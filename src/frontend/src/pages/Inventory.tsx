@@ -1,669 +1,712 @@
-import { Edit2, Plus, Printer, Search, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { useCallback, useState } from "react";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { useApp } from "../context/AppContext";
+import type { InventoryPurchase, InventorySale } from "../types";
+import { formatCurrency, generateId, ls } from "../utils/localStorage";
 
-interface InventoryItem {
-  id: number;
+// ─────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────
+interface InvItem {
+  id: string;
   name: string;
   category: string;
-  store: string;
-  quantity: number;
   unit: string;
-  reorderLevel: number;
   sellPrice: number;
-  purchasePrice: number;
+  costPrice: number;
+  currentStock: number;
+  sessionId: string;
 }
 
-interface IssueRecord {
-  id: number;
-  itemId: number;
-  itemName: string;
-  quantity: number;
-  issuedTo: string;
-  recipientType: "Student" | "Staff";
-  date: string;
-  returnDate: string;
-  returned: boolean;
-}
-
-interface PurchaseRecord {
-  id: number;
-  itemId: number;
-  itemName: string;
-  quantity: number;
-  purchasePrice: number;
-  totalCost: number;
-  supplier: string;
-  date: string;
-  invoiceNo: string;
-}
-
-interface SaleRecord {
-  id: number;
-  itemId: number;
-  itemName: string;
-  quantity: number;
-  sellPrice: number;
-  totalAmount: number;
-  buyerName: string;
-  buyerType: "Student" | "Staff";
-  date: string;
-  paymentMode: "Cash" | "Online";
-}
-
-interface Category {
-  id: number;
-  name: string;
-}
-interface Store {
-  id: number;
-  name: string;
-  location: string;
-}
-
-const INITIAL_ITEMS: InventoryItem[] = [
-  {
-    id: 1,
-    name: "School Dress (Full)",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 100,
-    unit: "Pcs",
-    reorderLevel: 20,
-    sellPrice: 450,
-    purchasePrice: 320,
-  },
-  {
-    id: 2,
-    name: "School Dress (Half)",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 80,
-    unit: "Pcs",
-    reorderLevel: 20,
-    sellPrice: 380,
-    purchasePrice: 260,
-  },
-  {
-    id: 3,
-    name: "School Tie",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 150,
-    unit: "Pcs",
-    reorderLevel: 30,
-    sellPrice: 80,
-    purchasePrice: 45,
-  },
-  {
-    id: 4,
-    name: "School Belt",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 120,
-    unit: "Pcs",
-    reorderLevel: 25,
-    sellPrice: 60,
-    purchasePrice: 35,
-  },
-  {
-    id: 5,
-    name: "School Socks (Pair)",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 200,
-    unit: "Pairs",
-    reorderLevel: 40,
-    sellPrice: 50,
-    purchasePrice: 30,
-  },
-  {
-    id: 6,
-    name: "School Shoes",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 60,
-    unit: "Pairs",
-    reorderLevel: 15,
-    sellPrice: 600,
-    purchasePrice: 420,
-  },
-  {
-    id: 7,
-    name: "School Bag",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: 50,
-    unit: "Pcs",
-    reorderLevel: 10,
-    sellPrice: 750,
-    purchasePrice: 520,
-  },
-  {
-    id: 8,
-    name: "A4 Paper Ream",
-    category: "Stationery",
-    store: "Main Store",
-    quantity: 150,
-    unit: "Reams",
-    reorderLevel: 20,
-    sellPrice: 0,
-    purchasePrice: 280,
-  },
-  {
-    id: 9,
-    name: "Ballpoint Pens (Blue)",
-    category: "Stationery",
-    store: "Main Store",
-    quantity: 500,
-    unit: "Pcs",
-    reorderLevel: 50,
-    sellPrice: 10,
-    purchasePrice: 6,
-  },
-  {
-    id: 10,
-    name: "Football",
-    category: "Sports",
-    store: "Sports Room",
-    quantity: 8,
-    unit: "Pcs",
-    reorderLevel: 5,
-    sellPrice: 0,
-    purchasePrice: 480,
-  },
+type Tab = "stock" | "purchase" | "sales";
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: "stock", label: "Stock", icon: "📦" },
+  { id: "purchase", label: "Purchase", icon: "📥" },
+  { id: "sales", label: "Sales", icon: "📤" },
 ];
 
-const INITIAL_CATEGORIES: Category[] = [
-  { id: 1, name: "Uniform" },
-  { id: 2, name: "Stationery" },
-  { id: 3, name: "Sports" },
-  { id: 4, name: "Lab Equipment" },
-  { id: 5, name: "Furniture" },
-  { id: 6, name: "Electronics" },
-  { id: 7, name: "Art & Craft" },
-];
+const LOW = 5;
+const today = new Date().toISOString().split("T")[0];
 
-const INITIAL_STORES: Store[] = [
-  { id: 1, name: "Uniform Store", location: "Ground Floor, Block A" },
-  { id: 2, name: "Main Store", location: "Ground Floor, Block A" },
-  { id: 3, name: "Sports Room", location: "Sports Complex" },
-  { id: 4, name: "Science Lab", location: "Block B, 2nd Floor" },
-  { id: 5, name: "Warehouse", location: "Back Campus" },
-];
-
-function loadLS<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-  } catch {
-    return fallback;
-  }
+function exportCSV(rows: string[][], filename: string) {
+  const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
 }
 
-function stockStatus(
-  qty: number,
-  reorder: number,
-): { label: string; cls: string } {
-  if (qty <= 0)
-    return { label: "Out of Stock", cls: "bg-gray-800 text-gray-400" };
-  if (qty <= reorder)
-    return { label: "Critical", cls: "bg-red-900/50 text-red-400" };
-  if (qty <= reorder * 2)
-    return { label: "Low Stock", cls: "bg-yellow-900/50 text-yellow-400" };
-  return { label: "In Stock", cls: "bg-green-900/50 text-green-400" };
-}
+// ─────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────
+export default function Inventory() {
+  const { addNotification, isReadOnly, currentSession } = useApp();
+  const sessionId = currentSession?.id ?? "sess_2025";
+  const iKey = `inv_items_${sessionId}`;
+  const pKey = `inv_purchases_${sessionId}`;
+  const sKey = `inv_sales_${sessionId}`;
+  const catKey = `inv_categories_${sessionId}`;
 
-export function Inventory() {
-  const [tab, setTab] = useState<
-    "items" | "purchase" | "sales" | "issue" | "categories" | "report"
-  >("items");
-  const [items, setItems] = useState<InventoryItem[]>(() =>
-    loadLS("erp_inventory", INITIAL_ITEMS),
-  );
-  const [issues, setIssues] = useState<IssueRecord[]>(() =>
-    loadLS("erp_inventory_issues", []),
-  );
-  const [purchases, setPurchases] = useState<PurchaseRecord[]>(() =>
-    loadLS("erp_inventory_purchases", []),
-  );
-  const [sales, setSales] = useState<SaleRecord[]>(() =>
-    loadLS("erp_inventory_sales", []),
-  );
-  const [categories, setCategories] = useState<Category[]>(() =>
-    loadLS("erp_inventory_cats", INITIAL_CATEGORIES),
-  );
-  const [stores, setStores] = useState<Store[]>(() =>
-    loadLS("erp_inventory_stores", INITIAL_STORES),
-  );
-  const [search, setSearch] = useState("");
-  const [filterCat, setFilterCat] = useState("");
+  const [tab, setTab] = useState<Tab>("stock");
 
-  // Item modal
-  const [showItemModal, setShowItemModal] = useState(false);
-  const [editItem, setEditItem] = useState<InventoryItem | null>(null);
+  // ── Data ──────────────────────────────────────────────────
+  const [items, setItems] = useState<InvItem[]>(() =>
+    ls.get<InvItem[]>(iKey, []),
+  );
+  const [purchases, setPurchases] = useState<InventoryPurchase[]>(() =>
+    ls.get<InventoryPurchase[]>(pKey, []),
+  );
+  const [sales, setSales] = useState<InventorySale[]>(() =>
+    ls.get<InventorySale[]>(sKey, []),
+  );
+  const [categories, setCategories] = useState<string[]>(() =>
+    ls.get<string[]>(catKey, [
+      "Uniform",
+      "Tie",
+      "Belt",
+      "Books",
+      "Stationery",
+      "Sports",
+      "Other",
+    ]),
+  );
+
+  // ── Category management ───────────────────────────────────
+  const [newCategory, setNewCategory] = useState("");
+  const [showCatMgr, setShowCatMgr] = useState(false);
+
+  const saveCategories = useCallback(
+    (data: string[]) => {
+      setCategories(data);
+      ls.set(catKey, data);
+    },
+    [catKey],
+  );
+
+  const addCategory = useCallback(() => {
+    const c = newCategory.trim();
+    if (!c || categories.includes(c)) return;
+    saveCategories([...categories, c]);
+    setNewCategory("");
+  }, [newCategory, categories, saveCategories]);
+
+  const deleteCategory = useCallback(
+    (c: string) => saveCategories(categories.filter((x) => x !== c)),
+    [categories, saveCategories],
+  );
+
+  // ── Item form ─────────────────────────────────────────────
+  const [showItemForm, setShowItemForm] = useState(false);
+  const [editItemId, setEditItemId] = useState<string | null>(null);
   const [itemForm, setItemForm] = useState({
     name: "",
-    category: "Uniform",
-    store: "Uniform Store",
-    quantity: "",
+    category: categories[0] ?? "Uniform",
     unit: "Pcs",
-    reorderLevel: "10",
-    sellPrice: "",
-    purchasePrice: "",
+    sellPrice: 0,
+    costPrice: 0,
+    currentStock: 0,
   });
+  const [itemSearch, setItemSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("");
 
-  // Issue modal
-  const [showIssueModal, setShowIssueModal] = useState(false);
-  const [issueForm, setIssueForm] = useState({
-    itemId: "",
-    quantity: "",
-    issuedTo: "",
-    recipientType: "Student" as "Student" | "Staff",
-    date: new Date().toISOString().split("T")[0],
-    returnDate: "",
-  });
+  const saveItems = useCallback(
+    (data: InvItem[]) => {
+      setItems(data);
+      ls.set(iKey, data);
+    },
+    [iKey],
+  );
 
-  // Purchase modal
-  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
-  const [purchaseForm, setPurchaseForm] = useState({
-    itemId: "",
-    quantity: "",
-    purchasePrice: "",
-    supplier: "",
-    invoiceNo: "",
-    date: new Date().toISOString().split("T")[0],
-  });
-
-  // Sale modal
-  const [showSaleModal, setShowSaleModal] = useState(false);
-  const [saleForm, setSaleForm] = useState({
-    itemId: "",
-    quantity: "",
-    sellPrice: "",
-    buyerName: "",
-    buyerType: "Student" as "Student" | "Staff",
-    date: new Date().toISOString().split("T")[0],
-    paymentMode: "Cash" as "Cash" | "Online",
-  });
-
-  // Category modal
-  const [showCatModal, setShowCatModal] = useState(false);
-  const [catForm, setCatForm] = useState({
-    name: "",
-    type: "category" as "category" | "store",
-    location: "",
-  });
-
-  useEffect(() => {
-    localStorage.setItem("erp_inventory", JSON.stringify(items));
-  }, [items]);
-  useEffect(() => {
-    localStorage.setItem("erp_inventory_issues", JSON.stringify(issues));
-  }, [issues]);
-  useEffect(() => {
-    localStorage.setItem("erp_inventory_purchases", JSON.stringify(purchases));
-  }, [purchases]);
-  useEffect(() => {
-    localStorage.setItem("erp_inventory_sales", JSON.stringify(sales));
-  }, [sales]);
-  useEffect(() => {
-    localStorage.setItem("erp_inventory_cats", JSON.stringify(categories));
-  }, [categories]);
-  useEffect(() => {
-    localStorage.setItem("erp_inventory_stores", JSON.stringify(stores));
-  }, [stores]);
-
-  const filteredItems = items.filter((i) => {
-    const q = search.toLowerCase();
-    return (
-      (!q ||
-        i.name.toLowerCase().includes(q) ||
-        i.category.toLowerCase().includes(q) ||
-        i.store.toLowerCase().includes(q)) &&
-      (!filterCat || i.category === filterCat)
-    );
-  });
-
-  const saveItem = () => {
-    if (!itemForm.name.trim()) return;
-    const rec = {
-      ...itemForm,
-      quantity: Number(itemForm.quantity) || 0,
-      reorderLevel: Number(itemForm.reorderLevel) || 10,
-      sellPrice: Number(itemForm.sellPrice) || 0,
-      purchasePrice: Number(itemForm.purchasePrice) || 0,
-    };
-    if (editItem) {
-      setItems((prev) =>
-        prev.map((it) =>
-          it.id === editItem.id ? { ...editItem, ...rec } : it,
-        ),
-      );
-      toast.success("Item updated");
-    } else {
-      setItems((prev) => [...prev, { id: Date.now(), ...rec }]);
-      toast.success("Item added");
-    }
-    setShowItemModal(false);
-    setEditItem(null);
+  const openAddItem = () => {
     setItemForm({
       name: "",
-      category: "Uniform",
-      store: "Uniform Store",
-      quantity: "",
+      category: categories[0] ?? "",
       unit: "Pcs",
-      reorderLevel: "10",
-      sellPrice: "",
-      purchasePrice: "",
+      sellPrice: 0,
+      costPrice: 0,
+      currentStock: 0,
     });
+    setEditItemId(null);
+    setShowItemForm(true);
   };
 
-  const savePurchase = () => {
-    if (!purchaseForm.itemId || !purchaseForm.quantity) return;
-    const item = items.find((i) => i.id === Number(purchaseForm.itemId));
-    if (!item) return;
-    const qty = Number(purchaseForm.quantity);
-    const price = Number(purchaseForm.purchasePrice) || item.purchasePrice;
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === item.id ? { ...i, quantity: i.quantity + qty } : i,
-      ),
-    );
-    setPurchases((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        itemId: item.id,
-        itemName: item.name,
-        quantity: qty,
-        purchasePrice: price,
-        totalCost: price * qty,
-        supplier: purchaseForm.supplier,
-        date: purchaseForm.date,
-        invoiceNo: purchaseForm.invoiceNo,
-      },
-    ]);
-    toast.success(
-      `Purchased ${qty} ${item.name} from ${purchaseForm.supplier || "supplier"}`,
-    );
-    setShowPurchaseModal(false);
-    setPurchaseForm({
-      itemId: "",
-      quantity: "",
-      purchasePrice: "",
-      supplier: "",
-      invoiceNo: "",
-      date: new Date().toISOString().split("T")[0],
+  const openEditItem = (item: InvItem) => {
+    setItemForm({
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      sellPrice: item.sellPrice,
+      costPrice: item.costPrice,
+      currentStock: item.currentStock,
     });
+    setEditItemId(item.id);
+    setShowItemForm(true);
   };
 
-  const saveSale = () => {
-    if (!saleForm.itemId || !saleForm.buyerName || !saleForm.quantity) return;
-    const item = items.find((i) => i.id === Number(saleForm.itemId));
-    if (!item) return;
-    const qty = Number(saleForm.quantity);
-    if (qty > item.quantity) {
-      toast.error("Insufficient stock");
-      return;
+  const handleSaveItem = useCallback(() => {
+    if (!itemForm.name.trim()) return;
+    if (editItemId) {
+      saveItems(
+        items.map((i) =>
+          i.id === editItemId ? { ...itemForm, id: editItemId, sessionId } : i,
+        ),
+      );
+    } else {
+      const newItem: InvItem = { ...itemForm, id: generateId(), sessionId };
+      saveItems([...items, newItem]);
+      addNotification(
+        `Item "${itemForm.name}" added to inventory`,
+        "success",
+        "📦",
+      );
     }
-    const price = Number(saleForm.sellPrice) || item.sellPrice;
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === item.id ? { ...i, quantity: i.quantity - qty } : i,
-      ),
-    );
-    setSales((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        itemId: item.id,
-        itemName: item.name,
-        quantity: qty,
-        sellPrice: price,
-        totalAmount: price * qty,
-        buyerName: saleForm.buyerName,
-        buyerType: saleForm.buyerType,
-        date: saleForm.date,
-        paymentMode: saleForm.paymentMode,
-      },
-    ]);
-    toast.success(`Sold ${qty} ${item.name} to ${saleForm.buyerName}`);
-    setShowSaleModal(false);
-    setSaleForm({
-      itemId: "",
-      quantity: "",
-      sellPrice: "",
-      buyerName: "",
-      buyerType: "Student",
-      date: new Date().toISOString().split("T")[0],
-      paymentMode: "Cash",
-    });
-  };
+    setShowItemForm(false);
+    setEditItemId(null);
+  }, [itemForm, editItemId, items, saveItems, addNotification, sessionId]);
 
-  const saveIssue = () => {
-    if (!issueForm.itemId || !issueForm.issuedTo || !issueForm.quantity) return;
-    const item = items.find((i) => i.id === Number(issueForm.itemId));
+  const handleDeleteItem = useCallback(
+    (id: string) => saveItems(items.filter((i) => i.id !== id)),
+    [items, saveItems],
+  );
+
+  // ── Purchase form ─────────────────────────────────────────
+  const [purchForm, setPurchForm] = useState({
+    itemId: "",
+    quantity: 1,
+    rate: 0,
+    date: today,
+    supplier: "",
+  });
+
+  const savePurchases = useCallback(
+    (data: InventoryPurchase[]) => {
+      setPurchases(data);
+      ls.set(pKey, data);
+    },
+    [pKey],
+  );
+
+  const handlePurchase = useCallback(() => {
+    if (!purchForm.itemId || purchForm.quantity <= 0) return;
+    const item = items.find((i) => i.id === purchForm.itemId);
     if (!item) return;
-    const qty = Number(issueForm.quantity);
-    if (qty > item.quantity) {
-      toast.error("Insufficient stock");
-      return;
-    }
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === item.id ? { ...i, quantity: i.quantity - qty } : i,
-      ),
-    );
-    setIssues((prev) => [
-      ...prev,
-      {
-        id: Date.now(),
-        itemId: item.id,
-        itemName: item.name,
-        quantity: qty,
-        issuedTo: issueForm.issuedTo,
-        recipientType: issueForm.recipientType,
-        date: issueForm.date,
-        returnDate: issueForm.returnDate,
-        returned: false,
-      },
-    ]);
-    toast.success(`${qty} ${item.name} issued to ${issueForm.issuedTo}`);
-    setShowIssueModal(false);
-    setIssueForm({
-      itemId: "",
-      quantity: "",
-      issuedTo: "",
-      recipientType: "Student",
-      date: new Date().toISOString().split("T")[0],
-      returnDate: "",
-    });
-  };
-
-  const returnIssue = (id: number) => {
-    const issue = issues.find((i) => i.id === id);
-    if (!issue || issue.returned) return;
-    setItems((prev) =>
-      prev.map((i) =>
-        i.id === issue.itemId
-          ? { ...i, quantity: i.quantity + issue.quantity }
+    const rec: InventoryPurchase = {
+      id: generateId(),
+      itemId: purchForm.itemId,
+      itemName: item.name,
+      quantity: purchForm.quantity,
+      rate: purchForm.rate,
+      totalCost: purchForm.quantity * purchForm.rate,
+      date: purchForm.date,
+      supplier: purchForm.supplier,
+      sessionId,
+    };
+    savePurchases([...purchases, rec]);
+    saveItems(
+      items.map((i) =>
+        i.id === purchForm.itemId
+          ? { ...i, currentStock: i.currentStock + purchForm.quantity }
           : i,
       ),
     );
-    setIssues((prev) =>
-      prev.map((i) => (i.id === id ? { ...i, returned: true } : i)),
+    addNotification(
+      `Purchased ${purchForm.quantity} × ${item.name} — ${formatCurrency(rec.totalCost)}`,
+      "success",
+      "📥",
     );
-    toast.success("Item returned to stock");
+    setPurchForm({
+      itemId: "",
+      quantity: 1,
+      rate: 0,
+      date: today,
+      supplier: "",
+    });
+  }, [
+    purchForm,
+    purchases,
+    items,
+    savePurchases,
+    saveItems,
+    addNotification,
+    sessionId,
+  ]);
+
+  // ── Sale form ─────────────────────────────────────────────
+  const [saleForm, setSaleForm] = useState({
+    itemId: "",
+    quantity: 1,
+    sellPrice: 0,
+    date: today,
+    buyerName: "",
+  });
+  const [saleError, setSaleError] = useState("");
+
+  const saveSales = useCallback(
+    (data: InventorySale[]) => {
+      setSales(data);
+      ls.set(sKey, data);
+    },
+    [sKey],
+  );
+
+  const handleSale = useCallback(() => {
+    setSaleError("");
+    if (!saleForm.itemId || saleForm.quantity <= 0) return;
+    const item = items.find((i) => i.id === saleForm.itemId);
+    if (!item) return;
+    if (item.currentStock < saleForm.quantity) {
+      setSaleError(
+        `Insufficient stock! Available: ${item.currentStock} ${item.unit}`,
+      );
+      return;
+    }
+    const rec: InventorySale = {
+      id: generateId(),
+      itemId: saleForm.itemId,
+      itemName: item.name,
+      quantity: saleForm.quantity,
+      sellPrice: saleForm.sellPrice,
+      totalAmount: saleForm.quantity * saleForm.sellPrice,
+      date: saleForm.date,
+      buyerName: saleForm.buyerName,
+      sessionId,
+    };
+    saveSales([...sales, rec]);
+    const updated = items.map((i) =>
+      i.id === saleForm.itemId
+        ? { ...i, currentStock: i.currentStock - saleForm.quantity }
+        : i,
+    );
+    saveItems(updated);
+    addNotification(
+      `Sold ${saleForm.quantity} × ${item.name} — ${formatCurrency(rec.totalAmount)}`,
+      "success",
+      "📤",
+    );
+    const updatedItem = updated.find((i) => i.id === saleForm.itemId);
+    if (updatedItem && updatedItem.currentStock < LOW) {
+      addNotification(
+        `⚠️ Low stock: ${updatedItem.name} — only ${updatedItem.currentStock} left`,
+        "warning",
+        "⚠️",
+      );
+    }
+    setSaleForm({
+      itemId: "",
+      quantity: 1,
+      sellPrice: 0,
+      date: today,
+      buyerName: "",
+    });
+  }, [
+    saleForm,
+    sales,
+    items,
+    saveSales,
+    saveItems,
+    addNotification,
+    sessionId,
+  ]);
+
+  // ── Derived ───────────────────────────────────────────────
+  const filteredItems = items.filter((i) => {
+    const ms =
+      !itemSearch || i.name.toLowerCase().includes(itemSearch.toLowerCase());
+    const mc = !catFilter || i.category === catFilter;
+    return ms && mc;
+  });
+
+  const totalItems = items.length;
+  const totalStockValue = items.reduce(
+    (a, i) => a + i.currentStock * i.sellPrice,
+    0,
+  );
+  const totalSalesRevenue = sales.reduce((a, s) => a + s.totalAmount, 0);
+  const lowStockCount = items.filter((i) => i.currentStock < LOW).length;
+
+  // ── Export helpers ────────────────────────────────────────
+  const exportStock = () => {
+    const rows: string[][] = [
+      [
+        "Item",
+        "Category",
+        "Unit",
+        "Sell Price",
+        "Cost Price",
+        "Current Stock",
+        "Stock Value",
+      ],
+    ];
+    for (const item of items) {
+      rows.push([
+        item.name,
+        item.category,
+        item.unit,
+        String(item.sellPrice),
+        String(item.costPrice),
+        String(item.currentStock),
+        String(item.currentStock * item.sellPrice),
+      ]);
+    }
+    exportCSV(rows, "stock_report.csv");
   };
 
-  const lowStock = items.filter((i) => i.quantity <= i.reorderLevel);
-  const totalQty = items.reduce((s, i) => s + i.quantity, 0);
-  const today = new Date().toISOString().split("T")[0];
-  const todaySales = sales
-    .filter((s) => s.date === today)
-    .reduce((sum, s) => sum + s.totalAmount, 0);
-
-  // When sale item changes, auto-fill price
-  const handleSaleItemChange = (itemId: string) => {
-    const item = items.find((i) => i.id === Number(itemId));
-    setSaleForm((p) => ({
-      ...p,
-      itemId,
-      sellPrice: item ? String(item.sellPrice) : "",
-    }));
+  const exportPurchases = () => {
+    const rows: string[][] = [
+      ["Date", "Item", "Qty", "Rate (₹)", "Total Cost (₹)", "Supplier"],
+    ];
+    for (const p of purchases) {
+      rows.push([
+        p.date,
+        p.itemName,
+        String(p.quantity),
+        String(p.rate),
+        String(p.totalCost),
+        p.supplier ?? "",
+      ]);
+    }
+    exportCSV(rows, "purchases.csv");
   };
 
-  const handlePurchaseItemChange = (itemId: string) => {
-    const item = items.find((i) => i.id === Number(itemId));
-    setPurchaseForm((p) => ({
-      ...p,
-      itemId,
-      purchasePrice: item ? String(item.purchasePrice) : "",
-    }));
+  const exportSales = () => {
+    const rows: string[][] = [
+      ["Date", "Item", "Qty", "Sell Price (₹)", "Total (₹)", "Buyer"],
+    ];
+    for (const s of sales) {
+      rows.push([
+        s.date,
+        s.itemName,
+        String(s.quantity),
+        String(s.sellPrice),
+        String(s.totalAmount),
+        s.buyerName ?? "",
+      ]);
+    }
+    exportCSV(rows, "sales.csv");
   };
 
-  const inputCls =
-    "w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none focus:border-green-500";
-
+  // ─────────────────────────────────────────────────────────
+  // Render
+  // ─────────────────────────────────────────────────────────
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-white text-lg font-semibold">
-          Inventory Management
-        </h2>
+    <div className="space-y-4">
+      {/* Dashboard Summary */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <Card className="bg-primary/5 border-primary/20">
+          <CardContent className="py-3 text-center">
+            <div className="text-2xl font-bold text-primary">{totalItems}</div>
+            <div className="text-xs text-muted-foreground">Total Items</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-accent/10 border-accent/20">
+          <CardContent className="py-3 text-center">
+            <div className="text-lg font-bold text-accent">
+              {formatCurrency(totalStockValue)}
+            </div>
+            <div className="text-xs text-muted-foreground">Stock Value</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-secondary/10 border-secondary/20">
+          <CardContent className="py-3 text-center">
+            <div className="text-lg font-bold text-foreground">
+              {formatCurrency(totalSalesRevenue)}
+            </div>
+            <div className="text-xs text-muted-foreground">Sales Revenue</div>
+          </CardContent>
+        </Card>
+        <Card
+          className={
+            lowStockCount > 0
+              ? "bg-destructive/5 border-destructive/20"
+              : "bg-muted/30"
+          }
+        >
+          <CardContent className="py-3 text-center">
+            <div
+              className={`text-2xl font-bold ${lowStockCount > 0 ? "text-destructive" : "text-foreground"}`}
+            >
+              {lowStockCount}
+            </div>
+            <div className="text-xs text-muted-foreground">Low Stock Items</div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-5 gap-3 mb-4">
-        {[
-          { label: "Total Items", value: items.length, color: "text-white" },
-          { label: "Total Quantity", value: totalQty, color: "text-blue-400" },
-          {
-            label: "Low / Critical Stock",
-            value: lowStock.length,
-            color: "text-red-400",
-          },
-          {
-            label: "Active Issues",
-            value: issues.filter((i) => !i.returned).length,
-            color: "text-yellow-400",
-          },
-          {
-            label: "Today's Sales",
-            value: `₹${todaySales.toLocaleString("en-IN")}`,
-            color: "text-green-400",
-          },
-        ].map((k) => (
-          <div
-            key={k.label}
-            className="rounded-lg p-3"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <p className="text-gray-400 text-xs">{k.label}</p>
-            <p className={`${k.color} text-xl font-bold`}>{k.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-1 mb-4">
-        {(
-          [
-            "items",
-            "purchase",
-            "sales",
-            "issue",
-            "categories",
-            "report",
-          ] as const
-        ).map((t) => (
+      {/* Tabs */}
+      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
+        {TABS.map((t) => (
           <button
-            key={t}
+            key={t.id}
             type="button"
-            onClick={() => setTab(t)}
-            data-ocid={`inventory.${t}.tab`}
-            className={`px-4 py-1.5 rounded text-xs font-medium transition ${tab === t ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+            onClick={() => setTab(t.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              tab === t.id
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+            data-ocid={`inv-tab-${t.id}`}
           >
-            {t === "items"
-              ? "Stock Items"
-              : t === "purchase"
-                ? "Purchase"
-                : t === "sales"
-                  ? "Sales"
-                  : t === "issue"
-                    ? "Issue / Return"
-                    : t === "categories"
-                      ? "Categories & Stores"
-                      : "Stock Report"}
+            <span>{t.icon}</span>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* ─ STOCK ITEMS ─ */}
-      {tab === "items" && (
-        <div>
-          <div className="flex items-center gap-3 mb-3">
-            <div className="flex items-center bg-gray-800 border border-gray-700 rounded px-2 py-1.5 flex-1 max-w-xs">
-              <Search size={13} className="text-gray-400 mr-1.5" />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
+      {/* ── STOCK TAB ── */}
+      {tab === "stock" && (
+        <div className="space-y-4">
+          {/* Toolbar */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-2">
+              <Input
+                value={itemSearch}
+                onChange={(e) => setItemSearch(e.target.value)}
                 placeholder="Search items..."
-                className="bg-transparent text-gray-300 text-xs outline-none w-full"
-                data-ocid="inventory.search_input"
+                className="w-44"
+                data-ocid="inv-search"
               />
+              <select
+                className="border border-input rounded-md px-3 py-2 text-sm bg-background"
+                value={catFilter}
+                onChange={(e) => setCatFilter(e.target.value)}
+                data-ocid="inv-cat-filter"
+              >
+                <option value="">All Categories</option>
+                {categories.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
             </div>
-            <select
-              value={filterCat}
-              onChange={(e) => setFilterCat(e.target.value)}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-300 text-xs outline-none"
-            >
-              <option value="">All Categories</option>
-              {categories.map((c) => (
-                <option key={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={() => {
-                setEditItem(null);
-                setItemForm({
-                  name: "",
-                  category: "Uniform",
-                  store: "Uniform Store",
-                  quantity: "",
-                  unit: "Pcs",
-                  reorderLevel: "10",
-                  sellPrice: "",
-                  purchasePrice: "",
-                });
-                setShowItemModal(true);
-              }}
-              data-ocid="inventory.primary_button"
-              className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded"
-            >
-              <Plus size={13} /> Add Item
-            </button>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.print()}
+                data-ocid="inv-print-btn"
+              >
+                🖨️ Print
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={exportStock}
+                data-ocid="inv-export-stock-btn"
+              >
+                Export CSV
+              </Button>
+              {!isReadOnly && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowCatMgr((v) => !v)}
+                    data-ocid="inv-manage-cat-btn"
+                  >
+                    ⚙️ Categories
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={openAddItem}
+                    data-ocid="inv-add-item-btn"
+                  >
+                    + Add Item
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
-          <div className="rounded-lg overflow-hidden border border-gray-700">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#1a1f2e" }}>
+
+          {/* Category Manager */}
+          {showCatMgr && !isReadOnly && (
+            <Card className="border-accent/30 bg-accent/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Manage Categories</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                    placeholder="New category name"
+                    className="max-w-xs"
+                    onKeyDown={(e) => e.key === "Enter" && addCategory()}
+                    data-ocid="inv-new-cat-input"
+                  />
+                  <Button
+                    size="sm"
+                    onClick={addCategory}
+                    data-ocid="inv-add-cat-btn"
+                  >
+                    Add
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {categories.map((c) => (
+                    <div
+                      key={c}
+                      className="flex items-center gap-1 bg-muted rounded-full px-3 py-1"
+                    >
+                      <span className="text-sm text-foreground">{c}</span>
+                      <button
+                        type="button"
+                        onClick={() => deleteCategory(c)}
+                        className="text-muted-foreground hover:text-destructive text-xs ml-1"
+                        aria-label={`Remove category ${c}`}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Item Form */}
+          {showItemForm && !isReadOnly && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">
+                  {editItemId ? "Edit Item" : "New Item"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <Label>Item Name *</Label>
+                    <Input
+                      value={itemForm.name}
+                      onChange={(e) =>
+                        setItemForm((p) => ({ ...p, name: e.target.value }))
+                      }
+                      placeholder="e.g. School Dress"
+                      data-ocid="inv-item-name"
+                    />
+                  </div>
+                  <div>
+                    <Label>Category</Label>
+                    <select
+                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                      value={itemForm.category}
+                      onChange={(e) =>
+                        setItemForm((p) => ({ ...p, category: e.target.value }))
+                      }
+                    >
+                      {categories.map((c) => (
+                        <option key={c} value={c}>
+                          {c}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Unit</Label>
+                    <Input
+                      value={itemForm.unit}
+                      onChange={(e) =>
+                        setItemForm((p) => ({ ...p, unit: e.target.value }))
+                      }
+                      placeholder="Pcs / Pair / Set / kg / m"
+                    />
+                  </div>
+                  <div>
+                    <Label>Sell Price (₹) *</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={itemForm.sellPrice || ""}
+                      onChange={(e) =>
+                        setItemForm((p) => ({
+                          ...p,
+                          sellPrice: Number(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                      data-ocid="inv-sell-price"
+                    />
+                  </div>
+                  <div>
+                    <Label>Cost Price (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={itemForm.costPrice || ""}
+                      onChange={(e) =>
+                        setItemForm((p) => ({
+                          ...p,
+                          costPrice: Number(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                      data-ocid="inv-cost-price"
+                    />
+                  </div>
+                  <div>
+                    <Label>Opening Stock</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={itemForm.currentStock || ""}
+                      onChange={(e) =>
+                        setItemForm((p) => ({
+                          ...p,
+                          currentStock: Number(e.target.value),
+                        }))
+                      }
+                      placeholder="0"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleSaveItem}
+                    data-ocid="inv-save-item-btn"
+                  >
+                    Save Item
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowItemForm(false);
+                      setEditItemId(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Stock Table */}
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
                   {[
-                    "#",
                     "Item Name",
                     "Category",
-                    "Store",
-                    "Qty",
                     "Unit",
                     "Sell Price",
-                    "Purchase Price",
-                    "Reorder",
-                    "Status",
+                    "Cost Price",
+                    "Stock",
+                    "Stock Value",
                     "Actions",
                   ].map((h) => (
                     <th
                       key={h}
-                      className="text-left px-3 py-2 text-gray-400 font-medium whitespace-nowrap"
+                      className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
                     >
                       {h}
                     </th>
@@ -674,137 +717,246 @@ export function Inventory() {
                 {filteredItems.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={11}
-                      className="px-3 py-8 text-center text-gray-500"
-                      data-ocid="inventory.empty_state"
+                      colSpan={8}
+                      className="px-4 py-12 text-center text-muted-foreground"
+                      data-ocid="inv-empty-state"
                     >
-                      No items found.
+                      <div className="text-4xl mb-2">📦</div>
+                      <div className="font-medium">No items found</div>
+                      <div className="text-xs mt-1">
+                        Add your first inventory item to get started
+                      </div>
                     </td>
                   </tr>
                 ) : (
-                  filteredItems.map((item, i) => {
-                    const st = stockStatus(item.quantity, item.reorderLevel);
+                  filteredItems.map((item) => {
+                    const isLow = item.currentStock < LOW;
                     return (
                       <tr
                         key={item.id}
-                        style={{
-                          background: i % 2 === 0 ? "#111827" : "#0f1117",
-                        }}
-                        data-ocid={`inventory.item.${i + 1}`}
+                        className={`border-t border-border hover:bg-muted/30 transition-colors ${isLow ? "bg-destructive/5" : ""}`}
+                        data-ocid="inv-item-row"
                       >
-                        <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                        <td className="px-3 py-2 text-white font-medium">
+                        <td className="px-4 py-3 font-medium text-foreground">
                           {item.name}
-                        </td>
-                        <td className="px-3 py-2 text-blue-400">
-                          {item.category}
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">
-                          {item.store}
-                        </td>
-                        <td className="px-3 py-2 text-yellow-400 font-bold">
-                          {item.quantity}
-                        </td>
-                        <td className="px-3 py-2 text-gray-400">{item.unit}</td>
-                        <td className="px-3 py-2 text-green-400">
-                          {item.sellPrice > 0 ? `₹${item.sellPrice}` : "-"}
-                        </td>
-                        <td className="px-3 py-2 text-orange-400">
-                          {item.purchasePrice > 0
-                            ? `₹${item.purchasePrice}`
-                            : "-"}
-                        </td>
-                        <td className="px-3 py-2 text-gray-400">
-                          {item.reorderLevel}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded ${st.cls}`}
-                          >
-                            {st.label}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2">
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditItem(item);
-                                setItemForm({
-                                  name: item.name,
-                                  category: item.category,
-                                  store: item.store,
-                                  quantity: String(item.quantity),
-                                  unit: item.unit,
-                                  reorderLevel: String(item.reorderLevel),
-                                  sellPrice: String(item.sellPrice),
-                                  purchasePrice: String(item.purchasePrice),
-                                });
-                                setShowItemModal(true);
-                              }}
-                              className="text-blue-400 hover:text-blue-300"
-                              data-ocid={`inventory.edit_button.${i + 1}`}
+                          {isLow && (
+                            <Badge
+                              variant="destructive"
+                              className="ml-2 text-xs"
                             >
-                              <Edit2 size={12} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setItems((prev) =>
-                                  prev.filter((x) => x.id !== item.id),
-                                );
-                                toast.success("Item deleted");
-                              }}
-                              className="text-red-400 hover:text-red-300"
-                              data-ocid={`inventory.delete_button.${i + 1}`}
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
+                              Low Stock
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant="secondary">{item.category}</Badge>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {item.unit}
+                        </td>
+                        <td className="px-4 py-3 font-medium">
+                          {formatCurrency(item.sellPrice)}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {item.costPrice > 0
+                            ? formatCurrency(item.costPrice)
+                            : "—"}
+                        </td>
+                        <td className="px-4 py-3">
+                          <Badge variant={isLow ? "destructive" : "outline"}>
+                            {item.currentStock} {item.unit}
+                            {isLow && " ⚠️"}
+                          </Badge>
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-accent">
+                          {formatCurrency(item.currentStock * item.sellPrice)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {!isReadOnly && (
+                            <div className="flex gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openEditItem(item)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                variant="destructive"
+                                size="sm"
+                                onClick={() => handleDeleteItem(item.id)}
+                              >
+                                Delete
+                              </Button>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
                   })
                 )}
               </tbody>
+              {filteredItems.length > 0 && (
+                <tfoot className="bg-muted/40">
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-4 py-3 text-right font-semibold text-foreground"
+                    >
+                      Total Stock Value:
+                    </td>
+                    <td className="px-4 py-3 font-bold text-primary">
+                      {formatCurrency(
+                        filteredItems.reduce(
+                          (a, i) => a + i.currentStock * i.sellPrice,
+                          0,
+                        ),
+                      )}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
       )}
 
-      {/* ─ PURCHASE ─ */}
+      {/* ── PURCHASE TAB ── */}
       {tab === "purchase" && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-gray-300 text-sm font-medium">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">
               Purchase Records
-            </h3>
-            <button
-              type="button"
-              onClick={() => setShowPurchaseModal(true)}
-              data-ocid="inventory.purchase.primary_button"
-              className="flex items-center gap-1 bg-orange-600 hover:bg-orange-700 text-white text-xs px-3 py-1.5 rounded"
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportPurchases}
+              data-ocid="inv-export-purchases-btn"
             >
-              <Plus size={13} /> New Purchase
-            </button>
+              Export CSV
+            </Button>
           </div>
-          <div className="rounded-lg overflow-hidden border border-gray-700">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#1a1f2e" }}>
+
+          {!isReadOnly && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">New Purchase Entry</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <Label>Select Item *</Label>
+                    <select
+                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                      value={purchForm.itemId}
+                      onChange={(e) => {
+                        const item = items.find((i) => i.id === e.target.value);
+                        setPurchForm((p) => ({
+                          ...p,
+                          itemId: e.target.value,
+                          rate: item?.costPrice ?? p.rate,
+                        }));
+                      }}
+                      data-ocid="inv-purch-item-select"
+                    >
+                      <option value="">— Select Item —</option>
+                      {items.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name} (Stock: {i.currentStock} {i.unit})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Quantity *</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={purchForm.quantity || ""}
+                      onChange={(e) =>
+                        setPurchForm((p) => ({
+                          ...p,
+                          quantity: Number(e.target.value),
+                        }))
+                      }
+                      data-ocid="inv-purch-qty"
+                    />
+                  </div>
+                  <div>
+                    <Label>Rate per Unit (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={purchForm.rate || ""}
+                      onChange={(e) =>
+                        setPurchForm((p) => ({
+                          ...p,
+                          rate: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Date</Label>
+                    <Input
+                      type="date"
+                      value={purchForm.date}
+                      onChange={(e) =>
+                        setPurchForm((p) => ({ ...p, date: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Supplier Name</Label>
+                    <Input
+                      value={purchForm.supplier}
+                      onChange={(e) =>
+                        setPurchForm((p) => ({
+                          ...p,
+                          supplier: e.target.value,
+                        }))
+                      }
+                      placeholder="Supplier / vendor name"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <div className="bg-muted rounded-lg px-3 py-2 w-full text-sm">
+                      <span className="text-muted-foreground">
+                        Total Cost:{" "}
+                      </span>
+                      <span className="font-semibold text-foreground">
+                        {formatCurrency(purchForm.quantity * purchForm.rate)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  onClick={handlePurchase}
+                  data-ocid="inv-save-purchase-btn"
+                >
+                  Record Purchase
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
                   {[
-                    "#",
+                    "Date",
                     "Item",
                     "Qty",
-                    "Purchase Price",
+                    "Rate/Unit",
                     "Total Cost",
                     "Supplier",
-                    "Invoice No",
-                    "Date",
                   ].map((h) => (
                     <th
                       key={h}
-                      className="text-left px-3 py-2 text-gray-400 font-medium whitespace-nowrap"
+                      className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
                     >
                       {h}
                     </th>
@@ -815,1132 +967,254 @@ export function Inventory() {
                 {purchases.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
-                      className="px-3 py-8 text-center text-gray-500"
-                      data-ocid="inventory.purchase.empty_state"
+                      colSpan={6}
+                      className="px-4 py-10 text-center text-muted-foreground"
+                      data-ocid="inv-purchase-empty"
                     >
+                      <div className="text-3xl mb-1">📥</div>
                       No purchase records yet.
                     </td>
                   </tr>
                 ) : (
-                  purchases.map((p, i) => (
+                  [...purchases].reverse().map((p) => (
                     <tr
                       key={p.id}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0f1117",
-                      }}
-                      data-ocid={`inventory.purchase.item.${i + 1}`}
+                      className="border-t border-border hover:bg-muted/30"
                     >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 text-white">{p.itemName}</td>
-                      <td className="px-3 py-2 text-yellow-400 font-medium">
-                        {p.quantity}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {p.date}
                       </td>
-                      <td className="px-3 py-2 text-orange-400">
-                        ₹{p.purchasePrice}
+                      <td className="px-4 py-3 font-medium">{p.itemName}</td>
+                      <td className="px-4 py-3">{p.quantity}</td>
+                      <td className="px-4 py-3">{formatCurrency(p.rate)}</td>
+                      <td className="px-4 py-3 font-semibold text-accent">
+                        {formatCurrency(p.totalCost)}
                       </td>
-                      <td className="px-3 py-2 text-red-400 font-medium">
-                        ₹{p.totalCost.toLocaleString("en-IN")}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {p.supplier || "—"}
                       </td>
-                      <td className="px-3 py-2 text-gray-300">{p.supplier}</td>
-                      <td className="px-3 py-2 text-gray-400">
-                        {p.invoiceNo || "-"}
-                      </td>
-                      <td className="px-3 py-2 text-gray-400">{p.date}</td>
                     </tr>
                   ))
                 )}
               </tbody>
+              {purchases.length > 0 && (
+                <tfoot className="bg-muted/40">
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-4 py-3 text-right font-semibold text-foreground"
+                    >
+                      Total Purchase Cost:
+                    </td>
+                    <td className="px-4 py-3 font-bold text-primary">
+                      {formatCurrency(
+                        purchases.reduce((a, p) => a + p.totalCost, 0),
+                      )}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         </div>
       )}
 
-      {/* ─ SALES ─ */}
+      {/* ── SALES TAB ── */}
       {tab === "sales" && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-gray-300 text-sm font-medium">Sales Records</h3>
-            <button
-              type="button"
-              onClick={() => setShowSaleModal(true)}
-              data-ocid="inventory.sales.primary_button"
-              className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded"
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">
+              Sales Records
+            </h2>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportSales}
+              data-ocid="inv-export-sales-btn"
             >
-              <Plus size={13} /> New Sale
-            </button>
+              Export CSV
+            </Button>
           </div>
-          <div className="rounded-lg overflow-hidden border border-gray-700">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#1a1f2e" }}>
-                  {[
-                    "#",
-                    "Item",
-                    "Qty",
-                    "Sell Price",
-                    "Total Amount",
-                    "Buyer",
-                    "Type",
-                    "Mode",
-                    "Date",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="text-left px-3 py-2 text-gray-400 font-medium whitespace-nowrap"
+
+          {!isReadOnly && (
+            <Card className="border-primary/30 bg-primary/5">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">New Sale Entry</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {saleError && (
+                  <div className="text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2">
+                    ⚠️ {saleError}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div>
+                    <Label>Select Item *</Label>
+                    <select
+                      className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                      value={saleForm.itemId}
+                      onChange={(e) => {
+                        const item = items.find((i) => i.id === e.target.value);
+                        setSaleForm((p) => ({
+                          ...p,
+                          itemId: e.target.value,
+                          sellPrice: item?.sellPrice ?? 0,
+                        }));
+                        setSaleError("");
+                      }}
+                      data-ocid="inv-sale-item-select"
                     >
-                      {h}
-                    </th>
-                  ))}
+                      <option value="">— Select Item —</option>
+                      {items.map((i) => (
+                        <option key={i.id} value={i.id}>
+                          {i.name} — Stock: {i.currentStock} {i.unit}
+                          {i.currentStock < LOW ? " ⚠️ Low" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <Label>Quantity *</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={saleForm.quantity || ""}
+                      onChange={(e) => {
+                        setSaleError("");
+                        setSaleForm((p) => ({
+                          ...p,
+                          quantity: Number(e.target.value),
+                        }));
+                      }}
+                      data-ocid="inv-sale-qty"
+                    />
+                  </div>
+                  <div>
+                    <Label>Sell Price (₹)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={saleForm.sellPrice || ""}
+                      onChange={(e) =>
+                        setSaleForm((p) => ({
+                          ...p,
+                          sellPrice: Number(e.target.value),
+                        }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Date</Label>
+                    <Input
+                      type="date"
+                      value={saleForm.date}
+                      onChange={(e) =>
+                        setSaleForm((p) => ({ ...p, date: e.target.value }))
+                      }
+                    />
+                  </div>
+                  <div>
+                    <Label>Buyer / Student Name</Label>
+                    <Input
+                      value={saleForm.buyerName}
+                      onChange={(e) =>
+                        setSaleForm((p) => ({
+                          ...p,
+                          buyerName: e.target.value,
+                        }))
+                      }
+                      placeholder="Student or parent name"
+                      data-ocid="inv-sale-buyer"
+                    />
+                  </div>
+                  <div className="flex items-end">
+                    <div className="bg-muted rounded-lg px-3 py-2 w-full text-sm">
+                      <span className="text-muted-foreground">Total: </span>
+                      <span className="font-semibold text-foreground">
+                        {formatCurrency(saleForm.quantity * saleForm.sellPrice)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <Button onClick={handleSale} data-ocid="inv-save-sale-btn">
+                  Record Sale
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  {["Date", "Item", "Qty", "Sell Price", "Total", "Buyer"].map(
+                    (h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ),
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {sales.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={9}
-                      className="px-3 py-8 text-center text-gray-500"
-                      data-ocid="inventory.sales.empty_state"
+                      colSpan={6}
+                      className="px-4 py-10 text-center text-muted-foreground"
+                      data-ocid="inv-sales-empty"
                     >
-                      No sales records yet.
+                      <div className="text-3xl mb-1">📤</div>
+                      No sales recorded yet.
                     </td>
                   </tr>
                 ) : (
-                  sales.map((s, i) => (
+                  [...sales].reverse().map((s) => (
                     <tr
                       key={s.id}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0f1117",
-                      }}
-                      data-ocid={`inventory.sales.item.${i + 1}`}
+                      className="border-t border-border hover:bg-muted/30"
                     >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 text-white">{s.itemName}</td>
-                      <td className="px-3 py-2 text-yellow-400 font-medium">
-                        {s.quantity}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {s.date}
                       </td>
-                      <td className="px-3 py-2 text-green-400">
-                        ₹{s.sellPrice}
+                      <td className="px-4 py-3 font-medium">{s.itemName}</td>
+                      <td className="px-4 py-3">{s.quantity}</td>
+                      <td className="px-4 py-3">
+                        {formatCurrency(s.sellPrice)}
                       </td>
-                      <td className="px-3 py-2 text-green-400 font-bold">
-                        ₹{s.totalAmount.toLocaleString("en-IN")}
+                      <td className="px-4 py-3 font-semibold text-accent">
+                        {formatCurrency(s.totalAmount)}
                       </td>
-                      <td className="px-3 py-2 text-gray-300">{s.buyerName}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded ${s.buyerType === "Student" ? "bg-blue-900/40 text-blue-300" : "bg-purple-900/40 text-purple-300"}`}
-                        >
-                          {s.buyerType}
-                        </span>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {s.buyerName || "—"}
                       </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded ${s.paymentMode === "Cash" ? "bg-green-900/40 text-green-300" : "bg-blue-900/40 text-blue-300"}`}
-                        >
-                          {s.paymentMode}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-gray-400">{s.date}</td>
                     </tr>
                   ))
                 )}
               </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ─ ISSUE / RETURN ─ */}
-      {tab === "issue" && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-gray-300 text-sm font-medium">
-              Issue / Return Tracking
-            </h3>
-            <button
-              type="button"
-              onClick={() => setShowIssueModal(true)}
-              data-ocid="inventory.issue.primary_button"
-              className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded"
-            >
-              <Plus size={13} /> Issue Item
-            </button>
-          </div>
-          <div className="rounded-lg overflow-hidden border border-gray-700">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#1a1f2e" }}>
-                  {[
-                    "#",
-                    "Item",
-                    "Qty",
-                    "Issued To",
-                    "Type",
-                    "Issue Date",
-                    "Return Date",
-                    "Status",
-                    "Action",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="text-left px-3 py-2 text-gray-400 font-medium whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {issues.length === 0 ? (
+              {sales.length > 0 && (
+                <tfoot className="bg-muted/40">
                   <tr>
                     <td
-                      colSpan={9}
-                      className="px-3 py-8 text-center text-gray-500"
-                      data-ocid="inventory.issue.empty_state"
+                      colSpan={4}
+                      className="px-4 py-3 text-right font-semibold text-foreground"
                     >
-                      No items issued yet.
+                      Total Sales Revenue:
                     </td>
+                    <td className="px-4 py-3 font-bold text-primary">
+                      {formatCurrency(
+                        sales.reduce((a, s) => a + s.totalAmount, 0),
+                      )}
+                    </td>
+                    <td />
                   </tr>
-                ) : (
-                  issues.map((iss, i) => (
-                    <tr
-                      key={iss.id}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0f1117",
-                      }}
-                      data-ocid={`inventory.issue.item.${i + 1}`}
-                    >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 text-white">{iss.itemName}</td>
-                      <td className="px-3 py-2 text-yellow-400 font-medium">
-                        {iss.quantity}
-                      </td>
-                      <td className="px-3 py-2 text-gray-300">
-                        {iss.issuedTo}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded ${iss.recipientType === "Student" ? "bg-blue-900/40 text-blue-300" : "bg-purple-900/40 text-purple-300"}`}
-                        >
-                          {iss.recipientType}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 text-gray-400">{iss.date}</td>
-                      <td className="px-3 py-2 text-gray-400">
-                        {iss.returnDate || "-"}
-                      </td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`text-[10px] px-1.5 py-0.5 rounded ${iss.returned ? "bg-green-900/40 text-green-400" : "bg-orange-900/40 text-orange-400"}`}
-                        >
-                          {iss.returned ? "Returned" : "Issued"}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2">
-                        {!iss.returned && (
-                          <button
-                            type="button"
-                            onClick={() => returnIssue(iss.id)}
-                            className="text-xs bg-green-700 hover:bg-green-600 text-white px-2 py-0.5 rounded"
-                          >
-                            Return
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ─ CATEGORIES & STORES ─ */}
-      {tab === "categories" && (
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-300 text-sm font-medium">Categories</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setCatForm({ name: "", type: "category", location: "" });
-                  setShowCatModal(true);
-                }}
-                className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
-              >
-                <Plus size={12} /> Add
-              </button>
-            </div>
-            <div className="space-y-2">
-              {categories.map((c, i) => (
-                <div
-                  key={c.id}
-                  className="rounded-lg p-3 flex items-center justify-between"
-                  style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-                  data-ocid={`inventory.categories.item.${i + 1}`}
-                >
-                  <span className="text-gray-300 text-xs font-medium">
-                    {c.name}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setCategories((prev) => prev.filter((x) => x.id !== c.id))
-                    }
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-gray-300 text-sm font-medium">Stores</h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setCatForm({ name: "", type: "store", location: "" });
-                  setShowCatModal(true);
-                }}
-                className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs px-2 py-1 rounded"
-              >
-                <Plus size={12} /> Add
-              </button>
-            </div>
-            <div className="space-y-2">
-              {stores.map((s, i) => (
-                <div
-                  key={s.id}
-                  className="rounded-lg p-3 flex items-center justify-between"
-                  style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-                  data-ocid={`inventory.stores.item.${i + 1}`}
-                >
-                  <div>
-                    <div className="text-gray-300 text-xs font-medium">
-                      {s.name}
-                    </div>
-                    <div className="text-gray-500 text-[10px]">
-                      {s.location}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setStores((prev) => prev.filter((x) => x.id !== s.id))
-                    }
-                    className="text-red-400 hover:text-red-300"
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ STOCK REPORT ─ */}
-      {tab === "report" && (
-        <div>
-          <div className="flex justify-end mb-3">
-            <button
-              type="button"
-              onClick={() => {
-                const win = window.open("", "_blank", "width=900,height=600");
-                if (!win) return;
-                const el = document.getElementById("inv-report-print");
-                if (!el) return;
-                win.document.write(
-                  `<html><head><title>Inventory Report</title><style>body{font-family:Arial,sans-serif;font-size:11px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px}th{background:#e8f0fe}</style></head><body>${el.innerHTML}</body></html>`,
-                );
-                win.document.close();
-                setTimeout(() => {
-                  win.print();
-                  win.close();
-                }, 400);
-              }}
-              data-ocid="inventory.report.print.button"
-              className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded"
-            >
-              <Printer size={13} /> Print Report
-            </button>
-          </div>
-          <div id="inv-report-print">
-            {lowStock.length > 0 && (
-              <div className="mb-4">
-                <h3 className="text-red-400 font-semibold text-sm mb-2">
-                  ⚠️ Low / Critical Stock Alert ({lowStock.length} items)
-                </h3>
-                <div className="rounded-lg overflow-hidden border border-red-800">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr style={{ background: "#1a1f2e" }}>
-                        {[
-                          "Item",
-                          "Category",
-                          "Current Qty",
-                          "Reorder Level",
-                          "Status",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className="text-left px-3 py-2 text-gray-400 font-medium"
-                          >
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lowStock.map((item, i) => {
-                        const st = stockStatus(
-                          item.quantity,
-                          item.reorderLevel,
-                        );
-                        return (
-                          <tr
-                            key={item.id}
-                            style={{
-                              background: i % 2 === 0 ? "#111827" : "#0f1117",
-                            }}
-                          >
-                            <td className="px-3 py-2 text-white">
-                              {item.name}
-                            </td>
-                            <td className="px-3 py-2 text-gray-300">
-                              {item.category}
-                            </td>
-                            <td className="px-3 py-2 text-red-400 font-bold">
-                              {item.quantity}
-                            </td>
-                            <td className="px-3 py-2 text-gray-400">
-                              {item.reorderLevel}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span
-                                className={`text-[10px] px-1.5 py-0.5 rounded ${st.cls}`}
-                              >
-                                {st.label}
-                              </span>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-            <h3 className="text-white font-semibold text-sm mb-2">
-              Category-wise Summary
-            </h3>
-            <div className="rounded-lg overflow-hidden border border-gray-700">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr style={{ background: "#1a1f2e" }}>
-                    {["Category", "Items", "Total Qty", "Low Stock"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="text-left px-3 py-2 text-gray-400 font-medium"
-                        >
-                          {h}
-                        </th>
-                      ),
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {categories.map((cat, i) => {
-                    const catItems = items.filter(
-                      (it) => it.category === cat.name,
-                    );
-                    const catQty = catItems.reduce(
-                      (s, it) => s + it.quantity,
-                      0,
-                    );
-                    const catLow = catItems.filter(
-                      (it) => it.quantity <= it.reorderLevel,
-                    ).length;
-                    return (
-                      <tr
-                        key={cat.id}
-                        style={{
-                          background: i % 2 === 0 ? "#111827" : "#0f1117",
-                        }}
-                      >
-                        <td className="px-3 py-2 text-white">{cat.name}</td>
-                        <td className="px-3 py-2 text-blue-400">
-                          {catItems.length}
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">{catQty}</td>
-                        <td className="px-3 py-2">
-                          {catLow > 0 ? (
-                            <span className="text-red-400 font-semibold">
-                              {catLow}
-                            </span>
-                          ) : (
-                            <span className="text-green-400">0</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ ITEM MODAL ─ */}
-      {showItemModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="inventory.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-lg"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">
-                {editItem ? "Edit Item" : "Add Inventory Item"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowItemModal(false)}
-                className="text-gray-400 hover:text-white"
-                data-ocid="inventory.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <p className="text-gray-400 text-xs block mb-1">Item Name *</p>
-                <input
-                  value={itemForm.name}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, name: e.target.value }))
-                  }
-                  className={inputCls}
-                  placeholder="e.g. School Dress (Full)"
-                />
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Category</p>
-                <select
-                  value={itemForm.category}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, category: e.target.value }))
-                  }
-                  className={inputCls}
-                >
-                  {categories.map((c) => (
-                    <option key={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Store</p>
-                <select
-                  value={itemForm.store}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, store: e.target.value }))
-                  }
-                  className={inputCls}
-                >
-                  {stores.map((s) => (
-                    <option key={s.id}>{s.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Quantity</p>
-                <input
-                  type="number"
-                  value={itemForm.quantity}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, quantity: e.target.value }))
-                  }
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Unit</p>
-                <input
-                  value={itemForm.unit}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, unit: e.target.value }))
-                  }
-                  className={inputCls}
-                  placeholder="Pcs / Pairs / Reams"
-                />
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">
-                  Sell Price (₹)
-                </p>
-                <input
-                  type="number"
-                  value={itemForm.sellPrice}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, sellPrice: e.target.value }))
-                  }
-                  className={inputCls}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">
-                  Purchase Price (₹)
-                </p>
-                <input
-                  type="number"
-                  value={itemForm.purchasePrice}
-                  onChange={(e) =>
-                    setItemForm((p) => ({
-                      ...p,
-                      purchasePrice: e.target.value,
-                    }))
-                  }
-                  className={inputCls}
-                  placeholder="0"
-                />
-              </div>
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">
-                  Reorder Level
-                </p>
-                <input
-                  type="number"
-                  value={itemForm.reorderLevel}
-                  onChange={(e) =>
-                    setItemForm((p) => ({ ...p, reorderLevel: e.target.value }))
-                  }
-                  className={inputCls}
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={saveItem}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-2 rounded"
-                data-ocid="inventory.submit_button"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowItemModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded"
-                data-ocid="inventory.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ PURCHASE MODAL ─ */}
-      {showPurchaseModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="inventory.purchase.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-md"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">Record Purchase</h3>
-              <button
-                type="button"
-                onClick={() => setShowPurchaseModal(false)}
-                className="text-gray-400 hover:text-white"
-                data-ocid="inventory.purchase.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">
-                  Select Item *
-                </p>
-                <select
-                  value={purchaseForm.itemId}
-                  onChange={(e) => handlePurchaseItemChange(e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="">-- Select --</option>
-                  {items.map((i) => (
-                    <option key={i.id} value={i.id}>
-                      {i.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Quantity *</p>
-                  <input
-                    type="number"
-                    value={purchaseForm.quantity}
-                    onChange={(e) =>
-                      setPurchaseForm((p) => ({
-                        ...p,
-                        quantity: e.target.value,
-                      }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Purchase Price (₹)
-                  </p>
-                  <input
-                    type="number"
-                    value={purchaseForm.purchasePrice}
-                    onChange={(e) =>
-                      setPurchaseForm((p) => ({
-                        ...p,
-                        purchasePrice: e.target.value,
-                      }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Supplier</p>
-                  <input
-                    value={purchaseForm.supplier}
-                    onChange={(e) =>
-                      setPurchaseForm((p) => ({
-                        ...p,
-                        supplier: e.target.value,
-                      }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Invoice No.
-                  </p>
-                  <input
-                    value={purchaseForm.invoiceNo}
-                    onChange={(e) =>
-                      setPurchaseForm((p) => ({
-                        ...p,
-                        invoiceNo: e.target.value,
-                      }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div className="col-span-2">
-                  <p className="text-gray-400 text-xs block mb-1">Date</p>
-                  <input
-                    type="date"
-                    value={purchaseForm.date}
-                    onChange={(e) =>
-                      setPurchaseForm((p) => ({ ...p, date: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={savePurchase}
-                className="flex-1 bg-orange-600 hover:bg-orange-700 text-white text-xs py-2 rounded"
-                data-ocid="inventory.purchase.submit_button"
-              >
-                Save Purchase
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowPurchaseModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded"
-                data-ocid="inventory.purchase.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ SALE MODAL ─ */}
-      {showSaleModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="inventory.sales.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-md"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">Record Sale</h3>
-              <button
-                type="button"
-                onClick={() => setShowSaleModal(false)}
-                className="text-gray-400 hover:text-white"
-                data-ocid="inventory.sales.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">
-                  Select Item *
-                </p>
-                <select
-                  value={saleForm.itemId}
-                  onChange={(e) => handleSaleItemChange(e.target.value)}
-                  className={inputCls}
-                >
-                  <option value="">-- Select --</option>
-                  {items
-                    .filter((i) => i.quantity > 0)
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name} (Stock: {i.quantity})
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Quantity *</p>
-                  <input
-                    type="number"
-                    value={saleForm.quantity}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({ ...p, quantity: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Sell Price (₹)
-                  </p>
-                  <input
-                    type="number"
-                    value={saleForm.sellPrice}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({ ...p, sellPrice: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Buyer Name *
-                  </p>
-                  <input
-                    value={saleForm.buyerName}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({ ...p, buyerName: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Buyer Type</p>
-                  <select
-                    value={saleForm.buyerType}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({
-                        ...p,
-                        buyerType: e.target.value as "Student" | "Staff",
-                      }))
-                    }
-                    className={inputCls}
-                  >
-                    <option>Student</option>
-                    <option>Staff</option>
-                  </select>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Payment Mode
-                  </p>
-                  <select
-                    value={saleForm.paymentMode}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({
-                        ...p,
-                        paymentMode: e.target.value as "Cash" | "Online",
-                      }))
-                    }
-                    className={inputCls}
-                  >
-                    <option>Cash</option>
-                    <option>Online</option>
-                  </select>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Date</p>
-                  <input
-                    type="date"
-                    value={saleForm.date}
-                    onChange={(e) =>
-                      setSaleForm((p) => ({ ...p, date: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={saveSale}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-2 rounded"
-                data-ocid="inventory.sales.submit_button"
-              >
-                Save Sale
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowSaleModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded"
-                data-ocid="inventory.sales.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ ISSUE MODAL ─ */}
-      {showIssueModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="inventory.issue.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-md"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">Issue Item</h3>
-              <button
-                type="button"
-                onClick={() => setShowIssueModal(false)}
-                className="text-gray-400 hover:text-white"
-                data-ocid="inventory.issue.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Select Item</p>
-                <select
-                  value={issueForm.itemId}
-                  onChange={(e) =>
-                    setIssueForm((p) => ({ ...p, itemId: e.target.value }))
-                  }
-                  className={inputCls}
-                >
-                  <option value="">-- Select --</option>
-                  {items
-                    .filter((i) => i.quantity > 0)
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name} (Stock: {i.quantity})
-                      </option>
-                    ))}
-                </select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Quantity</p>
-                  <input
-                    type="number"
-                    value={issueForm.quantity}
-                    onChange={(e) =>
-                      setIssueForm((p) => ({ ...p, quantity: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Issued To</p>
-                  <input
-                    value={issueForm.issuedTo}
-                    onChange={(e) =>
-                      setIssueForm((p) => ({ ...p, issuedTo: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Recipient Type
-                  </p>
-                  <select
-                    value={issueForm.recipientType}
-                    onChange={(e) =>
-                      setIssueForm((p) => ({
-                        ...p,
-                        recipientType: e.target.value as "Student" | "Staff",
-                      }))
-                    }
-                    className={inputCls}
-                  >
-                    <option>Student</option>
-                    <option>Staff</option>
-                  </select>
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Issue Date</p>
-                  <input
-                    type="date"
-                    value={issueForm.date}
-                    onChange={(e) =>
-                      setIssueForm((p) => ({ ...p, date: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">
-                    Expected Return Date
-                  </p>
-                  <input
-                    type="date"
-                    value={issueForm.returnDate}
-                    onChange={(e) =>
-                      setIssueForm((p) => ({
-                        ...p,
-                        returnDate: e.target.value,
-                      }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={saveIssue}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded"
-                data-ocid="inventory.issue.submit_button"
-              >
-                Issue
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowIssueModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded"
-                data-ocid="inventory.issue.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ─ CATEGORY/STORE MODAL ─ */}
-      {showCatModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div
-            className="rounded-xl p-6 w-full max-w-sm"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">
-                Add {catForm.type === "category" ? "Category" : "Store"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowCatModal(false)}
-                className="text-gray-400 hover:text-white"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div>
-                <p className="text-gray-400 text-xs block mb-1">Name *</p>
-                <input
-                  value={catForm.name}
-                  onChange={(e) =>
-                    setCatForm((p) => ({ ...p, name: e.target.value }))
-                  }
-                  className={inputCls}
-                />
-              </div>
-              {catForm.type === "store" && (
-                <div>
-                  <p className="text-gray-400 text-xs block mb-1">Location</p>
-                  <input
-                    value={catForm.location}
-                    onChange={(e) =>
-                      setCatForm((p) => ({ ...p, location: e.target.value }))
-                    }
-                    className={inputCls}
-                  />
-                </div>
+                </tfoot>
               )}
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  if (!catForm.name.trim()) return;
-                  if (catForm.type === "category") {
-                    setCategories((prev) => [
-                      ...prev,
-                      { id: Date.now(), name: catForm.name },
-                    ]);
-                  } else {
-                    setStores((prev) => [
-                      ...prev,
-                      {
-                        id: Date.now(),
-                        name: catForm.name,
-                        location: catForm.location,
-                      },
-                    ]);
-                  }
-                  setShowCatModal(false);
-                  toast.success(
-                    `${catForm.type === "category" ? "Category" : "Store"} added`,
-                  );
-                }}
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white text-xs py-2 rounded"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowCatModal(false)}
-                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white text-xs py-2 rounded"
-              >
-                Cancel
-              </button>
-            </div>
+            </table>
           </div>
         </div>
       )}

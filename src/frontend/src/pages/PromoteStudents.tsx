@@ -1,738 +1,596 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   AlertTriangle,
-  ArrowRight,
   CheckCircle,
   ChevronRight,
   GraduationCap,
-  Users,
 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+import { useMemo, useState } from "react";
+import { useApp } from "../context/AppContext";
+import type { FeeReceipt, Student } from "../types";
+import {
+  CLASSES,
+  MONTHS,
+  SECTIONS,
+  formatCurrency,
+  generateId,
+  ls,
+} from "../utils/localStorage";
 
-interface StudentRecord {
-  id: number;
-  admNo: string;
-  name: string;
-  fatherName: string;
-  motherName?: string;
-  className: string;
-  section: string;
-  rollNo: string;
-  dob: string;
-  contact: string;
-  route?: string;
-  schNo?: string;
-  oldBalance: number;
-  status: "Active" | "Inactive" | "Discontinued";
-  session?: string;
-  prevSessionDues?: Array<{
-    month: string;
-    sessionLabel: string;
-    amount: number;
-  }>;
-  leavingDate?: string;
-  leavingReason?: string;
-  leavingRemarks?: string;
-  [key: string]: unknown;
+interface SectionMap {
+  fromClass: string;
+  fromSection: string;
+  toClass: string;
+  selected: boolean;
 }
 
-interface ClassRecord {
-  name: string;
-  sections: string[];
-  teacher: string;
-  max: number;
+function getNextClass(cls: string): string | null {
+  const idx = CLASSES.indexOf(cls);
+  if (idx === -1 || idx === CLASSES.length - 1) return null;
+  return CLASSES[idx + 1];
 }
 
-interface ClassTeacherRecord {
-  id: string;
-  classSection: string;
-  teacherName: string;
-  teacherId: string;
-  subjects: string[];
-  classRangeFrom: string;
-  classRangeTo: string;
-}
-
-interface PaymentRecord {
-  id: string;
-  admNo: string;
-  months: string[];
-  feeRows: Array<{
-    id: number;
-    feeHead: string;
-    months: Record<string, number>;
-    checked: boolean;
-  }>;
-  netFees: number;
-  receiptAmt: number;
-  balance: number;
-  session?: string;
-  [key: string]: unknown;
-}
-
-const CLASS_PROGRESSION: Record<string, string> = {
-  Nursery: "Class 1",
-  KG: "Class 1",
-  LKG: "UKG",
-  UKG: "Class 1",
-  "Class 1": "Class 2",
-  "Class 2": "Class 3",
-  "Class 3": "Class 4",
-  "Class 4": "Class 5",
-  "Class 5": "Class 6",
-  "Class 6": "Class 7",
-  "Class 7": "Class 8",
-  "Class 8": "Class 9",
-  "Class 9": "Class 10",
-  "Class 10": "PASSED_OUT",
-};
-
-function loadFromStorage<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function getNextSession(current: string): string {
-  const match = current.match(/(\d{4})-(\d{2,4})/);
-  if (match) {
-    const startYear = Number.parseInt(match[1], 10);
-    const endYear = startYear + 1;
-    return `${endYear}-${String(endYear + 1).slice(-2)}`;
-  }
-  return "2026-27";
-}
-
-function getClassSection(className: string, section: string): string {
-  return `${className}-${section}`;
-}
-
-type Step = 1 | 2 | 3 | 4;
-
-export function PromoteStudents() {
-  const [step, setStep] = useState<Step>(1);
-  const [currentSession] = useState<string>(() => {
-    try {
-      const settings = JSON.parse(localStorage.getItem("erp_settings") || "{}");
-      return settings.session || "2025-26";
-    } catch {
-      return "2025-26";
+export default function PromoteStudents() {
+  const { currentSession, createSession, switchSession, addNotification } =
+    useApp();
+  const [step, setStep] = useState(1);
+  const [newSessionLabel, setNewSessionLabel] = useState("");
+  const [sectionMaps, setSectionMaps] = useState<SectionMap[]>(() => {
+    const maps: SectionMap[] = [];
+    for (const cls of CLASSES) {
+      const next = getNextClass(cls);
+      for (const sec of SECTIONS) {
+        maps.push({
+          fromClass: cls,
+          fromSection: sec,
+          toClass: next ?? "Passed Out",
+          selected: false,
+        });
+      }
     }
+    return maps;
   });
-  const [newSession, setNewSession] = useState<string>(() =>
-    getNextSession(
-      (() => {
-        try {
-          const settings = JSON.parse(
-            localStorage.getItem("erp_settings") || "{}",
-          );
-          return settings.session || "2025-26";
-        } catch {
-          return "2025-26";
-        }
-      })(),
-    ),
+  const [confirmedCheckbox, setConfirmedCheckbox] = useState(false);
+  const [done, setDone] = useState(false);
+  const [summary, setSummary] = useState({
+    promoted: 0,
+    passedOut: 0,
+    duesCarried: 0,
+    totalDueAmount: 0,
+  });
+
+  const students = useMemo(
+    () =>
+      ls
+        .get<Student[]>("students", [])
+        .filter(
+          (s) =>
+            s.sessionId === (currentSession?.id ?? "") && s.status === "active",
+        ),
+    [currentSession],
   );
 
-  // Step 2: class selection
-  const _classes = loadFromStorage<ClassRecord[]>("erp_classes", []);
-  const classTeachers = loadFromStorage<ClassTeacherRecord[]>(
-    "erp_class_teachers",
-    [],
+  const receipts = useMemo(
+    () =>
+      ls
+        .get<FeeReceipt[]>("fee_receipts", [])
+        .filter(
+          (r) => r.sessionId === (currentSession?.id ?? "") && !r.isDeleted,
+        ),
+    [currentSession],
   );
-  const allStudents = loadFromStorage<StudentRecord[]>("erp_students", []);
-  const activeStudents = allStudents.filter((s) => s.status === "Active");
 
-  // Group active students by className+section
-  const classGroups: Record<string, StudentRecord[]> = {};
-  for (const s of activeStudents) {
-    const key = getClassSection(s.className, s.section);
-    if (!classGroups[key]) classGroups[key] = [];
-    classGroups[key].push(s);
+  function getStudentsForSection(cls: string, sec: string): Student[] {
+    return students.filter((s) => s.class === cls && s.section === sec);
   }
-  const classSections = Object.keys(classGroups).sort();
 
-  const [selectedSections, setSelectedSections] = useState<Set<string>>(
-    () => new Set(classSections),
+  function toggleSection(idx: number) {
+    setSectionMaps((prev) =>
+      prev.map((m, i) => (i === idx ? { ...m, selected: !m.selected } : m)),
+    );
+  }
+
+  function selectAll() {
+    setSectionMaps((prev) =>
+      prev.map((m) => ({
+        ...m,
+        selected: getStudentsForSection(m.fromClass, m.fromSection).length > 0,
+      })),
+    );
+  }
+
+  function clearAll() {
+    setSectionMaps((prev) => prev.map((m) => ({ ...m, selected: false })));
+  }
+
+  const selectedMaps = sectionMaps.filter((m) => m.selected);
+  const affectedStudents = selectedMaps.flatMap((m) =>
+    getStudentsForSection(m.fromClass, m.fromSection),
   );
 
-  const toggleSection = (cs: string) => {
-    setSelectedSections((prev) => {
-      const next = new Set(prev);
-      if (next.has(cs)) next.delete(cs);
-      else next.add(cs);
-      return next;
-    });
-  };
+  function getPaidMonths(studentId: string): Set<string> {
+    const paid = new Set<string>();
+    for (const r of receipts.filter((r) => r.studentId === studentId)) {
+      for (const item of r.items) paid.add(item.month);
+    }
+    return paid;
+  }
 
-  const toggleAll = (checked: boolean) => {
-    if (checked) setSelectedSections(new Set(classSections));
-    else setSelectedSections(new Set());
-  };
+  function getUnpaidMonths(studentId: string): string[] {
+    const paid = getPaidMonths(studentId);
+    return MONTHS.filter((m) => !paid.has(m));
+  }
 
-  const selectedStudents = activeStudents.filter((s) =>
-    selectedSections.has(getClassSection(s.className, s.section)),
-  );
+  // Estimate due amount from fee plan for the student
+  function getStudentDueAmount(
+    student: Student,
+    unpaidMonths: string[],
+  ): number {
+    if (unpaidMonths.length === 0) return 0;
+    const feesPlan = ls.get<
+      Array<{
+        classId: string;
+        sectionId: string;
+        headingId: string;
+        amount: number;
+      }>
+    >("fees_plan", []);
+    const planEntries = feesPlan.filter(
+      (p) => p.classId === student.class && p.sectionId === student.section,
+    );
+    if (planEntries.length === 0) return 0;
+    const monthlyTotal = planEntries.reduce((sum, p) => sum + p.amount, 0);
+    return monthlyTotal * unpaidMonths.length;
+  }
 
-  // Step 3: review data
-  const payments = loadFromStorage<PaymentRecord[]>("erp_fee_payments", []);
-
-  const getStudentDues = (admNo: string): number => {
-    return payments
-      .filter((p) => p.admNo === admNo && p.balance > 0)
-      .reduce((s, p) => s + p.balance, 0);
-  };
-
-  const getNextClass = (className: string): string => {
-    return CLASS_PROGRESSION[className] || className;
-  };
-
-  const passOutCount = selectedStudents.filter(
-    (s) => getNextClass(s.className) === "PASSED_OUT",
+  const passedOutCount = affectedStudents.filter(
+    (s) =>
+      selectedMaps.find(
+        (m) => m.fromClass === s.class && m.fromSection === s.section,
+      )?.toClass === "Passed Out",
   ).length;
-  const studentsWithDues = selectedStudents.filter(
-    (s) => getStudentDues(s.admNo) > 0,
-  ).length;
-  const totalDues = selectedStudents.reduce(
-    (sum, s) => sum + getStudentDues(s.admNo),
-    0,
+
+  const studentsWithDues = affectedStudents.filter(
+    (s) => getUnpaidMonths(s.id).length > 0,
   );
 
-  // Promotion logic
-  const [promotionResult, setPromotionResult] = useState<{
-    promoted: number;
-    passedOut: number;
-    duesCarried: number;
-  } | null>(null);
+  const totalDueEstimate = studentsWithDues.reduce((sum, s) => {
+    const unpaid = getUnpaidMonths(s.id);
+    return sum + getStudentDueAmount(s, unpaid);
+  }, 0);
 
-  const handleConfirmPromotion = () => {
-    try {
-      const allStudentsData = loadFromStorage<StudentRecord[]>(
-        "erp_students",
-        [],
+  function handlePromote() {
+    if (!newSessionLabel.trim().match(/^\d{4}-\d{2}$/)) {
+      alert("Session label must be in YYYY-YY format (e.g. 2026-27)");
+      return;
+    }
+    if (!confirmedCheckbox) {
+      alert("Please check the confirmation checkbox before proceeding.");
+      return;
+    }
+
+    const newSession = createSession(newSessionLabel.trim());
+    const allStudents = ls.get<Student[]>("students", []);
+    let promoted = 0;
+    let passedOut = 0;
+    let duesCarried = 0;
+    let totalDueAmount = 0;
+
+    // Save old-balance records separately for dues tracking
+    const oldBalances: Array<{
+      id: string;
+      studentId: string;
+      studentName: string;
+      sessionLabel: string;
+      months: string[];
+      totalAmount: number;
+    }> = ls.get("old_balances", []);
+
+    const updatedStudents = allStudents.map((s) => {
+      if (s.sessionId !== (currentSession?.id ?? "")) return s;
+      const map = selectedMaps.find(
+        (m) => m.fromClass === s.class && m.fromSection === s.section,
       );
-      const allPayments = loadFromStorage<PaymentRecord[]>(
-        "erp_fee_payments",
-        [],
-      );
+      if (!map) return s;
 
-      // Archive current session
-      const archiveKey = `erp_session_archive_${currentSession.replace(/[^a-zA-Z0-9]/g, "_")}`;
-      localStorage.setItem(
-        archiveKey,
-        JSON.stringify({
-          sessionLabel: currentSession,
-          archivedAt: new Date().toISOString(),
-          students: allStudentsData,
-          payments: allPayments,
-        }),
-      );
+      const unpaid = getUnpaidMonths(s.id);
+      const dueAmt = getStudentDueAmount(s, unpaid);
 
-      let promotedCount = 0;
-      let passedOutCount = 0;
-      let duesCarriedCount = 0;
-
-      const updatedStudents = allStudentsData.map((s) => {
-        if (s.status !== "Active") return s;
-        const cs = getClassSection(s.className, s.section);
-        if (!selectedSections.has(cs)) return s;
-
-        // Calculate per-month dues from payments
-        const studentPayments = allPayments.filter(
-          (p) => p.admNo === s.admNo && p.balance > 0,
-        );
-        const prevDues: Array<{
-          month: string;
-          sessionLabel: string;
-          amount: number;
-        }> = [];
-
-        for (const p of studentPayments) {
-          if (p.months.length > 0 && p.balance > 0) {
-            const perMonth = p.balance / p.months.length;
-            for (const m of p.months) {
-              const existing = prevDues.find(
-                (d) => d.month === m && d.sessionLabel === currentSession,
-              );
-              if (existing) {
-                existing.amount += perMonth;
-              } else {
-                prevDues.push({
-                  month: m,
-                  sessionLabel: currentSession,
-                  amount: Math.round(perMonth),
-                });
-              }
-            }
-          }
-        }
-
-        const totalOldBalance = studentPayments.reduce(
-          (sum, p) => sum + p.balance,
-          0,
-        );
-        const nextClass = getNextClass(s.className);
-        const isPassedOut = nextClass === "PASSED_OUT";
-
-        if (prevDues.length > 0) duesCarriedCount++;
-
-        if (isPassedOut) {
-          passedOutCount++;
-          return {
-            ...s,
-            status: "Discontinued" as const,
-            leavingReason: "Passed Out (Class 10)",
-            leavingDate: new Date().toISOString().split("T")[0],
-            leavingRemarks: `Promoted out after Session ${currentSession}`,
-            session: newSession,
-            prevSessionDues: prevDues,
-            oldBalance: Math.round(totalOldBalance),
-          };
-        }
-
-        promotedCount++;
-        return {
-          ...s,
-          className: nextClass,
-          session: newSession,
-          prevSessionDues: prevDues,
-          oldBalance: Math.round(totalOldBalance),
-        };
-      });
-
-      localStorage.setItem("erp_students", JSON.stringify(updatedStudents));
-
-      // Update session in settings
-      try {
-        const settings = JSON.parse(
-          localStorage.getItem("erp_settings") || "{}",
-        );
-        settings.session = newSession;
-        localStorage.setItem("erp_settings", JSON.stringify(settings));
-      } catch {
-        localStorage.setItem(
-          "erp_settings",
-          JSON.stringify({ session: newSession }),
-        );
+      if (unpaid.length > 0) {
+        duesCarried++;
+        totalDueAmount += dueAmt;
+        oldBalances.push({
+          id: generateId(),
+          studentId: s.id,
+          studentName: s.fullName,
+          sessionLabel: currentSession?.label ?? "",
+          months: unpaid,
+          totalAmount: dueAmt,
+        });
       }
 
-      setPromotionResult({
-        promoted: promotedCount,
-        passedOut: passedOutCount,
-        duesCarried: duesCarriedCount,
-      });
-      setStep(4);
-      toast.success("Students promoted successfully!");
-    } catch (err) {
-      toast.error("Promotion failed. Please try again.");
-      console.error(err);
-    }
-  };
+      const oldBal: Record<string, boolean> = {};
+      for (const month of unpaid) oldBal[month] = true;
 
-  const stepLabels = ["Session Setup", "Class Selection", "Review", "Done"];
+      if (map.toClass === "Passed Out") {
+        passedOut++;
+        return {
+          ...s,
+          status: "discontinued" as const,
+          leavingDate: new Date().toISOString().split("T")[0],
+          leavingReason: "Passed Out / Graduated",
+          remarks: "Passed Out / Graduated",
+          sessionId: newSession.id,
+          oldBalance: oldBal,
+        };
+      }
 
-  return (
-    <div>
-      <h2 className="text-white text-lg font-semibold mb-4 flex items-center gap-2">
-        <GraduationCap size={20} className="text-green-400" />
-        Promote Students
-      </h2>
+      promoted++;
+      return {
+        ...s,
+        class: map.toClass,
+        sessionId: newSession.id,
+        oldBalance: oldBal,
+      };
+    });
 
-      {/* Step indicator */}
-      <div className="flex items-center gap-0 mb-6">
-        {stepLabels.map((label, idx) => {
-          const stepNum = (idx + 1) as Step;
-          const isActive = step === stepNum;
-          const isDone = step > stepNum;
-          return (
-            <div key={label} className="flex items-center">
-              <div className="flex items-center gap-2">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all ${
-                    isDone
-                      ? "bg-green-600 border-green-600 text-white"
-                      : isActive
-                        ? "bg-blue-600 border-blue-400 text-white"
-                        : "bg-gray-800 border-gray-600 text-gray-500"
-                  }`}
-                >
-                  {isDone ? <CheckCircle size={14} /> : stepNum}
-                </div>
-                <span
-                  className={`text-xs font-medium ${
-                    isActive
-                      ? "text-blue-300"
-                      : isDone
-                        ? "text-green-400"
-                        : "text-gray-500"
-                  }`}
-                >
-                  {label}
-                </span>
-              </div>
-              {idx < stepLabels.length - 1 && (
-                <ChevronRight size={16} className="text-gray-600 mx-2" />
+    ls.set("students", updatedStudents);
+    ls.set("old_balances", oldBalances);
+    switchSession(newSession.id);
+    setSummary({ promoted, passedOut, duesCarried, totalDueAmount });
+    addNotification(
+      `Promotion complete: ${promoted} promoted, ${passedOut} passed out to session ${newSessionLabel}`,
+      "success",
+      "🎓",
+    );
+    setDone(true);
+  }
+
+  // ─── Done Screen ──────────────────────────────────────────
+  if (done) {
+    return (
+      <div className="p-4 lg:p-6 flex items-center justify-center min-h-[60vh]">
+        <Card className="p-10 text-center max-w-md w-full shadow-elevated">
+          <div className="w-20 h-20 rounded-full bg-accent/10 flex items-center justify-center mx-auto mb-4">
+            <CheckCircle className="w-10 h-10 text-accent" />
+          </div>
+          <h2 className="text-xl font-display font-bold text-foreground mb-2">
+            Promotion Complete!
+          </h2>
+          <p className="text-muted-foreground text-sm mb-6">
+            Session changed to{" "}
+            <strong className="text-foreground">{newSessionLabel}</strong>
+          </p>
+          <div className="grid grid-cols-2 gap-3 mb-4">
+            <div className="p-4 bg-accent/10 rounded-xl">
+              <p className="text-2xl font-bold text-accent font-display">
+                {summary.promoted}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Promoted</p>
+            </div>
+            <div className="p-4 bg-primary/10 rounded-xl">
+              <p className="text-2xl font-bold text-primary font-display">
+                {summary.passedOut}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Passed Out</p>
+            </div>
+          </div>
+          {summary.duesCarried > 0 && (
+            <div className="p-4 bg-orange-50 border border-orange-200 rounded-xl mb-4">
+              <p className="text-lg font-bold text-orange-700 font-display">
+                {summary.duesCarried} students
+              </p>
+              <p className="text-xs text-orange-600 mt-0.5">
+                had dues carried forward
+              </p>
+              {summary.totalDueAmount > 0 && (
+                <p className="text-sm font-semibold text-orange-700 mt-1">
+                  ≈ {formatCurrency(summary.totalDueAmount)} total
+                </p>
               )}
             </div>
-          );
-        })}
+          )}
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Unpaid dues are stored as "Old Balance" and visible in Fees →
+            Collect Fees. The old session{" "}
+            <strong className="text-foreground">{currentSession?.label}</strong>{" "}
+            is archived and accessible from the session switcher.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  // ─── Steps ────────────────────────────────────────────────
+  const stepLabels = [
+    "Set New Session",
+    "Select Classes",
+    "Review Dues",
+    "Confirm",
+  ];
+
+  return (
+    <div className="p-4 lg:p-6 max-w-3xl mx-auto space-y-5">
+      {/* Page Header */}
+      <div className="flex items-center gap-3">
+        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
+          <GraduationCap className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h1 className="text-xl font-display font-bold text-foreground">
+            Promote Students
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Move students to the next class and session
+          </p>
+        </div>
       </div>
 
-      {/* Step 1 */}
+      {/* Step Indicators */}
+      <div className="flex items-center gap-2">
+        {[1, 2, 3, 4].map((s) => (
+          <div key={s} className="flex items-center gap-2">
+            <div
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-colors ${
+                step === s
+                  ? "bg-primary text-primary-foreground"
+                  : step > s
+                    ? "bg-accent text-accent-foreground"
+                    : "bg-muted text-muted-foreground"
+              }`}
+            >
+              {step > s ? "✓" : s}
+            </div>
+            {s < 4 && (
+              <ChevronRight className="w-4 h-4 text-muted-foreground" />
+            )}
+          </div>
+        ))}
+        <span className="ml-2 text-sm text-muted-foreground">
+          {stepLabels[step - 1]}
+        </span>
+      </div>
+
+      {/* ── Step 1: New Session ── */}
       {step === 1 && (
-        <div
-          className="rounded-xl p-6 max-w-lg"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <h3 className="text-white font-semibold mb-1">Session Setup</h3>
-          <p className="text-gray-400 text-xs mb-5">
-            This will move all selected students to the next class and create a
-            new session archive.
-          </p>
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="current-session-display"
-                className="text-gray-400 text-xs block mb-1"
-              >
-                Current Session
-              </label>
-              <div
-                id="current-session-display"
-                className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-yellow-300 text-sm font-semibold"
-              >
-                {currentSession}
-              </div>
-            </div>
-            <div>
-              <label
-                htmlFor="new-session"
-                className="text-gray-400 text-xs block mb-1"
-              >
-                New Session Label
-              </label>
-              <input
-                id="new-session"
-                value={newSession}
-                onChange={(e) => setNewSession(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-white text-sm outline-none focus:border-blue-400"
-                placeholder="e.g. 2026-27"
-                data-ocid="promote.new_session.input"
-              />
-            </div>
-            <div
-              className="rounded-lg p-3"
-              style={{ background: "#0f1117", border: "1px solid #1f2937" }}
-            >
-              <div className="flex items-start gap-2">
-                <AlertTriangle
-                  size={13}
-                  className="text-yellow-400 mt-0.5 flex-shrink-0"
-                />
-                <p className="text-yellow-300 text-xs">
-                  Current session data ({currentSession}) will be archived.
-                  Students will move to the next class. Dues will carry forward
-                  as Old Balance.
-                </p>
-              </div>
-            </div>
+        <Card className="p-6 space-y-5">
+          <h2 className="font-display font-semibold text-foreground">
+            Step 1: Set New Session
+          </h2>
+          <div className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg">
+            <Badge variant="secondary">Current Session</Badge>
+            <span className="font-semibold text-foreground">
+              {currentSession?.label ?? "—"}
+            </span>
+            <Badge variant="outline" className="ml-auto text-xs">
+              Active
+            </Badge>
           </div>
-          <div className="mt-6 flex justify-end">
-            <button
-              type="button"
+
+          <div className="space-y-1.5">
+            <Label htmlFor="new-session-label">New Session Label *</Label>
+            <Input
+              id="new-session-label"
+              data-ocid="promote-new-session"
+              placeholder="e.g. 2026-27"
+              value={newSessionLabel}
+              onChange={(e) => setNewSessionLabel(e.target.value)}
+              className="max-w-xs"
+            />
+            <p className="text-xs text-muted-foreground">
+              Format: YYYY-YY (e.g. 2026-27). The old session will be archived.
+            </p>
+          </div>
+
+          <div className="p-3 bg-primary/5 border border-primary/20 rounded-lg text-sm text-foreground">
+            <p className="font-medium mb-1">What happens after promotion:</p>
+            <ul className="text-muted-foreground space-y-1 text-xs list-disc list-inside">
+              <li>Current session is archived (data preserved forever)</li>
+              <li>Students advance to next class in the new session</li>
+              <li>Class 12 students are automatically marked "Passed Out"</li>
+              <li>Unpaid monthly dues carry forward as Old Balance</li>
+            </ul>
+          </div>
+
+          <div className="flex justify-end">
+            <Button
+              data-ocid="promote-step1-next"
               onClick={() => setStep(2)}
-              disabled={!newSession.trim()}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-5 py-2 rounded font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              data-ocid="promote.step1.primary_button"
+              disabled={!newSessionLabel.trim().match(/^\d{4}-\d{2}$/)}
             >
-              Next <ArrowRight size={14} />
-            </button>
+              Next: Select Classes →
+            </Button>
           </div>
-        </div>
+        </Card>
       )}
 
-      {/* Step 2 */}
+      {/* ── Step 2: Select Sections ── */}
       {step === 2 && (
-        <div
-          className="rounded-xl p-6"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <h3 className="text-white font-semibold mb-1">Class Selection</h3>
-          <p className="text-gray-400 text-xs mb-4">
-            Select which classes to include in this promotion batch.
-          </p>
-
-          {classSections.length === 0 ? (
-            <div
-              className="text-center py-8 text-gray-500 text-sm"
-              data-ocid="promote.classes.empty_state"
-            >
-              No active students found. Please add students in Student
-              Information first.
+        <Card className="p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <h2 className="font-display font-semibold text-foreground">
+              Step 2: Select Sections to Promote
+            </h2>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" onClick={selectAll}>
+                Select All
+              </Button>
+              <Button variant="ghost" size="sm" onClick={clearAll}>
+                Clear
+              </Button>
             </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-3 mb-3">
-                <label className="flex items-center gap-2 text-gray-300 text-xs cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={selectedSections.size === classSections.length}
-                    onChange={(e) => toggleAll(e.target.checked)}
-                    className="accent-blue-500"
-                    data-ocid="promote.select_all.checkbox"
-                  />
-                  Select All
-                </label>
-                <span className="text-gray-500 text-xs">
-                  {selectedSections.size} of {classSections.length} sections
-                  selected
-                </span>
-              </div>
-
-              <div className="rounded-lg overflow-hidden border border-gray-700">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr style={{ background: "#0d111c" }}>
-                      <th className="px-3 py-2 text-left text-gray-400 w-8">
-                        {" "}
-                      </th>
-                      <th className="px-3 py-2 text-left text-gray-400">
-                        Class
-                      </th>
-                      <th className="px-3 py-2 text-left text-gray-400">
-                        Section
-                      </th>
-                      <th className="px-3 py-2 text-left text-gray-400">
-                        Class Teacher
-                      </th>
-                      <th className="px-3 py-2 text-right text-gray-400">
-                        Students
-                      </th>
-                      <th className="px-3 py-2 text-left text-gray-400">
-                        Promotes To
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {classSections.map((cs, i) => {
-                      const parts = cs.split("-");
-                      const section = parts[parts.length - 1];
-                      const className = parts.slice(0, -1).join("-");
-                      const ct = classTeachers.find(
-                        (t) => t.classSection === cs,
-                      );
-                      const count = (classGroups[cs] || []).length;
-                      const nextClass = getNextClass(className);
-                      const isPassOut = nextClass === "PASSED_OUT";
-                      return (
-                        <tr
-                          key={cs}
-                          style={{
-                            background: i % 2 === 0 ? "#111827" : "#0d111c",
-                          }}
-                          data-ocid={`promote.class.item.${i + 1}`}
-                        >
-                          <td className="px-3 py-2">
-                            <input
-                              type="checkbox"
-                              checked={selectedSections.has(cs)}
-                              onChange={() => toggleSection(cs)}
-                              className="accent-blue-500"
-                              data-ocid={`promote.class.checkbox.${i + 1}`}
-                            />
-                          </td>
-                          <td className="px-3 py-2 text-white font-medium">
-                            {className}
-                          </td>
-                          <td className="px-3 py-2">
-                            <span className="bg-blue-900/40 text-blue-300 px-2 py-0.5 rounded text-[10px]">
-                              {section}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-gray-300">
-                            {ct ? (
-                              ct.teacherName
-                            ) : (
-                              <span className="text-gray-600">—</span>
-                            )}
-                          </td>
-                          <td className="px-3 py-2 text-right text-white font-semibold">
-                            {count}
-                          </td>
-                          <td className="px-3 py-2">
-                            {isPassOut ? (
-                              <span className="text-green-400 font-medium">
-                                🎓 Passed Out
-                              </span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-gray-300">
-                                {nextClass}
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <div
-                className="mt-3 rounded-lg px-4 py-3"
-                style={{ background: "#0d111c", border: "1px solid #1f2937" }}
-              >
-                <p className="text-gray-300 text-xs">
-                  <span className="text-white font-semibold">
-                    {selectedStudents.length}
-                  </span>{" "}
-                  students across{" "}
-                  <span className="text-white font-semibold">
-                    {selectedSections.size}
-                  </span>{" "}
-                  sections selected for promotion
-                </p>
-              </div>
-            </>
-          )}
-
-          <div className="mt-5 flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(1)}
-              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded bg-gray-800 hover:bg-gray-700"
-              data-ocid="promote.step2.cancel_button"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={() => setStep(3)}
-              disabled={selectedSections.size === 0}
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-5 py-2 rounded font-medium disabled:opacity-50"
-              data-ocid="promote.step2.primary_button"
-            >
-              Next <ArrowRight size={14} />
-            </button>
           </div>
-        </div>
+          <p className="text-sm text-muted-foreground">
+            Only sections with active students are shown.
+          </p>
+          <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+            {sectionMaps
+              .filter(
+                (m) =>
+                  getStudentsForSection(m.fromClass, m.fromSection).length > 0,
+              )
+              .map((m) => {
+                const realIdx = sectionMaps.findIndex(
+                  (x) =>
+                    x.fromClass === m.fromClass &&
+                    x.fromSection === m.fromSection,
+                );
+                const count = getStudentsForSection(
+                  m.fromClass,
+                  m.fromSection,
+                ).length;
+                return (
+                  <label
+                    key={`${m.fromClass}-${m.fromSection}`}
+                    htmlFor={`section-${m.fromClass}-${m.fromSection}`}
+                    className={`flex items-center gap-4 p-3 rounded-lg transition-colors cursor-pointer w-full ${
+                      m.selected
+                        ? "bg-primary/5 border border-primary/20"
+                        : "bg-muted/30 hover:bg-muted/50"
+                    }`}
+                  >
+                    <Checkbox
+                      id={`section-${m.fromClass}-${m.fromSection}`}
+                      data-ocid={`promote-section-${m.fromClass}-${m.fromSection}`}
+                      checked={m.selected}
+                      onCheckedChange={() => toggleSection(realIdx)}
+                    />
+                    <span className="flex-1 flex items-center gap-3">
+                      <span className="font-semibold text-foreground">
+                        Class {m.fromClass}-{m.fromSection}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                      <span
+                        className={
+                          m.toClass === "Passed Out"
+                            ? "text-orange-600 font-medium"
+                            : "text-accent font-medium"
+                        }
+                      >
+                        {m.toClass === "Passed Out"
+                          ? "🎓 Passed Out"
+                          : `Class ${m.toClass}-${m.fromSection}`}
+                      </span>
+                      <Badge variant="secondary" className="ml-auto">
+                        {count} student{count !== 1 ? "s" : ""}
+                      </Badge>
+                    </span>
+                  </label>
+                );
+              })}
+          </div>
+          <div className="flex justify-between gap-3 pt-2">
+            <Button variant="outline" onClick={() => setStep(1)}>
+              ← Back
+            </Button>
+            <Button
+              data-ocid="promote-step2-next"
+              onClick={() => setStep(3)}
+              disabled={selectedMaps.length === 0}
+            >
+              Next: Review Dues ({affectedStudents.length} students) →
+            </Button>
+          </div>
+        </Card>
       )}
 
-      {/* Step 3 */}
+      {/* ── Step 3: Review ── */}
       {step === 3 && (
-        <div
-          className="rounded-xl p-6"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <h3 className="text-white font-semibold mb-1">Review Promotion</h3>
-          <p className="text-gray-400 text-xs mb-4">
-            Review the promotion details before confirming. This action cannot
-            be undone.
-          </p>
+        <Card className="p-6 space-y-4">
+          <h2 className="font-display font-semibold text-foreground">
+            Step 3: Review Students & Dues
+          </h2>
 
-          {/* Summary Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
-            {[
-              {
-                label: "Total Students",
-                value: selectedStudents.length,
-                color: "#3b82f6",
-                bg: "#1e3a5f",
-              },
-              {
-                label: "Passing Out (Cl.10)",
-                value: passOutCount,
-                color: "#22c55e",
-                bg: "#14532d",
-              },
-              {
-                label: "With Dues",
-                value: studentsWithDues,
-                color: "#f87171",
-                bg: "#450a0a",
-              },
-              {
-                label: "Total Dues",
-                value: `₹${totalDues.toLocaleString("en-IN")}`,
-                color: "#fbbf24",
-                bg: "#451a03",
-              },
-            ].map((card) => (
-              <div
-                key={card.label}
-                className="rounded-lg px-4 py-3 text-center"
-                style={{
-                  background: card.bg,
-                  border: `1px solid ${card.color}30`,
-                }}
-              >
-                <div
-                  className="text-xl font-bold mb-1"
-                  style={{ color: card.color }}
-                >
-                  {card.value}
-                </div>
-                <div className="text-gray-400 text-[10px]">{card.label}</div>
-              </div>
-            ))}
+          {/* Stats strip */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="p-3 bg-muted/40 rounded-xl text-center">
+              <p className="text-lg font-bold font-display text-foreground">
+                {affectedStudents.length}
+              </p>
+              <p className="text-xs text-muted-foreground">Total Students</p>
+            </div>
+            <div className="p-3 bg-orange-50 rounded-xl text-center">
+              <p className="text-lg font-bold font-display text-orange-700">
+                {passedOutCount}
+              </p>
+              <p className="text-xs text-muted-foreground">Passing Out</p>
+            </div>
+            <div className="p-3 bg-accent/10 rounded-xl text-center">
+              <p className="text-lg font-bold font-display text-accent">
+                {studentsWithDues.length}
+              </p>
+              <p className="text-xs text-muted-foreground">Have Dues</p>
+            </div>
           </div>
 
-          {/* Students Table */}
-          <div
-            className="rounded-lg overflow-hidden border border-gray-700 mb-5"
-            style={{ maxHeight: 360, overflowY: "auto" }}
-          >
-            <table className="w-full text-xs">
-              <thead style={{ position: "sticky", top: 0, zIndex: 1 }}>
-                <tr style={{ background: "#0d111c" }}>
-                  <th className="px-3 py-2 text-left text-gray-400">#</th>
-                  <th className="px-3 py-2 text-left text-gray-400">Adm No.</th>
-                  <th className="px-3 py-2 text-left text-gray-400">Name</th>
-                  <th className="px-3 py-2 text-left text-gray-400">
-                    Current Class
+          <div className="max-h-96 overflow-y-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 sticky top-0">
+                <tr>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">
+                    Student
                   </th>
-                  <th className="px-3 py-2 text-left text-gray-400">
-                    Next Class
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">
+                    From
                   </th>
-                  <th className="px-3 py-2 text-right text-gray-400">Dues</th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">
+                    To
+                  </th>
+                  <th className="text-left px-3 py-2 font-semibold text-muted-foreground">
+                    Unpaid Months
+                  </th>
                 </tr>
               </thead>
-              <tbody>
-                {selectedStudents.map((s, i) => {
-                  const nextClass = getNextClass(s.className);
-                  const isPassOut = nextClass === "PASSED_OUT";
-                  const dues = getStudentDues(s.admNo);
+              <tbody className="divide-y divide-border">
+                {affectedStudents.map((s) => {
+                  const unpaid = getUnpaidMonths(s.id);
+                  const map = selectedMaps.find(
+                    (m) =>
+                      m.fromClass === s.class && m.fromSection === s.section,
+                  );
                   return (
-                    <tr
-                      key={s.admNo}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0d111c",
-                      }}
-                      data-ocid={`promote.review.item.${i + 1}`}
-                    >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 text-blue-400 font-mono">
-                        {s.admNo}
+                    <tr key={s.id} className="hover:bg-muted/20">
+                      <td className="px-3 py-2 font-medium text-foreground">
+                        {s.fullName}
                       </td>
-                      <td className="px-3 py-2 text-white">{s.name}</td>
-                      <td className="px-3 py-2 text-gray-300">
-                        {s.className} - {s.section}
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {s.class}-{s.section}
                       </td>
                       <td className="px-3 py-2">
-                        {isPassOut ? (
-                          <span className="text-green-400 font-semibold">
-                            🎓 Passed Out
-                          </span>
-                        ) : (
-                          <span className="text-white">{nextClass}</span>
-                        )}
+                        <Badge
+                          variant={
+                            map?.toClass === "Passed Out"
+                              ? "secondary"
+                              : "default"
+                          }
+                          className="text-xs"
+                        >
+                          {map?.toClass === "Passed Out"
+                            ? "Passed Out"
+                            : `${map?.toClass}-${s.section}`}
+                        </Badge>
                       </td>
-                      <td
-                        className="px-3 py-2 text-right font-semibold"
-                        style={{ color: dues > 0 ? "#f87171" : "#6b7280" }}
-                      >
-                        {dues > 0 ? `₹${dues.toLocaleString("en-IN")}` : "—"}
+                      <td className="px-3 py-2">
+                        {unpaid.length === 0 ? (
+                          <span className="text-accent text-xs">✓ Clear</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-0.5">
+                            {unpaid.map((m) => (
+                              <Badge
+                                key={m}
+                                variant="secondary"
+                                className="text-xs bg-orange-100 text-orange-700 border-orange-200"
+                              >
+                                {m.slice(0, 3)}
+                              </Badge>
+                            ))}
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -740,110 +598,136 @@ export function PromoteStudents() {
               </tbody>
             </table>
           </div>
+          <div className="flex justify-between gap-3 pt-2">
+            <Button variant="outline" onClick={() => setStep(2)}>
+              ← Back
+            </Button>
+            <Button data-ocid="promote-step3-next" onClick={() => setStep(4)}>
+              Next: Confirm →
+            </Button>
+          </div>
+        </Card>
+      )}
 
-          <div
-            className="rounded-lg p-3 mb-5"
-            style={{ background: "#450a0a", border: "1px solid #7f1d1d" }}
-          >
-            <div className="flex items-start gap-2">
-              <AlertTriangle
-                size={13}
-                className="text-red-400 mt-0.5 flex-shrink-0"
-              />
-              <p className="text-red-200 text-xs">
-                <strong>Warning:</strong> This action will permanently move
-                students to their next class, archive the current session, and
-                update all dues as old balance. Class 10 students will be marked
-                as Passed Out. This cannot be undone.
+      {/* ── Step 4: Confirm ── */}
+      {step === 4 && (
+        <Card className="p-6 space-y-5">
+          <h2 className="font-display font-semibold text-foreground">
+            Step 4: Confirm Promotion
+          </h2>
+
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-4 bg-accent/10 rounded-xl text-center">
+              <p className="text-2xl font-bold font-display text-accent">
+                {affectedStudents.length - passedOutCount}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Will be Promoted
+              </p>
+            </div>
+            <div className="p-4 bg-primary/10 rounded-xl text-center">
+              <p className="text-2xl font-bold font-display text-primary">
+                {passedOutCount}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Passing Out
+              </p>
+            </div>
+            <div className="p-4 bg-orange-50 rounded-xl text-center">
+              <p className="text-2xl font-bold font-display text-orange-700">
+                {studentsWithDues.length}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">Have Dues</p>
+            </div>
+            <div className="p-4 bg-orange-50 rounded-xl text-center">
+              <p className="text-base font-bold font-display text-orange-700">
+                {totalDueEstimate > 0 ? formatCurrency(totalDueEstimate) : "₹0"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Dues Amount
               </p>
             </div>
           </div>
 
-          <div className="flex justify-between">
-            <button
-              type="button"
-              onClick={() => setStep(2)}
-              className="text-gray-400 hover:text-white text-sm px-4 py-2 rounded bg-gray-800 hover:bg-gray-700"
-              data-ocid="promote.step3.cancel_button"
-            >
-              Back
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmPromotion}
-              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white text-sm px-5 py-2 rounded font-semibold"
-              data-ocid="promote.confirm.primary_button"
-            >
-              <CheckCircle size={14} />
-              Confirm &amp; Promote
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Step 4 */}
-      {step === 4 && promotionResult && (
-        <div
-          className="rounded-xl p-8 max-w-lg text-center"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <div className="w-16 h-16 bg-green-600/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle size={32} className="text-green-400" />
-          </div>
-          <h3 className="text-white text-xl font-bold mb-2">
-            Promotion Complete!
-          </h3>
-          <p className="text-gray-400 text-sm mb-6">
-            Session{" "}
-            <span className="text-yellow-300 font-semibold">
-              {currentSession}
-            </span>{" "}
-            has been archived and students are now in session{" "}
-            <span className="text-green-400 font-semibold">{newSession}</span>.
-          </p>
-
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            <div
-              className="rounded-lg px-3 py-3"
-              style={{ background: "#1e3a5f", border: "1px solid #3b82f6" }}
-            >
-              <div className="text-2xl font-bold text-blue-400">
-                {promotionResult.promoted}
-              </div>
-              <div className="text-gray-400 text-[10px] mt-1">Promoted</div>
+          {/* Session summary */}
+          <div className="space-y-2 p-4 bg-muted/40 rounded-xl">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                Current session (will be archived):
+              </span>
+              <span className="font-semibold text-foreground">
+                {currentSession?.label}
+              </span>
             </div>
-            <div
-              className="rounded-lg px-3 py-3"
-              style={{ background: "#14532d", border: "1px solid #22c55e" }}
-            >
-              <div className="text-2xl font-bold text-green-400">
-                {promotionResult.passedOut}
-              </div>
-              <div className="text-gray-400 text-[10px] mt-1">Passed Out</div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">New session:</span>
+              <span className="font-semibold text-primary">
+                {newSessionLabel}
+              </span>
             </div>
-            <div
-              className="rounded-lg px-3 py-3"
-              style={{ background: "#451a03", border: "1px solid #fbbf24" }}
-            >
-              <div className="text-2xl font-bold text-yellow-400">
-                {promotionResult.duesCarried}
-              </div>
-              <div className="text-gray-400 text-[10px] mt-1">Dues Carried</div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Sections selected:</span>
+              <span className="font-semibold text-foreground">
+                {selectedMaps.length}
+              </span>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              window.location.hash = "/students";
-            }}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-sm px-6 py-2.5 rounded font-medium mx-auto"
-            data-ocid="promote.done.primary_button"
-          >
-            <Users size={14} />
-            View Students
-          </button>
-        </div>
+          {/* Warning */}
+          <div className="flex items-start gap-3 p-4 bg-orange-50 border border-orange-200 rounded-xl">
+            <AlertTriangle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+            <div className="text-sm text-orange-800">
+              <p className="font-semibold mb-1">Important — Please Read</p>
+              <ul className="space-y-1 text-xs list-disc list-inside">
+                <li>
+                  The current session will be archived (read-only) and a new
+                  session will be created
+                </li>
+                <li>
+                  Students will be moved to the next class in the new session
+                </li>
+                <li>
+                  Unpaid dues will carry forward as "Old Balance" and remain
+                  visible in Fees
+                </li>
+                <li>This action cannot be undone — export a backup first</li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Confirm checkbox */}
+          <div className="flex items-center gap-3 p-3 rounded-lg border border-border">
+            <Checkbox
+              id="confirm-promotion"
+              data-ocid="promote-confirm-checkbox"
+              checked={confirmedCheckbox}
+              onCheckedChange={(v) => setConfirmedCheckbox(!!v)}
+            />
+            <Label
+              htmlFor="confirm-promotion"
+              className="text-sm cursor-pointer leading-relaxed"
+            >
+              I confirm this action cannot be undone. I have exported a backup
+              of all school data before proceeding.
+            </Label>
+          </div>
+
+          <div className="flex justify-between gap-3 pt-1">
+            <Button variant="outline" onClick={() => setStep(3)}>
+              ← Back
+            </Button>
+            <Button
+              data-ocid="promote-confirm"
+              onClick={handlePromote}
+              disabled={!confirmedCheckbox}
+              className="min-w-40"
+            >
+              <GraduationCap className="w-4 h-4 mr-1.5" />
+              Promote All Students
+            </Button>
+          </div>
+        </Card>
       )}
     </div>
   );

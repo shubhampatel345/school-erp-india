@@ -1,1030 +1,947 @@
-import { Edit2, Plus, Printer, Trash2, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { toast } from "sonner";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  BarChart2,
+  Download,
+  Edit2,
+  PieChart,
+  PlusCircle,
+  Printer,
+  Trash2,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { useApp } from "../context/AppContext";
+import type { Expense, ExpenseHead } from "../types";
+import {
+  LS_KEYS,
+  MONTHS,
+  formatCurrency,
+  generateId,
+  ls,
+} from "../utils/localStorage";
 
-interface ExpRecord {
-  id: string;
-  type: "income" | "expense";
-  head: string;
-  description: string;
-  amount: number;
-  mode: string;
-  reference: string;
-  date: string;
-}
+// ─── Helpers ─────────────────────────────────────────────
+const CURRENT_MONTH = new Date().toLocaleString("en-IN", { month: "long" });
 
-interface ExpHead {
-  id: string;
-  name: string;
-  type: "income" | "expense";
-}
-
-interface BudgetEntry {
-  headId: string;
-  budgeted: number;
-}
-
-const DEMO_INCOME: ExpRecord[] = [
-  {
-    id: "i1",
-    type: "income",
-    head: "Tuition Fees",
-    description: "Tuition fee collection March batch 1",
-    amount: 450000,
-    mode: "Cash",
-    reference: "TF001",
-    date: "2026-03-05",
-  },
-  {
-    id: "i2",
-    type: "income",
-    head: "Transport Fees",
-    description: "Transport fee collection",
-    amount: 85000,
-    mode: "Cash",
-    reference: "TR001",
-    date: "2026-03-10",
-  },
-  {
-    id: "i3",
-    type: "income",
-    head: "Exam Fees",
-    description: "Examination fee collection",
-    amount: 42000,
-    mode: "Online",
-    reference: "EF001",
-    date: "2026-03-15",
-  },
-  {
-    id: "i4",
-    type: "income",
-    head: "Library Fees",
-    description: "Annual library fee",
-    amount: 18000,
-    mode: "Cash",
-    reference: "LF001",
-    date: "2026-03-18",
-  },
-];
-
-const DEMO_EXPENSE: ExpRecord[] = [
-  {
-    id: "e1",
-    type: "expense",
-    head: "Salary",
-    description: "Monthly staff salary March 2026",
-    amount: 283000,
-    mode: "Bank Transfer",
-    reference: "SAL003",
-    date: "2026-03-01",
-  },
-  {
-    id: "e2",
-    type: "expense",
-    head: "Electricity",
-    description: "Electricity bill March 2026",
-    amount: 28000,
-    mode: "Online",
-    reference: "ELEC03",
-    date: "2026-03-08",
-  },
-  {
-    id: "e3",
-    type: "expense",
-    head: "Maintenance",
-    description: "Building maintenance & repair",
-    amount: 15000,
-    mode: "Cash",
-    reference: "MAINT03",
-    date: "2026-03-12",
-  },
-  {
-    id: "e4",
-    type: "expense",
-    head: "Stationery",
-    description: "Office stationery purchase",
-    amount: 8500,
-    mode: "Cash",
-    reference: "STAT03",
-    date: "2026-03-20",
-  },
-];
-
-const DEMO_HEADS: ExpHead[] = [
-  { id: "h1", name: "Tuition Fees", type: "income" },
-  { id: "h2", name: "Transport Fees", type: "income" },
-  { id: "h3", name: "Exam Fees", type: "income" },
-  { id: "h4", name: "Library Fees", type: "income" },
-  { id: "h5", name: "Donation", type: "income" },
-  { id: "h6", name: "Salary", type: "expense" },
-  { id: "h7", name: "Electricity", type: "expense" },
-  { id: "h8", name: "Maintenance", type: "expense" },
-  { id: "h9", name: "Stationery", type: "expense" },
-  { id: "h10", name: "Cleaning", type: "expense" },
-];
-
-const DEMO_BUDGET: BudgetEntry[] = [
-  { headId: "h1", budgeted: 500000 },
-  { headId: "h2", budgeted: 90000 },
-  { headId: "h3", budgeted: 45000 },
-  { headId: "h6", budgeted: 300000 },
-  { headId: "h7", budgeted: 30000 },
-];
-
-const MONTHLY_DEMO = [
-  { month: "Oct", income: 760000, expense: 120000 },
-  { month: "Nov", income: 820000, expense: 130000 },
-  { month: "Dec", income: 690000, expense: 115000 },
-  { month: "Jan", income: 800000, expense: 125000 },
-  { month: "Feb", income: 750000, expense: 118000 },
-  { month: "Mar", income: 920000, expense: 140000 },
-];
-
-const PAYMENT_MODES = [
-  "Cash",
-  "Online",
-  "Cheque",
-  "Bank Transfer",
-  "DD",
-  "NEFT/RTGS",
-];
-
-function loadLS<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-  } catch {
-    return fallback;
+function exportCsv(data: (Expense & { balance: number })[]) {
+  const rows = [["Date", "Type", "Head", "Description", "Amount", "Balance"]];
+  for (const e of data) {
+    rows.push([
+      e.date,
+      e.type,
+      e.category,
+      e.description,
+      e.amount.toString(),
+      e.balance.toString(),
+    ]);
   }
+  const csv = rows.map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "expenses_ledger.csv";
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-export function Expenses() {
-  const [tab, setTab] = useState<
-    "income" | "expense" | "heads" | "budget" | "reports"
-  >("income");
-  const [income, setIncome] = useState<ExpRecord[]>(() =>
-    loadLS("erp_income", DEMO_INCOME),
-  );
-  const [expenses, setExpenses] = useState<ExpRecord[]>(() =>
-    loadLS("erp_expenses", DEMO_EXPENSE),
-  );
-  const [heads, setHeads] = useState<ExpHead[]>(() =>
-    loadLS("erp_expense_heads", DEMO_HEADS),
-  );
-  const [budget, _setBudget] = useState<BudgetEntry[]>(() =>
-    loadLS("erp_budget", DEMO_BUDGET),
-  );
+// ─── Ledger Tab ──────────────────────────────────────────
+function LedgerTab() {
+  const { currentSession, addNotification } = useApp();
+  const heads = ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []);
 
-  const [showLedgerModal, setShowLedgerModal] = useState<
-    "income" | "expense" | null
-  >(null);
-  const [editRecord, setEditRecord] = useState<ExpRecord | null>(null);
-  const [ledgerForm, setLedgerForm] = useState({
-    head: "",
+  const [entries, setEntries] = useState<Expense[]>(() =>
+    ls.get<Expense[]>(LS_KEYS.expenses, []),
+  );
+  const [filterType, setFilterType] = useState("all");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<Expense | null>(null);
+
+  const [form, setForm] = useState({
+    type: "expense" as "income" | "expense",
+    category: "",
+    date: new Date().toISOString().slice(0, 10),
     description: "",
     amount: "",
-    mode: "Cash",
-    reference: "",
-    date: new Date().toISOString().split("T")[0],
   });
 
-  const [showHeadModal, setShowHeadModal] = useState(false);
-  const [headForm, setHeadForm] = useState({
-    name: "",
-    type: "income" as "income" | "expense",
-  });
+  const sessionEntries = useMemo(
+    () =>
+      entries
+        .filter((e) => e.sessionId === currentSession?.id)
+        .sort((a, b) => a.date.localeCompare(b.date)),
+    [entries, currentSession],
+  );
 
-  useEffect(() => {
-    localStorage.setItem("erp_income", JSON.stringify(income));
-  }, [income]);
-  useEffect(() => {
-    localStorage.setItem("erp_expenses", JSON.stringify(expenses));
-  }, [expenses]);
-  useEffect(() => {
-    localStorage.setItem("erp_expense_heads", JSON.stringify(heads));
-  }, [heads]);
-  useEffect(() => {
-    localStorage.setItem("erp_budget", JSON.stringify(budget));
-  }, [budget]);
+  const filtered = useMemo(
+    () =>
+      sessionEntries.filter((e) => {
+        const matchType = filterType === "all" || e.type === filterType;
+        const matchFrom = !filterFrom || e.date >= filterFrom;
+        const matchTo = !filterTo || e.date <= filterTo;
+        return matchType && matchFrom && matchTo;
+      }),
+    [sessionEntries, filterType, filterFrom, filterTo],
+  );
 
-  const totalIncome = income.reduce((s, r) => s + r.amount, 0);
-  const totalExpense = expenses.reduce((s, r) => s + r.amount, 0);
-  const netBalance = totalIncome - totalExpense;
+  const { totalIncome, totalExpense } = useMemo(() => {
+    const inc = sessionEntries
+      .filter((e) => e.type === "income")
+      .reduce((s, e) => s + e.amount, 0);
+    const exp = sessionEntries
+      .filter((e) => e.type === "expense")
+      .reduce((s, e) => s + e.amount, 0);
+    return { totalIncome: inc, totalExpense: exp };
+  }, [sessionEntries]);
 
-  const saveLedgerEntry = (type: "income" | "expense") => {
-    if (!ledgerForm.head || !ledgerForm.amount) return;
-    const rec: ExpRecord = {
-      id: Date.now().toString(),
-      type,
-      ...ledgerForm,
-      amount: Number(ledgerForm.amount),
-    };
-    if (editRecord) {
-      if (type === "income")
-        setIncome((prev) =>
-          prev.map((r) =>
-            r.id === editRecord.id
-              ? {
-                  ...editRecord,
-                  ...ledgerForm,
-                  amount: Number(ledgerForm.amount),
-                }
-              : r,
-          ),
-        );
-      else
-        setExpenses((prev) =>
-          prev.map((r) =>
-            r.id === editRecord.id
-              ? {
-                  ...editRecord,
-                  ...ledgerForm,
-                  amount: Number(ledgerForm.amount),
-                }
-              : r,
-          ),
-        );
-      toast.success("Updated");
+  const handleSubmit = () => {
+    const amt = Number.parseFloat(form.amount);
+    if (
+      !form.category ||
+      !form.description ||
+      !form.date ||
+      Number.isNaN(amt) ||
+      amt <= 0
+    )
+      return;
+
+    if (editing) {
+      const updated = entries.map((e) =>
+        e.id === editing.id ? { ...e, ...form, amount: amt } : e,
+      );
+      setEntries(updated);
+      ls.set(LS_KEYS.expenses, updated);
     } else {
-      if (type === "income") setIncome((prev) => [...prev, rec]);
-      else setExpenses((prev) => [...prev, rec]);
-      toast.success("Entry added");
+      const entry: Expense = {
+        id: generateId(),
+        date: form.date,
+        description: form.description,
+        category: form.category,
+        amount: amt,
+        type: form.type,
+        sessionId: currentSession?.id ?? "",
+      };
+      const updated = [...entries, entry];
+      setEntries(updated);
+      ls.set(LS_KEYS.expenses, updated);
     }
-    setShowLedgerModal(null);
-    setEditRecord(null);
-    setLedgerForm({
-      head: "",
+
+    addNotification(
+      `${form.type === "income" ? "Income" : "Expense"} entry saved`,
+      "success",
+      "💰",
+    );
+    setShowForm(false);
+    setEditing(null);
+    setForm({
+      type: "expense",
+      category: "",
+      date: new Date().toISOString().slice(0, 10),
       description: "",
       amount: "",
-      mode: "Cash",
-      reference: "",
-      date: new Date().toISOString().split("T")[0],
     });
   };
 
-  const deleteRecord = (type: "income" | "expense", id: string) => {
-    if (type === "income") setIncome((prev) => prev.filter((r) => r.id !== id));
-    else setExpenses((prev) => prev.filter((r) => r.id !== id));
-    toast.success("Deleted");
+  const openEdit = (e: Expense) => {
+    setEditing(e);
+    setForm({
+      type: e.type,
+      category: e.category,
+      date: e.date,
+      description: e.description,
+      amount: e.amount.toString(),
+    });
+    setShowForm(true);
   };
 
-  const saveHead = () => {
-    if (!headForm.name.trim()) return;
-    setHeads((prev) => [...prev, { id: Date.now().toString(), ...headForm }]);
-    toast.success("Head added");
-    setShowHeadModal(false);
-    setHeadForm({ name: "", type: "income" });
+  const handleDelete = (id: string) => {
+    const updated = entries.filter((e) => e.id !== id);
+    setEntries(updated);
+    ls.set(LS_KEYS.expenses, updated);
   };
 
-  const budgetForHead = (headId: string) =>
-    budget.find((b) => b.headId === headId)?.budgeted || 0;
-  const actualForHead = (headId: string, type: "income" | "expense") => {
-    const records = type === "income" ? income : expenses;
-    const head = heads.find((h) => h.id === headId);
-    if (!head) return 0;
-    return records
-      .filter((r) => r.head === head.name)
-      .reduce((s, r) => s + r.amount, 0);
-  };
+  // Running balance
+  let runningBalance = 0;
+  const withBalance = filtered.map((e) => {
+    runningBalance += e.type === "income" ? e.amount : -e.amount;
+    return { ...e, balance: runningBalance };
+  });
 
-  const renderLedger = (data: ExpRecord[], type: "income" | "expense") => {
-    const typeHeads = heads.filter((h) => h.type === type);
-    let running = 0;
-    return (
-      <div>
-        <div className="flex justify-end mb-3">
-          <button
-            type="button"
-            onClick={() => {
-              setEditRecord(null);
-              setLedgerForm({
-                head: typeHeads[0]?.name || "",
-                description: "",
-                amount: "",
-                mode: "Cash",
-                reference: "",
-                date: new Date().toISOString().split("T")[0],
-              });
-              setShowLedgerModal(type);
-            }}
-            data-ocid={`expenses.${type}.primary_button`}
-            className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded"
-          >
-            <Plus size={13} /> Add Entry
-          </button>
+  return (
+    <div className="space-y-4">
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        <Card className="bg-green-50 border-green-200">
+          <CardContent className="p-4 flex items-center gap-3">
+            <TrendingUp className="w-8 h-8 text-green-600" />
+            <div>
+              <p className="text-xs text-muted-foreground">Total Income</p>
+              <p className="font-bold text-green-700">
+                {formatCurrency(totalIncome)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-red-50 border-red-200">
+          <CardContent className="p-4 flex items-center gap-3">
+            <TrendingDown className="w-8 h-8 text-red-500" />
+            <div>
+              <p className="text-xs text-muted-foreground">Total Expense</p>
+              <p className="font-bold text-red-600">
+                {formatCurrency(totalExpense)}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card
+          className={`col-span-2 md:col-span-1 ${totalIncome - totalExpense >= 0 ? "bg-primary/10" : "bg-destructive/10"}`}
+        >
+          <CardContent className="p-4">
+            <p className="text-xs text-muted-foreground">Net Balance</p>
+            <p
+              className={`font-bold text-lg ${totalIncome - totalExpense >= 0 ? "text-primary" : "text-destructive"}`}
+            >
+              {formatCurrency(totalIncome - totalExpense)}
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Actions */}
+      <div className="flex flex-wrap gap-2 justify-between">
+        <div className="flex gap-2 flex-wrap">
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger className="w-32" data-ocid="ledger-filter-type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="income">Income</SelectItem>
+              <SelectItem value="expense">Expense</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="date"
+            value={filterFrom}
+            onChange={(e) => setFilterFrom(e.target.value)}
+            className="w-40"
+          />
+          <Input
+            type="date"
+            value={filterTo}
+            onChange={(e) => setFilterTo(e.target.value)}
+            className="w-40"
+          />
         </div>
-        <div className="rounded-lg overflow-hidden border border-gray-700">
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ background: "#1a1f2e" }}>
-                {[
-                  "#",
-                  "Date",
-                  "Head",
-                  "Description",
-                  "Amount (₹)",
-                  "Mode",
-                  "Reference",
-                  "Running Balance",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="text-left px-3 py-2 text-gray-400 font-medium whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => exportCsv(withBalance)}
+          >
+            <Download className="w-4 h-4 mr-1" /> CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()}>
+            <Printer className="w-4 h-4 mr-1" /> Print
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setEditing(null);
+              setShowForm(true);
+            }}
+            data-ocid="add-entry-btn"
+          >
+            <PlusCircle className="w-4 h-4 mr-1" /> Add Entry
+          </Button>
+        </div>
+      </div>
+
+      {/* Table */}
+      {withBalance.length === 0 ? (
+        <div className="text-center py-14 text-muted-foreground">
+          <TrendingUp className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p>
+            No entries yet. Add income or expense entries to start tracking.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 sticky top-0">
+              <tr>
+                <th className="text-left p-3 font-semibold">Date</th>
+                <th className="text-left p-3 font-semibold">Type</th>
+                <th className="text-left p-3 font-semibold">Head</th>
+                <th className="text-left p-3 font-semibold">Description</th>
+                <th className="text-right p-3 font-semibold">Amount (₹)</th>
+                <th className="text-right p-3 font-semibold">Balance (₹)</th>
+                <th className="p-3 font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {data.length === 0 ? (
-                <tr>
+              {withBalance.map((e) => (
+                <tr
+                  key={e.id}
+                  className="border-t border-border hover:bg-muted/20"
+                  data-ocid="ledger-row"
+                >
+                  <td className="p-3 whitespace-nowrap">{e.date}</td>
+                  <td className="p-3">
+                    <Badge
+                      variant={e.type === "income" ? "default" : "destructive"}
+                      className="text-xs"
+                    >
+                      {e.type === "income" ? "Income" : "Expense"}
+                    </Badge>
+                  </td>
+                  <td className="p-3">{e.category}</td>
+                  <td className="p-3">{e.description}</td>
                   <td
-                    colSpan={9}
-                    className="px-3 py-8 text-center text-gray-500"
-                    data-ocid={`expenses.${type}.empty_state`}
+                    className={`p-3 text-right font-mono font-medium ${e.type === "income" ? "text-green-700" : "text-red-600"}`}
                   >
-                    No entries yet.
+                    {e.type === "income" ? "+" : "-"}₹
+                    {e.amount.toLocaleString("en-IN")}
+                  </td>
+                  <td
+                    className={`p-3 text-right font-mono font-semibold ${e.balance >= 0 ? "text-green-700" : "text-red-600"}`}
+                  >
+                    ₹{e.balance.toLocaleString("en-IN")}
+                  </td>
+                  <td className="p-3">
+                    <div className="flex gap-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => openEdit(e)}
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => handleDelete(e.id)}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
                   </td>
                 </tr>
-              ) : (
-                data.map((r, i) => {
-                  running += type === "income" ? r.amount : -r.amount;
-                  return (
-                    <tr
-                      key={r.id}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0f1117",
-                      }}
-                      data-ocid={`expenses.${type}.item.${i + 1}`}
-                    >
-                      <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                      <td className="px-3 py-2 text-gray-300">{r.date}</td>
-                      <td className="px-3 py-2 text-white">{r.head}</td>
-                      <td className="px-3 py-2 text-gray-400">
-                        {r.description}
-                      </td>
-                      <td
-                        className={`px-3 py-2 font-semibold ${type === "income" ? "text-green-400" : "text-red-400"}`}
-                      >
-                        ₹{r.amount.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-2 text-gray-400">{r.mode}</td>
-                      <td className="px-3 py-2 text-gray-500">
-                        {r.reference || "-"}
-                      </td>
-                      <td
-                        className={`px-3 py-2 font-medium ${running >= 0 ? "text-green-400" : "text-red-400"}`}
-                      >
-                        ₹{running.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditRecord(r);
-                              setLedgerForm({
-                                head: r.head,
-                                description: r.description,
-                                amount: String(r.amount),
-                                mode: r.mode,
-                                reference: r.reference,
-                                date: r.date,
-                              });
-                              setShowLedgerModal(type);
-                            }}
-                            className="text-blue-400 hover:text-blue-300"
-                            data-ocid={`expenses.${type}.edit_button.${i + 1}`}
-                          >
-                            <Edit2 size={13} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => deleteRecord(type, r.id)}
-                            className="text-red-400 hover:text-red-300"
-                            data-ocid={`expenses.${type}.delete_button.${i + 1}`}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
+              ))}
             </tbody>
           </table>
         </div>
-      </div>
-    );
+      )}
+
+      {/* Add/Edit Dialog */}
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editing ? "Edit Entry" : "Add Entry"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Type</Label>
+                <Select
+                  value={form.type}
+                  onValueChange={(v) =>
+                    setForm((f) => ({ ...f, type: v as "income" | "expense" }))
+                  }
+                >
+                  <SelectTrigger data-ocid="entry-type-select">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="income">Income</SelectItem>
+                    <SelectItem value="expense">Expense</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Date</Label>
+                <Input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, date: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Head / Category</Label>
+              <Select
+                value={form.category}
+                onValueChange={(v) => setForm((f) => ({ ...f, category: v }))}
+              >
+                <SelectTrigger data-ocid="entry-category-select">
+                  <SelectValue placeholder="Select head..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {heads.map((h) => (
+                    <SelectItem key={h.id} value={h.name}>
+                      {h.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Input
+                value={form.description}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, description: e.target.value }))
+                }
+                placeholder="Description..."
+                data-ocid="entry-desc-input"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Amount (₹)</Label>
+              <Input
+                type="number"
+                min={1}
+                value={form.amount}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, amount: e.target.value }))
+                }
+                placeholder="0"
+                data-ocid="entry-amount-input"
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={handleSubmit}
+                className="flex-1"
+                data-ocid="entry-save-btn"
+              >
+                Save
+              </Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Expense Heads Tab ───────────────────────────────────
+function ExpenseHeadsTab() {
+  const [heads, setHeads] = useState<ExpenseHead[]>(() =>
+    ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []),
+  );
+  const [newName, setNewName] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+
+  const save = (updated: ExpenseHead[]) => {
+    setHeads(updated);
+    ls.set(LS_KEYS.expenseHeads, updated);
+  };
+
+  const handleAdd = () => {
+    if (!newName.trim()) return;
+    save([...heads, { id: generateId(), name: newName.trim() }]);
+    setNewName("");
+  };
+
+  const handleEdit = (id: string) => {
+    if (!editName.trim()) return;
+    save(heads.map((h) => (h.id === id ? { ...h, name: editName.trim() } : h)));
+    setEditingId(null);
   };
 
   return (
-    <div>
-      <h2 className="text-white text-lg font-semibold mb-4">
-        Income &amp; Expenses
-      </h2>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-3 gap-3 mb-4">
-        <div
-          className="rounded-lg p-3"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <p className="text-gray-400 text-xs">Total Income</p>
-          <p className="text-green-400 text-2xl font-bold">
-            ₹{totalIncome.toLocaleString("en-IN")}
-          </p>
-        </div>
-        <div
-          className="rounded-lg p-3"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <p className="text-gray-400 text-xs">Total Expenses</p>
-          <p className="text-red-400 text-2xl font-bold">
-            ₹{totalExpense.toLocaleString("en-IN")}
-          </p>
-        </div>
-        <div
-          className="rounded-lg p-3"
-          style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-        >
-          <p className="text-gray-400 text-xs">Net Balance</p>
-          <p
-            className={`text-2xl font-bold ${netBalance >= 0 ? "text-green-400" : "text-red-400"}`}
-          >
-            ₹{netBalance.toLocaleString("en-IN")}
-          </p>
-        </div>
+    <div className="space-y-4 max-w-md">
+      <div className="flex gap-2">
+        <Input
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          placeholder="New expense head name..."
+          data-ocid="head-name-input"
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+        />
+        <Button onClick={handleAdd} data-ocid="add-head-btn">
+          <PlusCircle className="w-4 h-4 mr-1" /> Add
+        </Button>
       </div>
 
-      <div className="flex flex-wrap gap-1 mb-4">
-        {(["income", "expense", "heads", "budget", "reports"] as const).map(
-          (t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setTab(t)}
-              data-ocid={`expenses.${t}.tab`}
-              className={`px-4 py-1.5 rounded text-xs font-medium capitalize transition ${tab === t ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
-            >
-              {t === "income"
-                ? "Income Ledger"
-                : t === "expense"
-                  ? "Expense Ledger"
-                  : t === "heads"
-                    ? "Expense Heads"
-                    : t === "budget"
-                      ? "Budget"
-                      : "Reports"}
-            </button>
-          ),
-        )}
-      </div>
-
-      {tab === "income" && renderLedger(income, "income")}
-      {tab === "expense" && renderLedger(expenses, "expense")}
-
-      {/* ─ EXPENSE HEADS ─ */}
-      {tab === "heads" && (
-        <div>
-          <div className="flex justify-end mb-3">
-            <button
-              type="button"
-              onClick={() => setShowHeadModal(true)}
-              data-ocid="expenses.heads.primary_button"
-              className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded"
-            >
-              <Plus size={13} /> Add Head
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            {(["income", "expense"] as const).map((type) => (
-              <div key={type}>
-                <h3
-                  className={`font-semibold text-sm mb-2 ${type === "income" ? "text-green-400" : "text-red-400"}`}
+      {heads.length === 0 ? (
+        <p className="text-muted-foreground text-sm py-4 text-center">
+          No expense heads defined.
+        </p>
+      ) : (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-semibold">#</th>
+                <th className="text-left p-3 font-semibold">Head Name</th>
+                <th className="p-3 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {heads.map((h, i) => (
+                <tr
+                  key={h.id}
+                  className="border-t border-border"
+                  data-ocid="head-row"
                 >
-                  {type === "income" ? "Income Heads" : "Expense Heads"}
-                </h3>
-                <div className="space-y-2">
-                  {heads
-                    .filter((h) => h.type === type)
-                    .map((h, i) => (
-                      <div
-                        key={h.id}
-                        className="rounded-lg p-3 flex items-center justify-between"
-                        style={{
-                          background: "#1a1f2e",
-                          border: "1px solid #374151",
-                        }}
-                        data-ocid={`expenses.heads.item.${i + 1}`}
-                      >
-                        <span className="text-gray-300 text-xs">{h.name}</span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeads((prev) =>
-                              prev.filter((x) => x.id !== h.id),
-                            );
-                            toast.success("Removed");
-                          }}
-                          className="text-red-400 hover:text-red-300"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ─ BUDGET ─ */}
-      {tab === "budget" && (
-        <div>
-          <div className="rounded-lg overflow-hidden border border-gray-700 mb-4">
-            <table className="w-full text-xs">
-              <thead>
-                <tr style={{ background: "#1a1f2e" }}>
-                  {[
-                    "Head",
-                    "Type",
-                    "Budgeted (₹)",
-                    "Actual (₹)",
-                    "Variance (₹)",
-                    "Status",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="text-left px-3 py-2 text-gray-400 font-medium"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {heads
-                  .filter((h) => budgetForHead(h.id) > 0)
-                  .map((h, i) => {
-                    const budgeted = budgetForHead(h.id);
-                    const actual = actualForHead(h.id, h.type);
-                    const variance =
-                      h.type === "income"
-                        ? actual - budgeted
-                        : budgeted - actual;
-                    return (
-                      <tr
-                        key={h.id}
-                        style={{
-                          background: i % 2 === 0 ? "#111827" : "#0f1117",
-                        }}
-                      >
-                        <td className="px-3 py-2 text-white">{h.name}</td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded ${h.type === "income" ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}
-                          >
-                            {h.type}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-gray-300">
-                          ₹{budgeted.toLocaleString("en-IN")}
-                        </td>
-                        <td className="px-3 py-2 text-white font-medium">
-                          ₹{actual.toLocaleString("en-IN")}
-                        </td>
-                        <td
-                          className={`px-3 py-2 font-medium ${variance >= 0 ? "text-green-400" : "text-red-400"}`}
-                        >
-                          ₹{Math.abs(variance).toLocaleString("en-IN")}{" "}
-                          {variance >= 0 ? "▲" : "▼"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded ${variance >= 0 ? "bg-green-900/40 text-green-400" : "bg-red-900/40 text-red-400"}`}
-                          >
-                            {variance >= 0 ? "On Track" : "Over Budget"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
-          </div>
-          <h3 className="text-gray-200 text-sm font-medium mb-3">
-            Budget vs Actual
-          </h3>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart
-              data={heads
-                .filter((h) => budgetForHead(h.id) > 0)
-                .map((h) => ({
-                  name: h.name,
-                  Budgeted: budgetForHead(h.id),
-                  Actual: actualForHead(h.id, h.type),
-                }))}
-              margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="name" tick={{ fill: "#9ca3af", fontSize: 9 }} />
-              <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
-              <Tooltip
-                contentStyle={{
-                  background: "#1f2937",
-                  border: "none",
-                  color: "#fff",
-                }}
-              />
-              <Legend wrapperStyle={{ color: "#9ca3af", fontSize: 10 }} />
-              <Bar dataKey="Budgeted" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-              <Bar dataKey="Actual" fill="#22c55e" radius={[2, 2, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* ─ REPORTS ─ */}
-      {tab === "reports" && (
-        <div>
-          <div className="flex justify-end mb-3">
-            <button
-              type="button"
-              onClick={() => {
-                const el = document.getElementById("exp-report-print");
-                if (!el) return;
-                const win = window.open("", "_blank", "width=900,height=600");
-                if (!win) return;
-                win.document.write(
-                  `<html><head><title>Finance Report</title><style>body{font-family:Arial;font-size:11px}table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:4px 8px}th{background:#e8f0fe}</style></head><body>${el.innerHTML}</body></html>`,
-                );
-                win.document.close();
-                setTimeout(() => {
-                  win.print();
-                  win.close();
-                }, 400);
-              }}
-              data-ocid="expenses.report.print.button"
-              className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded"
-            >
-              <Printer size={13} /> Print
-            </button>
-          </div>
-          <div id="exp-report-print">
-            <div className="rounded-lg overflow-hidden border border-gray-700 mb-4">
-              <h3
-                className="text-gray-200 text-sm font-medium px-3 py-2"
-                style={{ background: "#1a1f2e" }}
-              >
-                Monthly Summary
-              </h3>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr style={{ background: "#1a1f2e" }}>
-                    {["Month", "Income (₹)", "Expense (₹)", "Net (₹)"].map(
-                      (h) => (
-                        <th
-                          key={h}
-                          className="text-left px-3 py-2 text-gray-400 font-medium"
-                        >
-                          {h}
-                        </th>
-                      ),
+                  <td className="p-3 text-muted-foreground">{i + 1}</td>
+                  <td className="p-3">
+                    {editingId === h.id ? (
+                      <Input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="h-7"
+                        autoFocus
+                        onKeyDown={(e) => e.key === "Enter" && handleEdit(h.id)}
+                      />
+                    ) : (
+                      h.name
                     )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {MONTHLY_DEMO.map((m, i) => (
-                    <tr
-                      key={m.month}
-                      style={{
-                        background: i % 2 === 0 ? "#111827" : "#0f1117",
-                      }}
+                  </td>
+                  <td className="p-3">
+                    <div className="flex gap-1 justify-center">
+                      {editingId === h.id ? (
+                        <>
+                          <Button
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => handleEdit(h.id)}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setEditingId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => {
+                              setEditingId(h.id);
+                              setEditName(h.name);
+                            }}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-destructive"
+                            onClick={() =>
+                              save(heads.filter((x) => x.id !== h.id))
+                            }
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Budget vs Actual Tab ────────────────────────────────
+interface BudgetEntry {
+  headId: string;
+  month: string;
+  budget: number;
+}
+
+function BudgetTab() {
+  const { currentSession } = useApp();
+  const heads = ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []);
+  const expenses = ls
+    .get<Expense[]>(LS_KEYS.expenses, [])
+    .filter((e) => e.sessionId === currentSession?.id && e.type === "expense");
+
+  const [budgets, setBudgets] = useState<BudgetEntry[]>(() =>
+    ls.get<BudgetEntry[]>("expense_budgets", []),
+  );
+  const [selMonth, setSelMonth] = useState(CURRENT_MONTH);
+
+  const getBudget = (headId: string) =>
+    budgets.find((b) => b.headId === headId && b.month === selMonth)?.budget ??
+    0;
+
+  const getActual = (headName: string) =>
+    expenses
+      .filter(
+        (e) => e.category === headName && e.date.includes(selMonth.slice(0, 3)),
+      )
+      .reduce((s, e) => s + e.amount, 0);
+
+  const saveBudget = (headId: string, val: number) => {
+    const updated = [
+      ...budgets.filter((b) => !(b.headId === headId && b.month === selMonth)),
+      { headId, month: selMonth, budget: val },
+    ];
+    setBudgets(updated);
+    ls.set("expense_budgets", updated);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Label>Month:</Label>
+        <Select value={selMonth} onValueChange={setSelMonth}>
+          <SelectTrigger className="w-40" data-ocid="budget-month-select">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MONTHS.map((m) => (
+              <SelectItem key={m} value={m}>
+                {m}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {heads.length === 0 ? (
+        <p className="text-muted-foreground text-sm">
+          Add expense heads first.
+        </p>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left p-3 font-semibold">Expense Head</th>
+                <th className="text-right p-3 font-semibold">Budget (₹)</th>
+                <th className="text-right p-3 font-semibold">Actual (₹)</th>
+                <th className="text-right p-3 font-semibold">Variance</th>
+                <th className="text-right p-3 font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {heads.map((h) => {
+                const budget = getBudget(h.id);
+                const actual = getActual(h.name);
+                const variance = budget - actual;
+                const over = actual > budget && budget > 0;
+                return (
+                  <tr
+                    key={h.id}
+                    className="border-t border-border hover:bg-muted/20"
+                  >
+                    <td className="p-3 font-medium">{h.name}</td>
+                    <td className="p-3 text-right">
+                      <Input
+                        type="number"
+                        value={budget || ""}
+                        onChange={(e) =>
+                          saveBudget(
+                            h.id,
+                            Number.parseFloat(e.target.value) || 0,
+                          )
+                        }
+                        className="w-24 h-7 text-right ml-auto"
+                        placeholder="0"
+                      />
+                    </td>
+                    <td className="p-3 text-right font-mono">
+                      ₹{actual.toLocaleString("en-IN")}
+                    </td>
+                    <td
+                      className={`p-3 text-right font-mono font-medium ${over ? "text-red-600" : "text-green-700"}`}
                     >
-                      <td className="px-3 py-2 text-white">{m.month}</td>
-                      <td className="px-3 py-2 text-green-400">
-                        ₹{m.income.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-2 text-red-400">
-                        ₹{m.expense.toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-3 py-2 font-medium text-blue-400">
-                        ₹{(m.income - m.expense).toLocaleString("en-IN")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div
-            className="rounded-lg p-4"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <h3 className="text-gray-200 text-sm font-medium mb-3">
-              Income vs Expense (Last 6 Months)
-            </h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart
-                data={MONTHLY_DEMO}
-                margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fill: "#9ca3af", fontSize: 10 }}
-                />
-                <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{
-                    background: "#1f2937",
-                    border: "none",
-                    color: "#fff",
-                  }}
-                />
-                <Legend wrapperStyle={{ color: "#9ca3af", fontSize: 10 }} />
-                <Bar
-                  dataKey="income"
-                  fill="#22c55e"
-                  name="Income"
-                  radius={[2, 2, 0, 0]}
-                />
-                <Bar
-                  dataKey="expense"
-                  fill="#ef4444"
-                  name="Expense"
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+                      {variance >= 0 ? "+" : ""}₹
+                      {variance.toLocaleString("en-IN")}
+                    </td>
+                    <td className="p-3 text-right">
+                      {budget === 0 ? (
+                        <Badge variant="secondary" className="text-xs">
+                          No Budget
+                        </Badge>
+                      ) : over ? (
+                        <Badge variant="destructive" className="text-xs">
+                          Over Budget
+                        </Badge>
+                      ) : (
+                        <Badge className="text-xs bg-green-100 text-green-800">
+                          Within Budget
+                        </Badge>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+    </div>
+  );
+}
 
-      {/* ─ LEDGER MODAL ─ */}
-      {showLedgerModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="expenses.ledger.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-md"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold capitalize">
-                {editRecord ? "Edit" : "Add"} {showLedgerModal} Entry
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLedgerModal(null);
-                  setEditRecord(null);
-                }}
-                className="text-gray-400 hover:text-white"
-                data-ocid="expenses.ledger.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
-                <label
-                  htmlFor="led-head"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Head
-                </label>
-                <select
-                  id="led-head"
-                  value={ledgerForm.head}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({ ...p, head: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                  data-ocid="expenses.ledger.select"
-                >
-                  {heads
-                    .filter((h) => h.type === showLedgerModal)
-                    .map((h) => (
-                      <option key={h.id}>{h.name}</option>
-                    ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="led-amount"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Amount (₹)
-                </label>
-                <input
-                  id="led-amount"
-                  type="number"
-                  value={ledgerForm.amount}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({ ...p, amount: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                  data-ocid="expenses.ledger.input"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="led-date"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Date
-                </label>
-                <input
-                  id="led-date"
-                  type="date"
-                  value={ledgerForm.date}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({ ...p, date: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="led-mode"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Payment Mode
-                </label>
-                <select
-                  id="led-mode"
-                  value={ledgerForm.mode}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({ ...p, mode: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                >
-                  {PAYMENT_MODES.map((m) => (
-                    <option key={m}>{m}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="led-ref"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Reference No.
-                </label>
-                <input
-                  id="led-ref"
-                  value={ledgerForm.reference}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({ ...p, reference: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                />
-              </div>
-              <div className="col-span-2">
-                <label
-                  htmlFor="led-desc"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Description
-                </label>
-                <input
-                  id="led-desc"
-                  value={ledgerForm.description}
-                  onChange={(e) =>
-                    setLedgerForm((p) => ({
-                      ...p,
-                      description: e.target.value,
-                    }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={() => saveLedgerEntry(showLedgerModal)}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-2 rounded"
-                data-ocid="expenses.ledger.submit_button"
-              >
-                {editRecord ? "Update" : "Save"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowLedgerModal(null);
-                  setEditRecord(null);
-                }}
-                className="flex-1 bg-gray-700 text-white text-xs py-2 rounded"
-                data-ocid="expenses.ledger.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+// ─── Charts Tab ──────────────────────────────────────────
+const CHART_COLORS = [
+  "#6366f1",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+  "#8b5cf6",
+  "#06b6d4",
+  "#ec4899",
+  "#84cc16",
+];
 
-      {/* ─ HEAD MODAL ─ */}
-      {showHeadModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="expenses.heads.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-sm"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">
-                Add Expense / Income Head
-              </h3>
-              <button
-                type="button"
-                onClick={() => setShowHeadModal(false)}
-                className="text-gray-400 hover:text-white"
-                data-ocid="expenses.heads.close_button"
-              >
-                <X size={18} />
-              </button>
+function ChartsTab() {
+  const { currentSession } = useApp();
+  const expenses = ls
+    .get<Expense[]>(LS_KEYS.expenses, [])
+    .filter((e) => e.sessionId === currentSession?.id);
+
+  const monthlyData = MONTHS.map((m) => {
+    const income = expenses
+      .filter((e) => e.type === "income" && e.date.includes(m.slice(0, 3)))
+      .reduce((s, e) => s + e.amount, 0);
+    const expense = expenses
+      .filter((e) => e.type === "expense" && e.date.includes(m.slice(0, 3)))
+      .reduce((s, e) => s + e.amount, 0);
+    return { month: m.slice(0, 3), income, expense };
+  });
+
+  const maxMonthly = Math.max(
+    ...monthlyData.flatMap((d) => [d.income, d.expense]),
+    1,
+  );
+
+  const heads = ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []);
+  const expenseOnly = expenses.filter((e) => e.type === "expense");
+  const byHead = heads
+    .map((h) => ({
+      name: h.name,
+      total: expenseOnly
+        .filter((e) => e.category === h.name)
+        .reduce((s, e) => s + e.amount, 0),
+    }))
+    .filter((h) => h.total > 0);
+  const totalByHead = byHead.reduce((s, h) => s + h.total, 0);
+
+  return (
+    <div className="space-y-8">
+      {/* Monthly Bar Chart */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <BarChart2 className="w-4 h-4" /> Monthly Income vs Expense
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <div className="flex items-end gap-1 min-w-[600px] h-48">
+              {monthlyData.map(({ month, income, expense }) => (
+                <div
+                  key={month}
+                  className="flex-1 flex flex-col items-center gap-0.5"
+                >
+                  <div
+                    className="w-full flex gap-0.5 items-end justify-center"
+                    style={{ height: "160px" }}
+                  >
+                    <div
+                      className="flex-1 bg-green-400 rounded-t transition-all"
+                      style={{
+                        height: `${(income / maxMonthly) * 100}%`,
+                        minHeight: income > 0 ? 2 : 0,
+                      }}
+                      title={`Income: ₹${income.toLocaleString("en-IN")}`}
+                    />
+                    <div
+                      className="flex-1 bg-red-400 rounded-t transition-all"
+                      style={{
+                        height: `${(expense / maxMonthly) * 100}%`,
+                        minHeight: expense > 0 ? 2 : 0,
+                      }}
+                      title={`Expense: ₹${expense.toLocaleString("en-IN")}`}
+                    />
+                  </div>
+                  <span className="text-[10px] text-muted-foreground">
+                    {month}
+                  </span>
+                </div>
+              ))}
             </div>
-            <div className="space-y-3">
-              <div>
-                <label
-                  htmlFor="head-name"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Head Name
-                </label>
-                <input
-                  id="head-name"
-                  value={headForm.name}
-                  onChange={(e) =>
-                    setHeadForm((p) => ({ ...p, name: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="head-type"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Type
-                </label>
-                <select
-                  id="head-type"
-                  value={headForm.type}
-                  onChange={(e) =>
-                    setHeadForm((p) => ({
-                      ...p,
-                      type: e.target.value as "income" | "expense",
-                    }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                >
-                  <option value="income">Income</option>
-                  <option value="expense">Expense</option>
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={saveHead}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-2 rounded"
-                data-ocid="expenses.heads.submit_button"
-              >
-                Save
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowHeadModal(false)}
-                className="flex-1 bg-gray-700 text-white text-xs py-2 rounded"
-                data-ocid="expenses.heads.cancel_button"
-              >
-                Cancel
-              </button>
+            <div className="flex gap-4 mt-2 text-xs">
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-green-400 inline-block" />{" "}
+                Income
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="w-3 h-3 rounded-sm bg-red-400 inline-block" />{" "}
+                Expense
+              </span>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Expense by Head */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <PieChart className="w-4 h-4" /> Expense by Head
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {byHead.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              No expense data yet.
+            </p>
+          ) : (
+            <div className="flex flex-wrap gap-3">
+              {byHead.map((h, i) => {
+                const pct =
+                  totalByHead > 0
+                    ? Math.round((h.total / totalByHead) * 100)
+                    : 0;
+                return (
+                  <div
+                    key={h.name}
+                    className="flex items-center gap-2 min-w-[180px]"
+                  >
+                    <div
+                      className="w-3 h-3 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
+                      }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="truncate max-w-[100px]">{h.name}</span>
+                        <span className="font-mono font-medium">{pct}%</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor:
+                              CHART_COLORS[i % CHART_COLORS.length],
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {formatCurrency(h.total)}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Main Component ──────────────────────────────────────
+export default function Expenses() {
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      <div className="flex items-center gap-3">
+        <TrendingUp className="w-6 h-6 text-primary" />
+        <div>
+          <h1 className="text-xl font-bold font-display">Expenses & Income</h1>
+          <p className="text-sm text-muted-foreground">
+            Track school finances, budgets, and reporting
+          </p>
         </div>
-      )}
+      </div>
+
+      <Tabs defaultValue="ledger" className="w-full">
+        <TabsList data-ocid="expenses-tabs">
+          <TabsTrigger value="ledger">Ledger</TabsTrigger>
+          <TabsTrigger value="heads">Expense Heads</TabsTrigger>
+          <TabsTrigger value="budget">Budget vs Actual</TabsTrigger>
+          <TabsTrigger value="charts">Charts</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="ledger">
+          <Card>
+            <CardContent className="pt-5">
+              <LedgerTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="heads">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Manage Expense Heads</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ExpenseHeadsTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="budget">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">
+                Budget vs Actual Comparison
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <BudgetTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="charts">
+          <ChartsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

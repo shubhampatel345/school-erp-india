@@ -1,1731 +1,837 @@
+import { useCallback, useState } from "react";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import {
-  Bus,
-  ChevronDown,
-  Edit,
-  MapPin,
-  Plus,
-  Route,
-  Search,
-  Trash2,
-  Truck,
-  User,
-  X,
-} from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { useApp } from "../context/AppContext";
+import type { Staff, Student } from "../types";
+import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
 
-type TransportTab =
-  | "routes"
-  | "vehicles"
-  | "pickuppoints"
-  | "routepickups"
-  | "assignvehicle"
-  | "feesmaster"
-  | "studentfees"
-  | "report";
-
-interface TRoute {
-  id: number;
-  name: string;
-  from: string;
-  to: string;
-  distance: number;
-  status: "Active" | "Inactive";
-}
-
-interface TVehicle {
-  id: number;
-  vehicleNo: string;
-  model: string;
+// ── Types ──────────────────────────────────────────────────
+interface RouteRecord {
+  id: string;
+  busNo: string;
+  routeName: string;
+  driverStaffId: string;
   driverName: string;
-  driverLicense: string;
-  driverContact: string;
-  capacity: number;
-  routeAssigned: string;
+  driverMobile: string;
+  monthlyFare: number;
+  pickupPoints: PickupPoint[];
 }
 
-interface TPickupPoint {
-  id: number;
-  name: string;
-  route: string;
-  pickupTime: string;
-  dropTime: string;
-  distanceFromSchool: number;
+interface PickupPoint {
+  id: string;
+  stopName: string;
+  order: number;
+  distance: string;
+  fare: number; // monthly fare for this pickup point (₹)
 }
 
-interface TRoutePickup {
-  id: number;
-  routeId: number;
-  pickupPointId: number;
-  sequence: number;
-}
-
-interface TVehicleAssign {
-  id: number;
-  routeId: number;
-  vehicleId: number;
-}
-
-interface TFeesMaster {
-  id: number;
-  route: string;
-  pickupPoint: string;
-  monthlyFee: number;
-  annualFee: number;
-}
-
-interface TStudentTransport {
-  id: number;
-  admNo: string;
+interface StudentTransport {
+  studentId: string;
   studentName: string;
-  className: string;
-  route: string;
-  pickupPoint: string;
-  monthlyFee: number;
+  admNo: string;
+  class: string;
+  section: string;
+  routeId: string;
+  busNo: string;
+  routeName: string;
+  pickupPointId: string;
+  pickupPointName: string;
 }
 
-function useLS<T>(key: string, def: T): [T, (v: T) => void] {
-  const [val, setVal] = useState<T>(() => {
-    try {
-      const s = localStorage.getItem(key);
-      return s ? (JSON.parse(s) as T) : def;
-    } catch {
-      return def;
-    }
-  });
-  const set = (v: T) => {
-    setVal(v);
-    localStorage.setItem(key, JSON.stringify(v));
-  };
-  return [val, set];
-}
+type TransportTab = "routes" | "pickup" | "students" | "dashboard";
 
-const inputCls =
-  "bg-gray-900 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none focus:border-blue-500 w-full";
-const labelCls = "text-gray-400 text-[11px] block mb-0.5";
-const thCls = "text-left px-3 py-2 text-gray-400 font-medium text-xs";
+const TABS: { id: TransportTab; label: string; icon: string }[] = [
+  { id: "routes", label: "Routes & Buses", icon: "🚌" },
+  { id: "pickup", label: "Pickup Points", icon: "📍" },
+  { id: "students", label: "Student Assignments", icon: "👥" },
+  { id: "dashboard", label: "Dashboard", icon: "📊" },
+];
 
-function Badge({
-  children,
-  color,
-}: { children: React.ReactNode; color: "green" | "red" | "blue" }) {
-  const cls = {
-    green: "bg-green-900/40 text-green-400",
-    red: "bg-red-900/40 text-red-400",
-    blue: "bg-blue-900/40 text-blue-400",
-  }[color];
-  return (
-    <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${cls}`}>
-      {children}
-    </span>
+const EMPTY_ROUTE: Omit<RouteRecord, "id" | "pickupPoints"> = {
+  busNo: "",
+  routeName: "",
+  driverStaffId: "",
+  driverName: "",
+  driverMobile: "",
+  monthlyFare: 0,
+};
+
+// ── Component ──────────────────────────────────────────────
+export default function Transport() {
+  const { addNotification, isReadOnly } = useApp();
+  const [activeTab, setActiveTab] = useState<TransportTab>("routes");
+
+  const [routes, setRoutes] = useState<RouteRecord[]>(() =>
+    ls.get<RouteRecord[]>("transport_routes_v2", []),
   );
-}
+  const [studentTransports, setStudentTransports] = useState<
+    StudentTransport[]
+  >(() => ls.get<StudentTransport[]>("student_transport_v2", []));
 
-// ─────────── ROUTES ───────────
-function RoutesTab() {
-  const [routes, setRoutes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [form, setForm] = useState({
-    name: "",
-    from: "",
-    to: "",
+  // ── Modals / forms ────────────────────────────────────────
+  const [showRouteModal, setShowRouteModal] = useState(false);
+  const [routeForm, setRouteForm] =
+    useState<Omit<RouteRecord, "id" | "pickupPoints">>(EMPTY_ROUTE);
+  const [editRouteId, setEditRouteId] = useState<string | null>(null);
+
+  const [showPickupModal, setShowPickupModal] = useState(false);
+  const [pickupRouteId, setPickupRouteId] = useState("");
+  const [pickupForm, setPickupForm] = useState({
+    stopName: "",
+    order: 1,
     distance: "",
-    status: "Active" as "Active" | "Inactive",
+    fare: 0,
   });
-  const [editing, setEditing] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
+  const [editPickupId, setEditPickupId] = useState<string | null>(null);
 
-  const save = () => {
-    if (!form.name.trim() || !form.from.trim() || !form.to.trim()) {
-      toast.error("Fill required fields");
-      return;
-    }
-    if (editing !== null) {
-      setRoutes(
+  const [studentSearch, setStudentSearch] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+  const [filterSection, setFilterSection] = useState("");
+  const [assignForm, setAssignForm] = useState({
+    studentId: "",
+    routeId: "",
+    pickupPointId: "",
+  });
+
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  // ── Data ──────────────────────────────────────────────────
+  const allStaff = ls.get<Staff[]>("staff", []);
+  const drivers = allStaff.filter(
+    (s) => s.designation?.toLowerCase() === "driver",
+  );
+
+  const allStudents = ls.get<Student[]>("students", []);
+  const activeStudents = allStudents.filter((s) => s.status !== "discontinued");
+  const filteredStudents = activeStudents.filter((s) => {
+    const q = studentSearch.toLowerCase();
+    const matchSearch =
+      !q ||
+      s.fullName.toLowerCase().includes(q) ||
+      s.admNo.toLowerCase().includes(q);
+    const matchClass = !filterClass || s.class === filterClass;
+    const matchSection = !filterSection || s.section === filterSection;
+    return matchSearch && matchClass && matchSection;
+  });
+
+  // ── Persist helpers ───────────────────────────────────────
+  const saveRoutes = useCallback((data: RouteRecord[]) => {
+    setRoutes(data);
+    ls.set("transport_routes_v2", data);
+  }, []);
+
+  const saveStudentTransports = useCallback(
+    (data: StudentTransport[]) => {
+      setStudentTransports(data);
+      ls.set("student_transport_v2", data);
+      // Also sync to student records so StudentDetail auto-populates
+      const students = ls.get<Student[]>("students", []);
+      const updated = students.map((st) => {
+        const found = data.find((d) => d.studentId === st.id);
+        if (found) {
+          return {
+            ...st,
+            transportBusNo: found.busNo,
+            transportRoute: found.routeName,
+            transportPickup: found.pickupPointName,
+            transportId: found.routeId,
+          };
+        }
+        // Remove if unassigned
+        const wasAssigned = studentTransports.some(
+          (d) => d.studentId === st.id,
+        );
+        if (wasAssigned && !found) {
+          return {
+            ...st,
+            transportBusNo: undefined,
+            transportRoute: undefined,
+            transportPickup: undefined,
+            transportId: undefined,
+          };
+        }
+        return st;
+      });
+      ls.set("students", updated);
+    },
+    [studentTransports],
+  );
+
+  // ── Route CRUD ────────────────────────────────────────────
+  const handleSaveRoute = useCallback(() => {
+    if (!routeForm.busNo.trim() || !routeForm.routeName.trim()) return;
+    const driverStaff = drivers.find((d) => d.id === routeForm.driverStaffId);
+    const entry = {
+      ...routeForm,
+      driverName: driverStaff?.name || routeForm.driverName,
+      driverMobile: driverStaff?.mobile || routeForm.driverMobile,
+    };
+    if (editRouteId) {
+      saveRoutes(
         routes.map((r) =>
-          r.id === editing
-            ? { ...r, ...form, distance: Number(form.distance) }
+          r.id === editRouteId
+            ? { ...entry, id: editRouteId, pickupPoints: r.pickupPoints }
             : r,
         ),
       );
-      setEditing(null);
     } else {
-      setRoutes([
-        ...routes,
-        { id: Date.now(), ...form, distance: Number(form.distance) },
-      ]);
+      saveRoutes([...routes, { ...entry, id: generateId(), pickupPoints: [] }]);
+      addNotification(`Route "${routeForm.routeName}" added`, "success", "🚌");
     }
-    setForm({ name: "", from: "", to: "", distance: "", status: "Active" });
-    toast.success(editing !== null ? "Route updated" : "Route added");
-  };
+    setRouteForm(EMPTY_ROUTE);
+    setEditRouteId(null);
+    setShowRouteModal(false);
+  }, [routeForm, editRouteId, routes, saveRoutes, drivers, addNotification]);
 
-  const edit = (r: TRoute) => {
-    setForm({
-      name: r.name,
-      from: r.from,
-      to: r.to,
-      distance: String(r.distance),
-      status: r.status,
-    });
-    setEditing(r.id);
-  };
-
-  const del = (id: number) => {
-    setRoutes(routes.filter((r) => r.id !== id));
-    toast.success("Route deleted");
-  };
-
-  const filtered = routes.filter(
-    (r) =>
-      r.name.toLowerCase().includes(search.toLowerCase()) ||
-      r.from.toLowerCase().includes(search.toLowerCase()) ||
-      r.to.toLowerCase().includes(search.toLowerCase()),
+  const handleDeleteRoute = useCallback(
+    (id: string) => {
+      const assignedCount = studentTransports.filter(
+        (s) => s.routeId === id,
+      ).length;
+      if (assignedCount > 0) {
+        setConfirmDelete(id);
+      } else {
+        saveRoutes(routes.filter((r) => r.id !== id));
+      }
+    },
+    [routes, saveRoutes, studentTransports],
   );
 
-  return (
-    <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3 flex items-center gap-2">
-          <Route size={14} className="text-blue-400" />
-          {editing !== null ? "Edit Route" : "Add New Route"}
-        </h3>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <span className={labelCls}>Route Name *</span>
-            <input
-              value={form.name}
-              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-              className={inputCls}
-              placeholder="e.g. Route A - North"
-              data-ocid="transport.routes.input"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>From *</span>
-            <input
-              value={form.from}
-              onChange={(e) => setForm((p) => ({ ...p, from: e.target.value }))}
-              className={inputCls}
-              placeholder="Starting point"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>To *</span>
-            <input
-              value={form.to}
-              onChange={(e) => setForm((p) => ({ ...p, to: e.target.value }))}
-              className={inputCls}
-              placeholder="Ending point"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Distance (km)</span>
-            <input
-              type="number"
-              min={0}
-              value={form.distance}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, distance: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="0"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Status</span>
-            <select
-              value={form.status}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  status: e.target.value as "Active" | "Inactive",
-                }))
-              }
-              className={inputCls}
-              data-ocid="transport.routes.select"
-            >
-              <option>Active</option>
-              <option>Inactive</option>
-            </select>
-          </div>
-        </div>
-        <div className="flex gap-2 justify-end">
-          {editing !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null);
-                setForm({
-                  name: "",
-                  from: "",
-                  to: "",
-                  distance: "",
-                  status: "Active",
-                });
-              }}
-              className="border border-gray-600 text-gray-400 text-xs px-4 py-1.5 rounded hover:text-white transition"
-              data-ocid="transport.routes.cancel_button"
-            >
-              <X size={12} className="inline mr-1" />
-              Cancel
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={save}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium flex items-center gap-1.5"
-            data-ocid="transport.routes.primary_button"
-          >
-            <Plus size={13} />
-            {editing !== null ? "Update" : "Add Route"}
-          </button>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-2 mb-2">
-        <div className="flex items-center bg-gray-800 border border-gray-700 rounded px-2 py-1.5 flex-1 max-w-xs">
-          <Search size={13} className="text-gray-400 mr-1.5" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search routes..."
-            className="bg-transparent text-gray-300 text-xs outline-none w-full"
-            data-ocid="transport.routes.search_input"
-          />
-        </div>
-        <span className="text-gray-500 text-xs">{filtered.length} routes</span>
-      </div>
-
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {[
-                "#",
-                "Route Name",
-                "From",
-                "To",
-                "Distance",
-                "Status",
-                "Actions",
-              ].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.routes.empty_state"
-                >
-                  No routes added yet
-                </td>
-              </tr>
-            ) : (
-              filtered.map((r, i) => (
-                <tr
-                  key={r.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.routes.item.${i + 1}`}
-                >
-                  <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                  <td className="px-3 py-2 text-white font-medium">{r.name}</td>
-                  <td className="px-3 py-2 text-gray-300">{r.from}</td>
-                  <td className="px-3 py-2 text-gray-300">{r.to}</td>
-                  <td className="px-3 py-2 text-gray-400">{r.distance} km</td>
-                  <td className="px-3 py-2">
-                    <Badge color={r.status === "Active" ? "green" : "red"}>
-                      {r.status}
-                    </Badge>
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => edit(r)}
-                        className="p-1 rounded bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.routes.edit_button.${i + 1}`}
-                      >
-                        <Edit size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => del(r.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.routes.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── VEHICLES ───────────
-function VehiclesTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [vehicles, setVehicles] = useLS<TVehicle[]>(
-    "erp_transport_vehicles",
-    [],
-  );
-  const blank = {
-    vehicleNo: "",
-    model: "",
-    driverName: "",
-    driverLicense: "",
-    driverContact: "",
-    capacity: "",
-    routeAssigned: "",
-  };
-  const [form, setForm] = useState(blank);
-  const [editing, setEditing] = useState<number | null>(null);
-
-  const save = () => {
-    if (!form.vehicleNo.trim() || !form.driverName.trim()) {
-      toast.error("Fill required fields");
-      return;
-    }
-    if (editing !== null) {
-      setVehicles(
-        vehicles.map((v) =>
-          v.id === editing
-            ? { ...v, ...form, capacity: Number(form.capacity) }
-            : v,
-        ),
-      );
-      setEditing(null);
-    } else {
-      setVehicles([
-        ...vehicles,
-        { id: Date.now(), ...form, capacity: Number(form.capacity) },
-      ]);
-    }
-    setForm(blank);
-    toast.success(editing !== null ? "Vehicle updated" : "Vehicle added");
-  };
-
-  const edit = (v: TVehicle) => {
-    setForm({
-      vehicleNo: v.vehicleNo,
-      model: v.model,
-      driverName: v.driverName,
-      driverLicense: v.driverLicense,
-      driverContact: v.driverContact,
-      capacity: String(v.capacity),
-      routeAssigned: v.routeAssigned,
-    });
-    setEditing(v.id);
-  };
-
-  const del = (id: number) => {
-    setVehicles(vehicles.filter((v) => v.id !== id));
-    toast.success("Vehicle deleted");
-  };
-
-  return (
-    <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3 flex items-center gap-2">
-          <Truck size={14} className="text-blue-400" />
-          {editing !== null ? "Edit Vehicle" : "Add Vehicle"}
-        </h3>
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <div>
-            <span className={labelCls}>Vehicle No. *</span>
-            <input
-              value={form.vehicleNo}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, vehicleNo: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="MH01 AB1234"
-              data-ocid="transport.vehicles.input"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Vehicle Model</span>
-            <input
-              value={form.model}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, model: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="Tata Starbus"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Driver Name *</span>
-            <input
-              value={form.driverName}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, driverName: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="Driver full name"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Driver License No.</span>
-            <input
-              value={form.driverLicense}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, driverLicense: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="DL-XXXXXXXXXXXX"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Driver Contact</span>
-            <input
-              value={form.driverContact}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, driverContact: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="9XXXXXXXXX"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Capacity (seats)</span>
-            <input
-              type="number"
-              min={0}
-              value={form.capacity}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, capacity: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="40"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Route Assigned</span>
-            <select
-              value={form.routeAssigned}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, routeAssigned: e.target.value }))
-              }
-              className={inputCls}
-              data-ocid="transport.vehicles.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="flex gap-2 justify-end">
-          {editing !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null);
-                setForm(blank);
-              }}
-              className="border border-gray-600 text-gray-400 text-xs px-4 py-1.5 rounded hover:text-white transition"
-              data-ocid="transport.vehicles.cancel_button"
-            >
-              <X size={12} className="inline mr-1" />
-              Cancel
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={save}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium flex items-center gap-1.5"
-            data-ocid="transport.vehicles.primary_button"
-          >
-            <Plus size={13} />
-            {editing !== null ? "Update" : "Add Vehicle"}
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {[
-                "#",
-                "Vehicle No.",
-                "Model",
-                "Driver Name",
-                "License",
-                "Contact",
-                "Capacity",
-                "Route",
-                "Actions",
-              ].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {vehicles.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={9}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.vehicles.empty_state"
-                >
-                  No vehicles added yet
-                </td>
-              </tr>
-            ) : (
-              vehicles.map((v, i) => (
-                <tr
-                  key={v.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.vehicles.item.${i + 1}`}
-                >
-                  <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                  <td className="px-3 py-2 text-white font-medium">
-                    {v.vehicleNo}
-                  </td>
-                  <td className="px-3 py-2 text-gray-300">{v.model || "—"}</td>
-                  <td className="px-3 py-2 text-gray-300">{v.driverName}</td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {v.driverLicense || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {v.driverContact || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {v.capacity || "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {v.routeAssigned ? (
-                      <Badge color="blue">{v.routeAssigned}</Badge>
-                    ) : (
-                      <span className="text-gray-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => edit(v)}
-                        className="p-1 rounded bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.vehicles.edit_button.${i + 1}`}
-                      >
-                        <Edit size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => del(v.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.vehicles.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── PICKUP POINTS ───────────
-function PickupPointsTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [points, setPoints] = useLS<TPickupPoint[]>(
-    "erp_transport_pickup_points",
-    [],
-  );
-  const blank = {
-    name: "",
-    route: "",
-    pickupTime: "",
-    dropTime: "",
-    distanceFromSchool: "",
-  };
-  const [form, setForm] = useState(blank);
-  const [editing, setEditing] = useState<number | null>(null);
-
-  const save = () => {
-    if (!form.name.trim() || !form.route) {
-      toast.error("Name and Route are required");
-      return;
-    }
-    if (editing !== null) {
-      setPoints(
-        points.map((p) =>
-          p.id === editing
-            ? {
-                ...p,
-                ...form,
-                distanceFromSchool: Number(form.distanceFromSchool),
-              }
-            : p,
-        ),
-      );
-      setEditing(null);
-    } else {
-      setPoints([
-        ...points,
-        {
-          id: Date.now(),
-          ...form,
-          distanceFromSchool: Number(form.distanceFromSchool),
-        },
-      ]);
-    }
-    setForm(blank);
-    toast.success(
-      editing !== null ? "Pickup point updated" : "Pickup point added",
+  const handleConfirmDelete = useCallback(() => {
+    if (!confirmDelete) return;
+    saveRoutes(routes.filter((r) => r.id !== confirmDelete));
+    saveStudentTransports(
+      studentTransports.filter((s) => s.routeId !== confirmDelete),
     );
-  };
+    setConfirmDelete(null);
+  }, [
+    confirmDelete,
+    routes,
+    saveRoutes,
+    studentTransports,
+    saveStudentTransports,
+  ]);
 
-  const del = (id: number) => {
-    setPoints(points.filter((p) => p.id !== id));
-    toast.success("Pickup point deleted");
-  };
+  // ── Pickup Point CRUD ─────────────────────────────────────
+  const handleSavePickup = useCallback(() => {
+    if (!pickupRouteId || !pickupForm.stopName.trim()) return;
+    const updatedRoutes = routes.map((r) => {
+      if (r.id !== pickupRouteId) return r;
+      if (editPickupId) {
+        return {
+          ...r,
+          pickupPoints: r.pickupPoints.map((p) =>
+            p.id === editPickupId ? { ...pickupForm, id: editPickupId } : p,
+          ),
+        };
+      }
+      const newPp: PickupPoint = { ...pickupForm, id: generateId() };
+      return { ...r, pickupPoints: [...r.pickupPoints, newPp] };
+    });
+    saveRoutes(updatedRoutes);
+    setPickupForm({ stopName: "", order: 1, distance: "", fare: 0 });
+    setEditPickupId(null);
+    setShowPickupModal(false);
+  }, [pickupRouteId, pickupForm, editPickupId, routes, saveRoutes]);
 
-  return (
+  const handleDeletePickup = useCallback(
+    (routeId: string, ppId: string) => {
+      saveRoutes(
+        routes.map((r) =>
+          r.id === routeId
+            ? {
+                ...r,
+                pickupPoints: r.pickupPoints.filter((p) => p.id !== ppId),
+              }
+            : r,
+        ),
+      );
+    },
+    [routes, saveRoutes],
+  );
+
+  // Move pickup point up/down
+  const movePickup = useCallback(
+    (routeId: string, ppId: string, dir: "up" | "down") => {
+      saveRoutes(
+        routes.map((r) => {
+          if (r.id !== routeId) return r;
+          const pts = [...r.pickupPoints];
+          const idx = pts.findIndex((p) => p.id === ppId);
+          if (dir === "up" && idx > 0)
+            [pts[idx - 1], pts[idx]] = [pts[idx], pts[idx - 1]];
+          if (dir === "down" && idx < pts.length - 1)
+            [pts[idx], pts[idx + 1]] = [pts[idx + 1], pts[idx]];
+          return {
+            ...r,
+            pickupPoints: pts.map((p, i) => ({ ...p, order: i + 1 })),
+          };
+        }),
+      );
+    },
+    [routes, saveRoutes],
+  );
+
+  // ── Student Assignment ────────────────────────────────────
+  const selectedRoute = routes.find((r) => r.id === assignForm.routeId);
+
+  const handleAssignStudent = useCallback(() => {
+    if (!assignForm.studentId || !assignForm.routeId) return;
+    const student = activeStudents.find((s) => s.id === assignForm.studentId);
+    const route = routes.find((r) => r.id === assignForm.routeId);
+    const pp = route?.pickupPoints.find(
+      (p) => p.id === assignForm.pickupPointId,
+    );
+    if (!student || !route) return;
+    const entry: StudentTransport = {
+      studentId: student.id,
+      studentName: student.fullName,
+      admNo: student.admNo,
+      class: student.class,
+      section: student.section,
+      routeId: route.id,
+      busNo: route.busNo,
+      routeName: route.routeName,
+      pickupPointId: pp?.id || "",
+      pickupPointName: pp?.stopName || "",
+    };
+    const rest = studentTransports.filter((s) => s.studentId !== student.id);
+    saveStudentTransports([...rest, entry]);
+    addNotification(
+      `${student.fullName} assigned to Bus ${route.busNo}`,
+      "success",
+      "🚌",
+    );
+    setAssignForm({ studentId: "", routeId: "", pickupPointId: "" });
+    setStudentSearch("");
+  }, [
+    assignForm,
+    activeStudents,
+    routes,
+    studentTransports,
+    saveStudentTransports,
+    addNotification,
+  ]);
+
+  const handleRemoveAssignment = useCallback(
+    (studentId: string) => {
+      saveStudentTransports(
+        studentTransports.filter((s) => s.studentId !== studentId),
+      );
+      addNotification("Transport assignment removed", "info", "🚌");
+    },
+    [studentTransports, saveStudentTransports, addNotification],
+  );
+
+  // ── Dashboard stats ───────────────────────────────────────
+  const totalAssigned = studentTransports.length;
+  const routeStats = routes.map((r) => ({
+    ...r,
+    count: studentTransports.filter((s) => s.routeId === r.id).length,
+  }));
+
+  // ── Tab content renderers ─────────────────────────────────
+  const renderRoutesTab = () => (
     <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3 flex items-center gap-2">
-          <MapPin size={14} className="text-blue-400" />
-          {editing !== null ? "Edit Pickup Point" : "Add Pickup Point"}
-        </h3>
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <div>
-            <span className={labelCls}>Pickup Point Name *</span>
-            <input
-              value={form.name}
-              onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-              className={inputCls}
-              placeholder="e.g. Sector 15 Stop"
-              data-ocid="transport.pickuppoints.input"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Route *</span>
-            <select
-              value={form.route}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, route: e.target.value }))
-              }
-              className={inputCls}
-              data-ocid="transport.pickuppoints.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <span className={labelCls}>Distance from School (km)</span>
-            <input
-              type="number"
-              min={0}
-              value={form.distanceFromSchool}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, distanceFromSchool: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="0"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Pickup Time</span>
-            <input
-              type="time"
-              value={form.pickupTime}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, pickupTime: e.target.value }))
-              }
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Drop Time</span>
-            <input
-              type="time"
-              value={form.dropTime}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, dropTime: e.target.value }))
-              }
-              className={inputCls}
-            />
-          </div>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            Routes & Buses
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            {routes.length} routes configured
+          </p>
         </div>
-        <div className="flex gap-2 justify-end">
-          {editing !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null);
-                setForm(blank);
-              }}
-              className="border border-gray-600 text-gray-400 text-xs px-4 py-1.5 rounded hover:text-white transition"
-              data-ocid="transport.pickuppoints.cancel_button"
-            >
-              <X size={12} className="inline mr-1" />
-              Cancel
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={save}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium flex items-center gap-1.5"
-            data-ocid="transport.pickuppoints.primary_button"
+        {!isReadOnly && (
+          <Button
+            onClick={() => {
+              setRouteForm(EMPTY_ROUTE);
+              setEditRouteId(null);
+              setShowRouteModal(true);
+            }}
+            data-ocid="add-route-btn"
           >
-            <Plus size={13} />
-            {editing !== null ? "Update" : "Add Point"}
-          </button>
-        </div>
+            + Add Route
+          </Button>
+        )}
       </div>
 
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {[
-                "#",
-                "Pickup Point",
-                "Route",
-                "Pickup Time",
-                "Drop Time",
-                "Distance",
-                "Actions",
-              ].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {points.length === 0 ? (
+      {routes.length === 0 ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <div className="text-4xl mb-3">🚌</div>
+            <p className="font-semibold text-foreground">No routes yet</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Add a bus route to get started.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
               <tr>
-                <td
-                  colSpan={7}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.pickuppoints.empty_state"
-                >
-                  No pickup points added yet
-                </td>
-              </tr>
-            ) : (
-              points.map((p, i) => (
-                <tr
-                  key={p.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.pickuppoints.item.${i + 1}`}
-                >
-                  <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                  <td className="px-3 py-2 text-white font-medium">{p.name}</td>
-                  <td className="px-3 py-2">
-                    <Badge color="blue">{p.route}</Badge>
-                  </td>
-                  <td className="px-3 py-2 text-gray-300">
-                    {p.pickupTime || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-gray-300">
-                    {p.dropTime || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {p.distanceFromSchool ? `${p.distanceFromSchool} km` : "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setForm({
-                            name: p.name,
-                            route: p.route,
-                            pickupTime: p.pickupTime,
-                            dropTime: p.dropTime,
-                            distanceFromSchool: String(p.distanceFromSchool),
-                          });
-                          setEditing(p.id);
-                        }}
-                        className="p-1 rounded bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.pickuppoints.edit_button.${i + 1}`}
-                      >
-                        <Edit size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => del(p.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.pickuppoints.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── ROUTE PICKUP POINTS ───────────
-function RoutePickupsTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [points] = useLS<TPickupPoint[]>("erp_transport_pickup_points", []);
-  const [assignments, setAssignments] = useLS<TRoutePickup[]>(
-    "erp_transport_route_pickups",
-    [],
-  );
-  const [selectedRoute, setSelectedRoute] = useState("");
-  const [selectedPoint, setSelectedPoint] = useState("");
-
-  const routePoints = points.filter((p) => p.route === selectedRoute);
-  const assignedIds = assignments
-    .filter(
-      (a) => routes.find((r) => r.name === selectedRoute)?.id === a.routeId,
-    )
-    .map((a) => a.pickupPointId);
-
-  const addPoint = () => {
-    if (!selectedRoute || !selectedPoint) return;
-    const route = routes.find((r) => r.name === selectedRoute);
-    const point = points.find((p) => p.name === selectedPoint);
-    if (!route || !point) return;
-    if (
-      assignments.some(
-        (a) => a.routeId === route.id && a.pickupPointId === point.id,
-      )
-    ) {
-      toast.error("Already assigned");
-      return;
-    }
-    const seq = assignments.filter((a) => a.routeId === route.id).length + 1;
-    setAssignments([
-      ...assignments,
-      {
-        id: Date.now(),
-        routeId: route.id,
-        pickupPointId: point.id,
-        sequence: seq,
-      },
-    ]);
-    toast.success("Pickup point added to route");
-  };
-
-  const removeAssign = (id: number) => {
-    setAssignments(assignments.filter((a) => a.id !== id));
-  };
-
-  const routeAssignments = selectedRoute
-    ? assignments
-        .filter(
-          (a) => routes.find((r) => r.name === selectedRoute)?.id === a.routeId,
-        )
-        .map((a) => ({
-          ...a,
-          point: points.find((p) => p.id === a.pickupPointId),
-        }))
-        .sort((a, b) => a.sequence - b.sequence)
-    : [];
-
-  return (
-    <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3">
-          Map Pickup Points to Route
-        </h3>
-        <div className="flex items-end gap-3">
-          <div className="flex-1">
-            <span className={labelCls}>Select Route</span>
-            <select
-              value={selectedRoute}
-              onChange={(e) => setSelectedRoute(e.target.value)}
-              className={inputCls}
-              data-ocid="transport.routepickups.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex-1">
-            <span className={labelCls}>Add Pickup Point</span>
-            <select
-              value={selectedPoint}
-              onChange={(e) => setSelectedPoint(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">-- Select Pickup Point --</option>
-              {routePoints
-                .filter((p) => !assignedIds.includes(p.id))
-                .map((p) => (
-                  <option key={p.id} value={p.name}>
-                    {p.name}
-                  </option>
-                ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={addPoint}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-4 py-1.5 rounded font-medium flex items-center gap-1.5"
-            data-ocid="transport.routepickups.primary_button"
-          >
-            <Plus size={13} />
-            Add
-          </button>
-        </div>
-      </div>
-
-      {selectedRoute && (
-        <div className="rounded-lg overflow-hidden border border-gray-700">
-          <div style={{ background: "#1a1f2e" }} className="px-3 py-2">
-            <span className="text-gray-300 text-xs font-medium">
-              Pickup Points on:{" "}
-              <span className="text-blue-400">{selectedRoute}</span>
-            </span>
-          </div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr style={{ background: "#111827" }}>
                 {[
-                  "Seq",
-                  "Pickup Point",
-                  "Pickup Time",
-                  "Drop Time",
-                  "Distance",
-                  "Action",
+                  "Bus No.",
+                  "Route Name",
+                  "Driver",
+                  "Monthly Fare",
+                  "Students",
+                  "Actions",
                 ].map((h) => (
-                  <th key={h} className={thCls}>
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
+                  >
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {routeAssignments.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="text-center py-6 text-gray-500"
-                    data-ocid="transport.routepickups.empty_state"
-                  >
-                    No pickup points on this route yet
-                  </td>
-                </tr>
-              ) : (
-                routeAssignments.map((a, i) => (
+              {routes.map((route) => {
+                const count = studentTransports.filter(
+                  (s) => s.routeId === route.id,
+                ).length;
+                // Compute fare range for display
+                const fares = route.pickupPoints
+                  .map((p) => p.fare ?? 0)
+                  .filter((f) => f > 0);
+                const fareDisplay =
+                  fares.length === 0
+                    ? "—"
+                    : fares.length === 1
+                      ? `₹${fares[0].toLocaleString("en-IN")}`
+                      : `₹${Math.min(...fares).toLocaleString("en-IN")}–₹${Math.max(...fares).toLocaleString("en-IN")}`;
+                return (
                   <tr
-                    key={a.id}
-                    style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                    data-ocid={`transport.routepickups.item.${i + 1}`}
+                    key={route.id}
+                    className="border-t border-border hover:bg-muted/30"
                   >
-                    <td className="px-3 py-2 text-gray-400">{a.sequence}</td>
-                    <td className="px-3 py-2 text-white">
-                      {a.point?.name || "—"}
+                    <td className="px-4 py-3">
+                      <Badge variant="outline" className="font-mono">
+                        {route.busNo}
+                      </Badge>
                     </td>
-                    <td className="px-3 py-2 text-gray-300">
-                      {a.point?.pickupTime || "—"}
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {route.routeName}
                     </td>
-                    <td className="px-3 py-2 text-gray-300">
-                      {a.point?.dropTime || "—"}
+                    <td className="px-4 py-3">
+                      <div>{route.driverName || "—"}</div>
+                      {route.driverMobile && (
+                        <div className="text-xs text-muted-foreground">
+                          {route.driverMobile}
+                        </div>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-gray-400">
-                      {a.point?.distanceFromSchool
-                        ? `${a.point.distanceFromSchool} km`
-                        : "—"}
+                    <td className="px-4 py-3 text-right font-medium">
+                      <div className="text-sm">{fareDisplay}</div>
+                      {fares.length > 1 && (
+                        <div className="text-[10px] text-muted-foreground">
+                          {route.pickupPoints.length} stops
+                        </div>
+                      )}
                     </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => removeAssign(a.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.routepickups.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
+                    <td className="px-4 py-3">
+                      <Badge variant={count > 0 ? "secondary" : "outline"}>
+                        {count} students
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setRouteForm({
+                              busNo: route.busNo,
+                              routeName: route.routeName,
+                              driverStaffId: route.driverStaffId,
+                              driverName: route.driverName,
+                              driverMobile: route.driverMobile,
+                              monthlyFare: route.monthlyFare,
+                            });
+                            setEditRouteId(route.id);
+                            setShowRouteModal(true);
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => handleDeleteRoute(route.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
                     </td>
                   </tr>
-                ))
-              )}
+                );
+              })}
             </tbody>
           </table>
         </div>
       )}
     </div>
   );
-}
 
-// ─────────── ASSIGN VEHICLE ───────────
-function AssignVehicleTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [vehicles] = useLS<TVehicle[]>("erp_transport_vehicles", []);
-  const [assigns, setAssigns] = useLS<TVehicleAssign[]>(
-    "erp_transport_vehicle_assign",
-    [],
-  );
-  const [selRoute, setSelRoute] = useState("");
-  const [selVehicle, setSelVehicle] = useState("");
-
-  const save = () => {
-    const route = routes.find((r) => r.name === selRoute);
-    const vehicle = vehicles.find((v) => v.vehicleNo === selVehicle);
-    if (!route || !vehicle) {
-      toast.error("Select both route and vehicle");
-      return;
-    }
-    const existing = assigns.find((a) => a.routeId === route.id);
-    if (existing) {
-      setAssigns(
-        assigns.map((a) =>
-          a.id === existing.id ? { ...a, vehicleId: vehicle.id } : a,
-        ),
-      );
-    } else {
-      setAssigns([
-        ...assigns,
-        { id: Date.now(), routeId: route.id, vehicleId: vehicle.id },
-      ]);
-    }
-    setSelRoute("");
-    setSelVehicle("");
-    toast.success("Vehicle assigned to route");
-  };
-
-  const del = (id: number) => {
-    setAssigns(assigns.filter((a) => a.id !== id));
-    toast.success("Assignment removed");
-  };
-
-  return (
+  const renderPickupTab = () => (
     <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3">
-          Assign Vehicle to Route
-        </h3>
-        <div className="flex items-end gap-3">
-          <div className="flex-1">
-            <span className={labelCls}>Route</span>
-            <select
-              value={selRoute}
-              onChange={(e) => setSelRoute(e.target.value)}
-              className={inputCls}
-              data-ocid="transport.assignvehicle.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex-1">
-            <span className={labelCls}>Vehicle</span>
-            <select
-              value={selVehicle}
-              onChange={(e) => setSelVehicle(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">-- Select Vehicle --</option>
-              {vehicles.map((v) => (
-                <option key={v.id} value={v.vehicleNo}>
-                  {v.vehicleNo} — {v.model}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button
-            type="button"
-            onClick={save}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium"
-            data-ocid="transport.assignvehicle.primary_button"
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            Pickup Points
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Manage stops for each route
+          </p>
+        </div>
+        {!isReadOnly && (
+          <Button
+            onClick={() => {
+              setPickupForm({ stopName: "", order: 1, distance: "", fare: 0 });
+              setEditPickupId(null);
+              setPickupRouteId(routes[0]?.id || "");
+              setShowPickupModal(true);
+            }}
+            data-ocid="add-pickup-btn"
           >
-            Assign
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {["#", "Route", "Vehicle No.", "Driver", "Action"].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {assigns.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.assignvehicle.empty_state"
-                >
-                  No vehicle assignments yet
-                </td>
-              </tr>
-            ) : (
-              assigns.map((a, i) => {
-                const route = routes.find((r) => r.id === a.routeId);
-                const vehicle = vehicles.find((v) => v.id === a.vehicleId);
-                return (
-                  <tr
-                    key={a.id}
-                    style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                    data-ocid={`transport.assignvehicle.item.${i + 1}`}
-                  >
-                    <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                    <td className="px-3 py-2 text-white">
-                      {route?.name || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-blue-400">
-                      {vehicle?.vehicleNo || "—"}
-                    </td>
-                    <td className="px-3 py-2 text-gray-300">
-                      {vehicle?.driverName || "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => del(a.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.assignvehicle.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── FEES MASTER ───────────
-function FeesMasterTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [points] = useLS<TPickupPoint[]>("erp_transport_pickup_points", []);
-  const [feesMaster, setFeesMaster] = useLS<TFeesMaster[]>(
-    "erp_transport_fees_master",
-    [],
-  );
-  const blank = { route: "", pickupPoint: "", monthlyFee: "", annualFee: "" };
-  const [form, setForm] = useState(blank);
-  const [editing, setEditing] = useState<number | null>(null);
-
-  const routePoints = points.filter((p) => p.route === form.route);
-
-  const save = () => {
-    if (!form.route) {
-      toast.error("Select a route");
-      return;
-    }
-    if (editing !== null) {
-      setFeesMaster(
-        feesMaster.map((f) =>
-          f.id === editing
-            ? {
-                ...f,
-                ...form,
-                monthlyFee: Number(form.monthlyFee),
-                annualFee: Number(form.annualFee),
-              }
-            : f,
-        ),
-      );
-      setEditing(null);
-    } else {
-      setFeesMaster([
-        ...feesMaster,
-        {
-          id: Date.now(),
-          ...form,
-          monthlyFee: Number(form.monthlyFee),
-          annualFee: Number(form.annualFee),
-        },
-      ]);
-    }
-    setForm(blank);
-    toast.success(editing !== null ? "Updated" : "Fees master entry added");
-  };
-
-  const del = (id: number) => {
-    setFeesMaster(feesMaster.filter((f) => f.id !== id));
-    toast.success("Deleted");
-  };
-
-  return (
-    <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3">
-          Transport Fees Master
-        </h3>
-        <div className="grid grid-cols-2 gap-3 mb-3">
-          <div>
-            <span className={labelCls}>Route *</span>
-            <select
-              value={form.route}
-              onChange={(e) =>
-                setForm((p) => ({
-                  ...p,
-                  route: e.target.value,
-                  pickupPoint: "",
-                }))
-              }
-              className={inputCls}
-              data-ocid="transport.feesmaster.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <span className={labelCls}>Pickup Point</span>
-            <select
-              value={form.pickupPoint}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, pickupPoint: e.target.value }))
-              }
-              className={inputCls}
-            >
-              <option value="">-- All Pickup Points --</option>
-              {routePoints.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <span className={labelCls}>Monthly Fee (₹)</span>
-            <input
-              type="number"
-              min={0}
-              value={form.monthlyFee}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, monthlyFee: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="0"
-              data-ocid="transport.feesmaster.input"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Annual Fee (₹)</span>
-            <input
-              type="number"
-              min={0}
-              value={form.annualFee}
-              onChange={(e) =>
-                setForm((p) => ({ ...p, annualFee: e.target.value }))
-              }
-              className={inputCls}
-              placeholder="0"
-            />
-          </div>
-        </div>
-        <div className="flex gap-2 justify-end">
-          {editing !== null && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(null);
-                setForm(blank);
-              }}
-              className="border border-gray-600 text-gray-400 text-xs px-4 py-1.5 rounded hover:text-white transition"
-              data-ocid="transport.feesmaster.cancel_button"
-            >
-              <X size={12} className="inline mr-1" />
-              Cancel
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={save}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium flex items-center gap-1.5"
-            data-ocid="transport.feesmaster.primary_button"
-          >
-            <Plus size={13} />
-            {editing !== null ? "Update" : "Add Entry"}
-          </button>
-        </div>
-      </div>
-
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {[
-                "#",
-                "Route",
-                "Pickup Point",
-                "Monthly Fee",
-                "Annual Fee",
-                "Actions",
-              ].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {feesMaster.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={6}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.feesmaster.empty_state"
-                >
-                  No fees master entries yet
-                </td>
-              </tr>
-            ) : (
-              feesMaster.map((f, i) => (
-                <tr
-                  key={f.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.feesmaster.item.${i + 1}`}
-                >
-                  <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                  <td className="px-3 py-2 text-white">{f.route}</td>
-                  <td className="px-3 py-2 text-gray-300">
-                    {f.pickupPoint || "All"}
-                  </td>
-                  <td className="px-3 py-2 text-green-400">
-                    ₹{f.monthlyFee.toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-3 py-2 text-green-400">
-                    ₹{f.annualFee.toLocaleString("en-IN")}
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setForm({
-                            route: f.route,
-                            pickupPoint: f.pickupPoint,
-                            monthlyFee: String(f.monthlyFee),
-                            annualFee: String(f.annualFee),
-                          });
-                          setEditing(f.id);
-                        }}
-                        className="p-1 rounded bg-gray-700 hover:bg-blue-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.feesmaster.edit_button.${i + 1}`}
-                      >
-                        <Edit size={11} />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => del(f.id)}
-                        className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                        data-ocid={`transport.feesmaster.delete_button.${i + 1}`}
-                      >
-                        <Trash2 size={11} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── STUDENT TRANSPORT FEES ───────────
-function StudentTransportFeesTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [points] = useLS<TPickupPoint[]>("erp_transport_pickup_points", []);
-  const [feesMaster] = useLS<TFeesMaster[]>("erp_transport_fees_master", []);
-  const [studentTransport, setStudentTransport] = useLS<TStudentTransport[]>(
-    "erp_student_transport",
-    [],
-  );
-  const [admNo, setAdmNo] = useState("");
-  const [selRoute, setSelRoute] = useState("");
-  const [selPickup, setSelPickup] = useState("");
-  const [search, setSearch] = useState("");
-
-  const routePoints = points.filter((p) => p.route === selRoute);
-
-  const calcFee = () => {
-    const master = feesMaster.find(
-      (f) =>
-        f.route === selRoute &&
-        (f.pickupPoint === selPickup || f.pickupPoint === ""),
-    );
-    return master?.monthlyFee || 0;
-  };
-
-  const getStudentFromLS = (no: string) => {
-    try {
-      const students = JSON.parse(
-        localStorage.getItem("erp_students") || "[]",
-      ) as Array<{ admNo: string; name: string; className: string }>;
-      return students.find((s) => s.admNo === no);
-    } catch {
-      return null;
-    }
-  };
-
-  const assign = () => {
-    if (!admNo.trim() || !selRoute) {
-      toast.error("Admission No and Route are required");
-      return;
-    }
-    const student = getStudentFromLS(admNo) || {
-      admNo,
-      name: admNo,
-      className: "—",
-    };
-    const fee = calcFee();
-    if (studentTransport.some((s) => s.admNo === admNo)) {
-      setStudentTransport(
-        studentTransport.map((s) =>
-          s.admNo === admNo
-            ? { ...s, route: selRoute, pickupPoint: selPickup, monthlyFee: fee }
-            : s,
-        ),
-      );
-    } else {
-      setStudentTransport([
-        ...studentTransport,
-        {
-          id: Date.now(),
-          admNo,
-          studentName: student.name,
-          className: student.className,
-          route: selRoute,
-          pickupPoint: selPickup,
-          monthlyFee: fee,
-        },
-      ]);
-    }
-    setAdmNo("");
-    setSelRoute("");
-    setSelPickup("");
-    toast.success("Student transport assigned");
-  };
-
-  const del = (id: number) => {
-    setStudentTransport(studentTransport.filter((s) => s.id !== id));
-    toast.success("Removed");
-  };
-
-  const filtered = studentTransport.filter(
-    (s) =>
-      s.admNo.toLowerCase().includes(search.toLowerCase()) ||
-      s.studentName.toLowerCase().includes(search.toLowerCase()),
-  );
-
-  return (
-    <div className="space-y-4">
-      <div
-        className="rounded-lg p-4"
-        style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-      >
-        <h3 className="text-white text-xs font-bold tracking-widest uppercase mb-3 flex items-center gap-2">
-          <User size={14} className="text-blue-400" />
-          Assign Student to Transport
-        </h3>
-        <div className="grid grid-cols-3 gap-3 mb-3">
-          <div>
-            <span className={labelCls}>Admission No. *</span>
-            <input
-              value={admNo}
-              onChange={(e) => setAdmNo(e.target.value)}
-              className={inputCls}
-              placeholder="ADM-001"
-              data-ocid="transport.studentfees.input"
-            />
-          </div>
-          <div>
-            <span className={labelCls}>Route *</span>
-            <select
-              value={selRoute}
-              onChange={(e) => {
-                setSelRoute(e.target.value);
-                setSelPickup("");
-              }}
-              className={inputCls}
-              data-ocid="transport.studentfees.select"
-            >
-              <option value="">-- Select Route --</option>
-              {routes.map((r) => (
-                <option key={r.id} value={r.name}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <span className={labelCls}>Pickup Point</span>
-            <select
-              value={selPickup}
-              onChange={(e) => setSelPickup(e.target.value)}
-              className={inputCls}
-            >
-              <option value="">-- Select Pickup Point --</option>
-              {routePoints.map((p) => (
-                <option key={p.id} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        {selRoute && (
-          <div className="mb-3 text-xs text-gray-300">
-            Calculated Monthly Fee:{" "}
-            <span className="text-green-400 font-bold">
-              ₹{calcFee().toLocaleString("en-IN")}
-            </span>
-          </div>
+            + Add Stop
+          </Button>
         )}
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={assign}
-            className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-5 py-1.5 rounded font-medium"
-            data-ocid="transport.studentfees.primary_button"
-          >
-            Assign Transport
-          </button>
-        </div>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="flex items-center bg-gray-800 border border-gray-700 rounded px-2 py-1.5 flex-1 max-w-xs">
-          <Search size={13} className="text-gray-400 mr-1.5" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by Adm. No or Name..."
-            className="bg-transparent text-gray-300 text-xs outline-none w-full"
-            data-ocid="transport.studentfees.search_input"
-          />
+      {routes.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            Add routes first before managing pickup points.
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {routes.map((route) => (
+            <Card key={route.id}>
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Badge variant="outline" className="font-mono">
+                      {route.busNo}
+                    </Badge>
+                    {route.routeName}
+                    <Badge variant="secondary">
+                      {route.pickupPoints.length} stops
+                    </Badge>
+                  </CardTitle>
+                  {!isReadOnly && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setPickupRouteId(route.id);
+                        setPickupForm({
+                          stopName: "",
+                          order: route.pickupPoints.length + 1,
+                          distance: "",
+                          fare: 0,
+                        });
+                        setEditPickupId(null);
+                        setShowPickupModal(true);
+                      }}
+                    >
+                      + Add Stop
+                    </Button>
+                  )}
+                </div>
+              </CardHeader>
+              <CardContent>
+                {route.pickupPoints.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-2">
+                    No stops added yet.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {[...route.pickupPoints]
+                      .sort((a, b) => a.order - b.order)
+                      .map((pp, idx) => (
+                        <div
+                          key={pp.id}
+                          className="flex items-center gap-3 bg-muted/30 rounded-lg px-3 py-2"
+                        >
+                          <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="flex-1 font-medium text-foreground">
+                            {pp.stopName}
+                          </span>
+                          {pp.distance && (
+                            <span className="text-xs text-muted-foreground">
+                              {pp.distance} km
+                            </span>
+                          )}
+                          {pp.fare > 0 && (
+                            <span className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
+                              ₹{pp.fare.toLocaleString("en-IN")}/mo
+                            </span>
+                          )}
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => movePickup(route.id, pp.id, "up")}
+                              disabled={idx === 0}
+                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              aria-label="Move up"
+                            >
+                              ▲
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                movePickup(route.id, pp.id, "down")
+                              }
+                              disabled={idx === route.pickupPoints.length - 1}
+                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              aria-label="Move down"
+                            >
+                              ▼
+                            </button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setPickupRouteId(route.id);
+                                setPickupForm({
+                                  stopName: pp.stopName,
+                                  order: pp.order,
+                                  distance: pp.distance,
+                                  fare: pp.fare ?? 0,
+                                });
+                                setEditPickupId(pp.id);
+                                setShowPickupModal(true);
+                              }}
+                            >
+                              Edit
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() =>
+                                handleDeletePickup(route.id, pp.id)
+                              }
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
         </div>
-      </div>
+      )}
+    </div>
+  );
 
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
+  const renderStudentsTab = () => (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-foreground">
+        Student Transport Assignment
+      </h2>
+
+      {!isReadOnly && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader>
+            <CardTitle className="text-base">Assign Student to Route</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <Label>Filter Class</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={filterClass}
+                  onChange={(e) => setFilterClass(e.target.value)}
+                >
+                  <option value="">All Classes</option>
+                  {CLASSES.map((c) => (
+                    <option key={c} value={c}>
+                      Class {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Filter Section</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={filterSection}
+                  onChange={(e) => setFilterSection(e.target.value)}
+                >
+                  <option value="">All Sections</option>
+                  {SECTIONS.map((s) => (
+                    <option key={s} value={s}>
+                      {s}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Search Student</Label>
+                <Input
+                  value={studentSearch}
+                  onChange={(e) => setStudentSearch(e.target.value)}
+                  placeholder="Name or Adm. No."
+                  data-ocid="student-transport-search"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <Label>Select Student *</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={assignForm.studentId}
+                  onChange={(e) =>
+                    setAssignForm((p) => ({ ...p, studentId: e.target.value }))
+                  }
+                  data-ocid="student-transport-select"
+                >
+                  <option value="">— Select Student —</option>
+                  {filteredStudents.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.fullName} ({s.admNo}) — {s.class} {s.section}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Route / Bus *</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={assignForm.routeId}
+                  onChange={(e) =>
+                    setAssignForm((p) => ({
+                      ...p,
+                      routeId: e.target.value,
+                      pickupPointId: "",
+                    }))
+                  }
+                  data-ocid="assign-route-select"
+                >
+                  <option value="">— Select Route —</option>
+                  {routes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      Bus {r.busNo} — {r.routeName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Pickup Point</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={assignForm.pickupPointId}
+                  onChange={(e) =>
+                    setAssignForm((p) => ({
+                      ...p,
+                      pickupPointId: e.target.value,
+                    }))
+                  }
+                  data-ocid="assign-pickup-select"
+                >
+                  <option value="">— Select Stop —</option>
+                  {(selectedRoute?.pickupPoints || []).map((pp) => (
+                    <option key={pp.id} value={pp.id}>
+                      {pp.stopName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <Button
+              onClick={handleAssignStudent}
+              data-ocid="assign-student-btn"
+            >
+              Assign to Transport
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="overflow-x-auto rounded-xl border border-border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
               {[
-                "Adm. No.",
                 "Student Name",
+                "Adm. No.",
                 "Class",
+                "Bus No.",
                 "Route",
                 "Pickup Point",
-                "Monthly Fee",
                 "Action",
               ].map((h) => (
-                <th key={h} className={thCls}>
+                <th
+                  key={h}
+                  className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
+                >
                   {h}
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filtered.length === 0 ? (
+            {studentTransports.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.studentfees.empty_state"
+                  className="px-4 py-10 text-center text-muted-foreground"
                 >
-                  No students assigned to transport
+                  No students assigned to transport yet.
                 </td>
               </tr>
             ) : (
-              filtered.map((s, i) => (
+              studentTransports.map((st) => (
                 <tr
-                  key={s.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.studentfees.item.${i + 1}`}
+                  key={st.studentId}
+                  className="border-t border-border hover:bg-muted/30"
                 >
-                  <td className="px-3 py-2 text-blue-400 font-medium">
-                    {s.admNo}
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    {st.studentName}
                   </td>
-                  <td className="px-3 py-2 text-white">{s.studentName}</td>
-                  <td className="px-3 py-2 text-gray-300">{s.className}</td>
-                  <td className="px-3 py-2 text-gray-300">{s.route}</td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {s.pickupPoint || "—"}
+                  <td className="px-4 py-3 text-muted-foreground">
+                    {st.admNo}
                   </td>
-                  <td className="px-3 py-2 text-green-400">
-                    ₹{s.monthlyFee.toLocaleString("en-IN")}
+                  <td className="px-4 py-3">
+                    {st.class} {st.section}
                   </td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => del(s.id)}
-                      className="p-1 rounded bg-gray-700 hover:bg-red-700 text-gray-400 hover:text-white transition"
-                      data-ocid={`transport.studentfees.delete_button.${i + 1}`}
-                    >
-                      <Trash2 size={11} />
-                    </button>
+                  <td className="px-4 py-3">
+                    <Badge variant="outline" className="font-mono">
+                      {st.busNo}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3">{st.routeName}</td>
+                  <td className="px-4 py-3">{st.pickupPointName || "—"}</td>
+                  <td className="px-4 py-3">
+                    {!isReadOnly && (
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleRemoveAssignment(st.studentId)}
+                      >
+                        Remove
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))
@@ -1735,166 +841,461 @@ function StudentTransportFeesTab() {
       </div>
     </div>
   );
-}
 
-// ─────────── TRANSPORT REPORT ───────────
-function TransportReportTab() {
-  const [routes] = useLS<TRoute[]>("erp_transport_routes", []);
-  const [vehicles] = useLS<TVehicle[]>("erp_transport_vehicles", []);
-  const [assigns] = useLS<TVehicleAssign[]>("erp_transport_vehicle_assign", []);
-  const [studentTransport] = useLS<TStudentTransport[]>(
-    "erp_student_transport",
-    [],
-  );
-  const [filterRoute, setFilterRoute] = useState("");
+  const renderDashboardTab = () => (
+    <div className="space-y-6">
+      <h2 className="text-lg font-semibold text-foreground">
+        Transport Dashboard
+      </h2>
 
-  const getVehicleForRoute = (routeName: string) => {
-    const route = routes.find((r) => r.name === routeName);
-    if (!route) return "—";
-    const assign = assigns.find((a) => a.routeId === route.id);
-    if (!assign) return "—";
-    return vehicles.find((v) => v.id === assign.vehicleId)?.vehicleNo || "—";
-  };
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="bg-primary/5 border-primary/20">
+          <CardContent className="pt-4 pb-3 text-center">
+            <div className="text-3xl font-bold text-primary">
+              {routes.length}
+            </div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Total Routes
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-accent/10 border-accent/20">
+          <CardContent className="pt-4 pb-3 text-center">
+            <div className="text-3xl font-bold text-accent">
+              {totalAssigned}
+            </div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Students on Transport
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="bg-secondary border-border">
+          <CardContent className="pt-4 pb-3 text-center">
+            <div className="text-3xl font-bold text-foreground">
+              {drivers.length}
+            </div>
+            <div className="text-sm text-muted-foreground mt-1">Drivers</div>
+          </CardContent>
+        </Card>
+        <Card className="bg-secondary border-border">
+          <CardContent className="pt-4 pb-3 text-center">
+            <div className="text-3xl font-bold text-foreground">
+              {routes.reduce((s, r) => s + r.pickupPoints.length, 0)}
+            </div>
+            <div className="text-sm text-muted-foreground mt-1">
+              Pickup Stops
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-  const filtered = studentTransport.filter(
-    (s) => !filterRoute || s.route === filterRoute,
+      {/* Route-wise student count */}
+      <div>
+        <h3 className="font-semibold text-foreground mb-3">Route-wise Count</h3>
+        <div className="grid gap-3 md:grid-cols-2">
+          {routeStats.length === 0 ? (
+            <p className="text-sm text-muted-foreground col-span-2">
+              No routes configured.
+            </p>
+          ) : (
+            routeStats.map((r) => (
+              <Card key={r.id}>
+                <CardContent className="py-3 flex items-center gap-4">
+                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                    🚌
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-foreground truncate">
+                      {r.routeName}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Bus {r.busNo} • Driver: {r.driverName || "Not assigned"}
+                    </div>
+                  </div>
+                  <Badge
+                    variant={r.count > 0 ? "default" : "outline"}
+                    className="shrink-0"
+                  >
+                    {r.count} students
+                  </Badge>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </div>
+      </div>
+
+      {/* Driver list */}
+      {drivers.length > 0 && (
+        <div>
+          <h3 className="font-semibold text-foreground mb-3">Drivers</h3>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50">
+                <tr>
+                  {[
+                    "Driver Name",
+                    "Mobile",
+                    "Assigned Bus",
+                    "Route",
+                    "Students",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-left font-semibold text-muted-foreground"
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {drivers.map((driver) => {
+                  const assignedRoute = routes.find(
+                    (r) =>
+                      r.driverStaffId === driver.id ||
+                      r.driverName === driver.name,
+                  );
+                  const count = assignedRoute
+                    ? studentTransports.filter(
+                        (s) => s.routeId === assignedRoute.id,
+                      ).length
+                    : 0;
+                  return (
+                    <tr
+                      key={driver.id}
+                      className="border-t border-border hover:bg-muted/30"
+                    >
+                      <td className="px-4 py-3 font-medium">{driver.name}</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {driver.mobile}
+                      </td>
+                      <td className="px-4 py-3">
+                        {assignedRoute ? (
+                          <Badge variant="outline" className="font-mono">
+                            {assignedRoute.busNo}
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {assignedRoute?.routeName || "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge variant="secondary">{count}</Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
   );
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 mb-2">
-        <div>
-          <span className={labelCls}>Filter by Route</span>
-          <select
-            value={filterRoute}
-            onChange={(e) => setFilterRoute(e.target.value)}
-            className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-            data-ocid="transport.report.select"
-          >
-            <option value="">All Routes</option>
-            {routes.map((r) => (
-              <option key={r.id} value={r.name}>
-                {r.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="text-gray-400 text-xs mt-4">
-          {filtered.length} students
-        </div>
-      </div>
-
-      <div className="rounded-lg overflow-hidden border border-gray-700">
-        <table className="w-full text-xs">
-          <thead>
-            <tr style={{ background: "#1a1f2e" }}>
-              {[
-                "Adm. No.",
-                "Student Name",
-                "Class",
-                "Route",
-                "Vehicle",
-                "Pickup Point",
-                "Monthly Fee",
-              ].map((h) => (
-                <th key={h} className={thCls}>
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={7}
-                  className="text-center py-8 text-gray-500"
-                  data-ocid="transport.report.empty_state"
-                >
-                  No transport data available
-                </td>
-              </tr>
-            ) : (
-              filtered.map((s, i) => (
-                <tr
-                  key={s.id}
-                  style={{ background: i % 2 === 0 ? "#111827" : "#0f1117" }}
-                  data-ocid={`transport.report.item.${i + 1}`}
-                >
-                  <td className="px-3 py-2 text-blue-400">{s.admNo}</td>
-                  <td className="px-3 py-2 text-white">{s.studentName}</td>
-                  <td className="px-3 py-2 text-gray-300">{s.className}</td>
-                  <td className="px-3 py-2 text-gray-300">{s.route}</td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {getVehicleForRoute(s.route)}
-                  </td>
-                  <td className="px-3 py-2 text-gray-400">
-                    {s.pickupPoint || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-green-400">
-                    ₹{s.monthlyFee.toLocaleString("en-IN")}
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-// ─────────── MAIN TRANSPORT PAGE ───────────
-export function Transport() {
-  const [tab, setTab] = useState<TransportTab>("routes");
-
-  const tabs: { id: TransportTab; label: string; icon: React.ReactNode }[] = [
-    { id: "routes", label: "Routes", icon: <Route size={13} /> },
-    { id: "vehicles", label: "Vehicles", icon: <Truck size={13} /> },
-    { id: "pickuppoints", label: "Pickup Points", icon: <MapPin size={13} /> },
-    {
-      id: "routepickups",
-      label: "Route Pickups",
-      icon: <ChevronDown size={13} />,
-    },
-    { id: "assignvehicle", label: "Assign Vehicle", icon: <Bus size={13} /> },
-    { id: "feesmaster", label: "Fees Master", icon: <Bus size={13} /> },
-    { id: "studentfees", label: "Student Fees", icon: <User size={13} /> },
-    { id: "report", label: "Report", icon: <Search size={13} /> },
-  ];
-
-  return (
-    <div>
-      <h2 className="text-white text-lg font-semibold mb-4">
-        Transport Management
-      </h2>
-      <div className="flex flex-wrap gap-1 mb-5">
-        {tabs.map((t) => (
+      {/* Tab Nav */}
+      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
+        {TABS.map((tab) => (
           <button
-            key={t.id}
+            key={tab.id}
             type="button"
-            onClick={() => setTab(t.id)}
-            data-ocid={`transport.${t.id}.tab`}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition ${
-              tab === t.id
-                ? "bg-blue-600 text-white"
-                : "bg-gray-800 text-gray-400 hover:text-white hover:bg-gray-700"
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+              activeTab === tab.id
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
+            data-ocid={`transport-tab-${tab.id}`}
           >
-            {t.icon}
-            {t.label}
+            <span>{tab.icon}</span>
+            {tab.label}
           </button>
         ))}
       </div>
 
-      {tab === "routes" && <RoutesTab />}
-      {tab === "vehicles" && <VehiclesTab />}
-      {tab === "pickuppoints" && <PickupPointsTab />}
-      {tab === "routepickups" && <RoutePickupsTab />}
-      {tab === "assignvehicle" && <AssignVehicleTab />}
-      {tab === "feesmaster" && <FeesMasterTab />}
-      {tab === "studentfees" && <StudentTransportFeesTab />}
-      {tab === "report" && <TransportReportTab />}
+      {activeTab === "routes" && renderRoutesTab()}
+      {activeTab === "pickup" && renderPickupTab()}
+      {activeTab === "students" && renderStudentsTab()}
+      {activeTab === "dashboard" && renderDashboardTab()}
+
+      {/* Route Modal */}
+      {showRouteModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-lg shadow-elevated">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">
+                {editRouteId ? "Edit Route" : "Add Route"}
+              </CardTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRouteModal(false);
+                  setEditRouteId(null);
+                }}
+                className="text-muted-foreground hover:text-foreground text-xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Bus No. *</Label>
+                  <Input
+                    value={routeForm.busNo}
+                    onChange={(e) =>
+                      setRouteForm((p) => ({ ...p, busNo: e.target.value }))
+                    }
+                    placeholder="e.g. MP-09-AB-1234"
+                    data-ocid="route-busno-input"
+                  />
+                </div>
+                <div>
+                  <Label>Route Name *</Label>
+                  <Input
+                    value={routeForm.routeName}
+                    onChange={(e) =>
+                      setRouteForm((p) => ({ ...p, routeName: e.target.value }))
+                    }
+                    placeholder="e.g. North Route"
+                    data-ocid="route-name-input"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Driver (from Staff)</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={routeForm.driverStaffId}
+                  onChange={(e) => {
+                    const driver = drivers.find((d) => d.id === e.target.value);
+                    setRouteForm((p) => ({
+                      ...p,
+                      driverStaffId: e.target.value,
+                      driverName: driver?.name || p.driverName,
+                      driverMobile: driver?.mobile || p.driverMobile,
+                    }));
+                  }}
+                  data-ocid="route-driver-select"
+                >
+                  <option value="">— Select Driver —</option>
+                  {drivers.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} ({d.mobile})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {!routeForm.driverStaffId && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label>Driver Name (Manual)</Label>
+                    <Input
+                      value={routeForm.driverName}
+                      onChange={(e) =>
+                        setRouteForm((p) => ({
+                          ...p,
+                          driverName: e.target.value,
+                        }))
+                      }
+                      placeholder="Driver name"
+                    />
+                  </div>
+                  <div>
+                    <Label>Driver Mobile</Label>
+                    <Input
+                      value={routeForm.driverMobile}
+                      onChange={(e) =>
+                        setRouteForm((p) => ({
+                          ...p,
+                          driverMobile: e.target.value,
+                        }))
+                      }
+                      placeholder="Mobile number"
+                    />
+                  </div>
+                </div>
+              )}
+              <div>
+                <Label>Monthly Fare (₹)</Label>
+                <Input
+                  type="number"
+                  value={routeForm.monthlyFare}
+                  onChange={(e) =>
+                    setRouteForm((p) => ({
+                      ...p,
+                      monthlyFare: Number(e.target.value),
+                    }))
+                  }
+                  placeholder="0"
+                  data-ocid="route-fare-input"
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button onClick={handleSaveRoute} data-ocid="save-route-btn">
+                  Save Route
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowRouteModal(false);
+                    setEditRouteId(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Pickup Modal */}
+      {showPickupModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-md shadow-elevated">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">
+                {editPickupId ? "Edit Stop" : "Add Pickup Stop"}
+              </CardTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPickupModal(false);
+                  setEditPickupId(null);
+                }}
+                className="text-muted-foreground hover:text-foreground text-xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label>Route</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={pickupRouteId}
+                  onChange={(e) => setPickupRouteId(e.target.value)}
+                >
+                  {routes.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      Bus {r.busNo} — {r.routeName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label>Stop Name *</Label>
+                <Input
+                  value={pickupForm.stopName}
+                  onChange={(e) =>
+                    setPickupForm((p) => ({ ...p, stopName: e.target.value }))
+                  }
+                  placeholder="e.g. Main Gate, Railway Station"
+                  data-ocid="pickup-name-input"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label>Order</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={pickupForm.order}
+                    onChange={(e) =>
+                      setPickupForm((p) => ({
+                        ...p,
+                        order: Number(e.target.value),
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Distance (km)</Label>
+                  <Input
+                    value={pickupForm.distance}
+                    onChange={(e) =>
+                      setPickupForm((p) => ({ ...p, distance: e.target.value }))
+                    }
+                    placeholder="e.g. 5.2"
+                  />
+                </div>
+              </div>
+              <div>
+                <Label>Monthly Fare (₹) *</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={pickupForm.fare || ""}
+                  onChange={(e) =>
+                    setPickupForm((p) => ({
+                      ...p,
+                      fare: Math.max(0, Number(e.target.value)),
+                    }))
+                  }
+                  placeholder="e.g. 500"
+                  data-ocid="pickup-fare-input"
+                />
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Students at this stop will be charged this amount each month
+                </p>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button onClick={handleSavePickup} data-ocid="save-pickup-btn">
+                  Save Stop
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPickupModal(false);
+                    setEditPickupId(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Confirm delete modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm shadow-elevated">
+            <CardHeader>
+              <CardTitle className="text-base text-destructive">
+                ⚠️ Delete Route?
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                This route has students assigned. Deleting it will remove all
+                student transport assignments for this route.
+              </p>
+              <div className="flex gap-2">
+                <Button variant="destructive" onClick={handleConfirmDelete}>
+                  Yes, Delete
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmDelete(null)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

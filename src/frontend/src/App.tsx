@@ -1,188 +1,185 @@
-import { Toaster } from "@/components/ui/sonner";
-import { useEffect, useState } from "react";
-import { Layout } from "./components/layout/Layout";
-import {
-  AuthProvider,
-  generateCredentialsFromData,
-  useAuth,
-} from "./context/AuthContext";
-import { SchoolProvider } from "./context/SchoolContext";
-import { Academics } from "./pages/Academics";
-import { Alumni } from "./pages/Alumni";
-import { Attendance } from "./pages/Attendance";
-import { Certificate } from "./pages/Certificate";
-import { Communicate } from "./pages/Communicate";
-import { Dashboard } from "./pages/Dashboard";
-import { DriverDashboard } from "./pages/DriverDashboard";
-import { Examinations } from "./pages/Examinations";
-import { Expenses } from "./pages/Expenses";
-import { Fees } from "./pages/Fees";
-import { HumanResource } from "./pages/HR";
-import { Homework } from "./pages/Homework";
-import { Inventory } from "./pages/Inventory";
-import { LoginPage } from "./pages/LoginPage";
-import { ParentDashboard } from "./pages/ParentDashboard";
-import { PromoteStudents } from "./pages/PromoteStudents";
-import { QRScanner } from "./pages/QRScanner";
-import { Reports } from "./pages/Reports";
-import { Settings } from "./pages/Settings";
-import { Students } from "./pages/Students";
-import { TeacherTimetable } from "./pages/TeacherTimetable";
-import { Transport } from "./pages/Transport";
-import { WhatsApp } from "./pages/WhatsApp";
-import { seedDemoDataIfEmpty } from "./utils/demoData";
+import { useState } from "react";
+import Layout from "./components/Layout";
+import { useApp } from "./context/AppContext";
+import { AppProvider } from "./context/AppContext";
+import Academics from "./pages/Academics";
+import AlumniPage from "./pages/Alumni";
+import Attendance from "./pages/Attendance";
+import Certificates from "./pages/Certificates";
+import Communication from "./pages/Communication";
+import Dashboard from "./pages/Dashboard";
+import Documentation from "./pages/Documentation";
+import Examinations from "./pages/Examinations";
+import Expenses from "./pages/Expenses";
+import Fees from "./pages/Fees";
+import HR from "./pages/HR";
+import HomeworkPage from "./pages/Homework";
+import Inventory from "./pages/Inventory";
+import Login from "./pages/Login";
+import Placeholder from "./pages/Placeholder";
+import PromoteStudents from "./pages/PromoteStudents";
+import Reports from "./pages/Reports";
+import Settings from "./pages/Settings";
+import Students from "./pages/Students";
+import Transport from "./pages/Transport";
 
-// Increment this version to wipe all old localStorage data on next load
-const APP_DATA_VERSION = "v29-clean";
+const PAGE_META: Record<string, { title: string; description?: string }> = {
+  "academics/classes": {
+    title: "Classes & Sections",
+    description: "Manage class and section structure.",
+  },
+  "academics/subjects": {
+    title: "Subjects",
+    description: "Define subjects and class assignments.",
+  },
+  "academics/timetable": {
+    title: "Teacher Timetable",
+    description: "Build class timetables for teachers.",
+  },
+  "academics/syllabus": {
+    title: "Syllabus",
+    description: "Track chapter-wise syllabus progress.",
+  },
+  "academics/classteachers": {
+    title: "Class Teachers",
+    description: "Assign class teachers to sections.",
+  },
+  "hr/payroll": {
+    title: "Payroll",
+    description: "Process staff salaries and payroll.",
+  },
+  "hr/leave": {
+    title: "Leave Management",
+    description: "Track staff leave applications.",
+  },
+  "examinations/results": {
+    title: "Examination Results",
+    description: "Record and publish exam results.",
+  },
+  transport: {
+    title: "Transport",
+    description: "Manage bus routes and student transport.",
+  },
+  inventory: {
+    title: "Inventory",
+    description: "Track stock, purchases, and sales.",
+  },
+  "communication/whatsapp": {
+    title: "WhatsApp Messages",
+    description: "Send WhatsApp notifications.",
+  },
+  "communication/rcs": {
+    title: "RCS Messages",
+    description: "Send Google RCS messages.",
+  },
+  "communication/scheduler": {
+    title: "Notification Scheduler",
+    description: "Configure automated notifications.",
+  },
+  certificates: {
+    title: "Template Studio",
+    description: "Design and print school certificates and ID cards.",
+  },
+  alumni: {
+    title: "Alumni",
+    description: "Manage alumni directory and events.",
+  },
+  expenses: {
+    title: "Expenses & Income",
+    description: "Track school expenses and income.",
+  },
+  homework: {
+    title: "Homework",
+    description: "Assign and track student homework.",
+  },
+  reports: {
+    title: "Reports",
+    description: "Generate and view school reports.",
+  },
+  "qr-attendance": {
+    title: "QR Attendance Scanner",
+    description: "Scan student QR codes to mark attendance.",
+  },
+  documentation: {
+    title: "Documentation",
+    description: "User guides, deployment instructions, and help.",
+  },
+  "settings/profile": {
+    title: "School Profile",
+    description: "Configure school details.",
+  },
+  "settings/sessions": {
+    title: "Session Management",
+    description: "Create and archive academic sessions.",
+  },
+  "settings/whatsapp": {
+    title: "WhatsApp API Settings",
+    description: "Configure WhatsApp API credentials.",
+  },
+  "settings/online-payment": {
+    title: "Online Payment",
+    description: "Enable GPay, Razorpay, PayU gateways.",
+  },
+  "settings/notifications": {
+    title: "Notification Scheduler",
+    description: "Set up automated notification rules.",
+  },
+  "settings/users": {
+    title: "User Management",
+    description: "Manage all system user accounts.",
+  },
+};
 
-function clearOldData() {
-  const stored = localStorage.getItem("erp_data_version");
-  if (stored !== APP_DATA_VERSION) {
-    // Clear all ERP data keys
-    const erpKeys = Object.keys(localStorage).filter((k) =>
-      k.startsWith("erp_"),
-    );
-    for (const key of erpKeys) {
-      localStorage.removeItem(key);
-    }
-    localStorage.setItem("erp_data_version", APP_DATA_VERSION);
-  }
-}
+function AppRoutes() {
+  const { currentUser } = useApp();
+  const [activePage, setActivePage] = useState("dashboard");
 
-function getPath() {
-  return window.location.hash.replace("#", "") || "/";
-}
+  if (!currentUser) return <Login />;
 
-function AppInner() {
-  const { user } = useAuth();
-  const [path, setPath] = useState(getPath);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [isSyncing, setIsSyncing] = useState(false);
-
-  // Clear old demo data, then initialize clean defaults
-  useEffect(() => {
-    clearOldData();
-    seedDemoDataIfEmpty();
-    const timer = setTimeout(() => {
-      generateCredentialsFromData();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    const handler = () => setPath(getPath());
-    window.addEventListener("hashchange", handler);
-    return () => window.removeEventListener("hashchange", handler);
-  }, []);
-
-  useEffect(() => {
-    const onOnline = () => {
-      setIsOnline(true);
-      setIsSyncing(true);
-      setTimeout(() => setIsSyncing(false), 1500);
-    };
-    const onOffline = () => setIsOnline(false);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, []);
-
-  if (!user) return <LoginPage />;
-
-  const navigate = (to: string) => {
-    window.location.hash = to;
-  };
-
-  // Driver-only view
-  if (user.role === "driver") {
-    if (path === "/qr-scanner")
-      return (
-        <Layout
-          collapsed={sidebarCollapsed}
-          onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-          currentPath={path}
-          navigate={navigate}
-          isOnline={isOnline}
-          isSyncing={isSyncing}
-        >
-          <QRScanner />
-        </Layout>
-      );
-    return (
-      <Layout
-        collapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-        currentPath={path}
-        navigate={navigate}
-        isOnline={isOnline}
-        isSyncing={isSyncing}
-      >
-        <DriverDashboard navigate={navigate} />
-      </Layout>
-    );
-  }
-
-  // Parent-only view
-  if (user.role === "parent") {
-    return (
-      <Layout
-        collapsed={sidebarCollapsed}
-        onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-        currentPath={path}
-        navigate={navigate}
-        isOnline={isOnline}
-        isSyncing={isSyncing}
-      >
-        {path === "/fees" ? (
-          <Fees />
-        ) : path === "/attendance" ? (
-          <Attendance />
-        ) : path === "/communicate" ? (
-          <Communicate />
-        ) : (
-          <ParentDashboard navigate={navigate} />
-        )}
-      </Layout>
-    );
-  }
+  const navigate = (page: string) => setActivePage(page);
 
   const renderPage = () => {
-    if (path === "/" || path === "") return <Dashboard navigate={navigate} />;
-    if (path === "/students") return <Students />;
-    if (path === "/fees") return <Fees />;
-    if (path === "/attendance") return <Attendance />;
-    if (path === "/examinations") return <Examinations />;
-    if (path === "/academics") return <Academics />;
-    if (path === "/hr") return <HumanResource />;
-    if (path === "/transport") return <Transport />;
-    if (path === "/reports") return <Reports />;
-    if (path === "/communicate") return <Communicate />;
-    if (path === "/whatsapp") return <WhatsApp />;
-    if (path === "/inventory") return <Inventory />;
-    if (path === "/expenses") return <Expenses />;
-    if (path === "/certificate") return <Certificate />;
-    if (path === "/homework") return <Homework />;
-    if (path === "/settings") return <Settings />;
-    if (path === "/alumni") return <Alumni />;
-    if (path === "/teacher-timetable") return <TeacherTimetable />;
-    if (path === "/promote") return <PromoteStudents />;
-    if (path === "/qr-scanner") return <QRScanner />;
-    return <Dashboard navigate={navigate} />;
+    if (activePage === "dashboard") return <Dashboard onNavigate={navigate} />;
+    if (activePage === "students") return <Students />;
+    if (activePage === "attendance") return <Attendance />;
+    if (activePage === "fees" || activePage.startsWith("fees/"))
+      return <Fees />;
+    if (activePage === "examinations" || activePage.startsWith("examinations/"))
+      return <Examinations />;
+    if (activePage === "hr" || activePage.startsWith("hr/"))
+      return <HR onNavigate={navigate} />;
+    if (activePage === "promote") return <PromoteStudents />;
+    if (activePage === "transport") return <Transport />;
+    if (activePage === "inventory") return <Inventory />;
+    if (activePage === "expenses") return <Expenses />;
+    if (activePage === "homework") return <HomeworkPage />;
+    if (activePage === "certificates") return <Certificates />;
+    if (activePage === "alumni") return <AlumniPage />;
+    if (activePage === "reports") return <Reports />;
+    if (activePage === "documentation") return <Documentation />;
+    if (
+      activePage === "communication" ||
+      activePage.startsWith("communication/")
+    )
+      return <Communication />;
+    if (activePage === "settings" || activePage.startsWith("settings/"))
+      return <Settings />;
+    if (activePage === "academics" || activePage.startsWith("academics/"))
+      return <Academics />;
+    const meta = PAGE_META[activePage];
+    if (meta)
+      return (
+        <Placeholder
+          title={meta.title}
+          description={meta.description}
+          onNavigate={navigate}
+        />
+      );
+    return <Dashboard onNavigate={navigate} />;
   };
 
   return (
-    <Layout
-      collapsed={sidebarCollapsed}
-      onToggleSidebar={() => setSidebarCollapsed((v) => !v)}
-      currentPath={path}
-      navigate={navigate}
-      isOnline={isOnline}
-      isSyncing={isSyncing}
-    >
+    <Layout activePage={activePage} onNavigate={navigate}>
       {renderPage()}
     </Layout>
   );
@@ -190,11 +187,8 @@ function AppInner() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <SchoolProvider>
-        <AppInner />
-        <Toaster />
-      </SchoolProvider>
-    </AuthProvider>
+    <AppProvider>
+      <AppRoutes />
+    </AppProvider>
   );
 }

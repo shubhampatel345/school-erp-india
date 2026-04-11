@@ -1,0 +1,840 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Badge } from "../../components/ui/badge";
+import { Button } from "../../components/ui/button";
+import { Input } from "../../components/ui/input";
+import { Label } from "../../components/ui/label";
+import { useApp } from "../../context/AppContext";
+import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface SubjectRow {
+  id: string;
+  date: string;
+  day: string;
+  subject: string;
+}
+
+interface ClassTimetable {
+  classKey: string;
+  rows: SubjectRow[];
+}
+
+export interface SavedTimetable {
+  id: string;
+  examName: string;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  tables: ClassTimetable[];
+  savedAt: string;
+}
+
+interface AcademicSubject {
+  id: string;
+  name: string;
+  classes: string[];
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const DEFAULT_SUBJECTS = [
+  "Hindi",
+  "English",
+  "Mathematics",
+  "Science",
+  "Social Science",
+  "Computer",
+  "Sanskrit",
+  "Art",
+  "Physical Education",
+];
+
+const DAYS = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getDayName(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return DAYS[d.getDay()];
+}
+
+function getExamDates(start: string, end: string): string[] {
+  if (!start || !end || start > end) return [];
+  const dates: string[] = [];
+  const cur = new Date(`${start}T12:00:00`);
+  const last = new Date(`${end}T12:00:00`);
+  while (cur <= last) {
+    if (cur.getDay() !== 0) dates.push(cur.toISOString().split("T")[0]);
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function getSubjectsForClass(
+  className: string,
+  acSubjects: AcademicSubject[],
+): string[] {
+  const classNum = className
+    .replace("Class ", "")
+    .replace(/[A-Z]$/, "")
+    .trim();
+  const matched = acSubjects
+    .filter((s) => s.classes?.includes(classNum))
+    .map((s) => s.name);
+  return matched.length > 0 ? matched : [...DEFAULT_SUBJECTS];
+}
+
+function formatDate(dateStr: string): string {
+  if (!dateStr) return "";
+  const d = new Date(`${dateStr}T12:00:00`);
+  return d.toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function exportCSV(tables: ClassTimetable[], examName: string) {
+  if (tables.length === 0) return;
+  const allDates = [
+    ...new Set(tables.flatMap((t) => t.rows.map((r) => r.date))),
+  ].sort();
+  const headers = ["Date", "Day", ...tables.map((t) => t.classKey)];
+  const rows = allDates.map((date) => {
+    const dayName = getDayName(date);
+    const subjects = tables.map(
+      (t) => t.rows.find((r) => r.date === date)?.subject ?? "",
+    );
+    return [formatDate(date), dayName, ...subjects];
+  });
+  const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${examName.replace(/\s+/g, "_")}_timetable.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Class Card with drag-only-subjects ────────────────────────────────────────
+function ClassCard({
+  table,
+  onReorder,
+  saved,
+}: {
+  table: ClassTimetable;
+  onReorder: (classKey: string, newRows: SubjectRow[]) => void;
+  saved: boolean;
+}) {
+  const dragIdx = useRef<number | null>(null);
+  const [dragOver, setDragOver] = useState<number | null>(null);
+
+  const handleDragStart = (idx: number) => {
+    if (saved) return;
+    dragIdx.current = idx;
+  };
+
+  const handleDrop = (idx: number) => {
+    setDragOver(null);
+    if (saved || dragIdx.current === null || dragIdx.current === idx) return;
+    const newRows = [...table.rows];
+    const dragged = newRows[dragIdx.current];
+    newRows.splice(dragIdx.current, 1);
+    newRows.splice(idx, 0, dragged);
+    const dates = table.rows.map((r) => r.date);
+    const days = table.rows.map((r) => r.day);
+    const reordered = newRows.map((r, i) => ({
+      ...r,
+      date: dates[i],
+      day: days[i],
+    }));
+    onReorder(table.classKey, reordered);
+    dragIdx.current = null;
+  };
+
+  return (
+    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-card">
+      <div className="bg-primary/10 px-4 py-2.5 border-b border-border flex items-center justify-between">
+        <span className="font-semibold text-foreground font-display">
+          {table.classKey}
+        </span>
+        {!saved && (
+          <span className="text-xs text-muted-foreground italic">
+            ↕ Drag subject to reorder
+          </span>
+        )}
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-muted/30">
+            <th className="px-3 py-2 text-left text-muted-foreground font-medium w-28">
+              Date
+            </th>
+            <th className="px-3 py-2 text-left text-muted-foreground font-medium w-20">
+              Day
+            </th>
+            <th className="px-3 py-2 text-left text-muted-foreground font-medium">
+              Subject
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {table.rows.map((row, idx) => (
+            <tr
+              key={row.id}
+              className={`border-t border-border/50 transition-colors ${
+                dragOver === idx && !saved
+                  ? "bg-accent/10"
+                  : !saved
+                    ? "hover:bg-muted/20"
+                    : ""
+              }`}
+              draggable={!saved}
+              onDragStart={() => handleDragStart(idx)}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(idx);
+              }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={() => handleDrop(idx)}
+            >
+              <td className="px-3 py-2 text-muted-foreground font-mono text-xs whitespace-nowrap">
+                {formatDate(row.date)}
+              </td>
+              <td className="px-3 py-2 text-muted-foreground text-xs">
+                {row.day.slice(0, 3)}
+              </td>
+              <td className="px-3 py-2 font-medium text-foreground">
+                <div className="flex items-center gap-2">
+                  {!saved && (
+                    <span
+                      className="text-muted-foreground cursor-grab select-none text-base leading-none"
+                      aria-hidden="true"
+                    >
+                      ⠿
+                    </span>
+                  )}
+                  {row.subject}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ── Combined Excel View ───────────────────────────────────────────────────────
+function CombinedView({
+  tables,
+  examName,
+  examTime,
+}: {
+  tables: ClassTimetable[];
+  examName: string;
+  examTime?: string;
+}) {
+  if (tables.length === 0) return null;
+  const allDates = [
+    ...new Set(tables.flatMap((t) => t.rows.map((r) => r.date))),
+  ].sort();
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h3 className="font-semibold text-foreground">
+          Combined Timetable — All Classes
+        </h3>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => exportCSV(tables, examName)}
+            data-ocid="exam-export-csv"
+          >
+            Export CSV
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => window.print()}
+            data-ocid="exam-print-combined"
+          >
+            Print
+          </Button>
+        </div>
+      </div>
+
+      {/* Print header (hidden on screen) */}
+      <div className="hidden print:block text-center mb-4">
+        <h1 className="text-xl font-bold">
+          {
+            ls.get<{ name: string }>("school_profile", {
+              name: "SHUBH SCHOOL ERP",
+            }).name
+          }
+        </h1>
+        <h2 className="text-base font-semibold mt-1">{examName} — Timetable</h2>
+        {examTime && <p className="text-sm">Time: {examTime}</p>}
+      </div>
+
+      <div className="overflow-x-auto rounded-xl border border-border bg-card print:border-0">
+        <table className="w-full text-sm min-w-max">
+          <thead>
+            <tr className="bg-primary/10 border-b border-border">
+              <th className="px-3 py-2.5 text-left text-foreground font-semibold border-r border-border sticky left-0 bg-primary/10 whitespace-nowrap">
+                Date
+              </th>
+              <th className="px-3 py-2.5 text-left text-foreground font-semibold border-r border-border whitespace-nowrap">
+                Day
+              </th>
+              {tables.map((t) => (
+                <th
+                  key={t.classKey}
+                  className="px-3 py-2.5 text-center text-foreground font-semibold border-r border-border last:border-r-0 whitespace-nowrap"
+                >
+                  {t.classKey}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {allDates.map((date, i) => (
+              <tr
+                key={date}
+                className={`border-t border-border ${i % 2 === 0 ? "bg-background" : "bg-muted/20"}`}
+              >
+                <td className="px-3 py-2 font-mono text-xs text-muted-foreground border-r border-border sticky left-0 bg-inherit whitespace-nowrap">
+                  {formatDate(date)}
+                </td>
+                <td className="px-3 py-2 text-muted-foreground border-r border-border text-xs">
+                  {getDayName(date)}
+                </td>
+                {tables.map((t) => {
+                  const row = t.rows.find((r) => r.date === date);
+                  return (
+                    <td
+                      key={t.classKey}
+                      className="px-3 py-2 text-center font-medium text-foreground border-r border-border last:border-r-0 whitespace-nowrap"
+                    >
+                      {row?.subject ?? "—"}
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Print signature line */}
+      <div className="hidden print:flex justify-between mt-8 text-sm">
+        <span>Class Teacher Signature: _______________</span>
+        <span>Principal Signature: _______________</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+export default function ExamTimetableMaker() {
+  const { addNotification } = useApp();
+
+  // Step 1 state
+  const [examName, setExamName] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [startTime, setStartTime] = useState("09:00");
+  const [endTime, setEndTime] = useState("12:00");
+
+  // Step 2 state
+  const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+  const [classSubjects, setClassSubjects] = useState<Record<string, string[]>>(
+    {},
+  );
+
+  // Generated timetables
+  const [generated, setGenerated] = useState<ClassTimetable[]>([]);
+  const [isSaved, setIsSaved] = useState(false);
+
+  // Saved list
+  const [savedList, setSavedList] = useState<SavedTimetable[]>(() =>
+    ls.get<SavedTimetable[]>("exam_timetables", []),
+  );
+  const [viewSaved, setViewSaved] = useState<SavedTimetable | null>(null);
+
+  // Academic subjects
+  const [acSubjects, setAcSubjects] = useState<AcademicSubject[]>([]);
+  useEffect(() => {
+    setAcSubjects(ls.get<AcademicSubject[]>("academics_subjects", []));
+  }, []);
+
+  const examDates = getExamDates(startDate, endDate);
+
+  const allClassKeys: string[] = [];
+  for (const cls of CLASSES) {
+    for (const sec of SECTIONS.slice(0, 3)) {
+      allClassKeys.push(`Class ${cls}${sec}`);
+    }
+  }
+
+  const toggleClass = (key: string) => {
+    setSelectedClasses((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+    setIsSaved(false);
+    setGenerated([]);
+  };
+
+  const toggleSubject = (classKey: string, subject: string) => {
+    setClassSubjects((prev) => {
+      const current =
+        prev[classKey] ?? getSubjectsForClass(classKey, acSubjects);
+      const updated = current.includes(subject)
+        ? current.filter((s) => s !== subject)
+        : [...current, subject];
+      return { ...prev, [classKey]: updated };
+    });
+  };
+
+  const getSubjectsFor = useCallback(
+    (classKey: string) =>
+      classSubjects[classKey] ?? getSubjectsForClass(classKey, acSubjects),
+    [classSubjects, acSubjects],
+  );
+
+  const generate = useCallback(() => {
+    if (
+      !examName.trim() ||
+      examDates.length === 0 ||
+      selectedClasses.length === 0
+    )
+      return;
+    const tables: ClassTimetable[] = selectedClasses.map((classKey) => {
+      const subjects = getSubjectsFor(classKey);
+      const shuffled = shuffle(subjects);
+      const rows: SubjectRow[] = examDates.map((date, i) => ({
+        id: generateId(),
+        date,
+        day: getDayName(date),
+        subject: shuffled[i % shuffled.length],
+      }));
+      return { classKey, rows };
+    });
+    setGenerated(tables);
+    setIsSaved(false);
+  }, [examName, examDates, selectedClasses, getSubjectsFor]);
+
+  const handleReorder = useCallback(
+    (classKey: string, newRows: SubjectRow[]) => {
+      setGenerated((prev) =>
+        prev.map((t) =>
+          t.classKey === classKey ? { ...t, rows: newRows } : t,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleSave = useCallback(() => {
+    if (generated.length === 0) return;
+    const entry: SavedTimetable = {
+      id: generateId(),
+      examName,
+      startDate,
+      endDate,
+      startTime,
+      endTime,
+      tables: generated,
+      savedAt: new Date().toISOString(),
+    };
+    const updated = [entry, ...savedList];
+    ls.set("exam_timetables", updated);
+    setSavedList(updated);
+    setIsSaved(true);
+    addNotification(`Exam timetable saved: ${examName}`, "success", "📅");
+  }, [
+    generated,
+    examName,
+    startDate,
+    endDate,
+    startTime,
+    endTime,
+    savedList,
+    addNotification,
+  ]);
+
+  const canGenerate =
+    examName.trim().length > 0 &&
+    startDate.length > 0 &&
+    endDate.length > 0 &&
+    selectedClasses.length > 0 &&
+    examDates.length > 0;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Step 1: Exam Details ──────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-5 space-y-5">
+        <div className="flex items-center gap-3">
+          <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
+            1
+          </span>
+          <div>
+            <h2 className="font-semibold text-foreground">Exam Details</h2>
+            <p className="text-xs text-muted-foreground">
+              Enter exam name, dates and time
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
+            <Label>Exam Name</Label>
+            <Input
+              placeholder="e.g. Half Yearly 2025-26"
+              value={examName}
+              onChange={(e) => setExamName(e.target.value)}
+              data-ocid="exam-name"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Start Date</Label>
+            <Input
+              type="date"
+              value={startDate}
+              onChange={(e) => {
+                setStartDate(e.target.value);
+                setGenerated([]);
+                setIsSaved(false);
+              }}
+              data-ocid="exam-start-date"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>End Date</Label>
+            <Input
+              type="date"
+              value={endDate}
+              onChange={(e) => {
+                setEndDate(e.target.value);
+                setGenerated([]);
+                setIsSaved(false);
+              }}
+              data-ocid="exam-end-date"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Time From</Label>
+            <Input
+              type="time"
+              value={startTime}
+              onChange={(e) => setStartTime(e.target.value)}
+              data-ocid="exam-start-time"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Time To</Label>
+            <Input
+              type="time"
+              value={endTime}
+              onChange={(e) => setEndTime(e.target.value)}
+              data-ocid="exam-end-time"
+            />
+          </div>
+          {examDates.length > 0 && (
+            <div className="space-y-1.5 flex flex-col justify-end">
+              <Label>Exam Schedule</Label>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant="secondary">{examDates.length} days</Badge>
+                <span className="text-xs text-muted-foreground">
+                  (Sundays excluded)
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Dates preview strip */}
+        {examDates.length > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              Exam Dates Preview
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {examDates.map((d) => (
+                <span
+                  key={d}
+                  className="px-2 py-1 rounded-md bg-muted/50 border border-border text-xs font-mono text-muted-foreground"
+                >
+                  {formatDate(d)} ({getDayName(d).slice(0, 3)})
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Step 2: Classes & Subjects ────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-5 space-y-5">
+        <div className="flex items-center gap-3">
+          <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
+            2
+          </span>
+          <div>
+            <h2 className="font-semibold text-foreground">
+              Classes &amp; Subjects
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Select participating classes and confirm subjects
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Select Classes</Label>
+          <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-10 gap-1.5">
+            {allClassKeys.map((key) => (
+              <label
+                key={key}
+                className={`flex items-center justify-center p-2 rounded-lg border cursor-pointer text-xs font-medium transition-smooth select-none ${
+                  selectedClasses.includes(key)
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={selectedClasses.includes(key)}
+                  onChange={() => toggleClass(key)}
+                  data-ocid={`exam-class-${key.replace(/\s+/g, "-").toLowerCase()}`}
+                />
+                {key.replace("Class ", "")}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {selectedClasses.length > 0 && (
+          <div className="space-y-3">
+            <Label>Subjects per Class</Label>
+            <div className="space-y-3">
+              {selectedClasses.map((classKey) => {
+                const available = getSubjectsForClass(classKey, acSubjects);
+                const selected = getSubjectsFor(classKey);
+                return (
+                  <div
+                    key={classKey}
+                    className="bg-muted/30 rounded-lg p-3 space-y-2"
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-semibold text-foreground">
+                        {classKey}
+                      </p>
+                      <span className="text-xs text-muted-foreground">
+                        {selected.length} subjects selected
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {available.map((subj) => (
+                        <button
+                          key={subj}
+                          type="button"
+                          onClick={() => toggleSubject(classKey, subj)}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-smooth ${
+                            selected.includes(subj)
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                          }`}
+                        >
+                          {subj}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Step 3: Generate ─────────────────────────────────────── */}
+      <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
+              3
+            </span>
+            <div>
+              <h2 className="font-semibold text-foreground">
+                Generate Timetable
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                Auto-distributes subjects across exam dates
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              onClick={generate}
+              disabled={!canGenerate}
+              data-ocid="exam-generate"
+            >
+              {generated.length > 0 ? "Re-Generate" : "Generate Timetable"}
+            </Button>
+            {generated.length > 0 && !isSaved && (
+              <Button
+                variant="outline"
+                onClick={handleSave}
+                className="border-accent text-accent hover:bg-accent/10"
+                data-ocid="exam-save"
+              >
+                Save Timetable
+              </Button>
+            )}
+            {isSaved && (
+              <Badge className="bg-accent/20 text-accent border border-accent/30 px-3 py-1.5">
+                ✓ Saved
+              </Badge>
+            )}
+          </div>
+        </div>
+
+        {!canGenerate && (
+          <p className="text-muted-foreground text-sm bg-muted/30 rounded-lg px-4 py-3">
+            Complete Steps 1 and 2 — enter exam name, select dates, and pick at
+            least one class.
+          </p>
+        )}
+
+        {generated.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {generated.map((table) => (
+              <ClassCard
+                key={table.classKey}
+                table={table}
+                onReorder={handleReorder}
+                saved={isSaved}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Step 4: Combined View (after save) ───────────────────── */}
+      {isSaved && generated.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-4">
+          <div className="flex items-center gap-3">
+            <span className="w-7 h-7 rounded-full bg-accent text-accent-foreground text-sm font-bold flex items-center justify-center shrink-0">
+              4
+            </span>
+            <div>
+              <h2 className="font-semibold text-foreground">
+                Combined Excel View
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                All classes in one table — print or export as CSV
+              </p>
+            </div>
+          </div>
+          <CombinedView
+            tables={generated}
+            examName={examName}
+            examTime={`${startTime} – ${endTime}`}
+          />
+        </div>
+      )}
+
+      {/* ── Saved Timetables ─────────────────────────────────────── */}
+      {savedList.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+          <h2 className="font-semibold text-foreground">
+            Saved Timetables ({savedList.length})
+          </h2>
+          <div className="space-y-2">
+            {savedList.map((entry) => (
+              <div key={entry.id} className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-smooth">
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground truncate">
+                      {entry.examName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(entry.startDate)} →{" "}
+                      {formatDate(entry.endDate)}
+                      &nbsp;·&nbsp;{entry.startTime}–{entry.endTime}
+                      &nbsp;·&nbsp;{entry.tables.length} classes
+                    </p>
+                  </div>
+                  <div className="flex gap-2 shrink-0 ml-3">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() =>
+                        setViewSaved(viewSaved?.id === entry.id ? null : entry)
+                      }
+                      data-ocid={`exam-view-saved-${entry.id}`}
+                    >
+                      {viewSaved?.id === entry.id ? "Hide" : "View"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => exportCSV(entry.tables, entry.examName)}
+                    >
+                      CSV
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => {
+                        const updated = savedList.filter(
+                          (e) => e.id !== entry.id,
+                        );
+                        ls.set("exam_timetables", updated);
+                        setSavedList(updated);
+                        if (viewSaved?.id === entry.id) setViewSaved(null);
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+
+                {viewSaved?.id === entry.id && (
+                  <div className="pl-4 border-l-2 border-primary/30">
+                    <CombinedView
+                      tables={entry.tables}
+                      examName={entry.examName}
+                      examTime={`${entry.startTime} – ${entry.endTime}`}
+                    />
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,104 +1,52 @@
-// SHUBH SCHOOL ERP - Service Worker
-const CACHE_NAME = 'shubh-erp-v1';
+const CACHE_NAME = 'shubh-erp-v3';
 const STATIC_ASSETS = [
   '/',
+  '/index.html',
   '/manifest.json',
 ];
 
-// Install event - cache static assets
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+      return cache.addAll(STATIC_ASSETS).catch(() => {
+        // Some assets may not exist yet — ignore failures
+      });
+    })
   );
+  self.skipWaiting();
 });
 
-// Activate event - clean up old caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames
-          .filter((name) => name !== CACHE_NAME)
-          .map((name) => caches.delete(name))
-      );
-    }).then(() => self.clients.claim())
+    caches.keys().then((keys) =>
+      Promise.all(
+        keys
+          .filter((k) => k !== CACHE_NAME)
+          .map((k) => caches.delete(k))
+      )
+    )
   );
+  self.clients.claim();
 });
 
-// Fetch event - network first with cache fallback
 self.addEventListener('fetch', (event) => {
-  // Skip non-GET requests and chrome-extension requests
+  // Only handle GET requests for same-origin resources
   if (event.request.method !== 'GET') return;
-  if (!event.request.url.startsWith('http')) return;
+  if (!event.request.url.startsWith(self.location.origin)) return;
+  // Skip API calls (WhatsApp, etc.)
+  if (event.request.url.includes('/api/')) return;
 
-  const url = new URL(event.request.url);
-
-  // For navigation requests (HTML pages): network-first
-  if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          const cloned = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
-          return response;
-        })
-        .catch(() => caches.match('/') || caches.match(event.request))
-    );
-    return;
-  }
-
-  // For static assets (JS, CSS, fonts, images): cache-first
-  if (
-    url.pathname.match(/\.(js|css|woff2?|ttf|eot|png|jpg|jpeg|svg|ico|webp)$/)
-  ) {
-    event.respondWith(
-      caches.match(event.request).then((cached) => {
-        if (cached) return cached;
-        return fetch(event.request).then((response) => {
-          if (response.ok) {
-            const cloned = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
-          }
-          return response;
-        });
-      })
-    );
-    return;
-  }
-
-  // For everything else: network-first with cache fallback
   event.respondWith(
-    fetch(event.request)
-      .then((response) => {
-        if (response.ok) {
-          const cloned = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cloned));
+    caches.match(event.request).then((cached) => {
+      const networkFetch = fetch(event.request).then((response) => {
+        if (response && response.status === 200 && response.type === 'basic') {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, clone));
         }
         return response;
-      })
-      .catch(() => caches.match(event.request))
-  );
-});
-
-// Handle push notifications
-self.addEventListener('push', (event) => {
-  const data = event.data?.json() || {};
-  const title = data.title || 'SHUBH SCHOOL ERP';
-  const options = {
-    body: data.body || 'You have a new notification',
-    icon: '/assets/generated/pwa-icon-192.dim_192x192.png',
-    badge: '/assets/generated/pwa-icon-192.dim_192x192.png',
-    data: data,
-  };
-  event.waitUntil(self.registration.showNotification(title, options));
-});
-
-// Handle notification click
-self.addEventListener('notificationclick', (event) => {
-  event.notification.close();
-  event.waitUntil(
-    clients.openWindow(event.notification.data?.url || '/')
+      });
+      // Network-first, cache fallback
+      return networkFetch.catch(() => cached ?? caches.match('/'));
+    })
   );
 });

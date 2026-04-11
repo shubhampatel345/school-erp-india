@@ -1,954 +1,939 @@
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import {
   BarChart2,
-  CheckSquare,
+  BookOpen,
+  CheckCircle,
+  Clock,
   Edit2,
-  Plus,
-  Square,
+  PlusCircle,
   Trash2,
-  X,
+  Users,
+  XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
+import { useApp } from "../context/AppContext";
+import type {
+  HomeworkSubmission,
+  Homework as HomeworkType,
+  Student,
+  Subject,
+} from "../types";
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Legend,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
-import { toast } from "sonner";
+  CLASSES,
+  LS_KEYS,
+  SECTIONS,
+  generateId,
+  ls,
+} from "../utils/localStorage";
 
-interface HWRecord {
-  id: string;
-  class: string;
-  section: string;
-  subject: string;
-  title: string;
-  description: string;
-  assignedDate: string;
-  dueDate: string;
-  status: "Open" | "Closed";
+// ─── Helpers ─────────────────────────────────────────────
+const today = new Date().toISOString().slice(0, 10);
+
+function getStatus(hw: HomeworkType): "active" | "overdue" {
+  return hw.dueDate < today ? "overdue" : "active";
 }
 
-interface Submission {
-  hwId: string;
-  studentAdmNo: string;
-  studentName: string;
-  submitted: boolean;
-}
+// ─── Homework List Tab ───────────────────────────────────
+function HomeworkListTab() {
+  const { currentSession, currentUser, addNotification } = useApp();
+  const subjects = ls.get<Subject[]>(LS_KEYS.subjects, []);
 
-const CLASSES = [
-  "Class 1",
-  "Class 3",
-  "Class 5",
-  "Class 7",
-  "Class 8",
-  "Class 10",
-  "Class 12",
-];
-const SECTIONS = ["A", "B", "C"];
-const SUBJECTS = [
-  "Mathematics",
-  "English",
-  "Hindi",
-  "Science",
-  "Social Science",
-  "Computer",
-  "Physics",
-  "Chemistry",
-  "Biology",
-];
-
-const DEMO_HW: HWRecord[] = [
-  {
-    id: "hw1",
-    class: "Class 10",
-    section: "A",
-    subject: "Mathematics",
-    title: "Trigonometry Practice Set",
-    description:
-      "Complete exercises 5.1 to 5.5 from NCERT. Show all working steps.",
-    assignedDate: "2026-03-15",
-    dueDate: "2026-03-20",
-    status: "Open",
-  },
-  {
-    id: "hw2",
-    class: "Class 7",
-    section: "B",
-    subject: "Science",
-    title: "Photosynthesis Diagram",
-    description:
-      "Draw a labeled diagram of photosynthesis process and write notes.",
-    assignedDate: "2026-03-15",
-    dueDate: "2026-03-18",
-    status: "Open",
-  },
-  {
-    id: "hw3",
-    class: "Class 5",
-    section: "A",
-    subject: "English",
-    title: "Festival Essay",
-    description: "Write a 200-word essay on 'My Favourite Festival'.",
-    assignedDate: "2026-03-14",
-    dueDate: "2026-03-17",
-    status: "Closed",
-  },
-  {
-    id: "hw4",
-    class: "Class 8",
-    section: "A",
-    subject: "Social Science",
-    title: "India Map Work",
-    description: "Mark all Indian states and capitals on the outline map.",
-    assignedDate: "2026-03-16",
-    dueDate: "2026-03-22",
-    status: "Open",
-  },
-  {
-    id: "hw5",
-    class: "Class 12",
-    section: "A",
-    subject: "Physics",
-    title: "Optics Problems",
-    description: "Solve Q1-Q15 from Chapter 9 Ray Optics in NCERT.",
-    assignedDate: "2026-03-17",
-    dueDate: "2026-03-24",
-    status: "Open",
-  },
-  {
-    id: "hw6",
-    class: "Class 10",
-    section: "B",
-    subject: "English",
-    title: "Letter Writing",
-    description: "Write a formal letter to the Principal requesting leave.",
-    assignedDate: "2026-03-10",
-    dueDate: "2026-03-13",
-    status: "Closed",
-  },
-];
-
-const CHART_COLORS = [
-  "#3b82f6",
-  "#22c55e",
-  "#f97316",
-  "#8b5cf6",
-  "#14b8a6",
-  "#eab308",
-];
-
-function loadLS<T>(key: string, fallback: T): T {
-  try {
-    return JSON.parse(localStorage.getItem(key) || "null") ?? fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-export function Homework() {
-  const [tab, setTab] = useState<"list" | "tracker" | "analytics">("list");
-  const [homework, setHomework] = useState<HWRecord[]>(() =>
-    loadLS("erp_homework", DEMO_HW),
+  const [items, setItems] = useState<HomeworkType[]>(() =>
+    ls.get<HomeworkType[]>(LS_KEYS.homework, []),
   );
-  const [submissions, setSubmissions] = useState<Submission[]>(() =>
-    loadLS("erp_hw_submissions", []),
-  );
-  const [selectedHw, setSelectedHw] = useState<HWRecord | null>(null);
-  const [filterClass, setFilterClass] = useState("");
-  const [filterSubject, setFilterSubject] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"" | "Open" | "Closed">("");
-  const [showModal, setShowModal] = useState(false);
-  const [editHw, setEditHw] = useState<HWRecord | null>(null);
+  const [filterClass, setFilterClass] = useState("all");
+  const [filterSubject, setFilterSubject] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [showForm, setShowForm] = useState(false);
+  const [editing, setEditing] = useState<HomeworkType | null>(null);
+
   const [form, setForm] = useState({
-    class: "Class 10",
-    section: "A",
-    subject: "Mathematics",
+    class: "",
+    section: "",
+    subject: "",
     title: "",
     description: "",
     dueDate: "",
-    status: "Open" as "Open" | "Closed",
   });
 
-  useEffect(() => {
-    localStorage.setItem("erp_homework", JSON.stringify(homework));
-  }, [homework]);
-  useEffect(() => {
-    localStorage.setItem("erp_hw_submissions", JSON.stringify(submissions));
-  }, [submissions]);
+  const sessionItems = useMemo(
+    () =>
+      items.filter(
+        (hw) => !hw.sessionId || hw.sessionId === currentSession?.id,
+      ),
+    [items, currentSession],
+  );
 
-  const students: Array<{ admNo: string; name: string; className: string }> =
-    (() => {
-      try {
-        return JSON.parse(localStorage.getItem("erp_students") || "[]");
-      } catch {
-        return [];
-      }
-    })();
+  const filtered = useMemo(
+    () =>
+      sessionItems.filter((hw) => {
+        const matchClass = filterClass === "all" || hw.class === filterClass;
+        const matchSubject =
+          filterSubject === "all" || hw.subject === filterSubject;
+        const status = getStatus(hw);
+        const matchStatus = filterStatus === "all" || filterStatus === status;
+        return matchClass && matchSubject && matchStatus;
+      }),
+    [sessionItems, filterClass, filterSubject, filterStatus],
+  );
 
-  const filtered = homework.filter((hw) => {
-    return (
-      (!filterClass || hw.class === filterClass) &&
-      (!filterSubject || hw.subject === filterSubject) &&
-      (!filterStatus || hw.status === filterStatus)
-    );
-  });
+  const handleSubmit = () => {
+    if (!form.class || !form.subject || !form.title || !form.dueDate) return;
 
-  const saveHw = () => {
-    if (!form.title.trim()) return;
-    const today = new Date().toISOString().split("T")[0];
-    if (editHw) {
-      setHomework((prev) =>
-        prev.map((h) => (h.id === editHw.id ? { ...editHw, ...form } : h)),
+    if (editing) {
+      const updated = items.map((hw) =>
+        hw.id === editing.id
+          ? { ...hw, ...form, assignedBy: currentUser?.name ?? "Teacher" }
+          : hw,
       );
-      toast.success("Homework updated");
+      setItems(updated);
+      ls.set(LS_KEYS.homework, updated);
     } else {
-      const newHw: HWRecord = {
-        id: Date.now().toString(),
-        ...form,
-        assignedDate: today,
+      const hw: HomeworkType = {
+        id: generateId(),
+        class: form.class,
+        section: form.section,
+        subject: form.subject,
+        title: form.title,
+        description: form.description,
+        dueDate: form.dueDate,
+        assignedBy: currentUser?.name ?? "Teacher",
+        createdAt: new Date().toISOString(),
+        sessionId: currentSession?.id,
       };
-      setHomework((prev) => [...prev, newHw]);
-      toast.success("Homework assigned");
+      const updated = [hw, ...items];
+      setItems(updated);
+      ls.set(LS_KEYS.homework, updated);
     }
-    setShowModal(false);
-    setEditHw(null);
+
+    addNotification(
+      `Homework "${form.title}" ${editing ? "updated" : "added"}`,
+      "success",
+      "📚",
+    );
+    setShowForm(false);
+    setEditing(null);
     setForm({
-      class: "Class 10",
-      section: "A",
-      subject: "Mathematics",
+      class: "",
+      section: "",
+      subject: "",
       title: "",
       description: "",
       dueDate: "",
-      status: "Open",
     });
   };
 
-  const toggleSubmission = (hwId: string, admNo: string, name: string) => {
-    const existing = submissions.find(
-      (s) => s.hwId === hwId && s.studentAdmNo === admNo,
-    );
-    if (existing) {
-      setSubmissions((prev) =>
-        prev.map((s) =>
-          s.hwId === hwId && s.studentAdmNo === admNo
-            ? { ...s, submitted: !s.submitted }
-            : s,
-        ),
-      );
-    } else {
-      setSubmissions((prev) => [
-        ...prev,
-        { hwId, studentAdmNo: admNo, studentName: name, submitted: true },
-      ]);
-    }
+  const openEdit = (hw: HomeworkType) => {
+    setEditing(hw);
+    setForm({
+      class: hw.class,
+      section: hw.section,
+      subject: hw.subject,
+      title: hw.title,
+      description: hw.description,
+      dueDate: hw.dueDate,
+    });
+    setShowForm(true);
   };
 
-  const getSubmissionStatus = (hwId: string, admNo: string) => {
-    const s = submissions.find(
-      (s) => s.hwId === hwId && s.studentAdmNo === admNo,
-    );
-    return s?.submitted || false;
+  const handleDelete = (id: string) => {
+    const updated = items.filter((hw) => hw.id !== id);
+    setItems(updated);
+    ls.set(LS_KEYS.homework, updated);
   };
 
-  const getHwStudents = (hw: HWRecord) =>
-    students
-      .filter((s) => {
-        const cls = s.className?.toLowerCase() || "";
-        return cls.includes(hw.class.toLowerCase().replace("class ", ""));
-      })
-      .slice(0, 20);
-
-  // Analytics data
-  const subjectDist = SUBJECTS.map((sub) => ({
-    name: sub,
-    count: homework.filter((h) => h.subject === sub).length,
-  })).filter((s) => s.count > 0);
-  const classDist = CLASSES.map((cls) => ({
-    name: cls,
-    Total: homework.filter((h) => h.class === cls).length,
-    Open: homework.filter((h) => h.class === cls && h.status === "Open").length,
-  })).filter((c) => c.Total > 0);
+  const overdueCount = sessionItems.filter(
+    (hw) => getStatus(hw) === "overdue",
+  ).length;
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-white text-lg font-semibold">
-          Homework Management
-        </h2>
-        <button
-          type="button"
-          onClick={() => {
-            setEditHw(null);
-            setForm({
-              class: "Class 10",
-              section: "A",
-              subject: "Mathematics",
-              title: "",
-              description: "",
-              dueDate: "",
-              status: "Open",
-            });
-            setShowModal(true);
-          }}
-          data-ocid="homework.primary_button"
-          className="flex items-center gap-1 bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded"
-        >
-          <Plus size={13} /> Assign Homework
-        </button>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-4 gap-3 mb-4">
-        {[
-          {
-            label: "Total Assigned",
-            value: homework.length,
-            color: "text-white",
-          },
-          {
-            label: "Open",
-            value: homework.filter((h) => h.status === "Open").length,
-            color: "text-green-400",
-          },
-          {
-            label: "Closed",
-            value: homework.filter((h) => h.status === "Closed").length,
-            color: "text-gray-400",
-          },
-          {
-            label: "Overdue",
-            value: homework.filter(
-              (h) =>
-                h.status === "Open" &&
-                h.dueDate < new Date().toISOString().split("T")[0],
-            ).length,
-            color: "text-red-400",
-          },
-        ].map((k) => (
-          <div
-            key={k.label}
-            className="rounded-lg p-3"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <p className="text-gray-400 text-xs">{k.label}</p>
-            <p className={`${k.color} text-2xl font-bold`}>{k.value}</p>
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap gap-1 mb-4">
-        {(["list", "tracker", "analytics"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            data-ocid={`homework.${t}.tab`}
-            className={`px-4 py-1.5 rounded text-xs font-medium capitalize transition ${tab === t ? "bg-green-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
-          >
-            {t === "list"
-              ? "Homework List"
-              : t === "tracker"
-                ? "Submission Tracker"
-                : "Analytics"}
-          </button>
-        ))}
-      </div>
-
-      {/* ─ HOMEWORK LIST ─ */}
-      {tab === "list" && (
-        <div>
-          <div className="flex flex-wrap gap-2 mb-3">
-            <select
-              value={filterClass}
-              onChange={(e) => setFilterClass(e.target.value)}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-300 text-xs outline-none"
-              data-ocid="homework.class.select"
-            >
-              <option value="">All Classes</option>
-              {CLASSES.map((c) => (
-                <option key={c}>{c}</option>
-              ))}
-            </select>
-            <select
-              value={filterSubject}
-              onChange={(e) => setFilterSubject(e.target.value)}
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-300 text-xs outline-none"
-            >
-              <option value="">All Subjects</option>
-              {SUBJECTS.map((s) => (
-                <option key={s}>{s}</option>
-              ))}
-            </select>
-            <select
-              value={filterStatus}
-              onChange={(e) =>
-                setFilterStatus(e.target.value as "" | "Open" | "Closed")
-              }
-              className="bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-gray-300 text-xs outline-none"
-            >
-              <option value=" ">All Status</option>
-              <option value="Open">Open</option>
-              <option value="Closed">Closed</option>
-            </select>
-          </div>
-          <div className="space-y-3">
-            {filtered.length === 0 ? (
-              <div
-                className="text-center py-8 text-gray-500"
-                data-ocid="homework.list.empty_state"
-              >
-                No homework found.
-              </div>
-            ) : (
-              filtered.map((hw, i) => {
-                const overdue =
-                  hw.status === "Open" &&
-                  hw.dueDate < new Date().toISOString().split("T")[0];
-                return (
-                  <div
-                    key={hw.id}
-                    className="rounded-lg p-4"
-                    style={{
-                      background: "#1a1f2e",
-                      border: `1px solid ${overdue ? "#7f1d1d" : "#374151"}`,
-                    }}
-                    data-ocid={`homework.list.item.${i + 1}`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="text-white font-medium text-sm">
-                            {hw.title}
-                          </h3>
-                          <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full ${hw.status === "Open" ? "bg-green-900/50 text-green-400" : "bg-gray-700 text-gray-400"}`}
-                          >
-                            {hw.status}
-                          </span>
-                          {overdue && (
-                            <span className="text-[10px] bg-red-900/50 text-red-400 px-1.5 py-0.5 rounded-full">
-                              Overdue
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex gap-3 text-[10px] mb-2">
-                          <span className="text-blue-400">
-                            {hw.class}-{hw.section}
-                          </span>
-                          <span className="text-purple-400">{hw.subject}</span>
-                          <span className="text-gray-500">
-                            Assigned: {hw.assignedDate}
-                          </span>
-                          <span
-                            className={`font-medium ${overdue ? "text-red-400" : "text-yellow-400"}`}
-                          >
-                            Due: {hw.dueDate}
-                          </span>
-                        </div>
-                        <p className="text-gray-400 text-xs">
-                          {hw.description}
-                        </p>
-                      </div>
-                      <div className="flex gap-2 ml-4">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setTab("tracker");
-                            setSelectedHw(hw);
-                          }}
-                          className="text-green-400 hover:text-green-300 text-[10px] bg-green-900/30 px-2 py-1 rounded"
-                          data-ocid={`homework.tracker.button.${i + 1}`}
-                        >
-                          <CheckSquare size={12} className="inline mr-1" />
-                          Track
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditHw(hw);
-                            setForm({
-                              class: hw.class,
-                              section: hw.section,
-                              subject: hw.subject,
-                              title: hw.title,
-                              description: hw.description,
-                              dueDate: hw.dueDate,
-                              status: hw.status,
-                            });
-                            setShowModal(true);
-                          }}
-                          className="text-blue-400 hover:text-blue-300"
-                          data-ocid={`homework.edit_button.${i + 1}`}
-                        >
-                          <Edit2 size={13} />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHomework((prev) =>
-                              prev.filter((x) => x.id !== hw.id),
-                            );
-                            toast.success("Removed");
-                          }}
-                          className="text-red-400 hover:text-red-300"
-                          data-ocid={`homework.delete_button.${i + 1}`}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
+    <div className="space-y-4">
+      {overdueCount > 0 && (
+        <div className="flex items-center gap-2 p-3 bg-destructive/10 rounded-lg border border-destructive/30 text-sm">
+          <Clock className="w-4 h-4 text-destructive" />
+          <span className="text-destructive font-medium">
+            {overdueCount} overdue assignments detected
+          </span>
         </div>
       )}
 
-      {/* ─ SUBMISSION TRACKER ─ */}
-      {tab === "tracker" && (
-        <div>
-          <div className="flex items-center gap-3 mb-4">
-            <select
-              value={selectedHw?.id || ""}
-              onChange={(e) =>
-                setSelectedHw(
-                  homework.find((h) => h.id === e.target.value) || null,
-                )
-              }
-              className="flex-1 max-w-md bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-              data-ocid="homework.tracker.select"
-            >
-              <option value="">-- Select Homework --</option>
-              {homework.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.class} | {h.subject}: {h.title}
-                </option>
+      <div className="flex flex-wrap gap-2 justify-between">
+        <div className="flex gap-2 flex-wrap">
+          <Select value={filterClass} onValueChange={setFilterClass}>
+            <SelectTrigger className="w-28" data-ocid="hw-filter-class">
+              <SelectValue placeholder="Class" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {CLASSES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  Class {c}
+                </SelectItem>
               ))}
-            </select>
-          </div>
-          {selectedHw &&
-            (() => {
-              const hwStudents = getHwStudents(selectedHw);
-              const submittedCount = hwStudents.filter((s) =>
-                getSubmissionStatus(selectedHw.id, s.admNo),
-              ).length;
-              return (
-                <div>
-                  <div
-                    className="flex items-center gap-4 mb-3 p-3 rounded-lg"
-                    style={{
-                      background: "#1a1f2e",
-                      border: "1px solid #374151",
-                    }}
+            </SelectContent>
+          </Select>
+          <Select value={filterSubject} onValueChange={setFilterSubject}>
+            <SelectTrigger className="w-32" data-ocid="hw-filter-subject">
+              <SelectValue placeholder="Subject" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Subjects</SelectItem>
+              {subjects.map((s) => (
+                <SelectItem key={s.id} value={s.name}>
+                  {s.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-32" data-ocid="hw-filter-status">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="overdue">Overdue</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <Button
+          size="sm"
+          onClick={() => {
+            setEditing(null);
+            setShowForm(true);
+          }}
+          data-ocid="add-homework-btn"
+        >
+          <PlusCircle className="w-4 h-4 mr-1" /> Add Homework
+        </Button>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div
+          className="text-center py-14 text-muted-foreground"
+          data-ocid="hw-empty-state"
+        >
+          <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-30" />
+          <p>No homework assignments found.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 sticky top-0">
+              <tr>
+                <th className="text-left p-3 font-semibold">Title</th>
+                <th className="text-left p-3 font-semibold">Class</th>
+                <th className="text-left p-3 font-semibold">Subject</th>
+                <th className="text-left p-3 font-semibold">Due Date</th>
+                <th className="text-left p-3 font-semibold">Assigned By</th>
+                <th className="text-left p-3 font-semibold">Status</th>
+                <th className="p-3 font-semibold">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((hw) => {
+                const status = getStatus(hw);
+                return (
+                  <tr
+                    key={hw.id}
+                    className="border-t border-border hover:bg-muted/20"
+                    data-ocid="hw-row"
                   >
-                    <span className="text-white font-medium text-xs">
-                      {selectedHw.title}
-                    </span>
-                    <span className="text-blue-400 text-xs">
-                      {selectedHw.class}-{selectedHw.section}
-                    </span>
-                    <span className="text-gray-400 text-xs">
-                      {selectedHw.subject}
-                    </span>
-                    <span className="ml-auto text-xs">
-                      <span className="text-green-400 font-bold">
-                        {submittedCount}
-                      </span>
-                      <span className="text-gray-500">
-                        /{hwStudents.length}
-                      </span>{" "}
-                      submitted
-                    </span>
-                  </div>
-                  {hwStudents.length === 0 ? (
-                    <div className="text-center py-8 text-gray-500">
-                      No students found for this class. Add students first.
-                    </div>
-                  ) : (
-                    <div className="rounded-lg overflow-hidden border border-gray-700">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr style={{ background: "#1a1f2e" }}>
-                            {[
-                              "#",
-                              "Adm No.",
-                              "Student Name",
-                              "Submitted",
-                              "Action",
-                            ].map((h) => (
-                              <th
-                                key={h}
-                                className="text-left px-3 py-2 text-gray-400 font-medium"
-                              >
-                                {h}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {hwStudents.map((s, i) => {
-                            const submitted = getSubmissionStatus(
-                              selectedHw.id,
-                              s.admNo,
-                            );
-                            return (
-                              <tr
-                                key={s.admNo}
-                                style={{
-                                  background:
-                                    i % 2 === 0 ? "#111827" : "#0f1117",
-                                }}
-                                data-ocid={`homework.tracker.item.${i + 1}`}
-                              >
-                                <td className="px-3 py-2 text-gray-500">
-                                  {i + 1}
-                                </td>
-                                <td className="px-3 py-2 text-yellow-400">
-                                  {s.admNo}
-                                </td>
-                                <td className="px-3 py-2 text-white">
-                                  {s.name}
-                                </td>
-                                <td className="px-3 py-2">
-                                  <span
-                                    className={`text-[10px] px-1.5 py-0.5 rounded ${submitted ? "bg-green-900/50 text-green-400" : "bg-gray-800 text-gray-500"}`}
-                                  >
-                                    {submitted ? "Submitted" : "Pending"}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-2">
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      toggleSubmission(
-                                        selectedHw.id,
-                                        s.admNo,
-                                        s.name,
-                                      )
-                                    }
-                                    className="flex items-center gap-1 text-xs"
-                                    data-ocid={`homework.tracker.toggle.${i + 1}`}
-                                  >
-                                    {submitted ? (
-                                      <CheckSquare
-                                        size={14}
-                                        className="text-green-400"
-                                      />
-                                    ) : (
-                                      <Square
-                                        size={14}
-                                        className="text-gray-400"
-                                      />
-                                    )}
-                                    <span
-                                      className={
-                                        submitted
-                                          ? "text-green-400"
-                                          : "text-gray-400"
-                                      }
-                                    >
-                                      {submitted ? "Unmark" : "Mark Submitted"}
-                                    </span>
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
+                    <td className="p-3">
+                      <div>
+                        <p className="font-medium">{hw.title}</p>
+                        {hw.description && (
+                          <p className="text-xs text-muted-foreground truncate max-w-[200px]">
+                            {hw.description}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 whitespace-nowrap">
+                      Class {hw.class}
+                      {hw.section ? ` - ${hw.section}` : ""}
+                    </td>
+                    <td className="p-3">{hw.subject}</td>
+                    <td className="p-3 whitespace-nowrap">{hw.dueDate}</td>
+                    <td className="p-3">{hw.assignedBy}</td>
+                    <td className="p-3">
+                      <Badge
+                        variant={
+                          status === "overdue" ? "destructive" : "default"
+                        }
+                        className="text-xs"
+                      >
+                        {status === "overdue" ? "⚠ Overdue" : "Active"}
+                      </Badge>
+                    </td>
+                    <td className="p-3">
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => openEdit(hw)}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive"
+                          onClick={() => handleDelete(hw.id)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {editing ? "Edit Homework" : "Add Homework"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 pt-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label>Class</Label>
+                <Select
+                  value={form.class}
+                  onValueChange={(v) => setForm((f) => ({ ...f, class: v }))}
+                >
+                  <SelectTrigger data-ocid="hw-class-select">
+                    <SelectValue placeholder="Select class" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLASSES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        Class {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Section</Label>
+                <Select
+                  value={form.section}
+                  onValueChange={(v) => setForm((f) => ({ ...f, section: v }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Section" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">All</SelectItem>
+                    {SECTIONS.map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {s}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Subject</Label>
+              <Select
+                value={form.subject}
+                onValueChange={(v) => setForm((f) => ({ ...f, subject: v }))}
+              >
+                <SelectTrigger data-ocid="hw-subject-select">
+                  <SelectValue placeholder="Select subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.name}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value="Hindi">Hindi</SelectItem>
+                  <SelectItem value="English">English</SelectItem>
+                  <SelectItem value="Mathematics">Mathematics</SelectItem>
+                  <SelectItem value="Science">Science</SelectItem>
+                  <SelectItem value="Social Science">Social Science</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Title</Label>
+              <Input
+                value={form.title}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, title: e.target.value }))
+                }
+                placeholder="Homework title..."
+                data-ocid="hw-title-input"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Description</Label>
+              <Textarea
+                rows={2}
+                value={form.description}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, description: e.target.value }))
+                }
+                placeholder="Details..."
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Due Date</Label>
+              <Input
+                type="date"
+                value={form.dueDate}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, dueDate: e.target.value }))
+                }
+                data-ocid="hw-due-input"
+              />
+            </div>
+            <div className="flex gap-2 pt-2">
+              <Button
+                onClick={handleSubmit}
+                className="flex-1"
+                data-ocid="hw-save-btn"
+              >
+                Save
+              </Button>
+              <Button variant="outline" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+// ─── Submission Tracker Tab ──────────────────────────────
+type SubmissionStatus = "submitted" | "late" | "missing";
+
+function SubmissionTrackerTab() {
+  const { currentSession } = useApp();
+  const homeworkItems = ls
+    .get<HomeworkType[]>(LS_KEYS.homework, [])
+    .filter((hw) => !hw.sessionId || hw.sessionId === currentSession?.id);
+
+  const [selectedHwId, setSelectedHwId] = useState("");
+  const [submissions, setSubmissions] = useState<HomeworkSubmission[]>(() =>
+    ls.get<HomeworkSubmission[]>(LS_KEYS.homeworkSubmissions, []),
+  );
+
+  const selectedHw = homeworkItems.find((hw) => hw.id === selectedHwId);
+
+  const classStudents = useMemo(() => {
+    if (!selectedHw) return [];
+    return ls
+      .get<Student[]>(LS_KEYS.students, [])
+      .filter(
+        (s) =>
+          s.class === selectedHw.class &&
+          (!selectedHw.section || s.section === selectedHw.section) &&
+          s.status === "active",
+      );
+  }, [selectedHw]);
+
+  const getSubmission = (studentId: string) =>
+    submissions.find(
+      (sub) => sub.homeworkId === selectedHwId && sub.studentId === studentId,
+    );
+
+  const setStatus = (studentId: string, status: SubmissionStatus) => {
+    const existing = submissions.filter(
+      (sub) =>
+        !(sub.homeworkId === selectedHwId && sub.studentId === studentId),
+    );
+    const newSub: HomeworkSubmission = {
+      id: generateId(),
+      homeworkId: selectedHwId,
+      studentId,
+      submittedAt: new Date().toISOString(),
+      status,
+    };
+    const updated = [...existing, newSub];
+    setSubmissions(updated);
+    ls.set(LS_KEYS.homeworkSubmissions, updated);
+  };
+
+  const submittedCount = classStudents.filter((s) => {
+    const sub = getSubmission(s.id);
+    return sub?.status === "submitted";
+  }).length;
+  const lateCount = classStudents.filter(
+    (s) => getSubmission(s.id)?.status === "late",
+  ).length;
+  const missingCount = classStudents.filter(
+    (s) => !getSubmission(s.id) || getSubmission(s.id)?.status === "missing",
+  ).length;
+  const submissionPct =
+    classStudents.length > 0
+      ? Math.round((submittedCount / classStudents.length) * 100)
+      : 0;
+
+  return (
+    <div className="space-y-4">
+      <div className="max-w-sm">
+        <Label>Select Homework Assignment</Label>
+        <Select value={selectedHwId} onValueChange={setSelectedHwId}>
+          <SelectTrigger className="mt-1" data-ocid="tracker-hw-select">
+            <SelectValue placeholder="Choose homework..." />
+          </SelectTrigger>
+          <SelectContent>
+            {homeworkItems.map((hw) => (
+              <SelectItem key={hw.id} value={hw.id}>
+                {hw.title} — Class {hw.class} {hw.section} ({hw.subject})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {selectedHw && (
+        <>
+          {/* Stats */}
+          <div className="grid grid-cols-3 gap-3">
+            <Card className="bg-green-50 border-green-200">
+              <CardContent className="p-3 flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-green-600" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Submitted</p>
+                  <p className="font-bold text-green-700">
+                    {submittedCount}/{classStudents.length}
+                  </p>
                 </div>
-              );
-            })()}
-          {!selectedHw && (
-            <div
-              className="text-center py-8 text-gray-500"
-              data-ocid="homework.tracker.empty_state"
-            >
-              Select a homework assignment to track submissions.
+              </CardContent>
+            </Card>
+            <Card className="bg-amber-50 border-amber-200">
+              <CardContent className="p-3 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-amber-600" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Late</p>
+                  <p className="font-bold text-amber-700">{lateCount}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-red-50 border-red-200">
+              <CardContent className="p-3 flex items-center gap-2">
+                <XCircle className="w-5 h-5 text-red-500" />
+                <div>
+                  <p className="text-xs text-muted-foreground">Missing</p>
+                  <p className="font-bold text-red-600">{missingCount}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="space-y-1">
+            <div className="flex justify-between text-xs text-muted-foreground">
+              <span>Submission Rate</span>
+              <span className="font-semibold">{submissionPct}%</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full bg-primary transition-all"
+                style={{ width: `${submissionPct}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Student Table */}
+          {classStudents.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              No students in this class/section.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    <th className="text-left p-3 font-semibold">Student</th>
+                    <th className="text-left p-3 font-semibold">Adm. No.</th>
+                    <th className="text-left p-3 font-semibold">Status</th>
+                    <th className="p-3 font-semibold">Mark</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {classStudents.map((s) => {
+                    const sub = getSubmission(s.id);
+                    return (
+                      <tr
+                        key={s.id}
+                        className="border-t border-border hover:bg-muted/20"
+                        data-ocid="tracker-student-row"
+                      >
+                        <td className="p-3 font-medium">{s.fullName}</td>
+                        <td className="p-3 text-muted-foreground">{s.admNo}</td>
+                        <td className="p-3">
+                          {!sub || sub.status === "missing" ? (
+                            <Badge variant="destructive" className="text-xs">
+                              Missing
+                            </Badge>
+                          ) : sub.status === "late" ? (
+                            <Badge className="text-xs bg-amber-100 text-amber-800">
+                              Late
+                            </Badge>
+                          ) : (
+                            <Badge className="text-xs bg-green-100 text-green-800">
+                              Submitted
+                            </Badge>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              variant={
+                                sub?.status === "submitted"
+                                  ? "default"
+                                  : "outline"
+                              }
+                              className="h-7 px-2 text-xs"
+                              onClick={() => setStatus(s.id, "submitted")}
+                            >
+                              ✓ Done
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={
+                                sub?.status === "late" ? "default" : "outline"
+                              }
+                              className="h-7 px-2 text-xs"
+                              onClick={() => setStatus(s.id, "late")}
+                            >
+                              Late
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={
+                                sub?.status === "missing"
+                                  ? "destructive"
+                                  : "outline"
+                              }
+                              className="h-7 px-2 text-xs"
+                              onClick={() => setStatus(s.id, "missing")}
+                            >
+                              ✗
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
-        </div>
+        </>
       )}
+    </div>
+  );
+}
 
-      {/* ─ ANALYTICS ─ */}
-      {tab === "analytics" && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div
-              className="rounded-lg p-4"
-              style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <BarChart2 size={14} className="text-blue-400" />
-                <h3 className="text-gray-200 text-sm font-medium">
-                  Class-wise Homework Count
-                </h3>
-              </div>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart
-                  data={classDist}
-                  margin={{ top: 5, right: 10, left: -20, bottom: 5 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis
-                    dataKey="name"
-                    tick={{ fill: "#9ca3af", fontSize: 9 }}
-                  />
-                  <YAxis tick={{ fill: "#9ca3af", fontSize: 10 }} />
-                  <Tooltip
-                    contentStyle={{
-                      background: "#1f2937",
-                      border: "none",
-                      color: "#fff",
-                    }}
-                  />
-                  <Legend wrapperStyle={{ color: "#9ca3af", fontSize: 10 }} />
-                  <Bar dataKey="Total" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="Open" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-            <div
-              className="rounded-lg p-4"
-              style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <BarChart2 size={14} className="text-purple-400" />
-                <h3 className="text-gray-200 text-sm font-medium">
-                  Subject-wise Distribution
-                </h3>
-              </div>
-              <ResponsiveContainer width="100%" height={180}>
-                <PieChart>
-                  <Pie
-                    data={subjectDist}
-                    dataKey="count"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={70}
-                    label={({ name, value }) => `${name}: ${value}`}
-                  >
-                    {subjectDist.map((entry, index) => (
-                      <Cell
-                        key={entry.name}
-                        fill={CHART_COLORS[index % CHART_COLORS.length]}
-                      />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: "#1f2937",
-                      border: "none",
-                      color: "#fff",
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </div>
-      )}
+// ─── Analytics Tab ───────────────────────────────────────
+function AnalyticsTab() {
+  const { currentSession } = useApp();
+  const hwItems = ls
+    .get<HomeworkType[]>(LS_KEYS.homework, [])
+    .filter((hw) => !hw.sessionId || hw.sessionId === currentSession?.id);
+  const submissions = ls.get<HomeworkSubmission[]>(
+    LS_KEYS.homeworkSubmissions,
+    [],
+  );
+  const students = ls
+    .get<Student[]>(LS_KEYS.students, [])
+    .filter((s) => s.sessionId === currentSession?.id && s.status === "active");
 
-      {/* ─ HOMEWORK MODAL ─ */}
-      {showModal && (
-        <div
-          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
-          data-ocid="homework.modal"
-        >
-          <div
-            className="rounded-xl p-6 w-full max-w-md"
-            style={{ background: "#1a1f2e", border: "1px solid #374151" }}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-white font-semibold">
-                {editHw ? "Edit Homework" : "Assign Homework"}
-              </h3>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowModal(false);
-                  setEditHw(null);
-                }}
-                className="text-gray-400 hover:text-white"
-                data-ocid="homework.close_button"
-              >
-                <X size={18} />
-              </button>
-            </div>
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label
-                    htmlFor="hw-class"
-                    className="text-gray-400 text-xs block mb-1"
-                  >
-                    Class
-                  </label>
-                  <select
-                    id="hw-class"
-                    value={form.class}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, class: e.target.value }))
-                    }
-                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                    data-ocid="homework.class.select"
-                  >
-                    {CLASSES.map((c) => (
-                      <option key={c}>{c}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="hw-sec"
-                    className="text-gray-400 text-xs block mb-1"
-                  >
-                    Section
-                  </label>
-                  <select
-                    id="hw-sec"
-                    value={form.section}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, section: e.target.value }))
-                    }
-                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                  >
-                    {SECTIONS.map((s) => (
-                      <option key={s}>{s}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label
-                    htmlFor="hw-status"
-                    className="text-gray-400 text-xs block mb-1"
-                  >
-                    Status
-                  </label>
-                  <select
-                    id="hw-status"
-                    value={form.status}
-                    onChange={(e) =>
-                      setForm((p) => ({
-                        ...p,
-                        status: e.target.value as "Open" | "Closed",
-                      }))
-                    }
-                    className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                  >
-                    <option>Open</option>
-                    <option>Closed</option>
-                  </select>
-                </div>
+  // Submission rate by class
+  const byClass = CLASSES.map((c) => {
+    const classHw = hwItems.filter((hw) => hw.class === c);
+    const classStudents = students.filter((s) => s.class === c);
+    const total = classHw.length * classStudents.length;
+    const submitted = submissions.filter(
+      (sub) =>
+        classHw.some((hw) => hw.id === sub.homeworkId) &&
+        sub.status === "submitted",
+    ).length;
+    return {
+      class: c,
+      submitted,
+      total,
+      pct: total > 0 ? Math.round((submitted / total) * 100) : 0,
+    };
+  }).filter((c) => c.total > 0);
+
+  // Overall status distribution
+  const totalSubs = submissions.length;
+  const onTime = submissions.filter((s) => s.status === "submitted").length;
+  const late = submissions.filter((s) => s.status === "late").length;
+  const missing = submissions.filter((s) => s.status === "missing").length;
+
+  // Subject completion rate
+  const subjects = ls.get<{ id: string; name: string }[]>(LS_KEYS.subjects, []);
+  const subjectData = subjects
+    .map((sub) => {
+      const subHw = hwItems.filter((hw) => hw.subject === sub.name);
+      const subSubs = submissions.filter(
+        (s) =>
+          subHw.some((hw) => hw.id === s.homeworkId) &&
+          s.status === "submitted",
+      );
+      const total = subHw.length;
+      return {
+        name: sub.name,
+        completed: subSubs.length,
+        total,
+        pct: total > 0 ? Math.round((subSubs.length / total) * 100) : 0,
+      };
+    })
+    .filter((s) => s.total > 0);
+
+  const STATUS_COLORS = {
+    submitted: "#22c55e",
+    late: "#f59e0b",
+    missing: "#ef4444",
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Overall submission stats */}
+      {totalSubs === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center text-muted-foreground">
+            <BarChart2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
+            <p>No submission data yet. Mark submissions in the Tracker tab.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          {/* On-time vs late vs missing */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Users className="w-4 h-4" /> Submission Status Distribution
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex gap-6 flex-wrap">
+                {(
+                  [
+                    {
+                      label: "On Time",
+                      count: onTime,
+                      color: STATUS_COLORS.submitted,
+                    },
+                    { label: "Late", count: late, color: STATUS_COLORS.late },
+                    {
+                      label: "Missing",
+                      count: missing,
+                      color: STATUS_COLORS.missing,
+                    },
+                  ] as const
+                ).map((item) => {
+                  const pct =
+                    totalSubs > 0
+                      ? Math.round((item.count / totalSubs) * 100)
+                      : 0;
+                  return (
+                    <div key={item.label} className="flex-1 min-w-[120px]">
+                      <div className="flex justify-between text-sm mb-1">
+                        <span className="flex items-center gap-1">
+                          <span
+                            className="w-2.5 h-2.5 rounded-full"
+                            style={{ backgroundColor: item.color }}
+                          />
+                          {item.label}
+                        </span>
+                        <span className="font-semibold">{pct}%</span>
+                      </div>
+                      <div className="h-3 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: item.color,
+                          }}
+                        />
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {item.count} submissions
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
-              <div>
-                <label
-                  htmlFor="hw-subject"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Subject
-                </label>
-                <select
-                  id="hw-subject"
-                  value={form.subject}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, subject: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                >
-                  {SUBJECTS.map((s) => (
-                    <option key={s}>{s}</option>
+            </CardContent>
+          </Card>
+
+          {/* Submission rate by class */}
+          {byClass.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BarChart2 className="w-4 h-4" /> Submission Rate by Class
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {byClass.map((c) => (
+                    <div key={c.class} className="flex items-center gap-3">
+                      <span className="text-sm font-medium w-16 shrink-0">
+                        Class {c.class}
+                      </span>
+                      <div className="flex-1 h-5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${c.pct}%` }}
+                        />
+                      </div>
+                      <span className="text-sm font-semibold w-10 text-right">
+                        {c.pct}%
+                      </span>
+                    </div>
                   ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  htmlFor="hw-title"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Title
-                </label>
-                <input
-                  id="hw-title"
-                  value={form.title}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, title: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none focus:border-green-500"
-                  data-ocid="homework.input"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="hw-due"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Due Date
-                </label>
-                <input
-                  id="hw-due"
-                  type="date"
-                  value={form.dueDate}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, dueDate: e.target.value }))
-                  }
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none"
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="hw-desc"
-                  className="text-gray-400 text-xs block mb-1"
-                >
-                  Description
-                </label>
-                <textarea
-                  id="hw-desc"
-                  value={form.description}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, description: e.target.value }))
-                  }
-                  rows={3}
-                  className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-white text-xs outline-none resize-none"
-                  data-ocid="homework.textarea"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                type="button"
-                onClick={saveHw}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-2 rounded"
-                data-ocid="homework.submit_button"
-              >
-                {editHw ? "Update" : "Assign"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowModal(false);
-                  setEditHw(null);
-                }}
-                className="flex-1 bg-gray-700 text-white text-xs py-2 rounded"
-                data-ocid="homework.cancel_button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Subject-wise completion */}
+          {subjectData.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <BookOpen className="w-4 h-4" /> Subject-wise Completion
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto rounded-lg border border-border">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-semibold">Subject</th>
+                        <th className="text-right p-3 font-semibold">
+                          Assignments
+                        </th>
+                        <th className="text-right p-3 font-semibold">
+                          Completed
+                        </th>
+                        <th className="p-3 font-semibold">Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {subjectData.map((s) => (
+                        <tr
+                          key={s.name}
+                          className="border-t border-border hover:bg-muted/20"
+                        >
+                          <td className="p-3 font-medium">{s.name}</td>
+                          <td className="p-3 text-right text-muted-foreground">
+                            {s.total}
+                          </td>
+                          <td className="p-3 text-right">{s.completed}</td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                                <div
+                                  className="h-full rounded-full bg-primary"
+                                  style={{ width: `${s.pct}%` }}
+                                />
+                              </div>
+                              <span className="text-xs font-semibold w-8 text-right">
+                                {s.pct}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
       )}
+    </div>
+  );
+}
+
+// ─── Main Component ──────────────────────────────────────
+export default function Homework() {
+  return (
+    <div className="p-4 md:p-6 space-y-4">
+      <div className="flex items-center gap-3">
+        <BookOpen className="w-6 h-6 text-primary" />
+        <div>
+          <h1 className="text-xl font-bold font-display">Homework</h1>
+          <p className="text-sm text-muted-foreground">
+            Assign, track, and analyse student homework
+          </p>
+        </div>
+      </div>
+
+      <Tabs defaultValue="list" className="w-full">
+        <TabsList data-ocid="homework-tabs">
+          <TabsTrigger value="list">
+            <BookOpen className="w-4 h-4 mr-1.5" /> Homework List
+          </TabsTrigger>
+          <TabsTrigger value="tracker">
+            <CheckCircle className="w-4 h-4 mr-1.5" /> Submission Tracker
+          </TabsTrigger>
+          <TabsTrigger value="analytics">
+            <BarChart2 className="w-4 h-4 mr-1.5" /> Analytics
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="list">
+          <Card>
+            <CardContent className="pt-5">
+              <HomeworkListTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="tracker">
+          <Card>
+            <CardContent className="pt-5">
+              <SubmissionTrackerTab />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <AnalyticsTab />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
