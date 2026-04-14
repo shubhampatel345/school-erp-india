@@ -10,13 +10,16 @@ import {
   Code2,
   Copy,
   Database,
+  GraduationCap,
   HelpCircle,
+  IndianRupee,
   MessageSquare,
   Printer,
   RefreshCw,
   Rocket,
   Shield,
   Smartphone,
+  Users,
   Wifi,
 } from "lucide-react";
 import { useState } from "react";
@@ -197,79 +200,189 @@ function Alert({
 // ─── Module data ─────────────────────────────────────────────
 const MODULES = [
   {
-    name: "Students",
+    name: "Student Information",
     icon: "🎒",
-    desc: "Excel-style grid with rich filters (class, section, route, status). Double-click opens full profile with photo, Transport tab (auto-populated from Transport module), Fees tab, Discounts tab (per-month fixed amount), Old Fees tab, and Credentials tab. Print admission forms (3 templates), ID cards (customizable with uploaded background), and admit cards with QR code.",
+    desc: [
+      "Excel-style grid with 50+ columns. Multi-filter: class, section, status, gender, category, route — all simultaneously.",
+      "Search by: name, mobile, father's name, mother's name, village, class.",
+      "Bulk checkboxes: print list, export CSV, WhatsApp batch message.",
+      "Import/Export CSV with gender field.",
+      "Double-click opens full Student Detail modal with tabs:",
+      "• Basic Info: photo, admission date, DOB, address, father/mother name, Aadhaar, S.R. No., Pen No., Apaar No.",
+      "• Academic: class, section, roll number, category, previous school.",
+      "• Transport: Bus No., Route, Pickup Point (auto-populated from Transport module). 11-month checkbox wizard (Apr–Mar, June unchecked by default).",
+      "• Discounts: fixed monthly discount amount, select which fee headings it applies to (Select All option), net payable preview.",
+      "• Old Fees: add/edit previous session dues that carry forward to net payable.",
+      "• Credentials: auto-generated username/password, reset by Super Admin.",
+      "Admission Form: 3 printable templates. ID Card: upload background image, checkbox wizard for fields, font/color/size controls, set default template. Admit Card: editable text with QR code. Birthday list.",
+    ],
   },
   {
-    name: "Fees",
+    name: "Fees Module",
     icon: "💰",
-    desc: "Collect Fees: student info panel, month-selector grid, old balance carry-forward (shown in red), Other Charges row, payment history with reprint/edit/delete. Fee Headings: define heading names with applicable months. Fee Plan: section-wise amounts editable by Super Admin. Fee Register: full ledger with drill-down drill-down, permission-based edit/delete. Dues Fees: wizard with month + class selection, print/export/reminder letter/WhatsApp. Accounts: account-wise received fees. Discounts per student per month.",
+    desc: [
+      "Fee Heading Design: define heading names with specific months they apply to (e.g. Lab Fee → April, October only). No group field.",
+      "Fees Plan: section-wise amounts per heading per class/section. Same heading can have different values across sections. Editable by Super Admin only.",
+      "Collect Fees: Student search panel + info display + month selector. Only applicable fees for student's class/section shown. Old balance carry-forward: RED = student owes (paid less than net fee); GREEN credit = student paid more (auto-settles on next payment). Family Members panel: students sharing same mobile shown together for quick navigation. Other Charges row: type any label (tie, belt, books, etc.). Payment history: reprint, full edit (change months/amount/date/mode), delete (also removes related balance adjustments). Zero-amount validation: receipt won't save if total is ₹0. Zero-amount particulars are skipped on printed receipts. Receipt starts printing from top of page.",
+      "Receipt Templates (4): Standard, Compact, Detailed, Bharati Format (105mm × 145mm). QR code on each receipt encodes real data.",
+      "Fee Register: full payment ledger. Shows who received payment (name + role). Permission-based edit/delete. Reprint option. CSV export.",
+      "Accounts: account-wise received fees summary. Heading-wise breakdown per account.",
+      "Due Fees Wizard: select months + classes via checkboxes. Shows month-wise dues. Print / Export / WhatsApp Reminder / Print Reminder Letter options.",
+      "Online Fees: Super Admin toggles GPay/Razorpay/PayU on/off. Online payments auto-update Fee Register and generate receipt.",
+    ],
   },
   {
     name: "Attendance",
     icon: "📋",
-    desc: "Mark daily attendance by class/section. RFID/Biometric tab integrates with ESSL/ZKTeco devices over IP. QR Scanner tab supports camera or USB/Bluetooth keyboard-mode scanners. Welcome Display tab shows full-screen animated welcome card on each scan — ideal for a lobby TV. Route-wise and class-wise present/absent summary.",
+    desc: [
+      "Manual Entry tab: mark daily attendance by class/section grid.",
+      "RFID/Biometric tab: simulate RFID scan or integrate with IP-based ESSL/ZKTeco devices. Shows present/total summary by class, section, and route.",
+      "QR Scanner tab: camera mode (mobile browser with HTTPS) and USB/Bluetooth keyboard-mode scanner (plug-in scanner types into input field, auto-captures). Scans student Admit Card QR code. Marks student present with timestamp. Manual Admission No. fallback. Today's scan log displayed. CSV export.",
+      "Welcome Display tab: designed for a lobby TV or large screen. Idle state shows live digital clock and 'SCAN CARD TO CHECK IN'. On scan: full-screen animated card with student/staff photo, name, father's name (student) or designation (staff), class/section, exact entry time, and 'WELCOME TO SCHOOL!' banner. Last 5 check-ins shown in a ticker strip.",
+      "Biometric Devices tab: Add ESSL/ZKTeco devices by IP, port, device type. Test Connection. Sync Attendance logs. Map device User IDs to student/staff records.",
+    ],
   },
   {
     name: "Examinations",
     icon: "📝",
-    desc: "Timetable Maker wizard: enter exam name, dates, times, classes, subjects. System auto-generates per-class timetables. Drag subjects to reorder (dates are locked). Generate reshuffles; Save locks the arrangement. Excel-style combined view, printable/exportable as CSV.",
+    desc: [
+      "Exam Timetable Maker wizard: enter exam name, dates/times, select classes and subjects. System auto-generates per-class timetables with subject suggestions.",
+      "Drag-and-drop subject reordering within a date slot (dates are locked). Generate button reshuffles subjects. Save button locks the arrangement.",
+      "Excel-style combined view: Date, Day, Class columns. Printable and exportable as CSV.",
+      "Exam Results: enter marks per student per subject. Auto-calculate percentage, grade, rank. Publish results. Marksheet generation.",
+    ],
   },
   {
     name: "HR & Payroll",
     icon: "👥",
-    desc: "Staff directory with photo, import/export CSV. Teacher subject-class wizard (multi-subject with class range, e.g. English Class 1–5, Art Class 6–8). Payroll module: net salary setup, attendance-based deduction calculation, payslip generation, payroll register.",
+    desc: [
+      "Staff Directory: add/edit/delete staff with photo. Import/Export CSV (bulk upload).",
+      "Teacher Subject Wizard (Step 2 of Add Staff): assign multiple subjects with class ranges. Example: English Class 1–5, Art Class 6–8. These assignments feed the Teacher Timetable generator automatically.",
+      "Payroll module: set gross/net salary per staff. Attendance-based deduction: Net Salary = Gross × (Days Present / Working Days). Generate payslips. Payroll register with all staff. Export to CSV.",
+      "Leave Management: apply for leave, approve/reject, track leave balance.",
+    ],
   },
   {
     name: "Academics",
     icon: "📚",
-    desc: "Classes & Sections CRUD. Subjects with multi-class assignment wizard (one subject can be assigned to many classes simultaneously). Teacher Timetable Maker: wizard auto-loads teacher-subject-class assignments, conflict-safe scheduling, drag-and-drop, combined view and teacher-wise view. Syllabus chapter tracker.",
+    desc: [
+      "Classes & Sections: CRUD for class structure (e.g. Class 1A, 1B, 2A). No Class Teacher field — assign separately.",
+      "Subjects: multi-class wizard. One subject can be assigned to many classes (e.g. Hindi → Classes 1 through 8 simultaneously). No code/class/teacher columns.",
+      "Class Timetable: period grid editor. Set per-period duration and interval/break time.",
+      "Teacher Timetable Maker: wizard auto-loads teacher-subject-class assignments from HR. Supports split-week subjects (e.g. 3 days one subject, 3 days another). Auto-generates conflict-free timetables per section. Drag-and-drop for teacher/subject arrangement. Regenerate and Save. Combined view (all sections) and teacher-wise view.",
+      "Syllabus: chapter tracker with progress bars per class/subject.",
+    ],
   },
   {
     name: "Transport",
     icon: "🚌",
-    desc: "Routes and pickup points. Monthly fare is set per pickup point (not per route). Driver assignment per route. Student profiles auto-populate Bus No., Route, Pickup Point. Student transport month selection wizard (11 months auto-selected, June deselected by default). Route-wise attendance summary.",
-  },
-  {
-    name: "Inventory",
-    icon: "📦",
-    desc: "Item master with category and sell price (for uniform items like dress, tie, belt). Purchase orders with supplier tracking. Sales with auto-deduction from stock. Stock report with print/export.",
-  },
-  {
-    name: "Communication",
-    icon: "💬",
-    desc: "WhatsApp tab: real API integration via wacoder.in — compose, send to parent/student/teacher, view send log. RCS tab: simulated Google RCS messages with templates. Auto-Send Scheduler: 7 configurable events (Fee Due, Absent Alert, Birthday Wish, Exam Timetable, Result Published, General Notice, Homework Deadline) with timing, recipient group, and channel (WhatsApp/RCS/Both). Notification bell in header shows live ERP events.",
+    desc: [
+      "Routes: add route name, bus number, driver assignment.",
+      "Pickup Points: add stops per route. Set monthly fare per pickup point (not per route).",
+      "Student assignment: students are assigned to a route and pickup point from the Transport module. Their student profile Transport tab auto-populates Bus No., Route, Pickup Point.",
+      "Transport months selection: in student details → Transport tab, select which months transport applies (11 months auto-selected, June unchecked by default).",
+      "Route-wise attendance summary: see which students are present/absent on each route today.",
+    ],
   },
   {
     name: "Template Studio",
     icon: "🏅",
-    desc: "All school templates in one place: ID Card, Fees Receipt, Admission Form, Result/Marksheet, Admit Card, Bonafide Certificate, Transfer Certificate, Experience Certificate. Full drag-and-drop design editor: move any element, change font size/color/family, upload custom background image, set paper size (A4, A5, 105×145mm), and set default template for printing. Export/import designs to share between branches.",
+    desc: [
+      "All 8 school templates in one place: Student ID Card, Fees Receipt, Admission Form, Result/Marksheet, Admit Card, Bonafide Certificate, Transfer Certificate, Experience Certificate.",
+      "Full drag-and-drop canvas editor: move any field anywhere on the canvas.",
+      "Controls: font family, font size, font color, bold/italic, element position/size.",
+      "Background: upload custom image or set solid color.",
+      "Paper size: A4, A5, 105×145mm (Bharati Format), or custom dimensions.",
+      "Save design, export design file, import design file (share between school branches).",
+      "Set default template per type — used for all printing throughout the ERP.",
+    ],
+  },
+  {
+    name: "Inventory",
+    icon: "📦",
+    desc: [
+      "Items: add items with name, category, unit, sell price, cost price, opening stock.",
+      "Categories: Uniform, Stationery, Books, Equipment, or custom.",
+      "Purchase tab: record purchases from suppliers with quantity and cost.",
+      "Sales tab: record sales with quantity. Stock auto-deducted.",
+      "Low stock alerts. Stock summary report with print/export to CSV.",
+    ],
+  },
+  {
+    name: "Communication",
+    icon: "💬",
+    desc: [
+      "WhatsApp tab: real API integration via wacoder.in (app_key + auth_key). Compose messages. Send to parent/student/teacher groups. View sends log with status.",
+      "WhatsApp Auto-Reply Bot: parents send their child's Admission No. to school WhatsApp → system auto-replies with attendance summary and pending fees.",
+      "RCS Messages tab: simulated Google RCS messages with same templates as WhatsApp.",
+      "Notification Scheduler: 7 event cards — Fee Due Reminder, Absent Alert, Birthday Wish, Exam Timetable Published, Result Published, General Notice, Homework Deadline. Each has ON/OFF toggle, timing setting (e.g. '3 days before'), recipient group, and channel (WhatsApp / RCS / Both).",
+      "Notification bell in header shows live ERP events (fee receipts, attendance saves, new admissions).",
+    ],
   },
   {
     name: "Expenses",
     icon: "💸",
-    desc: "Income & Expense ledgers with running balance. Expense Heads CRUD. Budget vs Actual comparison. Monthly bar chart.",
+    desc: [
+      "Income & Expense ledgers with running balance.",
+      "Expense Heads CRUD (e.g. Salary, Electricity, Maintenance).",
+      "Budget vs Actual comparison by head.",
+      "Monthly bar chart showing income vs expenses.",
+    ],
   },
   {
     name: "Homework",
     icon: "✏️",
-    desc: "Assign homework by class/section/subject with due date. Overdue detection (highlighted in red). Submission tracker per student. Analytics charts.",
+    desc: [
+      "Assign homework by class/section/subject with due date and description.",
+      "Overdue detection: assignments past due date highlighted in red.",
+      "Submission Tracker: mark each student's submission status.",
+      "Analytics charts: completion rates by class.",
+    ],
   },
   {
     name: "Alumni",
     icon: "🎓",
-    desc: "Alumni directory (CRUD + search). Batch view (grouped cards by year). Events management.",
+    desc: [
+      "Alumni Directory: CRUD for alumni records with search.",
+      "Batch View: grouped cards by passing year.",
+      "Events: manage alumni events and reunions.",
+    ],
   },
   {
     name: "Reports",
     icon: "📊",
-    desc: "8 report cards: Students, Finance, Attendance, Exams, HR, Transport, Inventory, Fees Due. Each pulls real data from ERP storage and displays charts + tables.",
+    desc: [
+      "8 report cards, each opens real data from ERP storage:",
+      "Students Report, Finance Report, Attendance Report, Examinations Report, HR Report, Transport Report, Inventory Report, Fees Due Report.",
+      "Each report displays charts + tables with print and CSV export options.",
+    ],
   },
   {
     name: "Promote Students",
     icon: "⬆️",
-    desc: "4-step wizard to bulk-advance all students to the next class and create a new session. Archives old session with infinite history. Month-wise unpaid dues carry forward as Old Balance in the new session. Class 10/12 graduates are auto-discontinued as 'Passed Out'.",
+    desc: [
+      "4-step wizard: select session, review students, map next classes, confirm promotion.",
+      "Bulk advances all students to the next class. Creates the new session (e.g. 2025-26 → 2026-27).",
+      "Archives old session — all historical data is preserved indefinitely.",
+      "Month-wise unpaid fees carry forward as Old Balance in the new session.",
+      "Students finishing the final class (e.g. Class 12) are auto-discontinued as 'Passed Out'.",
+      "⚠️ Always export a backup before running Promote Students.",
+    ],
+  },
+  {
+    name: "Settings",
+    icon: "⚙️",
+    desc: [
+      "School Profile: name, address, phone, email, upload logo, upload dashboard background image.",
+      "Session Management: view current session, create new session, switch sessions (archived = read-only for non-Super Admin; Super Admin can edit all sessions).",
+      "User Management (Super Admin only): searchable list of all users. Reset any password. Add new staff users (Admin, Receptionist, Accountant, Librarian, Driver) with name, position, mobile (becomes username), password.",
+      "WhatsApp API: enter app_key + auth_key (wacoder.in), toggle enable/disable, send test message, view recent sends log.",
+      "WhatsApp Bot: enable/disable auto-reply for parent admission-number lookup.",
+      "Online Payment: toggle GPay / Razorpay / PayU gateways on/off.",
+      "Notification Scheduler: configure all 7 auto-notification events.",
+      "Themes: select and save preferred color theme (multiple themes available).",
+      "Data Management: Export JSON Backup, Import JSON Backup, Factory Reset (3-step confirmation), backup history log.",
+    ],
   },
 ];
 
@@ -277,34 +390,40 @@ const MODULES = [
 const ROLES = [
   [
     "Super Admin",
-    "Full access to all modules, settings, user management, delete/edit receipts, session management, factory reset",
+    "All modules + all sessions including archived. Reset any password. Factory reset. Add/remove users.",
   ],
   [
     "Admin",
-    "All modules except Super Admin settings. Can reset non-admin passwords. Cannot delete fee receipts",
+    "All modules except Super Admin settings. Can reset non-admin passwords. Cannot delete fee receipts.",
   ],
   [
     "Accountant",
-    "Full fees module, expense ledger, reports. Cannot access HR payroll or settings",
+    "Full fees module, expense ledger, accounts, reports. No HR payroll or settings access.",
   ],
   [
     "Receptionist",
-    "Student information (view/add), attendance, basic fees view. No delete rights",
+    "Student information (view/add), attendance, basic fees view. No delete rights.",
   ],
   [
     "Teacher",
-    "Mark attendance for own classes, homework, timetable view, student list for assigned classes",
+    "Mark attendance for own classes, homework, timetable view, student list for assigned classes.",
   ],
   [
     "Parent",
-    "View own children's fee receipts, attendance, timetable, notices, homework",
+    "View own children's fee receipts, attendance, timetable, notices, homework.",
   ],
   [
     "Student",
-    "View own attendance, fee receipts, timetable, homework assignments",
+    "View own attendance, fee receipts, timetable, homework assignments, exam results.",
   ],
-  ["Driver", "QR Attendance scanner, own route info and student list"],
-  ["Librarian", "Student list (view only), basic attendance view"],
+  [
+    "Driver",
+    "QR Attendance scanner, own route info and assigned student list.",
+  ],
+  [
+    "Librarian",
+    "Student list (view only), basic attendance view, custom access.",
+  ],
 ];
 
 // ─── FAQs ────────────────────────────────────────────────────
@@ -315,10 +434,10 @@ const FAQS = [
   },
   {
     q: "A teacher or student cannot log in. What are their default credentials?",
-    a: "Student: Username = Admission No., Password = Date of Birth in ddmmyyyy (e.g. 01042010). Teacher: Username = Mobile No., Password = DOB in ddmmyyyy. Parent: Username = Mobile No., Password = same Mobile No. Credentials are auto-created when you add a student or staff member.",
+    a: "Student: Username = Admission No., Password = Date of Birth in ddmmyyyy (e.g. 01042010). Teacher: Username = Mobile No., Password = DOB in ddmmyyyy. Parent: Username = Guardian Mobile No., Password = same Mobile No. Credentials are auto-created when you add a student or staff member.",
   },
   {
-    q: "Receipts print with a blank page before or wrong position.",
+    q: "Receipts print with a blank page or at wrong position.",
     a: "In the print dialog, set Margins to 'None' and uncheck 'Headers and footers'. For Bharati Format (4-size / 105×145mm), set paper size to A6 (148×105mm) in the print dialog. The receipt starts at the top of the page.",
   },
   {
@@ -327,7 +446,7 @@ const FAQS = [
   },
   {
     q: "WhatsApp messages show 'CORS error'. Is this a bug?",
-    a: "No. CORS errors only occur when testing from localhost or the Caffeine preview URL. Once you deploy to your own cPanel domain (e.g. school.com), the wacoder.in API calls will work correctly. The ERP will continue functioning even when the CORS error appears in preview.",
+    a: "No. CORS errors only occur when testing from localhost or the Caffeine preview URL. Once you deploy to your own cPanel domain (e.g. school.com), the wacoder.in API calls will work correctly. The ERP continues functioning even when the CORS error appears in preview.",
   },
   {
     q: "How do I backup all school data?",
@@ -339,11 +458,23 @@ const FAQS = [
   },
   {
     q: "ESSL biometric device is connected but no data comes in.",
-    a: "Ensure the device is on the same network (LAN) as the computer running the ERP. Check the device IP in its hardware settings, enter it in Attendance → RFID/Biometric → Device IP. If on cPanel hosting, you must run the PHP proxy script on your server so the device can push data to it.",
+    a: "Ensure the device is on the same LAN as the computer running the ERP. Check the device IP in its hardware settings (Menu → Communication → Ethernet), then enter it in Attendance → Biometric Devices. For cPanel hosted ERP, use the PHP proxy script.",
+  },
+  {
+    q: "Balance amount is showing wrong color in Collect Fees.",
+    a: "RED = student owes money (paid less than net fee, e.g. owed ₹500, paid ₹400, balance = ₹100 red). GREEN = student has credit (paid more than net fee, e.g. owed ₹500, paid ₹600, credit = ₹100 green — auto-settles on next payment).",
+  },
+  {
+    q: "After deleting a receipt, the balance amount is still showing.",
+    a: "This was fixed in a recent version. Deleting a fee receipt now removes all related balance adjustments and recalculates the student's running balance from scratch. If you still see stale data, try refreshing the page.",
   },
   {
     q: "How do parents receive WhatsApp auto-replies for attendance?",
-    a: "Go to Communication → Auto-Send Scheduler → enable 'Absent Alert'. Set channel to WhatsApp. The parent's mobile number (as entered in the student's father/guardian mobile field) will receive an automatic message each time their child is marked absent.",
+    a: "Go to Communication → Auto-Send Scheduler → enable 'Absent Alert'. Set channel to WhatsApp. The parent's mobile number (from the student profile guardian field) will receive an automatic message when their child is marked absent.",
+  },
+  {
+    q: "Can the ERP work on multiple devices / computers simultaneously?",
+    a: "Data is stored in browser localStorage per device. To share data across devices, export a backup on Device A and import it on Device B. For real-time multi-device sync, a server-based database setup is needed (future feature).",
   },
 ];
 
@@ -351,6 +482,8 @@ const FAQS = [
 type SectionId =
   | "getting-started"
   | "modules"
+  | "fees-deep"
+  | "attendance-deep"
   | "whatsapp"
   | "essl"
   | "backup"
@@ -377,6 +510,18 @@ const SECTIONS: {
     label: "Module Guide",
     shortLabel: "Modules",
     icon: <BookOpen className="w-4 h-4" />,
+  },
+  {
+    id: "fees-deep",
+    label: "Fees Deep Dive",
+    shortLabel: "Fees",
+    icon: <IndianRupee className="w-4 h-4" />,
+  },
+  {
+    id: "attendance-deep",
+    label: "Attendance Guide",
+    shortLabel: "Attend.",
+    icon: <Users className="w-4 h-4" />,
   },
   {
     id: "whatsapp",
@@ -449,7 +594,8 @@ export default function Documentation() {
             Documentation
           </h1>
           <p className="text-xs text-muted-foreground hidden sm:block">
-            User guides, deployment &amp; help for SHUBH SCHOOL ERP
+            Complete user guide, deployment &amp; technical reference for SHUBH
+            SCHOOL ERP
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -461,7 +607,7 @@ export default function Documentation() {
             size="sm"
             onClick={() => window.print()}
             className="gap-1.5 text-xs"
-            data-ocid="doc-print-btn"
+            data-ocid="doc.print_button"
           >
             <Printer className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Print</span>
@@ -477,14 +623,18 @@ export default function Documentation() {
         <span className="text-muted-foreground font-medium mr-1 shrink-0 hidden sm:inline">
           Jump to:
         </span>
-        {[
-          { id: "getting-started" as SectionId, label: "Getting Started" },
-          { id: "cpanel" as SectionId, label: "Deploy" },
-          { id: "whatsapp" as SectionId, label: "WhatsApp" },
-          { id: "essl" as SectionId, label: "ESSL" },
-          { id: "backup" as SectionId, label: "Backup" },
-          { id: "faq" as SectionId, label: "FAQ" },
-        ].map((item) => (
+        {(
+          [
+            { id: "getting-started" as SectionId, label: "Getting Started" },
+            { id: "fees-deep" as SectionId, label: "Fees" },
+            { id: "attendance-deep" as SectionId, label: "Attendance" },
+            { id: "cpanel" as SectionId, label: "Deploy" },
+            { id: "whatsapp" as SectionId, label: "WhatsApp" },
+            { id: "essl" as SectionId, label: "ESSL" },
+            { id: "backup" as SectionId, label: "Backup" },
+            { id: "faq" as SectionId, label: "FAQ" },
+          ] satisfies { id: SectionId; label: string }[]
+        ).map((item) => (
           <button
             key={item.id}
             type="button"
@@ -507,7 +657,7 @@ export default function Documentation() {
             <button
               key={s.id}
               type="button"
-              data-ocid={`doc-nav-${s.id}`}
+              data-ocid={`doc.nav.${s.id}`}
               onClick={() => setActive(s.id)}
               className={`flex items-center gap-2.5 px-4 py-2.5 text-sm text-left transition-colors ${
                 active === s.id
@@ -561,6 +711,8 @@ function DocContent({ active }: { active: SectionId }) {
   const map: Record<SectionId, React.ReactNode> = {
     "getting-started": <GettingStarted />,
     modules: <ModuleGuide />,
+    "fees-deep": <FeesDeepDive />,
+    "attendance-deep": <AttendanceGuide />,
     whatsapp: <WhatsAppSetup />,
     essl: <EsslBiometric />,
     backup: <BackupRestore />,
@@ -573,39 +725,39 @@ function DocContent({ active }: { active: SectionId }) {
   return <>{map[active]}</>;
 }
 
-// ─── Setup checklist (extracted to avoid index-as-key) ───────
+// ─── Setup checklist data ────────────────────────────────────
 const SETUP_STEPS = [
   {
     title: "Configure School Profile",
-    desc: "Settings → School Profile. Enter school name, address, mobile, email, and upload logo. This auto-fills all receipts, certificates, and ID cards.",
+    desc: "Settings → School Profile. Enter school name, address, mobile, email, upload logo, and optionally upload a dashboard background image.",
   },
   {
     title: "Set Up Classes & Sections",
-    desc: "Academics → Classes & Sections. Add your class structure (e.g. Class 1A, 1B … 12C). No Class Teacher field — assign class teachers separately.",
+    desc: "Academics → Classes & Sections. Add your class structure (e.g. Class 1A, 1B … 12C).",
   },
   {
     title: "Add Subjects",
-    desc: "Academics → Subjects. Use the multi-class wizard to assign one subject to many classes at once (e.g. Hindi → Class 1 to Class 8).",
+    desc: "Academics → Subjects. Use the multi-class wizard to assign one subject to many classes (e.g. Hindi → Class 1 to 8 simultaneously).",
   },
   {
     title: "Add HR Staff & Teachers",
-    desc: "HR → Staff Directory → Add Staff. For teachers, the subject-class range wizard opens in Step 2 — assign each subject with a class range.",
+    desc: "HR → Staff Directory → Add Staff. For teachers, the subject-class range wizard (Step 2) lets you assign multiple subjects with class ranges (e.g. English: Class 1–5, Art: Class 6–8).",
   },
   {
     title: "Define Fee Structure",
-    desc: "Fees → Fee Headings: define heading names and which months they apply to. Fees → Fee Plan: set section-wise amounts (Super Admin only).",
+    desc: "Fees → Fee Headings: define heading names and applicable months. Fees → Fee Plan: set section-wise amounts per heading (Super Admin only).",
   },
   {
     title: "Admit Students",
-    desc: "Students → Add Student. Fill the admission form. Login credentials (Adm.No. / DOB) are auto-created. Transport details auto-populate from Transport module.",
+    desc: "Students → Add Student. Fill the admission form. Credentials (Adm.No. / DOB) are auto-created. Transport details auto-populate from Transport module.",
   },
   {
-    title: "Configure Transport (if applicable)",
-    desc: "Transport → Routes → Add Route → Add Pickup Points → set monthly fare per pickup point. Assign students to routes in Students → student details → Transport tab.",
+    title: "Configure Transport (Optional)",
+    desc: "Transport → Routes → Add Pickup Points → set monthly fare per pickup point. Assign students to routes in student details → Transport tab.",
   },
   {
     title: "Start Collecting Fees",
-    desc: "Fees → Collect Fees. Search a student by admission number, select months, enter amount, save and print receipt. Old balance carries forward automatically.",
+    desc: "Fees → Collect Fees. Search student, select months, enter amount, save and print receipt. Old balance carries forward automatically.",
   },
 ];
 
@@ -654,6 +806,12 @@ function GettingStarted() {
               "Change immediately after first login",
             ],
             [
+              "Admin",
+              "admin",
+              "admin123",
+              "Created in Settings → User Management",
+            ],
+            [
               "Teacher",
               "Mobile No.",
               "DOB (ddmmyyyy)",
@@ -667,24 +825,23 @@ function GettingStarted() {
             ],
             [
               "Parent",
-              "Mobile No.",
-              "Mobile No.",
-              "Same as guardian mobile in student profile",
+              "Father's Mobile No.",
+              "Father's Mobile No.",
+              "Supports multiple children",
             ],
+            ["Driver", "driver", "driver123", "Or mobile/DOB if added via HR"],
             [
-              "Driver",
-              "Mobile No.",
-              "DOB (ddmmyyyy)",
-              "Staff with Driver designation",
-            ],
-            [
-              "Accountant / Receptionist",
+              "Receptionist / Accountant / Librarian",
               "Mobile No.",
               "Set by Super Admin",
               "Created in Settings → User Management",
             ],
           ]}
         />
+        <Alert type="warn">
+          ⚠️ Change the Super Admin password immediately after first login:
+          top-right user menu → Change Password.
+        </Alert>
       </Card>
 
       <Card className="p-5">
@@ -697,9 +854,14 @@ function GettingStarted() {
       <Card className="p-5 space-y-3">
         <h3 className="font-semibold text-foreground">Session Management</h3>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          The current academic session (e.g. 2025-26) is shown in the header.
-          Use the session dropdown to switch to archived sessions for read-only
-          historical view. Super Admin can edit data in any session.
+          The current academic session (e.g. 2025-26) is shown at the top-left
+          of the header. Use the session dropdown to switch to archived sessions
+          for read-only historical view.
+        </p>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          <strong className="text-foreground">Super Admin</strong> can edit data
+          in any session, including archived ones. Non-Super Admin roles see
+          archived sessions as read-only.
         </p>
         <p className="text-sm text-muted-foreground leading-relaxed">
           At year-end, run{" "}
@@ -707,6 +869,36 @@ function GettingStarted() {
           sidebar to advance all students, create the next session, and carry
           forward unpaid month-wise dues as Old Balance. Sessions are archived
           infinitely — no data is ever deleted.
+        </p>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Auto-Generated Credentials
+        </h3>
+        <p className="text-sm text-muted-foreground text-sm mb-2">
+          Credentials are automatically created when you add a student or staff
+          member:
+        </p>
+        <DocTable
+          headers={["User Type", "Username", "Default Password"]}
+          rows={[
+            [
+              "Student",
+              "Admission Number (e.g. 2025001)",
+              "DOB in ddmmyyyy (e.g. 01042012)",
+            ],
+            [
+              "Teacher / Staff",
+              "Mobile Number (e.g. 9876543210)",
+              "DOB in ddmmyyyy (e.g. 15081985)",
+            ],
+            ["Parent", "Father's Mobile Number", "Same mobile number"],
+          ]}
+        />
+        <p className="text-xs text-muted-foreground">
+          View credentials in student/staff detail modal → Credentials tab.
+          Super Admin can reset any password from Settings → User Management.
         </p>
       </Card>
     </div>
@@ -722,16 +914,351 @@ function ModuleGuide() {
           Module Guide
         </h2>
         <p className="text-sm text-muted-foreground">
-          Click each module to expand its usage guide.
+          Click each module to expand its complete usage guide.
         </p>
       </div>
       {MODULES.map((mod) => (
         <Accordion key={mod.name} title={`${mod.icon}  ${mod.name}`}>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            {mod.desc}
-          </p>
+          <ul className="space-y-1.5">
+            {(Array.isArray(mod.desc) ? mod.desc : [mod.desc]).map((line) => (
+              <li
+                key={line}
+                className="text-sm text-muted-foreground leading-relaxed"
+              >
+                {line}
+              </li>
+            ))}
+          </ul>
         </Accordion>
       ))}
+    </div>
+  );
+}
+
+// ─── Fees Deep Dive ──────────────────────────────────────────
+function FeesDeepDive() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-display font-bold text-foreground mb-1">
+          Fees Module — Deep Dive
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Complete guide to the fees collection workflow, balance logic,
+          receipts, and registers.
+        </p>
+      </div>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Fee Setup Flow</h3>
+        <ol className="space-y-3 text-sm text-muted-foreground">
+          <li className="flex gap-2">
+            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+              1
+            </span>
+            <div>
+              <strong className="text-foreground">Fee Headings</strong>: Define
+              heading names (e.g. Tuition Fee, Lab Fee, Sports Fee) and which
+              months they apply to. Fees → Fee Headings.
+            </div>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+              2
+            </span>
+            <div>
+              <strong className="text-foreground">Fees Plan</strong>: Set the
+              amount per heading per class and section. Same heading can be ₹500
+              for Class 1A and ₹600 for Class 1B. Fees → Fee Plan. Super Admin
+              only.
+            </div>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+              3
+            </span>
+            <div>
+              <strong className="text-foreground">Transport Fares</strong>: Set
+              monthly fare per pickup point in Transport → Routes → Pickup
+              Points. Automatically included in fee collection for
+              transport-assigned students.
+            </div>
+          </li>
+          <li className="flex gap-2">
+            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 mt-0.5">
+              4
+            </span>
+            <div>
+              <strong className="text-foreground">Discounts</strong>: Per
+              student in student details → Discounts tab. Fixed monthly amount.
+              Select which fee headings it applies to.
+            </div>
+          </li>
+        </ol>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Collect Fees — Workflow
+        </h3>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>
+            1. Search student by Admission No., name, or mobile. Student info
+            panel loads on the left.
+          </li>
+          <li>
+            2. Month selector appears. 11 months are auto-selected (June
+            unchecked by default). Select the months to collect for.
+          </li>
+          <li>
+            3. Fee grid shows only the fee headings applicable to the student's
+            class/section with per-month columns.
+          </li>
+          <li>
+            4. If student has transport, it appears as a separate row with the
+            pickup-point monthly fare × selected transport months.
+          </li>
+          <li>5. Discounts (if any) are shown and subtracted automatically.</li>
+          <li>
+            6. Old balance from previous unpaid amounts is shown and added to
+            the Net Total.
+          </li>
+          <li>
+            7. Add Other Charges row if needed (e.g. Tie ₹150, Belt ₹100).
+          </li>
+          <li>
+            8. Enter the Amount Received. The system calculates balance
+            immediately.
+          </li>
+          <li>
+            9. Select receipt template (Standard / Compact / Detailed / Bharati
+            Format).
+          </li>
+          <li>
+            10. Click Save & Print. Receipt is generated and payment history
+            updates.
+          </li>
+        </ol>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Balance Amount Logic</h3>
+        <DocTable
+          headers={["Scenario", "Color", "What Happens"]}
+          rows={[
+            [
+              "Net Fee ₹500, Paid ₹400 → Shortfall ₹100",
+              "🔴 RED",
+              "₹100 balance carried to next payment as outstanding due",
+            ],
+            [
+              "Net Fee ₹500, Paid ₹500 → Exact",
+              "—",
+              "No balance. Receipt generated for ₹500",
+            ],
+            [
+              "Net Fee ₹500, Paid ₹600 → Surplus ₹100",
+              "🟢 GREEN",
+              "₹100 credit balance auto-settles on next payment (reduces next net fee by ₹100)",
+            ],
+          ]}
+        />
+        <Alert type="info">
+          ℹ️ Deleting a receipt also removes all related balance adjustments and
+          recalculates the student's complete balance from scratch.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Fees Awaiting (Dashboard)
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          The Fees Awaiting card on the dashboard shows total dues only up to
+          the current month:
+        </p>
+        <ul className="space-y-1 text-sm text-muted-foreground">
+          <li>• Current month = April → shows dues for April only</li>
+          <li>• Current month = June → shows dues for April + May + June</li>
+          <li>
+            • Includes tuition fees + transport fees + other charges − discounts
+          </li>
+        </ul>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Receipt Templates</h3>
+        <DocTable
+          headers={["Template", "Size", "Use Case"]}
+          rows={[
+            ["Standard", "A4", "Default. Full details, school header, QR code"],
+            ["Compact", "Half A4", "Save paper — two receipts per sheet"],
+            ["Detailed", "A4", "Full ledger view with payment history"],
+            [
+              "Bharati Format",
+              "105mm × 145mm",
+              "Traditional 4-size receipt format popular in Indian schools",
+            ],
+          ]}
+        />
+        <p className="text-xs text-muted-foreground">
+          For Bharati Format, set printer paper size to A6 (148×105mm) with
+          margins set to None. Zero-amount line items are automatically skipped
+          on all templates.
+        </p>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Family Members in Collect Fees
+        </h3>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          If two or more students share the same guardian mobile number, they
+          are considered family members. When collecting fees for one student,
+          the Family Members panel on the right shows all siblings. Click any
+          sibling to instantly switch to their fee collection — no need to
+          re-search.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+// ─── Attendance Guide ────────────────────────────────────────
+function AttendanceGuide() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-display font-bold text-foreground mb-1">
+          Attendance — Complete Guide
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Manual, RFID, QR scanner, biometric, and Welcome Display — all
+          attendance methods explained.
+        </p>
+      </div>
+
+      <Accordion title="📋 Manual Attendance" defaultOpen>
+        <ul className="space-y-1.5 text-sm text-muted-foreground">
+          <li>• Go to Attendance → Manual Entry</li>
+          <li>• Select class and section from the dropdowns</li>
+          <li>
+            • Grid shows all students with P (Present) / A (Absent) toggles
+          </li>
+          <li>
+            • Save to record. Attendance summary updates on the dashboard.
+          </li>
+          <li>
+            • View/edit past attendance by selecting a date from the calendar.
+          </li>
+        </ul>
+      </Accordion>
+
+      <Accordion title="📱 QR Scanner Attendance">
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Scan student Admit Cards to mark attendance. Works in two modes:
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-lg border border-border p-3 text-sm">
+              <p className="font-medium text-foreground mb-1">Camera Mode</p>
+              <ul className="space-y-1 text-muted-foreground text-xs">
+                <li>• Works on mobile browser with HTTPS</li>
+                <li>• Tap "Use Camera" tab in QR Scanner</li>
+                <li>• Allow camera permission when prompted</li>
+                <li>• Point camera at student's Admit Card QR code</li>
+                <li>• Student is marked present automatically</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border p-3 text-sm">
+              <p className="font-medium text-foreground mb-1">
+                Scanner Device Mode
+              </p>
+              <ul className="space-y-1 text-muted-foreground text-xs">
+                <li>• Plug in USB or Bluetooth barcode scanner</li>
+                <li>• Switch to "Scanner Device" tab</li>
+                <li>• Scanner types Admission No. into input field</li>
+                <li>• Auto-captures on Enter key (keyboard emulation)</li>
+                <li>• Works without camera permission</li>
+              </ul>
+            </div>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Manual fallback: type Admission No. and press Enter if scanner
+            fails. Today's scan log is shown below the scanner. Export as CSV.
+          </p>
+        </div>
+      </Accordion>
+
+      <Accordion title="📺 Welcome Display (Lobby TV Screen)">
+        <div className="space-y-3 text-sm text-muted-foreground">
+          <p>
+            Go to Attendance → Welcome Display tab. Open this tab on a TV or
+            large monitor at the school entrance for a professional entry
+            display.
+          </p>
+          <div className="rounded-lg bg-muted/40 p-3 space-y-2 text-xs">
+            <p className="font-medium text-foreground text-sm">
+              Idle State (no scan):
+            </p>
+            <ul className="space-y-1">
+              <li>• Live digital clock (large format)</li>
+              <li>• Current date, day, and school name</li>
+              <li>• Pulsing "SCAN YOUR CARD TO CHECK IN" prompt</li>
+            </ul>
+          </div>
+          <div className="rounded-lg bg-muted/40 p-3 space-y-2 text-xs">
+            <p className="font-medium text-foreground text-sm">
+              On Scan (6-second animation):
+            </p>
+            <ul className="space-y-1">
+              <li>• Large photo / avatar of student or staff</li>
+              <li>• Big name display</li>
+              <li>• Father's name (students) or Designation (staff)</li>
+              <li>• Class and section</li>
+              <li>• Exact entry time</li>
+              <li>• "WELCOME TO SCHOOL!" banner</li>
+              <li>• Last 5 check-ins shown in ticker strip at the bottom</li>
+            </ul>
+          </div>
+          <Alert type="info">
+            ℹ️ Keep the Welcome Display tab open on the lobby computer/TV. In
+            another tab/device, trigger scans from the RFID/Biometric or QR
+            Scanner tab — the display updates in real time.
+          </Alert>
+        </div>
+      </Accordion>
+
+      <Accordion title="🖐 ESSL / ZKTeco Biometric Devices">
+        <div className="space-y-2 text-sm text-muted-foreground">
+          <p>
+            IP-based biometric attendance integration. Full setup guide in the
+            ESSL Biometric section.
+          </p>
+          <p>Quick setup:</p>
+          <ol className="space-y-1 list-decimal list-inside">
+            <li>
+              Set a static IP on the biometric device (e.g. 192.168.1.201)
+            </li>
+            <li>
+              Attendance → Biometric Devices → Add Device (name, IP, port 4370)
+            </li>
+            <li>Test Connection → Sync Attendance</li>
+            <li>
+              Map device User IDs to students/staff in Biometric ID Mapping
+            </li>
+          </ol>
+        </div>
+      </Accordion>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Attendance Summary</h3>
+        <p className="text-sm text-muted-foreground">
+          The RFID/Biometric tab shows a live summary. The Dashboard shows
+          present/total counts for today. Click the dashboard card to see
+          class/section-wise and route-wise breakdown.
+        </p>
+      </Card>
     </div>
   );
 }
@@ -757,19 +1284,23 @@ function WhatsAppSetup() {
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Visit <strong className="text-foreground">wacoder.in</strong> and
-            create a free or paid account.
+            create an account.
           </li>
           <li>
-            2. Connect your WhatsApp number (scan QR from the wacoder
-            dashboard).
+            2. Connect your WhatsApp number by scanning the QR code in the
+            dashboard.
           </li>
           <li>
             3. Go to{" "}
-            <strong className="text-foreground">API Credentials</strong> — note
+            <strong className="text-foreground">API Credentials</strong> — copy
             your <code className="text-xs bg-muted px-1 rounded">app_key</code>{" "}
             and <code className="text-xs bg-muted px-1 rounded">auth_key</code>.
           </li>
         </ol>
+        <Alert type="info">
+          ℹ️ Keep your keys private — they authenticate all messages from your
+          school account.
+        </Alert>
       </Card>
 
       <Card className="p-5 space-y-4">
@@ -778,9 +1309,9 @@ function WhatsAppSetup() {
         </h3>
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
-            1. In SHUBH SCHOOL ERP, go to{" "}
-            <strong className="text-foreground">Settings → WhatsApp API</strong>
-            .
+            1. Go to{" "}
+            <strong className="text-foreground">Settings → WhatsApp API</strong>{" "}
+            (Super Admin only).
           </li>
           <li>
             2. Paste your{" "}
@@ -793,26 +1324,35 @@ function WhatsAppSetup() {
           </li>
           <li>
             4. Enter a test mobile number and click{" "}
-            <strong className="text-foreground">Send Test Message</strong> to
-            verify the connection.
+            <strong className="text-foreground">Send Test Message</strong>.
           </li>
+          <li>5. A green success message confirms the connection is live.</li>
         </ol>
-        <Alert type="info">
-          ℹ️ Test messages may show a CORS error in preview mode. Deploy to your
+        <p className="text-sm text-muted-foreground font-medium">
+          API format (for reference):
+        </p>
+        <Code>{`curl --request POST 'https://wacoder.in/api/whatsapp-web/send-message' \\
+  --form 'app_key="8d786da0-d381-4604-80e6-7b5f449ed801"' \\
+  --form 'auth_key="XFnyEeW9v8xBCLVHEbVLUxPjvuT7wFfzfu27X5qz2scMuAoXom"' \\
+  --form 'to="91XXXXXXXXXX"' \\
+  --form 'type="text"' \\
+  --form 'message="Fee receipt generated — Amount: ₹2500"'`}</Code>
+        <Alert type="warn">
+          ⚠️ CORS errors only appear in preview/localhost mode. Deploy to your
           cPanel domain for real sends.
         </Alert>
       </Card>
 
       <Card className="p-5 space-y-4">
         <h3 className="font-semibold text-foreground">
-          Step 3 — Enable Auto-Reply Bot
+          Step 3 — Enable Auto-Send Scheduler
         </h3>
         <p className="text-sm text-muted-foreground">
           Go to{" "}
           <strong className="text-foreground">
             Communication → Auto-Send Scheduler
           </strong>{" "}
-          and enable the events you want:
+          (or Settings → Notification Scheduler) and enable events:
         </p>
         <DocTable
           headers={["Event", "Recipient", "Trigger"]}
@@ -820,29 +1360,13 @@ function WhatsAppSetup() {
             [
               "Absent Alert",
               "Parent (guardian mobile)",
-              "When student marked absent in Attendance",
+              "When student marked absent",
             ],
-            [
-              "Fee Due Reminder",
-              "Parent",
-              "X days before the 15th of the month",
-            ],
-            [
-              "Fee Receipt",
-              "Parent",
-              "After saving a fee collection in Collect Fees",
-            ],
+            ["Fee Due Reminder", "Parent", "X days before 15th of month"],
+            ["Fee Receipt", "Parent", "After saving a fee collection"],
             ["Birthday Wish", "Student / Parent", "On student's date of birth"],
-            [
-              "Exam Timetable",
-              "Parent / Student",
-              "When exam timetable is published",
-            ],
-            [
-              "Result Published",
-              "Parent / Student",
-              "When exam results are saved",
-            ],
+            ["Exam Timetable", "Parent / Student", "When timetable published"],
+            ["Result Published", "Parent / Student", "When exam results saved"],
             ["Homework Deadline", "Student", "Day before assignment due date"],
           ]}
         />
@@ -854,24 +1378,67 @@ function WhatsAppSetup() {
 
       <Card className="p-5 space-y-3">
         <h3 className="font-semibold text-foreground">
-          WhatsApp Parent Inquiry (Admission No. Auto-Reply)
+          WhatsApp Auto-Reply Bot (Admission No. Lookup)
         </h3>
         <p className="text-sm text-muted-foreground leading-relaxed">
-          Parents can WhatsApp the school number with their child's Admission
-          No. and receive an automated reply with attendance summary and pending
-          fees. This requires setting up a webhook on your wacoder.in account
-          pointing to the ERP's API endpoint.
+          Enable in{" "}
+          <strong className="text-foreground">Settings → WhatsApp Bot</strong>.
+          When a parent sends their child's Admission No. to the school WhatsApp
+          number, the bot automatically replies with:
         </p>
+        <ul className="space-y-1 text-sm text-muted-foreground">
+          <li>• Student name, class, section</li>
+          <li>• Attendance summary for the current month</li>
+          <li>• Pending fees amount and last payment date</li>
+        </ul>
         <p className="text-sm text-muted-foreground">
-          Webhook URL format:{" "}
+          PHP proxy script for cPanel (upload to{" "}
           <code className="text-xs bg-muted px-1 rounded">
-            https://yourdomain.com/api/whatsapp-webhook
+            public_html/api/whatsapp-proxy.php
           </code>
+          ):
         </p>
-        <Alert type="info">
-          ℹ️ The webhook feature requires cPanel hosting — it does not work in
-          browser-only mode since data is stored in localStorage on the client.
-        </Alert>
+        <Code>{`<?php
+header('Access-Control-Allow-Origin: *');
+header('Content-Type: application/json');
+$ch = curl_init('https://wacoder.in/api/whatsapp-web/send-message');
+curl_setopt($ch, CURLOPT_POST, 1);
+curl_setopt($ch, CURLOPT_POSTFIELDS, $_POST);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+echo curl_exec($ch);
+curl_close($ch);
+?>`}</Code>
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-foreground mb-3">
+          Troubleshooting WhatsApp
+        </h3>
+        <DocTable
+          headers={["Problem", "Solution"]}
+          rows={[
+            [
+              "CORS error in test",
+              "Normal in preview — deploy to real cPanel domain",
+            ],
+            [
+              '"Unauthorized" error',
+              "Check app_key and auth_key are correct in Settings → WhatsApp API",
+            ],
+            [
+              "Messages not received",
+              "Verify guardian mobile in student profile uses country code (e.g. 91XXXXXXXXXX)",
+            ],
+            [
+              "Test works but auto-send doesn't",
+              "Check event is toggled ON in Auto-Send Scheduler",
+            ],
+            [
+              "WhatsApp session disconnected",
+              "Re-scan QR code in wacoder.in dashboard",
+            ],
+          ]}
+        />
       </Card>
     </div>
   );
@@ -894,8 +1461,8 @@ function EsslBiometric() {
       <Alert type="warn">
         ⚠️ <strong>Requirement:</strong> The biometric device and the
         computer/server running SHUBH SCHOOL ERP must be on the same local
-        network (LAN/WiFi). The device communicates over IP — it cannot work
-        over the public internet without a PHP proxy on your cPanel server.
+        network (LAN/WiFi). For cPanel hosted ERP, a PHP proxy script is
+        required.
       </Alert>
 
       <Card className="p-5 space-y-4">
@@ -904,26 +1471,25 @@ function EsslBiometric() {
         </h3>
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
-            1. On the ESSL/ZKTeco device, go to{" "}
-            <strong className="text-foreground">
-              Menu → Communication → Ethernet
-            </strong>
-            .
+            1. On device: Menu → Communication → Ethernet (or Comm → Network)
           </li>
           <li>
-            2. Assign a static IP (e.g.{" "}
+            2. Assign static IP (e.g.{" "}
             <code className="text-xs bg-muted px-1 rounded">192.168.1.201</code>
-            ) in the same subnet as your LAN.
+            ) in your LAN subnet
           </li>
           <li>
-            3. Note the <strong className="text-foreground">IP Address</strong>,{" "}
-            <strong className="text-foreground">Port</strong> (default: 4370),
-            and <strong className="text-foreground">Device ID</strong> (usually
-            1).
+            3. Set Port:{" "}
+            <code className="text-xs bg-muted px-1 rounded">4370</code> (default
+            ZKTeco port)
           </li>
+          <li>4. Save and restart the device</li>
           <li>
-            4. Ensure the device is set to push mode or pull mode — SHUBH ERP
-            supports both via the ZKLIB protocol.
+            5. Verify:{" "}
+            <code className="text-xs bg-muted px-1 rounded">
+              ping 192.168.1.201
+            </code>{" "}
+            from your PC
           </li>
         </ol>
       </Card>
@@ -936,34 +1502,33 @@ function EsslBiometric() {
           <li>
             1. Go to{" "}
             <strong className="text-foreground">
-              Attendance → RFID / Biometric
+              Attendance → Biometric Devices
             </strong>{" "}
-            tab.
+            tab
           </li>
           <li>
-            2. Click <strong className="text-foreground">Add Device</strong> and
-            enter:
+            2. Click <strong className="text-foreground">Add Device</strong>
           </li>
         </ol>
         <DocTable
           headers={["Field", "Example", "Notes"]}
           rows={[
-            ["Device IP", "192.168.1.201", "Static IP assigned on device"],
-            ["Port", "4370", "Default ZKTeco port"],
-            ["Device ID", "1", "Check device hardware settings"],
             ["Device Name", "Main Gate", "Any label for identification"],
+            ["Device IP", "192.168.1.201", "Static IP set in Step 1"],
+            ["Port", "4370", "Default ZKTeco port"],
+            ["Device ID", "1", "From device hardware settings"],
           ]}
         />
         <ol className="space-y-2 text-sm text-muted-foreground" start={3}>
           <li>
             3. Click{" "}
-            <strong className="text-foreground">Test Connection</strong> — a
-            green success message confirms the device is reachable.
+            <strong className="text-foreground">Test Connection</strong> — green
+            confirms reachability
           </li>
           <li>
             4. Click{" "}
             <strong className="text-foreground">Sync Attendance</strong> to pull
-            punch data from the device into the ERP attendance log.
+            punch records
           </li>
         </ol>
       </Card>
@@ -972,29 +1537,20 @@ function EsslBiometric() {
         <h3 className="font-semibold text-foreground">
           Step 3 — Map Biometric IDs to Students/Staff
         </h3>
-        <p className="text-sm text-muted-foreground">
-          Each enrolled fingerprint on the device has a User ID number. Map
-          these IDs to ERP records:
-        </p>
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Go to{" "}
             <strong className="text-foreground">
               Attendance → Biometric ID Mapping
             </strong>
-            .
           </li>
           <li>
-            2. For each student/staff, enter their device User ID (from device
-            enrollment).
+            2. For each person, enter the device User ID (Menu → User Management
+            → View All on device)
           </li>
+          <li>3. Select matching Student or Staff record from ERP dropdown</li>
           <li>
-            3. Select the matching ERP student or staff record from the
-            dropdown.
-          </li>
-          <li>
-            4. Save. The next sync will now match punch records to the correct
-            person.
+            4. Save. Next sync matches punch records to the correct person.
           </li>
         </ol>
       </Card>
@@ -1004,34 +1560,31 @@ function EsslBiometric() {
           PHP Proxy Script for cPanel Hosting
         </h3>
         <p className="text-sm text-muted-foreground">
-          Browser JavaScript cannot directly connect to the biometric device
-          (CORS restriction). On cPanel hosting, upload this PHP script to your
-          server — it acts as a bridge between the device and the ERP.
+          Upload to{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            public_html/api/biometric-proxy.php
+          </code>
+          :
         </p>
         <Code>{`<?php
-// biometric-proxy.php — upload to public_html/api/
-// Call from ERP: /api/biometric-proxy.php?ip=192.168.1.201&port=4370
-
+// SHUBH SCHOOL ERP — Biometric Proxy for cPanel
 header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json');
 
 $ip   = $_GET['ip']   ?? '';
-$port = $_GET['port'] ?? '4370';
+$port = (int)($_GET['port'] ?? 4370);
 
 if (!$ip) { echo json_encode(['error' => 'IP required']); exit; }
 
-// Connect to ZKTeco device via TCP
-$sock = @fsockopen($ip, (int)$port, $errno, $errstr, 5);
+$sock = @fsockopen($ip, $port, $errno, $errstr, 5);
 if (!$sock) {
     echo json_encode(['error' => "Cannot connect: $errstr ($errno)"]);
     exit;
 }
-// Send ZKLib command to fetch attendance log
 $cmd = pack('H*', '5050827d08000000000000000000000000000000');
 fwrite($sock, $cmd);
 $data = fread($sock, 65536);
 fclose($sock);
-
 echo json_encode(['data' => base64_encode($data), 'bytes' => strlen($data)]);`}</Code>
         <p className="text-sm text-muted-foreground">
           After uploading, set{" "}
@@ -1051,24 +1604,39 @@ echo json_encode(['data' => base64_encode($data), 'bytes' => strlen($data)]);`}<
           rows={[
             [
               "Test Connection fails",
-              "Check device IP, port 4370, and that both device and PC are on same LAN subnet",
+              "Check device IP/port. Ping device. Verify same LAN subnet.",
             ],
             [
-              "Connection times out",
-              "Disable Windows Firewall temporarily and try again. Add port 4370 to firewall exceptions",
+              "Connection timeout",
+              "Disable Windows Firewall temporarily. Add port 4370 exception.",
             ],
             [
-              "Punch data syncs but wrong person",
-              "Re-check Biometric ID Mapping — the device User ID must exactly match the ERP mapping",
+              "Wrong person matched",
+              "Re-check Biometric ID Mapping — Device User ID must exactly match",
             ],
             [
               "No data after sync",
-              "Device may have no records. Check device attendance log directly via device menu",
+              "Check device attendance log via Menu → Attendance Records",
             ],
             [
-              "Works on LAN but not on cPanel",
-              "Install and configure the PHP proxy script described above",
+              "Works on LAN, not on cPanel",
+              "Install and configure the PHP proxy script above",
             ],
+          ]}
+        />
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-foreground mb-3">
+          Supported Device Models
+        </h3>
+        <DocTable
+          headers={["Brand", "Compatible Models"]}
+          rows={[
+            ["ESSL", "iFace 700, iFace302, iClock 580, T9"],
+            ["ZKTeco", "ZK4500, F18, F22, MB360, SpeedFace"],
+            ["Realand", "A-C021, A-C091"],
+            ["Other", "Any device supporting ZKLib TCP SDK on port 4370"],
           ]}
         />
       </Card>
@@ -1098,27 +1666,25 @@ function BackupRestore() {
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Go to{" "}
-            <strong className="text-foreground">Settings → Data</strong> tab.
+            <strong className="text-foreground">Settings → Data</strong> tab
           </li>
           <li>
             2. Click{" "}
-            <strong className="text-foreground">Export JSON Backup</strong>.
+            <strong className="text-foreground">Export JSON Backup</strong>
           </li>
           <li>
             3. A file named{" "}
             <code className="text-xs bg-muted px-1 rounded">
               shubh-erp-backup-YYYY-MM-DD.json
             </code>{" "}
-            downloads automatically.
+            downloads automatically
           </li>
-          <li>
-            4. Save this file to Google Drive, a USB drive, or email it to
-            yourself.
-          </li>
+          <li>4. Save to Google Drive, USB drive, or email it to yourself</li>
         </ol>
         <Alert type="info">
-          ℹ️ The backup includes ALL data: students, staff, fees, receipts,
-          sessions, attendance, transport, inventory, expenses, and settings.
+          ℹ️ Backup includes ALL data: students, staff, fees, receipts, sessions,
+          attendance, transport, inventory, expenses, settings, and WhatsApp
+          configuration.
         </Alert>
       </Card>
 
@@ -1129,27 +1695,39 @@ function BackupRestore() {
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Go to{" "}
-            <strong className="text-foreground">Settings → Data</strong> tab.
+            <strong className="text-foreground">Settings → Data</strong> tab
           </li>
           <li>
             2. Click{" "}
-            <strong className="text-foreground">Import JSON Backup</strong>.
+            <strong className="text-foreground">Import JSON Backup</strong>
           </li>
           <li>
             3. Select the backup{" "}
             <code className="text-xs bg-muted px-1 rounded">.json</code> file
-            from your computer.
+            from your computer
           </li>
           <li>
-            4. All data is restored immediately. The page will reload
-            automatically.
+            4. All data is restored immediately. Page reloads automatically.
           </li>
         </ol>
         <Alert type="warn">
-          ⚠️ Importing a backup REPLACES all current data. If you have new data
-          entered after the backup was made, it will be lost. Export a fresh
-          backup first if needed.
+          ⚠️ Importing a backup REPLACES all current data. Export a fresh backup
+          first if you have new entries after the backup date.
         </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Transfer Data to Another Computer
+        </h3>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>1. On old computer: Settings → Data → Export JSON Backup</li>
+          <li>
+            2. On new computer: open ERP URL → Settings → Data → Import JSON
+            Backup
+          </li>
+          <li>3. Select backup file — all data transfers instantly</li>
+        </ol>
       </Card>
 
       <Card className="p-5 space-y-3">
@@ -1170,15 +1748,11 @@ function BackupRestore() {
               "Any time",
               "Reset clears ALL data permanently",
             ],
-            [
-              "Monthly",
-              "1st of every month",
-              "Minimum recommended for any school",
-            ],
+            ["Weekly minimum", "Every Friday", "Safe fallback"],
             [
               "Before browser update",
-              "When prompted",
-              "Browser updates sometimes clear storage",
+              "When Chrome prompts",
+              "Browser updates can clear storage",
             ],
           ]}
         />
@@ -1188,23 +1762,20 @@ function BackupRestore() {
         <h3 className="font-semibold text-destructive">Factory Reset</h3>
         <p className="text-sm text-muted-foreground leading-relaxed">
           Settings → Data → <strong>Factory Reset</strong>. Clears{" "}
-          <strong>ALL</strong> school data including students, fees, sessions,
-          attendance, and settings. Use only to completely start fresh (e.g. new
-          school setup). This action cannot be undone — always export a backup
-          before resetting.
+          <strong>ALL</strong> school data — students, fees, sessions,
+          attendance, and settings. 3-step confirmation required. Use only to
+          completely start fresh.
         </p>
         <Alert type="danger">
-          🚨 Factory Reset is permanent. The ERP will return to its initial
-          empty state. Super Admin login (superadmin / admin123) is the only
-          credential that remains.
+          🚨 Factory Reset is permanent and irreversible. Super Admin login
+          (superadmin / admin123) is the only credential that remains.
         </Alert>
       </Card>
 
       <Card className="p-5 space-y-3">
-        <h3 className="font-semibold text-foreground">Data Storage Keys</h3>
-        <p className="text-sm text-muted-foreground mb-2">
-          All data is stored in browser localStorage with these key prefixes:
-        </p>
+        <h3 className="font-semibold text-foreground">
+          Data Storage Keys Reference
+        </h3>
         <Code>{`shubh_erp_students          — All student records
 shubh_erp_staff             — All staff records
 shubh_erp_fee_receipts      — All fee payment receipts
@@ -1248,7 +1819,7 @@ function CpanelDeploy() {
           Step-by-Step Deployment
         </h3>
         <ol className="space-y-5">
-          <Step num={1} title="Install dependencies and build the project">
+          <Step num={1} title="Build the project locally">
             <p className="text-sm text-muted-foreground mb-2">
               Run these commands on your local computer (requires Node.js 18+
               and pnpm):
@@ -1260,37 +1831,34 @@ pnpm install
 cd src/frontend
 pnpm build
 
-# The build output will be at:
-# src/frontend/dist/`}</Code>
+# Build output will be at: src/frontend/dist/`}</Code>
           </Step>
 
           <Step num={2} title="Locate the dist/ folder">
             <p className="text-sm text-muted-foreground">
-              After the build completes, find the{" "}
-              <code className="text-xs bg-muted px-1 rounded">dist/</code>{" "}
-              folder inside{" "}
+              After build completes, find{" "}
               <code className="text-xs bg-muted px-1 rounded">
-                src/frontend/
+                src/frontend/dist/
               </code>
-              . It will contain:
+              . It contains:
             </p>
             <Code>{`dist/
-├── index.html          ← main HTML entry point
+├── index.html          ← main entry point
 ├── assets/
-│   ├── index-[hash].js   ← bundled JavaScript
-│   ├── index-[hash].css  ← bundled CSS
-│   └── ...               ← fonts, icons, images
-└── manifest.json        ← PWA manifest`}</Code>
+│   ├── index-[hash].js
+│   ├── index-[hash].css
+│   └── ...             ← fonts, icons, images
+└── manifest.json       ← PWA manifest`}</Code>
           </Step>
 
           <Step num={3} title="Log in to your cPanel hosting">
             <p className="text-sm text-muted-foreground">
-              Go to your hosting provider's cPanel URL (usually{" "}
+              Go to your hosting cPanel URL (usually{" "}
               <code className="text-xs bg-muted px-1 rounded">
                 yourdomain.com/cpanel
               </code>{" "}
-              or as provided in your hosting welcome email). Log in with your
-              cPanel username and password.
+              or as in your hosting welcome email). Log in with your cPanel
+              credentials.
             </p>
           </Step>
 
@@ -1300,7 +1868,7 @@ pnpm build
               <code className="text-xs bg-muted px-1 rounded">
                 public_html/
               </code>{" "}
-              folder (this is your website's root directory).
+              folder — your website root.
             </p>
           </Step>
 
@@ -1311,45 +1879,33 @@ pnpm build
               the dist folder itself.
             </p>
             <ol className="space-y-1.5 text-sm text-muted-foreground">
-              <li>
-                • Compress the dist/ folder as a ZIP file on your computer
-              </li>
+              <li>• Compress the dist/ folder as a ZIP on your computer</li>
               <li>
                 • In File Manager, click <strong>Upload</strong> → select the
-                ZIP file
+                ZIP
               </li>
               <li>
-                • After upload completes, right-click the ZIP →{" "}
-                <strong>Extract</strong>
+                • After upload, right-click the ZIP → <strong>Extract</strong>
               </li>
               <li>
-                • Ensure index.html, assets/, and manifest.json are directly
-                inside public_html/
+                • Verify: index.html, assets/, manifest.json are directly in
+                public_html/
               </li>
               <li>• Delete the ZIP file after extraction</li>
             </ol>
           </Step>
 
-          <Step
-            num={6}
-            title="Create the .htaccess file (required for routing)"
-          >
+          <Step num={6} title="Create .htaccess file (required for routing)">
             <p className="text-sm text-muted-foreground mb-2">
-              Without this file, page refreshes will return a 404 error. In File
-              Manager, click <strong>+ File</strong>, name it{" "}
+              Without this, page refreshes return a 404. In File Manager, click{" "}
+              <strong>+ File</strong>, name it{" "}
               <code className="text-xs bg-muted px-1 rounded">.htaccess</code>{" "}
-              (with the dot), and paste this content:
+              (with dot), and paste:
             </p>
             <Code>{`Options -MultiViews
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ index.html [QSA,L]`}</Code>
-            <p className="text-xs text-muted-foreground mt-2">
-              Note: Use{" "}
-              <code className="text-xs bg-muted px-1 rounded">QSA,L</code> — not{" "}
-              <code className="text-xs bg-muted px-1 rounded">QR,L</code>. The
-              QSA flag passes query strings correctly.
-            </p>
           </Step>
 
           <Step
@@ -1359,21 +1915,16 @@ RewriteRule ^ index.html [QSA,L]`}</Code>
             <p className="text-sm text-muted-foreground">
               In cPanel, go to <strong>SSL/TLS</strong> →{" "}
               <strong>Free SSL Certificate (Let's Encrypt)</strong> → click{" "}
-              <strong>Issue</strong> for your domain. HTTPS is mandatory for the
-              QR camera scanner and PWA install feature.
+              <strong>Issue</strong>. HTTPS is mandatory for QR camera scanner
+              and PWA install.
             </p>
           </Step>
 
-          <Step num={8} title="Point your custom domain (if applicable)">
-            <p className="text-sm text-muted-foreground">
-              If you have a custom domain (e.g.{" "}
-              <code className="text-xs bg-muted px-1 rounded">school.in</code>),
-              go to your domain registrar's DNS settings and add:
-            </p>
+          <Step num={8} title="Point custom domain (if applicable)">
             <Code>{`Type: A Record
-Name: @ (or your subdomain, e.g. erp)
-Value: [Your server IP address from cPanel]
-TTL: 3600 (1 hour)`}</Code>
+Name: @ (root) or erp (subdomain)
+Value: [Your server IP from cPanel → General Info]
+TTL: 3600`}</Code>
           </Step>
 
           <Step num={9} title="Verify everything works">
@@ -1389,14 +1940,12 @@ TTL: 3600 (1 hour)`}</Code>
                 ✓ Login with <strong>superadmin / admin123</strong>
               </li>
               <li>
-                ✓ Go to Settings → School Profile and fill in your school
-                details
+                ✓ Go to Settings → School Profile — enter your school details
               </li>
               <li>
-                ✓ Open the app on your phone in Chrome → look for "Add to Home
-                Screen" prompt
+                ✓ Open on phone in Chrome → look for "Add to Home Screen" prompt
               </li>
-              <li>✓ Go to Attendance → QR Scanner → allow camera permission</li>
+              <li>✓ Attendance → QR Scanner → allow camera permission</li>
             </ol>
           </Step>
         </ol>
@@ -1409,38 +1958,33 @@ TTL: 3600 (1 hour)`}</Code>
           rows={[
             [
               "Blank white page",
-              "Build error or missing files",
-              "Open browser console (F12) — fix the error. Rebuild with pnpm build. Ensure all dist/ contents were uploaded",
+              "Missing files",
+              "Open F12 console. Rebuild with pnpm build. Verify all dist/ files uploaded",
             ],
             [
               "404 on page refresh",
               "Missing .htaccess",
-              "Create .htaccess in public_html with the RewriteRule above. Check mod_rewrite is enabled in cPanel",
+              "Create .htaccess with RewriteRule above. Check mod_rewrite enabled",
             ],
             [
-              "CSS / styles not loading",
+              "CSS not loading",
               "Wrong asset paths",
-              "Rebuild the app — Vite uses relative paths. Verify assets/ folder is present alongside index.html",
-            ],
-            [
-              "Slow first load",
-              "Normal PWA behavior",
-              "Service worker caches everything after first visit. Subsequent loads are instant",
+              "Rebuild — Vite uses relative paths. Verify assets/ folder alongside index.html",
             ],
             [
               "Can't install PWA",
-              "Not HTTPS or not Chrome",
-              "Ensure SSL is active. Use Chrome on Android. Check manifest.json is accessible",
+              "No HTTPS / wrong browser",
+              "Enable SSL. Use Chrome on Android. iOS requires Safari",
             ],
             [
-              "QR scanner permission blocked",
-              "Camera not allowed",
-              "Chrome Settings → Site Settings → Camera → find domain → set to Allow",
+              "QR scanner blocked",
+              "Camera denied",
+              "Chrome Settings → Site Settings → Camera → Allow for your domain",
             ],
             [
               "WhatsApp CORS error",
               "Localhost restriction",
-              "Deploy to your real domain — CORS only occurs in preview/localhost mode",
+              "Deploy to real domain — CORS only occurs in preview/localhost",
             ],
           ]}
         />
@@ -1451,28 +1995,19 @@ TTL: 3600 (1 hour)`}</Code>
           Recommended Indian Hosting Providers
         </h3>
         <DocTable
-          headers={[
-            "Provider",
-            "cPanel",
-            "Price/mo",
-            "Node.js",
-            "SSL",
-            "Notes",
-          ]}
+          headers={["Provider", "cPanel", "Price/mo", "SSL", "Notes"]}
           rows={[
             [
               "Hostinger India",
               "✅",
               "₹69",
-              "✅",
               "✅ Free",
-              "Best value, fast servers, recommended",
+              "Best value, fast NVMe SSD, recommended",
             ],
             [
               "MilesWeb",
               "✅",
               "₹49",
-              "❌",
               "✅ Free",
               "Cheapest option, good for small schools",
             ],
@@ -1480,7 +2015,6 @@ TTL: 3600 (1 hour)`}</Code>
               "ResellerClub",
               "✅",
               "₹79",
-              "❌",
               "✅ Free",
               "Good Indian support, reliable uptime",
             ],
@@ -1488,23 +2022,28 @@ TTL: 3600 (1 hour)`}</Code>
               "BigRock",
               "✅",
               "₹89",
-              "❌",
               "✅ Free",
-              "Popular in India, ICANN accredited",
+              "ICANN accredited, popular in India",
             ],
             [
               "HostGator India",
               "✅",
               "₹99",
-              "❌",
               "✅ Free",
-              "Very popular, 24/7 support",
+              "24/7 support, very popular",
+            ],
+            [
+              "Bluehost India",
+              "✅",
+              "₹199",
+              "✅ Free",
+              "Good for larger schools",
             ],
           ]}
         />
         <p className="text-xs text-muted-foreground mt-3">
-          * Prices approximate as of 2025. All providers support PHP 8+, MySQL,
-          and Let's Encrypt SSL. Node.js is NOT required for this app.
+          * Prices approximate as of 2025. Node.js is NOT required for
+          deployment — only for building locally.
         </p>
       </Card>
     </div>
@@ -1588,6 +2127,18 @@ function PwaInstall() {
           ]}
         />
       </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Mobile Bottom Navigation
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          On mobile screens, the ERP shows a bottom navigation bar with quick
+          links: Dashboard, Students, Fees, Attendance, and Menu (opens full
+          sidebar drawer). This provides a native app-like experience for daily
+          tasks.
+        </p>
+      </Card>
     </div>
   );
 }
@@ -1628,8 +2179,35 @@ function RolesSection() {
         </p>
       </div>
 
-      <Card className="p-5">
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Role Overview</h3>
         <DocTable headers={["Role", "Access Level"]} rows={ROLES} />
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">
+          Login Credentials by Role
+        </h3>
+        <DocTable
+          headers={["Role", "Username", "Password"]}
+          rows={[
+            ["Super Admin", "superadmin", "admin123 (change on first login)"],
+            ["Admin", "admin", "admin123 (change on first login)"],
+            ["Teacher", "Mobile No.", "DOB in ddmmyyyy format"],
+            ["Student", "Admission No.", "DOB in ddmmyyyy format"],
+            ["Parent", "Guardian Mobile No.", "Same mobile number"],
+            [
+              "Driver",
+              "driver (or Mobile No.)",
+              "driver123 (or DOB if added via HR)",
+            ],
+            [
+              "Receptionist / Accountant / Librarian",
+              "Mobile No.",
+              "Set by Super Admin",
+            ],
+          ]}
+        />
       </Card>
 
       <Card className="p-5 space-y-3">
@@ -1652,31 +2230,47 @@ function RolesSection() {
         <h3 className="font-semibold text-foreground">
           Adding New Staff Users
         </h3>
-        <p className="text-sm text-muted-foreground">
-          Super Admin can add Admin, Receptionist, Accountant, Librarian, and
-          other staff users:
-        </p>
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Go to{" "}
             <strong className="text-foreground">
               Settings → User Management
-            </strong>
-            .
+            </strong>{" "}
+            (Super Admin only)
           </li>
           <li>
             2. Click <strong className="text-foreground">Add Staff User</strong>
-            .
           </li>
           <li>
             3. Enter full name, position, mobile number (becomes username), and
-            password.
+            password
           </li>
           <li>
-            4. The user can log in immediately and change their own password
-            after login.
+            4. User can log in immediately and change their own password after
+            login
           </li>
         </ol>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Password Reset</h3>
+        <ul className="space-y-2 text-sm text-muted-foreground">
+          <li>
+            • Users change their own password: top-right user menu → Change
+            Password
+          </li>
+          <li>
+            • Super Admin resets any user: Settings → User Management → Reset
+            Password button next to the user
+          </li>
+          <li>
+            • If Super Admin is locked out: open browser DevTools (F12) →
+            Application → Local Storage → edit{" "}
+            <code className="text-xs bg-muted px-1 rounded">
+              shubh_erp_user_passwords
+            </code>
+          </li>
+        </ul>
       </Card>
     </div>
   );
@@ -1691,7 +2285,7 @@ function BuildCommands() {
           Build Commands
         </h2>
         <p className="text-sm text-muted-foreground">
-          For developers setting up or building the project locally.
+          For developers setting up, building, or modifying the project locally.
         </p>
       </div>
 
@@ -1738,7 +2332,7 @@ pnpm fix`}</Code>
 pnpm build
 
 # Output: src/frontend/dist/
-# Upload contents of dist/ to public_html/ on cPanel hosting`}</Code>
+# Upload contents of dist/ to public_html/ on cPanel`}</Code>
       </Card>
 
       <Card className="p-5 space-y-3">
@@ -1746,24 +2340,67 @@ pnpm build
           Project Folder Structure
         </h3>
         <Code>{`src/frontend/src/
-├── components/          # Shared UI components (Layout, shadcn/ui wrappers)
-├── context/             # AppContext: auth, sessions, notifications
-├── pages/               # One file per module (Students, Fees, Attendance...)
+├── components/          # Shared UI (Layout.tsx, Sidebar.tsx, shadcn/ui)
+├── context/
+│   └── AppContext.tsx   # Auth, sessions, notifications, global state
+├── hooks/
+│   └── useQueries.ts    # React Query data hooks
+├── pages/               # One file per module
 │   ├── settings/        # Settings sub-tabs
-│   ├── fees/            # Fees sub-tabs
-│   └── hr/              # HR sub-tabs
-├── types/               # TypeScript interfaces (Student, Staff, Receipt...)
+│   ├── fees/            # Fees sub-tabs (Collect, Plan, Headings...)
+│   ├── hr/              # HR sub-tabs (Staff, Payroll, Leave)
+│   └── academics/       # Academics sub-tabs
+├── types/
+│   └── index.ts         # All TypeScript interfaces
 └── utils/
-    ├── localStorage.ts  # ls() helper, MONTHS array, CLASSES constant
+    ├── localStorage.ts  # ls() helper, MONTHS, CLASSES, generateId
     └── whatsapp.ts      # wacoder.in API integration
 
-docs/                    # Markdown documentation files
+docs/                    # Markdown documentation (this content)
 public/
 ├── manifest.json        # PWA manifest
 ├── sw.js                # Service worker (offline cache)
 └── assets/
     ├── fonts/           # SpaceGrotesk, PlusJakartaSans, JetBrainsMono
-    └── icons/           # App icons (192x192, 512x512)`}</Code>
+    └── icons/           # App icons (192×192, 512×512)`}</Code>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Tech Stack</h3>
+        <DocTable
+          headers={["Layer", "Technology"]}
+          rows={[
+            ["Frontend", "React 19 + TypeScript"],
+            ["Styling", "Tailwind CSS + shadcn/ui"],
+            ["State / Data", "localStorage (browser-side storage)"],
+            ["Build tool", "Vite"],
+            ["Icons", "Lucide React"],
+            ["Animations", "motion/react"],
+            ["Fonts", "Space Grotesk, Plus Jakarta Sans, JetBrains Mono"],
+            ["WhatsApp", "wacoder.in REST API"],
+          ]}
+        />
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Key Utilities</h3>
+        <Code>{`// Read from localStorage
+ls.get('students', [])
+
+// Write to localStorage
+ls.set('students', studentArray)
+
+// Generate unique ID
+generateId()
+
+// Indian academic year months (April → March)
+MONTHS = ['April', 'May', 'June', ..., 'March']
+
+// All class names
+CLASSES = ['Nursery', 'LKG', 'UKG', 'Class 1', ..., 'Class 12']
+
+// Send WhatsApp message via wacoder.in
+sendWhatsApp('919876543210', 'Fee receipt...')`}</Code>
       </Card>
     </div>
   );

@@ -71,8 +71,10 @@ The exported JSON contains all localStorage keys with prefix `shubh_erp_`:
 To move ERP data to a new computer or browser:
 
 1. **On the old computer:** Export JSON Backup
-2. **On the new computer:** Open the ERP URL → go to Settings → Data → Import JSON Backup
+2. **On the new computer:** Open the ERP URL → Settings → Data → Import JSON Backup
 3. Select the backup file — all data transfers instantly
+
+> Note: localStorage is per-browser, per-device. Ensure you always use the same browser (e.g. Chrome) on the same device for consistent data access.
 
 ---
 
@@ -84,9 +86,10 @@ Clears **ALL** school data including students, fees, sessions, attendance, and s
 
 - Super Admin login (`superadmin` / `admin123`) is the only credential preserved
 - This action **cannot be undone**
+- 3-step confirmation required before reset executes
 - Always export a backup before resetting
 
-> 🚨 Use Factory Reset only when starting fresh (e.g. setting up for a new school). Do NOT use it to "fix" a problem — restore from backup instead.
+> 🚨 Use Factory Reset only when starting completely fresh (e.g. setting up for a new school). Do NOT use it to "fix" a problem — restore from backup instead.
 
 ---
 
@@ -94,14 +97,15 @@ Clears **ALL** school data including students, fees, sessions, attendance, and s
 
 If data is lost unexpectedly:
 
-1. **Check if browser history was cleared** — if so, data is gone (restore from backup)
-2. **Check if wrong browser is open** — different browsers have separate localStorage; ensure you're using the same browser you always use for the ERP
-3. **Check if you're logged in to the same device** — localStorage is device and browser specific
+1. **Check if browser history was cleared** — if so, data is gone; restore from backup
+2. **Check if wrong browser is open** — different browsers have separate localStorage; use the same browser you always use for the ERP
+3. **Check if you're on the same device** — localStorage is device and browser specific
 4. **Restore from your last backup** using Import JSON Backup
 5. **If no backup exists**, data cannot be recovered — this is why regular backups are critical
 
 ### Prevention
 
-- Pin the backup reminder: set a recurring calendar event for "ERP Backup" every Friday
+- Set a recurring calendar event "ERP Backup" every Friday
 - Store the backup file in at least 2 locations (cloud + local)
 - Consider using a dedicated browser profile exclusively for the ERP
+- Consider deploying to cPanel hosting and using a shared computer for the ERP (single point of truth)

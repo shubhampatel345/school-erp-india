@@ -12,79 +12,112 @@ Welcome to **SHUBH SCHOOL ERP**, a comprehensive web-based School Management Sys
 
 ---
 
-## First Login
+## Default Login Credentials
 
 | Role | Username | Password | Notes |
 |------|----------|----------|-------|
 | Super Admin | `superadmin` | `admin123` | **Change immediately after first login** |
+| Admin | `admin` | `admin123` | Created in Settings → User Management |
 | Teacher | Mobile No. | DOB (ddmmyyyy) | Auto-created when added in HR |
 | Student | Admission No. | DOB (ddmmyyyy) | Auto-created when admitted |
-| Parent | Mobile No. | Mobile No. | Same as guardian mobile in student profile |
-| Driver | Mobile No. | DOB (ddmmyyyy) | Added as staff with Driver designation |
-| Accountant / Receptionist | Mobile No. | Set by Super Admin | Created in Settings → User Management |
+| Parent | Father's Mobile No. | Father's Mobile No. | Supports multiple children |
+| Driver | `driver` | `driver123` | Or Mobile/DOB if added via HR |
+| Receptionist / Accountant / Librarian | Mobile No. | Set by Super Admin | Created in Settings → User Management |
+
+> ⚠️ **Security:** Change the Super Admin password immediately after first login. User menu → Change Password.
 
 ---
 
-## Initial Setup Checklist
+## Auto-Generated Credentials
 
-Follow these steps in order for a complete school setup:
+Credentials are automatically created when you add a student or staff member:
+
+| User Type | Username | Default Password |
+|-----------|----------|-----------------|
+| Student | Admission Number (e.g. 2025001) | DOB in ddmmyyyy (e.g. 01042012) |
+| Teacher / Staff | Mobile Number (e.g. 9876543210) | DOB in ddmmyyyy (e.g. 15081985) |
+| Parent | Father's Mobile Number | Same mobile number |
+
+View credentials in student/staff detail modal → **Credentials tab**. Super Admin can reset any password from **Settings → User Management**.
+
+---
+
+## First-Time Setup Checklist
+
+Follow these steps in order:
 
 ### 1. Configure School Profile
 `Settings → School Profile`
 
-Enter school name, address, phone, email, and upload your school logo. This data auto-fills all fee receipts, certificates, ID cards, and reports.
+Enter school name, address, phone, email, upload logo, and optionally a dashboard background image. This data auto-fills receipts, certificates, ID cards, and reports.
 
 ### 2. Set Up Classes & Sections
 `Academics → Classes & Sections`
 
-Add your class structure (e.g. Class 1A, 1B, 2A … 12C). Sections are separate entries under each class.
+Add your class structure (e.g. Class 1A, 1B, 2A … 12C).
 
 ### 3. Add Subjects
 `Academics → Subjects`
 
-Use the multi-class assignment wizard to assign one subject to many classes simultaneously (e.g. Hindi → Class 1 through Class 8).
+Use the multi-class wizard to assign one subject to many classes simultaneously (e.g. Hindi → Class 1 to Class 8).
 
 ### 4. Add Staff & Teachers
 `HR → Staff Directory → Add Staff`
 
-For teachers, the subject-class range wizard (Step 2 of Add Staff) lets you assign multiple subjects with class ranges (e.g. English: Class 1–5, Art: Class 6–8).
+For teachers, the Subject-Class Range Wizard (Step 2) lets you assign multiple subjects with class ranges (e.g. English: Class 1–5, Art: Class 6–8). This feeds the Teacher Timetable generator automatically.
 
 ### 5. Define Fee Structure
 `Fees → Fee Headings` then `Fees → Fee Plan`
 
 - **Fee Headings**: Define heading names and which months they apply to (e.g. Lab Fee → April, October only)
-- **Fee Plan**: Set section-wise amounts — the same heading can have different values per section (Super Admin only)
+- **Fee Plan**: Set section-wise amounts — same heading can have different values per section (Super Admin only)
 
 ### 6. Admit Students
 `Students → Add Student`
 
-Fill the admission form. Login credentials are auto-created (Student username = Adm. No., Password = DOB in ddmmyyyy format).
+Fill the admission form. Credentials are auto-created (Student: Adm. No. / DOB, Teacher: Mobile / DOB, Parent: Mobile / Mobile).
 
 ### 7. Assign Transport (Optional)
 `Transport → Routes`
 
-Add routes → pickup points → set monthly fare per pickup point. Student transport details auto-populate from the Transport module when the student is assigned to a route.
+Add routes → pickup points → set monthly fare per pickup point. Student transport details auto-populate from the Transport module.
 
 ### 8. Collect Fees
 `Fees → Collect Fees`
 
-Search a student, select months, enter amount, save and print. Old unpaid balance carries forward automatically.
+Search student, select months, enter amount, save and print receipt. Old unpaid balance carries forward automatically.
 
 ---
 
 ## Session Management
 
-- The current academic session (e.g. 2025-26) is shown in the top-left header
+- The current academic session (e.g. 2025-26) is shown at the top-left of the header
 - Use the session dropdown to switch to any archived session for read-only historical view
 - **Super Admin** can edit data in any session regardless of archive status
-- At year-end, run **Promote Students** (sidebar) to advance all students, create the next session (e.g. 2026-27), and carry forward unpaid month-wise dues as Old Balance
+- Non-Super Admin roles see archived sessions as read-only
+- At year-end, run **Promote Students** (sidebar) to advance all students, create the next session, and carry forward unpaid month-wise dues as Old Balance
 - Sessions are archived infinitely — no data is ever deleted
 
 ---
 
-## Default Demo Credentials (for testing)
+## Module Overview
 
-After first login as Super Admin, you can create all other users through:
-- **HR → Staff Directory** (for teachers, drivers, support staff)
-- **Settings → User Management** (for Admin, Accountant, Receptionist, Librarian roles)
-- Students and parents get credentials automatically when admitted
+| Module | Purpose |
+|--------|---------|
+| Students | Admission, profile, ID cards, admit cards, bulk export |
+| Fees | Fee collection, receipts, registers, due notices |
+| Attendance | Manual, RFID, QR scanner, biometric, Welcome Display |
+| Examinations | Timetable maker, results, marksheets |
+| HR & Payroll | Staff directory, payroll, leave management |
+| Academics | Classes, subjects, timetables, syllabus |
+| Transport | Routes, pickup points, fare management |
+| Template Studio | Design all school templates (ID, receipt, certificates) |
+| Inventory | Stock, purchases, sales for school items |
+| Communication | WhatsApp, RCS, notification scheduler |
+| Expenses | Income/expense ledger, budget tracking |
+| Homework | Assignments, submission tracking, analytics |
+| Alumni | Directory, batch view, events |
+| Reports | 8 data reports across all modules |
+| Promote Students | Year-end bulk promotion wizard |
+| Settings | School profile, sessions, users, themes, data management |
+| Documentation | This guide |

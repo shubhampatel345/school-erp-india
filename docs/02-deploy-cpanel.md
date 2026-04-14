@@ -2,7 +2,7 @@
 
 Host SHUBH SCHOOL ERP on any Indian shared hosting with cPanel. No Node.js server required on the host — the app runs entirely as a static web application.
 
-> **Important:** SHUBH SCHOOL ERP is a static React app. You only need basic shared hosting with cPanel — no Node.js, PHP database, or backend server required.
+> **Important:** SHUBH SCHOOL ERP is a static React app. You only need basic shared hosting with cPanel — no Node.js, PHP, or database required on the server.
 
 ---
 
@@ -10,7 +10,7 @@ Host SHUBH SCHOOL ERP on any Indian shared hosting with cPanel. No Node.js serve
 
 - cPanel hosting account (any Indian provider — see recommended list below)
 - Node.js 18+ and pnpm on your **local** computer (for building)
-- A custom domain (optional but recommended for HTTPS and PWA features)
+- A custom domain (optional but strongly recommended for HTTPS and PWA features)
 
 ---
 
@@ -48,7 +48,7 @@ dist/
 
 ### Step 3 — Log In to cPanel
 
-Go to your hosting provider's cPanel URL (usually `yourdomain.com/cpanel` or as provided in your hosting welcome email). Log in with your cPanel credentials.
+Go to your hosting provider's cPanel URL (usually `yourdomain.com/cpanel` or as provided in your hosting welcome email).
 
 ### Step 4 — Open File Manager → public_html
 
@@ -95,7 +95,7 @@ If you have a domain (e.g. `school.in`), update DNS at your registrar:
 ```
 Type: A Record
 Name: @ (root) or erp (subdomain)
-Value: [Your server IP from cPanel > General Info]
+Value: [Your server IP from cPanel → General Info]
 TTL: 3600
 ```
 
@@ -107,7 +107,7 @@ DNS changes take 15 minutes to 24 hours to propagate.
 2. Login with `superadmin` / `admin123`
 3. Go to **Settings → School Profile** and enter your school details
 4. Open the app in Chrome on your phone → look for the "Add to Home Screen" prompt
-5. Test: Students → Add Student, Fees → Collect Fees, Attendance → QR Scanner
+5. Test: Attendance → QR Scanner → allow camera permission
 
 ---
 
@@ -127,13 +127,14 @@ DNS changes take 15 minutes to 24 hours to propagate.
 
 ## Recommended Indian Hosting Providers
 
-| Provider | cPanel | Price/mo | Node.js | SSL | Notes |
-|----------|--------|----------|---------|-----|-------|
-| Hostinger India | ✅ | ₹69 | ✅ | ✅ Free | Best value, fast NVMe SSD, recommended |
-| MilesWeb | ✅ | ₹49 | ❌ | ✅ Free | Cheapest, good for small schools |
-| ResellerClub | ✅ | ✅₹79 | ❌ | ✅ Free | Good Indian support, reliable |
-| BigRock | ✅ | ₹89 | ❌ | ✅ Free | ICANN accredited, popular in India |
-| HostGator India | ✅ | ₹99 | ❌ | ✅ Free | 24/7 support, very popular |
+| Provider | cPanel | Price/mo | SSL | Notes |
+|----------|--------|----------|-----|-------|
+| Hostinger India | ✅ | ₹69 | ✅ Free | Best value, fast NVMe SSD, recommended |
+| MilesWeb | ✅ | ₹49 | ✅ Free | Cheapest, good for small schools |
+| ResellerClub | ✅ | ₹79 | ✅ Free | Good Indian support, reliable |
+| BigRock | ✅ | ₹89 | ✅ Free | ICANN accredited, popular in India |
+| HostGator India | ✅ | ₹99 | ✅ Free | 24/7 support, very popular |
+| Bluehost India | ✅ | ₹199 | ✅ Free | Good for larger schools |
 
 > Node.js is **not required** for deployment — only for building on your local machine.
 
@@ -142,9 +143,11 @@ DNS changes take 15 minutes to 24 hours to propagate.
 ## Post-Deployment Checklist
 
 - [ ] Login works (superadmin / admin123)
+- [ ] Changed Super Admin password from default
 - [ ] School profile filled with real school name and logo
 - [ ] SSL certificate active (padlock in browser)
-- [ ] Page refresh does not show 404
-- [ ] QR scanner camera works on mobile
+- [ ] Page refresh does not show 404 (.htaccess working)
+- [ ] QR scanner camera works on mobile (HTTPS required)
 - [ ] WhatsApp test message sends successfully
 - [ ] PWA "Add to Home Screen" prompt appears on Android Chrome
+- [ ] Backup exported and stored safely

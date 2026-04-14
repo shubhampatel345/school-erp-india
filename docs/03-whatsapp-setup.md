@@ -41,7 +41,7 @@ curl --request POST 'https://wacoder.in/api/whatsapp-web/send-message' \
 
 ## Step 3 — Configure Auto-Send Scheduler
 
-Go to **Communication → Auto-Send Scheduler** and enable the events you want:
+Go to **Communication → Auto-Send Scheduler** (or **Settings → Notification Scheduler**) and enable the events you want:
 
 | Event | Recipient | Trigger |
 |-------|-----------|---------|
@@ -59,57 +59,45 @@ For each event:
 - Select recipient group (Parent, Student, Teacher, or All)
 - Select channel (WhatsApp, RCS, or Both)
 
+> ⚠️ The guardian mobile number must be filled in the student profile for auto-messages to work.
+
 ---
 
-## WhatsApp Auto-Reply Bot (Admission No. Lookup)
+## Step 4 — Enable WhatsApp Auto-Reply Bot
 
-Parents can send their child's Admission No. to the school's WhatsApp number and receive an automated reply with:
+Go to **Settings → WhatsApp Bot** and toggle ON.
+
+When a parent sends their child's Admission No. to the school WhatsApp number, the bot automatically replies with:
 - Student name, class, and section
 - Attendance summary (present/absent this month)
 - Pending fees amount and last payment date
 
-### Setup Requirements
+### PHP Proxy Script for cPanel
 
-This feature requires:
-1. A wacoder.in webhook configured to point to your server
-2. A PHP endpoint on your cPanel server that receives the webhook, queries ERP data, and sends the reply
+Browser JavaScript cannot call external APIs directly due to CORS restrictions. Upload this script to handle WhatsApp calls from a cPanel server:
 
-### PHP Webhook Script (for cPanel)
-
-Upload this to `public_html/api/whatsapp-webhook.php`:
+**Upload to:** `public_html/api/whatsapp-proxy.php`
 
 ```php
 <?php
-// WhatsApp auto-reply webhook
+// WhatsApp proxy — upload to public_html/api/whatsapp-proxy.php
+header('Access-Control-Allow-Origin: *');
 header('Content-Type: application/json');
-
-$body = json_decode(file_get_contents('php://input'), true);
-$from = $body['from'] ?? '';
-$message = trim($body['message'] ?? '');
-
-// Student lookup by admission number
-// (Integrate with your ERP data export here)
-$admNo = strtoupper($message);
-
-// Send auto-reply
-$reply = "Hi! We received your query for Admission No: $admNo\n" .
-         "Please allow 1-2 minutes for our system to fetch details.\n" .
-         "For urgent help, call us directly.";
 
 $ch = curl_init('https://wacoder.in/api/whatsapp-web/send-message');
 curl_setopt($ch, CURLOPT_POST, 1);
-curl_setopt($ch, CURLOPT_POSTFIELDS, [
-    'app_key'  => 'YOUR_APP_KEY',
-    'auth_key' => 'YOUR_AUTH_KEY',
-    'to'       => $from,
-    'type'     => 'text',
-    'message'  => $reply,
-]);
+curl_setopt($ch, CURLOPT_POSTFIELDS, $_POST);
 curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
 $result = curl_exec($ch);
+$error  = curl_error($ch);
 curl_close($ch);
 
-echo json_encode(['status' => 'sent', 'result' => $result]);
+if ($error) {
+    echo json_encode(['error' => $error]);
+} else {
+    echo $result;
+}
 ```
 
 ---
@@ -119,8 +107,8 @@ echo json_encode(['status' => 'sent', 'result' => $result]);
 | Problem | Solution |
 |---------|----------|
 | CORS error in test | Normal in preview — deploy to real domain |
-| "Unauthorized" error | Check app_key and auth_key are correct |
-| Messages not received | Verify guardian mobile in student profile has country code (91XXXXXXXXXX) |
+| "Unauthorized" error | Check app_key and auth_key are correct in Settings → WhatsApp API |
+| Messages not received | Verify guardian mobile in student profile uses country code (91XXXXXXXXXX) |
 | Test message works but auto-send doesn't | Check that the event is toggled ON in Auto-Send Scheduler |
 | WhatsApp session disconnected | Re-scan QR code in wacoder.in dashboard |
 
@@ -128,7 +116,7 @@ echo json_encode(['status' => 'sent', 'result' => $result]);
 
 ## Message Templates
 
-The ERP sends these message templates (customizable in Communication → WhatsApp):
+The ERP sends these templates (customizable in Communication → WhatsApp):
 
 **Fee Receipt:**
 ```
@@ -154,4 +142,12 @@ Fees for [Student Name] are due.
 Amount: ₹[2500]  |  Due Date: 15th of this month
 Pay at school or contact Admin.
 — SHUBH SCHOOL
+```
+
+**Birthday Wish:**
+```
+Dear [Student Name],
+SHUBH SCHOOL wishes you a very Happy Birthday! 🎂
+May this year bring you joy and success.
+— SHUBH SCHOOL Family
 ```

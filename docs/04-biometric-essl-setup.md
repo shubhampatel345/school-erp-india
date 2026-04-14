@@ -36,7 +36,7 @@ On the ESSL/ZKTeco biometric device:
 
 ## Step 2 — Add Device in ERP
 
-1. Go to **Attendance → RFID / Biometric** tab
+1. Go to **Attendance → Biometric Devices** tab
 2. Click **Add Device** button
 3. Enter:
 
@@ -59,18 +59,18 @@ Each enrolled fingerprint on the device has a User ID number. These must be mapp
 1. Go to **Attendance → Biometric ID Mapping**
 2. Click **Add Mapping**
 3. For each person:
-   - Enter the **Device User ID** (from device's user list: Menu → User Management → View All)
+   - Enter the **Device User ID** (from device: Menu → User Management → View All)
    - Select the matching **Student** or **Staff** from the ERP dropdown
 4. Save the mapping
 5. Run **Sync Attendance** — punch records will now match the correct person
 
-> **Tip:** Export the device user list to a CSV/Excel file from the device management software, then bulk-import mappings.
+> **Tip:** Export the device user list to CSV from the device management software, then bulk-import mappings.
 
 ---
 
 ## Step 4 — PHP Proxy Script for cPanel Hosting
 
-Browser JavaScript cannot directly connect to the biometric device due to browser security restrictions (CORS). For cPanel-hosted deployments, install this PHP proxy on your server:
+Browser JavaScript cannot directly connect to the biometric device due to CORS restrictions. For cPanel-hosted deployments, install this PHP proxy:
 
 **Upload to:** `public_html/api/biometric-proxy.php`
 
@@ -121,10 +121,10 @@ while (!feof($sock)) {
 fclose($sock);
 
 echo json_encode([
-    'status'  => 'ok',
-    'ip'      => $ip,
-    'port'    => $port,
-    'bytes'   => strlen($data),
+    'status'   => 'ok',
+    'ip'       => $ip,
+    'port'     => $port,
+    'bytes'    => strlen($data),
     'data_b64' => base64_encode($data),
 ]);
 ```
@@ -136,14 +136,14 @@ echo json_encode([
 
 ---
 
-## Auto-Sync Schedule
+## Auto-Sync Schedule (cPanel Cron Job)
 
-To sync attendance automatically every hour, add a cPanel Cron Job:
+To sync attendance automatically every 30 minutes, add a cPanel Cron Job:
 
 **cPanel → Cron Jobs → Add New Cron Job:**
 
 ```
-Schedule: Every 30 minutes
+Schedule: Every 30 minutes  (*/30 * * * *)
 Command:  curl "https://yourdomain.com/api/biometric-proxy.php?ip=192.168.1.201&port=4370&action=sync" > /dev/null 2>&1
 ```
 
@@ -156,10 +156,10 @@ Command:  curl "https://yourdomain.com/api/biometric-proxy.php?ip=192.168.1.201&
 | Test Connection fails | Verify device IP and port. Ping device from your PC. Check both are on same LAN subnet |
 | Connection timeout | Temporarily disable Windows Firewall. Add port 4370 to firewall exceptions |
 | Punch data syncs but wrong person | Re-check Biometric ID Mapping — Device User ID must exactly match the mapping |
-| No data after sync | Device log may be empty. Check device attendance log via Menu → Attendance Records |
-| Works on LAN but not on cPanel | Install the PHP proxy script described above |
-| Proxy script returns blank | Check PHP version is 7.4+ in cPanel. Enable `fsockopen` in PHP configuration |
-| Device shows "connection refused" | Confirm device is powered on, connected to LAN, and the IP is reachable |
+| No data after sync | Device log may be empty. Check via Menu → Attendance Records on device |
+| Works on LAN but not on cPanel | Install and configure the PHP proxy script described above |
+| Proxy script returns blank | Check PHP version is 7.4+ in cPanel. Verify `fsockopen` is enabled |
+| Device shows "connection refused" | Confirm device is powered on, connected to LAN, and IP is reachable |
 
 ---
 
@@ -167,9 +167,11 @@ Command:  curl "https://yourdomain.com/api/biometric-proxy.php?ip=192.168.1.201&
 
 Tested and compatible (ZKLib TCP protocol):
 
-- **ESSL:** i-Face 700, iFace302, iClock 580, T9
-- **ZKTeco:** ZK4500, F18, F22, MB360, SpeedFace
-- **Realand:** A-C021, A-C091
-- **Other:** Any device supporting ZKLib TCP SDK on port 4370
+| Brand | Compatible Models |
+|-------|------------------|
+| ESSL | iFace 700, iFace302, iClock 580, T9 |
+| ZKTeco | ZK4500, F18, F22, MB360, SpeedFace |
+| Realand | A-C021, A-C091 |
+| Other | Any device supporting ZKLib TCP SDK on port 4370 |
 
 > If your device model is not listed, check if it supports "SDK TCP protocol" — most modern ESSL and ZKTeco devices do.
