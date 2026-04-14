@@ -6,17 +6,26 @@ import {
   ArrowUpRight,
   Bus,
   CalendarCheck,
+  CheckCircle2,
   ClipboardList,
   GraduationCap,
   IndianRupee,
+  Info,
+  Loader2,
   Plus,
+  RefreshCw,
+  Server,
   Users,
+  WifiOff,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useSync } from "../hooks/useSync";
 import type { AttendanceRecord, FeeReceipt, Staff, Student } from "../types";
 import { MONTHS, formatCurrency, ls } from "../utils/localStorage";
+
+// ── Stat card ──────────────────────────────────────────────
 
 interface StatCardProps {
   label: string;
@@ -71,6 +80,182 @@ function StatCard({
   );
 }
 
+// ── Sync status bar ────────────────────────────────────────
+
+function SyncBar() {
+  const {
+    mode,
+    lastSyncTime,
+    lastSyncError,
+    triggerSync,
+    isPolling,
+    serverInfo,
+  } = useSync();
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  const barConfig = {
+    local: {
+      bg: "bg-card border-b border-border",
+      icon: <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" />,
+      label: "Local Mode — data on this device only",
+      labelClass: "text-xs font-medium text-muted-foreground",
+      badgeCls: "bg-muted text-muted-foreground border-border",
+      badgeText: "Local",
+    },
+    connected: {
+      bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
+      icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
+      label: "Server Connected — syncing across all devices",
+      labelClass: "text-xs font-medium text-emerald-700",
+      badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
+      badgeText: "Connected",
+    },
+    syncing: {
+      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200/60",
+      icon: (
+        <Loader2 className="w-4 h-4 text-amber-600 animate-spin flex-shrink-0" />
+      ),
+      label: "Syncing with server…",
+      labelClass: "text-xs font-medium text-amber-700",
+      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
+      badgeText: "Syncing",
+    },
+    offline: {
+      bg: "bg-destructive/5 border-b border-destructive/20",
+      icon: <WifiOff className="w-4 h-4 text-destructive flex-shrink-0" />,
+      label: "Offline Mode — server unreachable, using local data",
+      labelClass: "text-xs font-medium text-destructive",
+      badgeCls: "bg-destructive/10 text-destructive border-destructive/30",
+      badgeText: "Offline",
+    },
+  };
+
+  const cfg = barConfig[mode];
+
+  return (
+    <div
+      className={`${cfg.bg} px-6 py-2 flex items-center gap-2`}
+      data-ocid="dashboard.sync_status"
+    >
+      {cfg.icon}
+      <span className={cfg.labelClass}>{cfg.label}</span>
+
+      {lastSyncTime && mode === "connected" && (
+        <span className="text-xs text-emerald-600 ml-1">
+          ·{" "}
+          {lastSyncTime.toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          })}
+        </span>
+      )}
+
+      <Badge
+        variant="outline"
+        className={`text-[10px] px-1.5 py-0.5 ml-1 border ${cfg.badgeCls}`}
+        data-ocid={`dashboard.sync_badge.${mode}`}
+      >
+        {cfg.badgeText}
+      </Badge>
+
+      {mode === "offline" && lastSyncError && (
+        <span className="text-xs text-destructive/70 ml-1 truncate max-w-[200px]">
+          {lastSyncError}
+        </span>
+      )}
+
+      {/* Refresh button */}
+      {mode !== "local" && (
+        <button
+          type="button"
+          onClick={() => void triggerSync()}
+          disabled={isPolling}
+          className="ml-1 p-0.5 rounded hover:bg-black/5 transition-colors"
+          title="Refresh sync"
+          aria-label="Refresh sync"
+          data-ocid="dashboard.sync_refresh.button"
+        >
+          <RefreshCw
+            className={`w-3.5 h-3.5 text-muted-foreground ${isPolling ? "animate-spin" : ""}`}
+          />
+        </button>
+      )}
+
+      {/* Info tooltip */}
+      <div
+        className="ml-1 relative"
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+      >
+        <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+        {showTooltip && (
+          <div className="absolute left-0 top-6 z-50 w-72 bg-card border border-border rounded-lg shadow-elevated p-3 text-xs text-foreground">
+            <p className="font-semibold mb-1 flex items-center gap-1.5">
+              {mode === "connected" ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
+                  MySQL Server
+                </>
+              ) : mode === "local" ? (
+                <>
+                  <Info className="w-3.5 h-3.5 text-muted-foreground" />{" "}
+                  Device-Local Storage
+                </>
+              ) : mode === "offline" ? (
+                <>
+                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Server
+                  Unreachable
+                </>
+              ) : (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…
+                </>
+              )}
+            </p>
+            {mode === "connected" && serverInfo ? (
+              <div className="space-y-0.5 text-muted-foreground">
+                {serverInfo.db_version && <p>MySQL {serverInfo.db_version}</p>}
+                {serverInfo.version && <p>API v{serverInfo.version}</p>}
+                {serverInfo.last_backup && (
+                  <p>Last backup: {serverInfo.last_backup}</p>
+                )}
+                <p className="mt-1">
+                  All changes sync across every device logged into this server.
+                </p>
+              </div>
+            ) : mode === "local" ? (
+              <p className="text-muted-foreground leading-relaxed">
+                Data is stored in this browser only. Configure a MySQL server in
+                Settings → Data Management → Database Server to sync across all
+                devices.
+              </p>
+            ) : mode === "offline" ? (
+              <p className="text-muted-foreground leading-relaxed">
+                Server is configured but unreachable. Check your internet
+                connection or server status. The app is running on locally
+                cached data.
+              </p>
+            ) : null}
+          </div>
+        )}
+      </div>
+
+      {/* Navigate to settings */}
+      {mode === "local" && (
+        <div
+          className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
+          title="Configure database server"
+        >
+          <Server className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Configure Server</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Dashboard ─────────────────────────────────────────
+
 interface DashboardProps {
   onNavigate: (page: string) => void;
 }
@@ -80,7 +265,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const sessionId = currentSession?.id ?? "";
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
-  // Load school settings for background
   const schoolSettings = useMemo(
     () =>
       ls.get<{ dashboardBackground?: string; name?: string }>(
@@ -118,14 +302,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       0,
     );
 
-    // Academic month index: Apr=0 … Mar=11
     const jsMonth = new Date().getMonth();
     const currentAcademicMonthIndex = (jsMonth + 9) % 12;
 
     const paidSet = new Set(
       receipts.flatMap((r) => r.items.map((i) => `${r.studentId}_${i.month}`)),
     );
-
     const feeHeadings = ls.get<
       Array<{ id: string; months: string[]; amount: number }>
     >("fee_headings", []);
@@ -138,7 +320,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       }>
     >("fees_plan", []);
 
-    // Transport data
     const studentTransportV2 = ls.get<
       Array<{ studentId: string; routeId: string; pickupPointId: string }>
     >("student_transport_v2", []);
@@ -153,7 +334,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       {},
     );
 
-    // Paid transport months per student
     const paidTransportSet = new Set(
       receipts.flatMap((r) =>
         r.items
@@ -171,7 +351,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       let studentHasFeesDue = false;
       let studentHasTransportDue = false;
 
-      // Regular fees dues
       for (const h of feeHeadings) {
         for (const month of h.months) {
           const monthAcademicIndex = MONTHS.indexOf(month);
@@ -197,7 +376,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         }
       }
 
-      // Transport dues
       const stAssign = studentTransportV2.find((t) => t.studentId === s.id);
       if (stAssign) {
         const route = transportRouteData.find((r) => r.id === stAssign.routeId);
@@ -231,16 +409,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       "transport_routes_v2",
       [],
     );
-
-    const classSecCounts: Record<string, { present: number; total: number }> =
-      {};
-    for (const s of students) {
-      const key = `Class ${s.class}-${s.section}`;
-      if (!classSecCounts[key]) classSecCounts[key] = { present: 0, total: 0 };
-      classSecCounts[key].total++;
-      const rec = todayAttendance.find((a) => a.studentId === s.id);
-      if (rec?.status === "Present") classSecCounts[key].present++;
-    }
 
     const classCounts: Record<string, { present: number; total: number }> = {};
     for (const s of students) {
@@ -294,7 +462,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       uniqueClasses,
       transportRoutes: transportRoutes.length,
       classCounts,
-      classSecCounts,
       routeCounts,
       today,
       currentMonthName,
@@ -345,7 +512,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
   return (
     <div className="flex flex-col gap-0">
-      {/* ── Hero / Welcome Banner ── */}
+      {/* Hero */}
       <div
         className="relative w-full min-h-[120px] flex items-center px-6 py-5 overflow-hidden"
         style={
@@ -358,7 +525,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             : undefined
         }
       >
-        {/* Overlay */}
         <div
           className={`absolute inset-0 ${
             schoolSettings.dashboardBackground
@@ -407,8 +573,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </Badge>
       </div>
 
+      {/* Dynamic Sync Status Bar */}
+      <SyncBar />
+
       <div className="p-4 lg:p-6 space-y-6">
-        {/* KPI Cards */}
+        {/* KPI cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           <StatCard
             label="Total Students"
@@ -417,7 +586,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             icon={Users}
             color="bg-primary"
             onClick={() => onNavigate("students")}
-            data-ocid="dashboard-card-total-students"
+            data-ocid="dashboard.students.card"
           />
           <StatCard
             label="Total Teachers"
@@ -426,7 +595,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             icon={GraduationCap}
             color="bg-purple-600"
             onClick={() => onNavigate("hr")}
-            data-ocid="dashboard-card-total-teachers"
+            data-ocid="dashboard.teachers.card"
           />
           <StatCard
             label="Classes"
@@ -434,30 +603,30 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             sub="Active classes"
             icon={ClipboardList}
             color="bg-sky-600"
-            data-ocid="dashboard-card-classes"
+            data-ocid="dashboard.classes.card"
           />
           <StatCard
             label="Fees Collected Today"
             value={formatCurrency(stats.collectedToday)}
-            sub={`Session total: ${formatCurrency(stats.totalCollectedSession)}`}
+            sub={`Session: ${formatCurrency(stats.totalCollectedSession)}`}
             icon={IndianRupee}
             color="bg-emerald-600"
             onClick={() => onNavigate("fees/register")}
-            data-ocid="dashboard-card-fees-collected"
+            data-ocid="dashboard.fees_collected.card"
           />
           <StatCard
             label="Student Present Today"
             value={`${stats.presentPct}%`}
-            sub={`${stats.presentCount} / ${stats.students} students`}
+            sub={`${stats.presentCount} / ${stats.students}`}
             icon={CalendarCheck}
             color="bg-accent"
             onClick={() => setShowAttendanceModal(true)}
-            data-ocid="dashboard-card-present-today"
+            data-ocid="dashboard.present_today.card"
           />
 
-          {/* Enhanced Fees Awaiting Card */}
+          {/* Fees Awaiting */}
           <Card
-            data-ocid="dashboard-card-fees-awaiting"
+            data-ocid="dashboard.fees_awaiting.card"
             onClick={() => onNavigate("fees/due")}
             className="p-5 flex items-start gap-4 cursor-pointer hover:shadow-elevated transition-shadow col-span-2 sm:col-span-1"
           >
@@ -506,7 +675,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             icon={Bus}
             color="bg-rose-600"
             onClick={() => onNavigate("transport")}
-            data-ocid="dashboard-card-transport"
+            data-ocid="dashboard.transport.card"
           />
         </div>
 
@@ -526,7 +695,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               </button>
             </div>
             {Object.keys(stats.classCounts).length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">
+              <div
+                className="py-8 text-center text-muted-foreground"
+                data-ocid="dashboard.attendance.empty_state"
+              >
                 <CalendarCheck className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No attendance recorded today</p>
                 <button
@@ -580,7 +752,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               </button>
             </div>
             {recentReceipts.length === 0 ? (
-              <div className="py-6 text-center text-muted-foreground">
+              <div
+                className="py-6 text-center text-muted-foreground"
+                data-ocid="dashboard.receipts.empty_state"
+              >
                 <IndianRupee className="w-7 h-7 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No receipts yet</p>
                 <button
@@ -642,7 +817,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           </div>
         </Card>
 
-        {/* Fee Due Date Info */}
+        {/* Fee due alert */}
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-center gap-3">
           <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0" />
           <div>
@@ -662,16 +837,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             size="sm"
             onClick={() => onNavigate("fees/due")}
             className="ml-auto flex-shrink-0 border-amber-300 text-amber-700 hover:bg-amber-100"
-            data-ocid="dashboard-view-dues-btn"
+            data-ocid="dashboard.view_dues.button"
           >
             View Dues
           </Button>
         </div>
 
-        {/* Attendance Detail Modal */}
+        {/* Attendance modal */}
         {showAttendanceModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-            <div className="bg-card rounded-2xl shadow-elevated w-full max-w-2xl border border-border max-h-[85vh] flex flex-col">
+            <div
+              className="bg-card rounded-2xl shadow-elevated w-full max-w-2xl border border-border max-h-[85vh] flex flex-col"
+              data-ocid="dashboard.attendance.dialog"
+            >
               <div className="flex items-center justify-between p-5 border-b border-border">
                 <h2 className="font-display font-semibold text-foreground">
                   Today's Attendance — {new Date().toLocaleDateString("en-IN")}
@@ -681,6 +859,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   onClick={() => setShowAttendanceModal(false)}
                   className="text-muted-foreground hover:text-foreground"
                   aria-label="Close"
+                  data-ocid="dashboard.attendance.close_button"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -715,7 +894,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
 
                 <div>
                   <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
-                    Class/Section Wise
+                    Class Wise
                   </h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -764,11 +943,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                                 </td>
                                 <td className="p-2 text-center">
                                   <span
-                                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                                      pct >= 75
-                                        ? "bg-accent/20 text-accent"
-                                        : "bg-orange-100 text-orange-700"
-                                    }`}
+                                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pct >= 75 ? "bg-accent/20 text-accent" : "bg-orange-100 text-orange-700"}`}
                                   >
                                     {pct}%
                                   </span>

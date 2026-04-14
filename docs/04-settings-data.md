@@ -2,7 +2,25 @@
 
 ## Overview
 
-SHUBH SCHOOL ERP stores all data in your browser's **localStorage** with the prefix `shubh_erp_`. This means data is tied to the browser and device you use — different browsers or devices have separate storage.
+SHUBH SCHOOL ERP supports two data storage modes:
+
+| Mode | Storage | Multi-Device | Setup |
+|------|---------|--------------|-------|
+| **Local Mode** | Browser localStorage (default) | ❌ Single device only | None |
+| **MySQL Mode** | MySQL database on cPanel server | ✅ Real-time sync | See `02-deploy-cpanel.md` |
+
+In **MySQL Mode**, all data is stored in your cPanel MySQL database. The ERP uses a 5-second polling sync — any change made on one device appears on all other devices within 5 seconds. localStorage is used only as a local cache.
+
+### Sync Status Indicator (Dashboard)
+
+The dashboard shows a live sync status indicator:
+
+| Status | Meaning |
+|--------|---------|
+| 🟢 **Local** | No server configured — data is in localStorage only |
+| 🟢 **Connected** | MySQL server connected, data is in sync |
+| 🔄 **Syncing** | Actively transferring data to/from server |
+| 🔴 **Offline** | Server configured but currently unreachable |
 
 ---
 
@@ -41,6 +59,44 @@ SHUBH SCHOOL ERP stores all data in your browser's **localStorage** with the pre
 - Searchable table of all users (students, teachers, staff, parents)
 - Reset any user's password
 - Add new staff users (Admin, Receptionist, Accountant, Librarian, Driver) with name, position, mobile (becomes username), and password
+
+---
+
+## Database Server Tab (MySQL Mode)
+
+`Settings → Data → Database Server`
+
+This tab is the control center for MySQL mode. Available to Super Admin only.
+
+### Configuring the API URL
+
+1. Enter your API URL: `https://yourdomain.com/api`
+2. Click **Test Connection** — a green ✅ "Connected" message confirms the database is reachable
+3. Click **Save API URL** to persist the setting
+
+### Migrate Data to Server
+
+If you have existing data in localStorage (from before setting up MySQL):
+
+1. Click **Migrate Data to Server**
+2. All localStorage data is uploaded to MySQL in one batch
+3. The sync indicator on the dashboard turns green
+4. From this point, all new data writes to MySQL first
+
+### What Data Is Stored Where
+
+| Data | MySQL Mode | Local Mode |
+|------|-----------|------------|
+| Students | MySQL `students` table | localStorage `shubh_erp_students` |
+| Staff | MySQL `staff` table | localStorage `shubh_erp_staff` |
+| Fee Receipts | MySQL `fee_receipts` table | localStorage `shubh_erp_fee_receipts` |
+| Fee Plan | MySQL `fee_plan` table | localStorage `shubh_erp_fee_plan` |
+| Attendance | MySQL `attendance` table | localStorage `shubh_erp_attendance` |
+| Transport | MySQL `transport` table | localStorage `shubh_erp_transport` |
+| Sessions | MySQL `sessions` table | localStorage `shubh_erp_sessions` |
+| School Profile | MySQL `settings` table | localStorage `shubh_erp_school_profile` |
+| User Passwords | MySQL `users` table | localStorage `shubh_erp_user_passwords` |
+| WhatsApp Keys | MySQL `settings` table | localStorage `shubh_erp_settings` |
 
 ---
 
@@ -112,15 +168,21 @@ Select and save a preferred color theme. Changes apply immediately and are saved
 ### Export Backup
 Downloads a timestamped JSON file: `shubh-erp-backup-YYYY-MM-DD.json`
 
+In MySQL Mode, the backup fetches data from the server (not just localStorage) — so the backup is a complete snapshot of the MySQL database exported to JSON.
+
 ### Import Backup
 Select a previously exported `.json` file. All data is restored immediately.
+
+In MySQL Mode, imported data is written to both localStorage (cache) and the MySQL database.
 
 > ⚠️ Import replaces ALL current data. Export a fresh backup first if needed.
 
 ### Factory Reset
 3-step confirmation required. Clears ALL school data. Super Admin login is the only credential preserved.
 
-### Data Storage Keys
+In MySQL Mode, Factory Reset also sends a clear request to the server — all MySQL tables are emptied (not dropped). The tables remain for future use.
+
+### Data Storage Keys (Local Mode Reference)
 
 ```
 shubh_erp_students          — All student records
@@ -136,4 +198,5 @@ shubh_erp_expenses          — Income & expense ledger
 shubh_erp_school_profile    — School name, logo, address
 shubh_erp_user_passwords    — Hashed user credentials
 shubh_erp_settings          — App preferences, WhatsApp keys
+shubh_erp_api_url           — Configured MySQL API URL
 ```

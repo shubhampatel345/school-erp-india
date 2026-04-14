@@ -1,23 +1,26 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular school management system for Indian schools. It covers student management, fee collection, attendance, timetables, HR, transport, communication, and more — fully mobile-optimized as a PWA.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular, web-based School Management ERP for Indian schools with full cPanel MySQL backend. Supports multi-school/branch operations, all user roles (Super Admin, Admin, Teacher, Parent, Student, Driver), and real-time data sync across all devices. Includes Student Information, Fees Collection, Attendance, HR/Payroll, Transport, Inventory, Communication, Template Studio, and more.",
   "features": [
-    "Dashboard with fees awaiting (tuition + transport), school background branding",
-    "Global student search by name, mobile, parent name, village, class with family grouping",
-    "Collect Fees with family member quick-panel for sibling billing",
-    "Transport fees integrated into fee calculations and dashboard",
-    "Session management with infinite archive",
-    "Role-based access for 7 user roles",
+    "MySQL database backend via PHP REST API on cPanel",
+    "Real-time data sync across all devices",
+    "JWT authentication with role-based access",
+    "30+ modules: Students, Fees, Attendance, HR, Academics, Transport, Inventory",
+    "PWA installable on Android/iOS",
     "WhatsApp integration via wacoder.in",
-    "PWA installable on Android/iOS"
+    "Complete cPanel deployment guide and documentation",
+    "Backup and restore with SQL dumps"
   ],
-  "category": "education",
+  "category": "productivity",
   "tags": [
     "school-erp",
-    "fee-management",
-    "attendance",
-    "transport",
+    "education",
     "india",
-    "pwa"
+    "mysql",
+    "cpanel",
+    "pwa",
+    "multi-role",
+    "attendance",
+    "fees-management"
   ],
-  "last_updated": "2026-04-13T15:52:34.701Z"
+  "last_updated": "2026-04-14T16:00:49.324Z"
 }

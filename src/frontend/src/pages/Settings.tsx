@@ -8,6 +8,7 @@ import {
   Palette,
   School,
   Settings as SettingsIcon,
+  Sparkles,
   Users,
 } from "lucide-react";
 import { useState } from "react";
@@ -17,6 +18,7 @@ import NotificationScheduler from "./settings/NotificationScheduler";
 import OnlinePaymentSettings from "./settings/OnlinePaymentSettings";
 import SchoolProfile from "./settings/SchoolProfile";
 import SessionManagement from "./settings/SessionManagement";
+import SystemUpdate from "./settings/SystemUpdate";
 import ThemeSettings from "./settings/ThemeSettings";
 import UserManagement from "./settings/UserManagement";
 import WhatsAppAutoReply from "./settings/WhatsAppAutoReply";
@@ -45,6 +47,12 @@ const TABS = [
     id: "data",
     label: "Data Management",
     icon: Database,
+    superAdminOnly: true,
+  },
+  {
+    id: "update",
+    label: "System Update",
+    icon: Sparkles,
     superAdminOnly: true,
   },
 ];
@@ -114,6 +122,7 @@ export default function Settings({ onNavigate: _onNavigate }: SettingsProps) {
         {activeTab === "notifications" && <NotificationScheduler />}
         {activeTab === "themes" && <ThemeSettings />}
         {activeTab === "data" && isSuperAdmin && <DataManagement />}
+        {activeTab === "update" && isSuperAdmin && <SystemUpdate />}
       </div>
     </div>
   );

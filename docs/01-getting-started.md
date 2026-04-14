@@ -4,10 +4,44 @@ Welcome to **SHUBH SCHOOL ERP**, a comprehensive web-based School Management Sys
 
 ---
 
+## Quick Setup — Choose Your Data Mode
+
+Before you begin, decide how you want to store school data:
+
+### Option A — Local Browser Mode (Default)
+**No server needed. Easiest to start.** Data is stored in your browser's localStorage. Works on a single device. No installation beyond the web app itself.
+
+- ✅ Works immediately — no setup
+- ✅ No hosting fees beyond the web app
+- ❌ Data is tied to one browser on one device
+- ❌ Staff on different computers see different data
+
+**When to use:** Small schools, single-computer setup, or for evaluation.
+
+### Option B — MySQL Server Mode (Recommended for Production)
+**Real-time sync across all devices.** Data is stored in a MySQL database on your cPanel hosting. All staff, admins, parents, and students share the same real-time data from any device.
+
+- ✅ All devices share the same data in real time
+- ✅ Proper backup to server (not just browser)
+- ✅ Works on any number of computers and phones simultaneously
+- ✅ Data survives browser clears, device changes, reinstalls
+- ⚠️ Requires cPanel hosting with PHP 7.4+ and MySQL 5.7+
+
+**When to use:** Any school with more than one staff member using the ERP.
+
+👉 To set up MySQL mode, see `02-deploy-cpanel.md` for the complete guide.
+
+---
+
 ## Prerequisites
 
+### Local Browser Mode
 - Modern web browser (Chrome recommended for full PWA and QR scanner support)
 - HTTPS hosting for camera and PWA install features
+
+### MySQL Server Mode (additional requirements)
+- cPanel hosting with **PHP 7.4+** and **MySQL 5.7+**
+- SSL certificate (AutoSSL/Let's Encrypt — free on all cPanel hosts)
 - Node.js 18+ and pnpm 8+ (for developers building from source)
 
 ---
@@ -51,38 +85,43 @@ Follow these steps in order:
 
 Enter school name, address, phone, email, upload logo, and optionally a dashboard background image. This data auto-fills receipts, certificates, ID cards, and reports.
 
-### 2. Set Up Classes & Sections
+### 2. (MySQL Mode) Connect to Database Server
+`Settings → Data → Database Server tab`
+
+Enter your API URL (e.g. `https://yourschool.com/api`), click **Test Connection**, then click **Migrate Data to Server**. After this, all data syncs in real time across devices.
+
+### 3. Set Up Classes & Sections
 `Academics → Classes & Sections`
 
 Add your class structure (e.g. Class 1A, 1B, 2A … 12C).
 
-### 3. Add Subjects
+### 4. Add Subjects
 `Academics → Subjects`
 
 Use the multi-class wizard to assign one subject to many classes simultaneously (e.g. Hindi → Class 1 to Class 8).
 
-### 4. Add Staff & Teachers
+### 5. Add Staff & Teachers
 `HR → Staff Directory → Add Staff`
 
 For teachers, the Subject-Class Range Wizard (Step 2) lets you assign multiple subjects with class ranges (e.g. English: Class 1–5, Art: Class 6–8). This feeds the Teacher Timetable generator automatically.
 
-### 5. Define Fee Structure
+### 6. Define Fee Structure
 `Fees → Fee Headings` then `Fees → Fee Plan`
 
 - **Fee Headings**: Define heading names and which months they apply to (e.g. Lab Fee → April, October only)
 - **Fee Plan**: Set section-wise amounts — same heading can have different values per section (Super Admin only)
 
-### 6. Admit Students
+### 7. Admit Students
 `Students → Add Student`
 
 Fill the admission form. Credentials are auto-created (Student: Adm. No. / DOB, Teacher: Mobile / DOB, Parent: Mobile / Mobile).
 
-### 7. Assign Transport (Optional)
+### 8. Assign Transport (Optional)
 `Transport → Routes`
 
 Add routes → pickup points → set monthly fare per pickup point. Student transport details auto-populate from the Transport module.
 
-### 8. Collect Fees
+### 9. Collect Fees
 `Fees → Collect Fees`
 
 Search student, select months, enter amount, save and print receipt. Old unpaid balance carries forward automatically.

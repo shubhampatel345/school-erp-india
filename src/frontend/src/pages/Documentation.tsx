@@ -17,12 +17,15 @@ import {
   Printer,
   RefreshCw,
   Rocket,
+  Server,
   Shield,
   Smartphone,
+  Table,
   Users,
   Wifi,
+  Zap,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 // ─── Copy button ─────────────────────────────────────────────
 function CopyButton({ text }: { text: string }) {
@@ -474,7 +477,7 @@ const FAQS = [
   },
   {
     q: "Can the ERP work on multiple devices / computers simultaneously?",
-    a: "Data is stored in browser localStorage per device. To share data across devices, export a backup on Device A and import it on Device B. For real-time multi-device sync, a server-based database setup is needed (future feature).",
+    a: "In Local Mode (default), data is stored in browser localStorage per device — different devices have separate data. To enable real-time multi-device sync, set up MySQL Mode: go to Settings → Data → Database Server, configure your cPanel API URL, and click Migrate Data to Server. After that, all staff, admins, and parents share the same live data from any device. See the cPanel + MySQL Setup section for the complete guide.",
   },
 ];
 
@@ -488,6 +491,9 @@ type SectionId =
   | "essl"
   | "backup"
   | "cpanel"
+  | "mysql-setup"
+  | "db-schema"
+  | "api-reference"
   | "pwa"
   | "faq"
   | "roles"
@@ -548,6 +554,24 @@ const SECTIONS: {
     icon: <Cloud className="w-4 h-4" />,
   },
   {
+    id: "mysql-setup",
+    label: "cPanel + MySQL Setup",
+    shortLabel: "MySQL",
+    icon: <Database className="w-4 h-4" />,
+  },
+  {
+    id: "db-schema",
+    label: "Database Schema",
+    shortLabel: "Schema",
+    icon: <Table className="w-4 h-4" />,
+  },
+  {
+    id: "api-reference",
+    label: "API Reference",
+    shortLabel: "API",
+    icon: <Server className="w-4 h-4" />,
+  },
+  {
     id: "pwa",
     label: "PWA Installation",
     shortLabel: "PWA",
@@ -576,8 +600,19 @@ const SECTIONS: {
 // ─── Main page ───────────────────────────────────────────────
 export default function Documentation() {
   const [active, setActive] = useState<SectionId>("getting-started");
+  const [apiUrl, setApiUrl] = useState<string>("");
+
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("shubh_erp_api_url") ?? "";
+      setApiUrl(stored);
+    } catch {
+      setApiUrl("");
+    }
+  }, []);
 
   const jumpTo = (id: SectionId) => setActive(id);
+  const isMySQL = apiUrl.trim().length > 0;
 
   return (
     <div className="flex flex-col h-full">
@@ -615,6 +650,43 @@ export default function Documentation() {
         </div>
       </div>
 
+      {/* Data Mode Banner */}
+      <div
+        className={`px-4 lg:px-6 py-2 flex items-center gap-2 text-xs border-b ${
+          isMySQL
+            ? "bg-primary/5 border-primary/20 text-primary"
+            : "bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300"
+        }`}
+        data-print-hide
+      >
+        {isMySQL ? (
+          <>
+            <Database className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              <strong>MySQL Mode</strong> — Data stored on server:{" "}
+              <code className="bg-primary/10 px-1 rounded">{apiUrl}</code> —
+              Real-time sync active across all devices.
+            </span>
+          </>
+        ) : (
+          <>
+            <Zap className="w-3.5 h-3.5 shrink-0" />
+            <span>
+              <strong>Local Browser Mode</strong> — Data is stored in this
+              browser only. For multi-device sync, set up{" "}
+              <button
+                type="button"
+                onClick={() => jumpTo("mysql-setup")}
+                className="underline font-medium hover:opacity-70"
+              >
+                cPanel + MySQL
+              </button>{" "}
+              or configure in Settings → Data → Database Server.
+            </span>
+          </>
+        )}
+      </div>
+
       {/* Quick jump bar */}
       <div
         className="bg-muted/30 border-b px-4 py-2 flex items-center gap-1.5 overflow-x-auto text-xs shrink-0"
@@ -629,6 +701,9 @@ export default function Documentation() {
             { id: "fees-deep" as SectionId, label: "Fees" },
             { id: "attendance-deep" as SectionId, label: "Attendance" },
             { id: "cpanel" as SectionId, label: "Deploy" },
+            { id: "mysql-setup" as SectionId, label: "MySQL Setup" },
+            { id: "db-schema" as SectionId, label: "DB Schema" },
+            { id: "api-reference" as SectionId, label: "API" },
             { id: "whatsapp" as SectionId, label: "WhatsApp" },
             { id: "essl" as SectionId, label: "ESSL" },
             { id: "backup" as SectionId, label: "Backup" },
@@ -717,6 +792,9 @@ function DocContent({ active }: { active: SectionId }) {
     essl: <EsslBiometric />,
     backup: <BackupRestore />,
     cpanel: <CpanelDeploy />,
+    "mysql-setup": <MySqlSetup />,
+    "db-schema": <DbSchema />,
+    "api-reference": <ApiReference />,
     pwa: <PwaInstall />,
     faq: <FaqSection />,
     roles: <RolesSection />,
@@ -791,6 +869,66 @@ function GettingStarted() {
           Set up SHUBH SCHOOL ERP for your school in under 10 minutes.
         </p>
       </div>
+
+      {/* Quick Setup: Local vs MySQL */}
+      <Card className="p-5 space-y-4 border-primary/20">
+        <h3 className="font-semibold text-foreground flex items-center gap-2">
+          <Zap className="w-4 h-4 text-primary" />
+          Quick Setup — Choose Your Data Mode
+        </h3>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div className="rounded-lg border border-border p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">💻</span>
+              <p className="font-medium text-foreground text-sm">
+                Option A — Local Browser Mode
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Data stored in your browser. Works immediately. Single device
+              only.
+            </p>
+            <ul className="text-xs text-muted-foreground space-y-0.5">
+              <li>✅ Zero setup — works right now</li>
+              <li>✅ No server or hosting needed</li>
+              <li>❌ Data tied to one browser/device</li>
+              <li>❌ Staff on other computers see different data</li>
+            </ul>
+            <p className="text-xs font-medium text-foreground mt-1">
+              Best for: Evaluation or single-computer schools
+            </p>
+          </div>
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="text-lg">🗄️</span>
+              <p className="font-medium text-foreground text-sm">
+                Option B — MySQL Mode{" "}
+                <Badge variant="secondary" className="text-xs ml-1">
+                  Recommended
+                </Badge>
+              </p>
+            </div>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Data on your cPanel MySQL server. All devices share the same
+              real-time data.
+            </p>
+            <ul className="text-xs text-muted-foreground space-y-0.5">
+              <li>✅ All devices sync in real time</li>
+              <li>✅ Data survives browser clears</li>
+              <li>✅ Any number of concurrent users</li>
+              <li>⚠️ Requires cPanel hosting with PHP + MySQL</li>
+            </ul>
+            <p className="text-xs font-medium text-foreground mt-1">
+              Best for: Any school with multiple staff
+            </p>
+          </div>
+        </div>
+        <Alert type="info">
+          ℹ️ To enable MySQL Mode: Settings → Data → Database Server → enter your
+          API URL and click Test Connection. See the{" "}
+          <strong>cPanel + MySQL Setup</strong> section for full instructions.
+        </Alert>
+      </Card>
 
       <Card className="p-5 space-y-4">
         <h3 className="font-semibold text-foreground">
@@ -1653,9 +1791,8 @@ function BackupRestore() {
           Backup & Restore
         </h2>
         <p className="text-sm text-muted-foreground">
-          All ERP data is stored in browser localStorage. Regular backups
-          protect against data loss from browser clears, device changes, or
-          accidental resets.
+          Backup behavior depends on your data mode: Local Browser Mode backs up
+          localStorage; MySQL Mode fetches a full snapshot from the server.
         </p>
       </div>
 
@@ -1682,7 +1819,9 @@ function BackupRestore() {
           <li>4. Save to Google Drive, USB drive, or email it to yourself</li>
         </ol>
         <Alert type="info">
-          ℹ️ Backup includes ALL data: students, staff, fees, receipts, sessions,
+          ℹ️ In MySQL Mode, the backup fetches from the server (not just
+          localStorage) — the JSON always reflects the latest database state.
+          Backup includes ALL data: students, staff, fees, receipts, sessions,
           attendance, transport, inventory, expenses, settings, and WhatsApp
           configuration.
         </Alert>
@@ -1710,24 +1849,75 @@ function BackupRestore() {
             4. All data is restored immediately. Page reloads automatically.
           </li>
         </ol>
+        <Alert type="info">
+          ℹ️ In MySQL Mode, imported data is written to both the MySQL server and
+          localStorage cache simultaneously.
+        </Alert>
         <Alert type="warn">
           ⚠️ Importing a backup REPLACES all current data. Export a fresh backup
           first if you have new entries after the backup date.
         </Alert>
       </Card>
 
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          MySQL Server-Side Backup (Additional Options)
+        </h3>
+        <Accordion title="Option 1: phpMyAdmin SQL Dump (Advanced)">
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              In cPanel, go to <strong>phpMyAdmin</strong> → select your ERP
+              database → click <strong>Export</strong>:
+            </p>
+            <ul className="space-y-1 text-xs">
+              <li>• Format: SQL</li>
+              <li>• Click Go — downloads a .sql file</li>
+              <li>• To restore: phpMyAdmin → Import → select the .sql file</li>
+            </ul>
+          </div>
+        </Accordion>
+        <Accordion title="Option 2: cPanel Database Backup">
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p>
+              In cPanel → <strong>Backup</strong> → Partial Backups → Download a
+              MySQL Database Backup → select your ERP database. Downloads a
+              compressed{" "}
+              <code className="text-xs bg-muted px-1 rounded">.sql.gz</code>{" "}
+              file.
+            </p>
+          </div>
+        </Accordion>
+      </Card>
+
       <Card className="p-5 space-y-3">
         <h3 className="font-semibold text-foreground">
           Transfer Data to Another Computer
         </h3>
-        <ol className="space-y-2 text-sm text-muted-foreground">
-          <li>1. On old computer: Settings → Data → Export JSON Backup</li>
-          <li>
-            2. On new computer: open ERP URL → Settings → Data → Import JSON
-            Backup
-          </li>
-          <li>3. Select backup file — all data transfers instantly</li>
-        </ol>
+        <div className="space-y-3">
+          <div>
+            <p className="text-sm font-medium text-foreground mb-1">
+              Local Mode:
+            </p>
+            <ol className="space-y-2 text-sm text-muted-foreground">
+              <li>1. On old computer: Settings → Data → Export JSON Backup</li>
+              <li>
+                2. On new computer: open ERP URL → Settings → Data → Import JSON
+                Backup
+              </li>
+              <li>3. Select backup file — all data transfers instantly</li>
+            </ol>
+          </div>
+          <div>
+            <p className="text-sm font-medium text-foreground mb-1">
+              MySQL Mode:
+            </p>
+            <p className="text-sm text-muted-foreground">
+              No transfer needed — just open the ERP URL on the new computer,
+              configure the same API URL in Settings → Data → Database Server,
+              and all data loads automatically from the server.
+            </p>
+          </div>
+        </div>
       </Card>
 
       <Card className="p-5 space-y-3">
@@ -1752,7 +1942,7 @@ function BackupRestore() {
             [
               "Before browser update",
               "When Chrome prompts",
-              "Browser updates can clear storage",
+              "Browser updates can clear local cache",
             ],
           ]}
         />
@@ -1763,9 +1953,13 @@ function BackupRestore() {
         <p className="text-sm text-muted-foreground leading-relaxed">
           Settings → Data → <strong>Factory Reset</strong>. Clears{" "}
           <strong>ALL</strong> school data — students, fees, sessions,
-          attendance, and settings. 3-step confirmation required. Use only to
-          completely start fresh.
+          attendance, and settings. 3-step confirmation required.
         </p>
+        <Alert type="info">
+          ℹ️ In MySQL Mode, Factory Reset also clears the MySQL server — all
+          tables are truncated (emptied but not dropped). Tables remain for
+          future use.
+        </Alert>
         <Alert type="danger">
           🚨 Factory Reset is permanent and irreversible. Super Admin login
           (superadmin / admin123) is the only credential that remains.
@@ -1788,7 +1982,8 @@ shubh_erp_inventory         — Stock, purchases, sales
 shubh_erp_expenses          — Income & expense ledger
 shubh_erp_school_profile    — School name, logo, address
 shubh_erp_user_passwords    — Hashed user credentials
-shubh_erp_settings          — App preferences, WhatsApp keys`}</Code>
+shubh_erp_settings          — App preferences, WhatsApp keys
+shubh_erp_api_url            — Configured MySQL API URL`}</Code>
       </Card>
     </div>
   );
@@ -1803,20 +1998,50 @@ function CpanelDeploy() {
           Deploy on cPanel Hosting
         </h2>
         <p className="text-sm text-muted-foreground">
-          Host SHUBH SCHOOL ERP on any Indian shared hosting with cPanel. No
-          Node.js server required on the host — it runs as a static web app.
+          Host SHUBH SCHOOL ERP on any Indian shared hosting with cPanel. Two
+          deployment modes available.
         </p>
       </div>
 
+      <div className="grid sm:grid-cols-2 gap-3">
+        <Card className="p-4 space-y-2">
+          <p className="font-medium text-foreground text-sm">
+            Mode A — Static Only
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Upload dist/ to public_html. Works as a standalone web app. Data
+            stays in the browser. No PHP or MySQL needed.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            ⏱ Setup time: ~5 minutes
+          </p>
+        </Card>
+        <Card className="p-4 space-y-2 border-primary/30 bg-primary/5">
+          <p className="font-medium text-foreground text-sm">
+            Mode B — MySQL Mode{" "}
+            <Badge variant="secondary" className="text-xs">
+              Recommended
+            </Badge>
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Static app + PHP API + MySQL database. Real-time sync across all
+            devices. Full multi-user support.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            ⏱ Setup time: ~20 minutes
+          </p>
+        </Card>
+      </div>
+
       <Alert type="info">
-        ℹ️ SHUBH SCHOOL ERP is a <strong>static React app</strong>. You only need
-        basic shared hosting with cPanel — no Node.js, PHP, or database required
-        on the server.
+        ℹ️ For the complete MySQL setup guide (create database, upload API,
+        configure config.php, run migration, connect from ERP), see the{" "}
+        <strong>cPanel + MySQL Setup</strong> section in the sidebar.
       </Alert>
 
       <Card className="p-5 space-y-5">
         <h3 className="font-semibold text-foreground">
-          Step-by-Step Deployment
+          Part 1 — Build & Upload Static App (All Modes)
         </h3>
         <ol className="space-y-5">
           <Step num={1} title="Build the project locally">
@@ -1835,19 +2060,13 @@ pnpm build
           </Step>
 
           <Step num={2} title="Locate the dist/ folder">
-            <p className="text-sm text-muted-foreground">
-              After build completes, find{" "}
-              <code className="text-xs bg-muted px-1 rounded">
-                src/frontend/dist/
-              </code>
-              . It contains:
-            </p>
             <Code>{`dist/
 ├── index.html          ← main entry point
 ├── assets/
 │   ├── index-[hash].js
 │   ├── index-[hash].css
 │   └── ...             ← fonts, icons, images
+├── api/                ← PHP REST API (for MySQL mode)
 └── manifest.json       ← PWA manifest`}</Code>
           </Step>
 
@@ -1888,8 +2107,8 @@ pnpm build
                 • After upload, right-click the ZIP → <strong>Extract</strong>
               </li>
               <li>
-                • Verify: index.html, assets/, manifest.json are directly in
-                public_html/
+                • Verify: index.html, assets/, api/, manifest.json are directly
+                in public_html/
               </li>
               <li>• Delete the ZIP file after extraction</li>
             </ol>
@@ -1914,9 +2133,9 @@ RewriteRule ^ index.html [QSA,L]`}</Code>
           >
             <p className="text-sm text-muted-foreground">
               In cPanel, go to <strong>SSL/TLS</strong> →{" "}
-              <strong>Free SSL Certificate (Let's Encrypt)</strong> → click{" "}
-              <strong>Issue</strong>. HTTPS is mandatory for QR camera scanner
-              and PWA install.
+              <strong>Free SSL Certificate (Let's Encrypt / AutoSSL)</strong> →
+              click <strong>Issue</strong>. HTTPS is mandatory for QR camera
+              scanner, PWA install, and MySQL API calls.
             </p>
           </Step>
 
@@ -1972,6 +2191,11 @@ TTL: 3600`}</Code>
               "Rebuild — Vite uses relative paths. Verify assets/ folder alongside index.html",
             ],
             [
+              "API returns 500",
+              "Wrong DB credentials",
+              "Check config.php — DB_NAME and DB_USER must include cPanel username prefix",
+            ],
+            [
               "Can't install PWA",
               "No HTTPS / wrong browser",
               "Enable SSL. Use Chrome on Android. iOS requires Safari",
@@ -1995,50 +2219,14 @@ TTL: 3600`}</Code>
           Recommended Indian Hosting Providers
         </h3>
         <DocTable
-          headers={["Provider", "cPanel", "Price/mo", "SSL", "Notes"]}
+          headers={["Provider", "MySQL", "PHP 8", "cPanel", "Price/mo", "SSL"]}
           rows={[
-            [
-              "Hostinger India",
-              "✅",
-              "₹69",
-              "✅ Free",
-              "Best value, fast NVMe SSD, recommended",
-            ],
-            [
-              "MilesWeb",
-              "✅",
-              "₹49",
-              "✅ Free",
-              "Cheapest option, good for small schools",
-            ],
-            [
-              "ResellerClub",
-              "✅",
-              "₹79",
-              "✅ Free",
-              "Good Indian support, reliable uptime",
-            ],
-            [
-              "BigRock",
-              "✅",
-              "₹89",
-              "✅ Free",
-              "ICANN accredited, popular in India",
-            ],
-            [
-              "HostGator India",
-              "✅",
-              "₹99",
-              "✅ Free",
-              "24/7 support, very popular",
-            ],
-            [
-              "Bluehost India",
-              "✅",
-              "₹199",
-              "✅ Free",
-              "Good for larger schools",
-            ],
+            ["Hostinger India", "✅", "✅", "✅", "₹69", "✅ Free"],
+            ["MilesWeb", "✅", "✅", "✅", "₹49", "✅ Free"],
+            ["ResellerClub", "✅", "✅", "✅", "₹79", "✅ Free"],
+            ["BigRock", "✅", "✅", "✅", "₹89", "✅ Free"],
+            ["HostGator India", "✅", "✅", "✅", "₹99", "✅ Free"],
+            ["Bluehost India", "✅", "✅", "✅", "₹199", "✅ Free"],
           ]}
         />
         <p className="text-xs text-muted-foreground mt-3">
@@ -2401,6 +2589,691 @@ CLASSES = ['Nursery', 'LKG', 'UKG', 'Class 1', ..., 'Class 12']
 
 // Send WhatsApp message via wacoder.in
 sendWhatsApp('919876543210', 'Fee receipt...')`}</Code>
+      </Card>
+    </div>
+  );
+}
+
+// ─── MySQL Setup ─────────────────────────────────────────────
+function MySqlSetup() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-display font-bold text-foreground mb-1">
+          cPanel + MySQL Setup
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Complete step-by-step guide to connect SHUBH SCHOOL ERP to a MySQL
+          database on cPanel hosting for real-time multi-device sync.
+        </p>
+      </div>
+
+      <Alert type="info">
+        ℹ️ <strong>Prerequisites:</strong> cPanel hosting with PHP 7.4+ and MySQL
+        5.7+, SSL certificate active, React app already deployed to public_html
+        (see Deploy on cPanel section).
+      </Alert>
+
+      <Card className="p-5 space-y-5">
+        <h3 className="font-semibold text-foreground">
+          Step 1 — Create MySQL Database
+        </h3>
+        <ol className="space-y-3 text-sm text-muted-foreground">
+          <li>
+            1. In cPanel, go to <strong>MySQL Databases</strong>
+          </li>
+          <li>
+            2. Under <strong>Create New Database</strong>, enter:{" "}
+            <code className="text-xs bg-muted px-1 rounded">shubherp_db</code> →
+            click <strong>Create Database</strong>
+          </li>
+          <li>
+            3. Under <strong>Create New User</strong>, enter username:{" "}
+            <code className="text-xs bg-muted px-1 rounded">shubherp_user</code>{" "}
+            + strong password → click <strong>Create User</strong>
+          </li>
+          <li>
+            4. Under <strong>Add User to Database</strong> → select user +
+            database → click <strong>Add</strong> → check{" "}
+            <strong>ALL PRIVILEGES</strong> → <strong>Make Changes</strong>
+          </li>
+        </ol>
+        <Alert type="warn">
+          ⚠️ cPanel prefixes your username to DB name and user: e.g.{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            cpanelusername_shubherp_db
+          </code>
+          . Use the full prefixed names in config.php.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 2 — Upload API Files
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          The PHP API is in{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            src/frontend/public/api/
+          </code>{" "}
+          in the project. After building, it is in{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            src/frontend/dist/api/
+          </code>
+          .
+        </p>
+        <p className="text-sm text-muted-foreground">
+          Upload the <code className="text-xs bg-muted px-1 rounded">api/</code>{" "}
+          folder to{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            public_html/api/
+          </code>
+          .
+        </p>
+        <Code>{`public_html/api/
+├── config.php     ← Edit this with your DB credentials
+├── index.php      ← API router
+├── migrate.php    ← Creates all MySQL tables
+└── endpoints/     ← Module endpoints`}</Code>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 3 — Edit config.php
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          In File Manager, open{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            public_html/api/config.php
+          </code>{" "}
+          and set your values:
+        </p>
+        <Code>{`<?php
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'cpanelusername_shubherp_db');  // Full prefixed name
+define('DB_USER', 'cpanelusername_shubherp_user'); // Full prefixed name
+define('DB_PASS', 'YourStrongPassword');
+define('DB_CHARSET', 'utf8mb4');
+define('JWT_SECRET', 'change-this-to-a-32-char-random-string');
+define('ALLOWED_ORIGIN', 'https://yourdomain.com');
+?>`}</Code>
+        <Alert type="warn">
+          ⚠️ Change{" "}
+          <code className="text-xs bg-muted px-1 rounded">JWT_SECRET</code> to a
+          random 32-character string. Change{" "}
+          <code className="text-xs bg-muted px-1 rounded">ALLOWED_ORIGIN</code>{" "}
+          to your exact domain.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 4 — Run Migration (Create Tables)
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          Open your browser and navigate to:
+        </p>
+        <Code>{"https://yourdomain.com/api/migrate.php?action=run"}</Code>
+        <p className="text-sm text-muted-foreground">Expected response:</p>
+        <Code>{`{
+  "success": true,
+  "message": "Migration complete",
+  "tables_created": ["students", "staff", "fee_receipts", "attendance", ...]
+}`}</Code>
+        <Alert type="info">
+          ℹ️ Run migration once. If run again, it safely skips tables that
+          already exist.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 5 — Connect ERP to Database
+        </h3>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>
+            1. Open your ERP:{" "}
+            <code className="text-xs bg-muted px-1 rounded">
+              https://yourdomain.com
+            </code>
+          </li>
+          <li>2. Log in as Super Admin</li>
+          <li>
+            3. Go to{" "}
+            <strong className="text-foreground">
+              Settings → Data → Database Server
+            </strong>{" "}
+            tab
+          </li>
+          <li>
+            4. Enter API URL:{" "}
+            <code className="text-xs bg-muted px-1 rounded">
+              https://yourdomain.com/api
+            </code>
+          </li>
+          <li>
+            5. Click <strong>Test Connection</strong> — green ✅ = success
+          </li>
+          <li>
+            6. Click <strong>Save API URL</strong>
+          </li>
+        </ol>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 6 — Migrate Existing Data
+        </h3>
+        <p className="text-sm text-muted-foreground">
+          If you already have data in localStorage (from before MySQL setup):
+        </p>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>
+            1. Stay in{" "}
+            <strong className="text-foreground">
+              Settings → Data → Database Server
+            </strong>
+          </li>
+          <li>
+            2. Click <strong>Migrate Data to Server</strong>
+          </li>
+          <li>3. All localStorage data uploads to MySQL</li>
+          <li>4. Sync indicator on dashboard turns green ✅</li>
+        </ol>
+        <Alert type="info">
+          ℹ️ After migration, all new writes go to MySQL first. localStorage is
+          used as a local cache only.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Step 7 — Test Multi-Device Sync
+        </h3>
+        <ol className="space-y-2 text-sm text-muted-foreground">
+          <li>1. Open ERP on a second device (computer or phone)</li>
+          <li>2. Log in — same students, fees, and settings should appear</li>
+          <li>
+            3. Add a student on Device A → appears on Device B within 5 seconds
+          </li>
+        </ol>
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-foreground mb-3">
+          Sync Status Indicator
+        </h3>
+        <DocTable
+          headers={["Status", "Meaning"]}
+          rows={[
+            ["🟢 Local", "No server configured — data in localStorage only"],
+            ["🟢 Connected", "MySQL server connected, data in sync"],
+            ["🔄 Syncing", "Actively transferring data to/from server"],
+            ["🔴 Offline", "Server configured but currently unreachable"],
+          ]}
+        />
+      </Card>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-foreground mb-3">Troubleshooting</h3>
+        <DocTable
+          headers={["Problem", "Solution"]}
+          rows={[
+            [
+              "Test Connection fails",
+              "Check config.php credentials. Verify DB_NAME/DB_USER include cPanel prefix",
+            ],
+            [
+              "API returns 500",
+              "Enable PHP error display: add error_reporting(E_ALL); to config.php temporarily",
+            ],
+            [
+              "CORS error in browser",
+              "Set ALLOWED_ORIGIN in config.php to your exact domain including https://",
+            ],
+            [
+              "Migration fails",
+              "Check PHP version in cPanel → MultiPHP Manager — use PHP 7.4 or 8.x",
+            ],
+            [
+              "Sync not updating",
+              "Verify API URL saved in Settings → Data → Database Server",
+            ],
+            [
+              '"Access denied for user"',
+              "In cPanel → MySQL Databases → verify user has ALL PRIVILEGES",
+            ],
+          ]}
+        />
+      </Card>
+    </div>
+  );
+}
+
+// ─── Database Schema ─────────────────────────────────────────
+function DbSchema() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-display font-bold text-foreground mb-1">
+          Database Schema
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          MySQL table structure for SHUBH SCHOOL ERP. All tables are created
+          automatically by the migration script.
+        </p>
+      </div>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Table Overview</h3>
+        <DocTable
+          headers={["Table", "Description"]}
+          rows={[
+            ["students", "Core student profiles with all admission data"],
+            ["staff", "Teacher and non-teaching staff profiles"],
+            ["users", "Login credentials for all user types (JWT auth)"],
+            ["sessions", "Academic session archive — infinite history"],
+            ["fee_headings", "Fee heading definitions with applicable months"],
+            ["fee_plan", "Fee amounts per class, section, and heading"],
+            ["fee_receipts", "Individual fee payment records and receipts"],
+            ["attendance", "Daily attendance records per student"],
+            ["transport", "Bus routes, pickup points, and monthly fares"],
+            ["inventory", "Stock items, purchases, and sales records"],
+            ["expenses", "Income and expense ledger entries"],
+            ["homework", "Homework assignments with due dates"],
+            ["alumni", "Alumni directory records"],
+            ["settings", "Key-value store for app preferences and API keys"],
+            ["school_profile", "School name, address, logo, theme settings"],
+            ["notifications", "ERP event notification log"],
+          ]}
+        />
+      </Card>
+
+      <Accordion title="students — Core student data" defaultOpen>
+        <Code>{`id            VARCHAR(36) PRIMARY KEY   -- UUID
+admission_no  VARCHAR(20) UNIQUE NOT NULL  -- e.g. '2025001'
+name          VARCHAR(100) NOT NULL
+father_name   VARCHAR(100)
+mother_name   VARCHAR(100)
+dob           DATE                         -- Date of birth
+gender        ENUM('Male','Female','Other')
+class         VARCHAR(20)                  -- e.g. 'Class 5'
+section       VARCHAR(5)                   -- e.g. 'A'
+roll_no       INT
+category      VARCHAR(30)                  -- General/OBC/SC/ST
+mobile        VARCHAR(15)                  -- Guardian mobile
+address       TEXT
+village       VARCHAR(100)
+aadhaar_no    VARCHAR(20)
+sr_no         VARCHAR(20)
+transport_route VARCHAR(100)
+pickup_point  VARCHAR(100)
+transport_months JSON                      -- ['April','May',...]
+discount_amount DECIMAL(10,2) DEFAULT 0
+discount_months JSON
+discount_headings JSON
+old_fees_balance DECIMAL(10,2) DEFAULT 0
+photo_url     TEXT
+session_id    VARCHAR(36)
+created_at    TIMESTAMP
+updated_at    TIMESTAMP`}</Code>
+      </Accordion>
+
+      <Accordion title="fee_receipts — Payment records">
+        <Code>{`id              VARCHAR(36) PRIMARY KEY
+receipt_no      VARCHAR(20) NOT NULL
+student_id      VARCHAR(36) NOT NULL       -- FK → students.id
+months          JSON                       -- ['April','May']
+fee_breakup     JSON                       -- [{heading, amount}]
+transport_amount DECIMAL(10,2)
+other_charges   DECIMAL(10,2)
+other_label     VARCHAR(100)
+discount        DECIMAL(10,2)
+old_balance     DECIMAL(10,2)
+net_fee         DECIMAL(10,2) NOT NULL
+amount_paid     DECIMAL(10,2) NOT NULL
+balance_after   DECIMAL(10,2)             -- +ve=deficit, -ve=credit
+payment_mode    ENUM('Cash','Cheque','Online','UPI')
+received_by     VARCHAR(100)
+received_role   VARCHAR(50)
+payment_date    DATE NOT NULL`}</Code>
+      </Accordion>
+
+      <Accordion title="attendance — Daily records">
+        <Code>{`id          VARCHAR(36) PRIMARY KEY
+student_id  VARCHAR(36) NOT NULL       -- FK → students.id
+date        DATE NOT NULL
+status      ENUM('Present','Absent','Late','Leave')
+time_in     TIME
+marked_by   VARCHAR(100)
+device_type ENUM('Manual','RFID','QR','Biometric')
+session_id  VARCHAR(36)
+UNIQUE KEY (student_id, date)`}</Code>
+      </Accordion>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">
+          Key Relationships (ASCII)
+        </h3>
+        <Code>{`sessions ────────────────────────────────┐
+                                          │
+students ────────────────────────────────┤
+  id (PK)                                │
+  session_id (FK → sessions.id)          │
+        │                                │
+        ├──► fee_receipts                │
+        │    student_id (FK)             │
+        │    session_id (FK)             │
+        │                                │
+        └──► attendance                  │
+             student_id (FK)             │
+             session_id (FK)             │
+                                          │
+fee_plan ────────────────────────────────┤
+  heading_id (FK → fee_headings.id)      │
+  session_id (FK)                        │
+                                          │
+staff ──────────────────────────────────┤
+  id (PK)                                │
+  │                                      │
+  ▼                                      │
+users                                    │
+  linked_id (FK → staff.id or           │
+             students.id)                │
+             session_id (FK)─────────────┘`}</Code>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Sample SQL Queries</h3>
+        <Accordion title="Students by class and section">
+          <Code>{`SELECT s.admission_no, s.name, s.father_name, s.mobile
+FROM students s
+JOIN sessions ses ON s.session_id = ses.id
+WHERE s.class = 'Class 5'
+  AND s.section = 'A'
+  AND s.status = 'Active'
+  AND ses.name = '2025-26'
+ORDER BY s.roll_no;`}</Code>
+        </Accordion>
+        <Accordion title="Fees due this month">
+          <Code>{`-- Students with unpaid October fees
+SELECT s.admission_no, s.name, s.class, s.mobile,
+  SUM(fp.amount) AS monthly_fee_due
+FROM students s
+JOIN fee_plan fp ON fp.class = s.class
+  AND (fp.section = s.section OR fp.section IS NULL)
+JOIN fee_headings fh ON fp.heading_id = fh.id
+WHERE s.status = 'Active'
+  AND JSON_CONTAINS(fh.applicable_months, '"October"')
+  AND s.id NOT IN (
+    SELECT DISTINCT student_id FROM fee_receipts
+    WHERE JSON_CONTAINS(months, '"October"')
+  )
+GROUP BY s.id ORDER BY s.class, s.name;`}</Code>
+        </Accordion>
+        <Accordion title="Attendance summary by class">
+          <Code>{`SELECT s.class, s.section,
+  COUNT(*) AS total,
+  SUM(a.status = 'Present') AS present,
+  SUM(a.status = 'Absent') AS absent,
+  ROUND(SUM(a.status = 'Present') * 100.0 / COUNT(*), 1) AS pct
+FROM students s
+LEFT JOIN attendance a ON a.student_id = s.id
+  AND a.date = CURDATE()
+WHERE s.status = 'Active'
+GROUP BY s.class, s.section
+ORDER BY s.class, s.section;`}</Code>
+        </Accordion>
+        <Accordion title="Payroll calculation">
+          <Code>{`SELECT st.name, st.designation, st.salary_gross,
+  COUNT(a.id) AS days_present,
+  26 AS working_days,
+  ROUND(st.salary_gross * COUNT(a.id) / 26) AS net_salary
+FROM staff st
+LEFT JOIN attendance a ON a.student_id = st.id
+  AND a.date BETWEEN '2025-10-01' AND '2025-10-31'
+  AND a.status = 'Present'
+WHERE st.status = 'Active'
+GROUP BY st.id ORDER BY st.name;`}</Code>
+        </Accordion>
+      </Card>
+    </div>
+  );
+}
+
+// ─── API Reference ───────────────────────────────────────────
+function ApiReference() {
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-xl font-display font-bold text-foreground mb-1">
+          REST API Reference
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Complete reference for the PHP REST API used in MySQL Mode.
+        </p>
+      </div>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Base URL & Auth</h3>
+        <Code>{`Base URL: https://yourdomain.com/api
+
+# All requests (except login) require:
+Authorization: Bearer {jwt_token}
+
+# Login to get token:
+POST /auth/login
+{"username": "superadmin", "password": "admin123"}
+
+# Response:
+{"success": true, "token": "eyJ...", "role": "superadmin"}`}</Code>
+        <Alert type="info">
+          ℹ️ JWT tokens expire after 24 hours. Re-login to get a fresh token. The
+          ERP auto-refreshes tokens on re-login.
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-3">
+        <h3 className="font-semibold text-foreground">Response Format</h3>
+        <Code>{`// Success
+{"success": true, "data": {...} | [...], "message": "..."}
+
+// Error
+{"success": false, "error": "Error description"}
+
+// HTTP Status Codes
+200 — Success
+201 — Created
+400 — Bad request (missing/invalid fields)
+401 — Unauthorized (missing or expired token)
+403 — Forbidden (insufficient role)
+404 — Not found
+500 — Server error`}</Code>
+      </Card>
+
+      <Accordion title="Auth Endpoints (/auth)" defaultOpen>
+        <DocTable
+          headers={["Method", "Endpoint", "Description", "Auth"]}
+          rows={[
+            ["POST", "/auth/login", "Login, get JWT token", "No"],
+            ["POST", "/auth/logout", "Invalidate token", "Yes"],
+            ["POST", "/auth/change-password", "Change own password", "Yes"],
+            [
+              "POST",
+              "/auth/reset-password",
+              "Reset any user password",
+              "Super Admin",
+            ],
+            ["GET", "/auth/me", "Get current user info", "Yes"],
+          ]}
+        />
+      </Accordion>
+
+      <Accordion title="Students Endpoints (/students)">
+        <div className="space-y-3">
+          <DocTable
+            headers={["Method", "Endpoint", "Description", "Auth"]}
+            rows={[
+              ["GET", "/students", "List all students (filterable)", "Yes"],
+              ["GET", "/students/{id}", "Get single student", "Yes"],
+              ["POST", "/students", "Add new student", "Admin+"],
+              ["PUT", "/students/{id}", "Update student", "Admin+"],
+              ["DELETE", "/students/{id}", "Delete student", "Super Admin"],
+              ["GET", "/students/export", "Export CSV", "Admin+"],
+              ["POST", "/students/import", "Import from CSV", "Admin+"],
+              ["GET", "/students/search?q={}", "Search students", "Yes"],
+            ]}
+          />
+          <p className="text-xs text-muted-foreground">
+            Query params for list:{" "}
+            <code className="bg-muted px-1 rounded">
+              ?class=Class+5&section=A&status=Active&session_id=abc
+            </code>
+          </p>
+        </div>
+      </Accordion>
+
+      <Accordion title="Fees Endpoints (/fees)">
+        <DocTable
+          headers={["Method", "Endpoint", "Description", "Auth"]}
+          rows={[
+            ["GET", "/fees/headings", "List fee headings", "Yes"],
+            ["POST", "/fees/headings", "Create heading", "Super Admin"],
+            ["PUT", "/fees/headings/{id}", "Update heading", "Super Admin"],
+            ["GET", "/fees/plan", "Get fee plan", "Yes"],
+            ["POST", "/fees/plan", "Set fee amount", "Super Admin"],
+            ["GET", "/fees/receipts", "List receipts", "Yes"],
+            ["POST", "/fees/receipts", "Create receipt", "Accountant+"],
+            ["PUT", "/fees/receipts/{id}", "Edit receipt", "Admin+"],
+            ["DELETE", "/fees/receipts/{id}", "Delete receipt", "Super Admin"],
+            ["GET", "/fees/due", "Get dues report", "Admin+"],
+            ["GET", "/fees/accounts", "Account-wise summary", "Accountant+"],
+          ]}
+        />
+      </Accordion>
+
+      <Accordion title="Attendance Endpoints (/attendance)">
+        <DocTable
+          headers={["Method", "Endpoint", "Description", "Auth"]}
+          rows={[
+            ["GET", "/attendance", "Get records (filter by date/class)", "Yes"],
+            ["POST", "/attendance", "Mark attendance (bulk)", "Teacher+"],
+            ["PUT", "/attendance/{id}", "Update single record", "Teacher+"],
+            ["GET", "/attendance/summary?date={}", "Class-wise summary", "Yes"],
+            [
+              "GET",
+              "/attendance/student/{id}?month={}",
+              "Monthly student attendance",
+              "Yes",
+            ],
+          ]}
+        />
+      </Accordion>
+
+      <Accordion title="HR Endpoints (/hr)">
+        <DocTable
+          headers={["Method", "Endpoint", "Description", "Auth"]}
+          rows={[
+            ["GET", "/hr/staff", "List all staff", "Yes"],
+            ["POST", "/hr/staff", "Add staff member", "Admin+"],
+            ["PUT", "/hr/staff/{id}", "Update staff", "Admin+"],
+            ["DELETE", "/hr/staff/{id}", "Delete staff", "Super Admin"],
+            [
+              "GET",
+              "/hr/payroll?month={}&year={}",
+              "Payroll summary",
+              "Admin+",
+            ],
+            ["POST", "/hr/payroll/generate", "Generate payroll", "Admin+"],
+          ]}
+        />
+      </Accordion>
+
+      <Accordion title="Backup & Sync Endpoints (/backup, /sync)">
+        <DocTable
+          headers={["Method", "Endpoint", "Description", "Auth"]}
+          rows={[
+            ["GET", "/backup/export", "Export full DB as JSON", "Super Admin"],
+            ["POST", "/backup/import", "Import JSON to DB", "Super Admin"],
+            [
+              "POST",
+              "/backup/reset",
+              "Factory reset all tables",
+              "Super Admin",
+            ],
+            ["GET", "/sync/status", "Check server status", "Yes"],
+            ["POST", "/sync/push", "Push localStorage to server", "Admin+"],
+            [
+              "GET",
+              "/sync/pull?since={timestamp}",
+              "Pull changes since timestamp",
+              "Yes",
+            ],
+          ]}
+        />
+        <Code>{`// Pull example (used by 5-second polling)
+GET /sync/pull?since=2025-10-15T08:30:00Z
+
+// Response
+{
+  "success": true,
+  "data": {
+    "students": [...],      // Changed records since timestamp
+    "fee_receipts": [...],
+    "attendance": [...]
+  },
+  "server_time": "2025-10-15T08:35:00Z"
+}`}</Code>
+      </Accordion>
+
+      <Accordion title="Migration Endpoint (/migrate.php)">
+        <DocTable
+          headers={["URL", "Description"]}
+          rows={[
+            [
+              "/api/migrate.php?action=run",
+              "Create all tables — run once on first setup",
+            ],
+            ["/api/migrate.php?action=status", "Check which tables exist"],
+            [
+              "/api/migrate.php?action=rollback",
+              "Drop all tables (use with extreme caution)",
+            ],
+          ]}
+        />
+        <Alert type="info">
+          ℹ️ Migration endpoints are not behind JWT auth — they are intended for
+          one-time browser-based setup. Safe to leave in place after migration.
+        </Alert>
+      </Accordion>
+
+      <Card className="p-5">
+        <h3 className="font-semibold text-foreground mb-3">
+          Common Error Codes
+        </h3>
+        <DocTable
+          headers={["Code", "Meaning", "Common Cause"]}
+          rows={[
+            ["AUTH_REQUIRED", "No token", "Missing Authorization header"],
+            [
+              "AUTH_EXPIRED",
+              "Token expired",
+              "Token older than 24 hours — re-login",
+            ],
+            [
+              "ROLE_FORBIDDEN",
+              "Insufficient role",
+              "Action requires higher permission",
+            ],
+            [
+              "DUPLICATE_ENTRY",
+              "Unique constraint",
+              "Admission No. or mobile already exists",
+            ],
+            ["DB_ERROR", "MySQL error", "Check config.php credentials"],
+            ["VALIDATION_ERROR", "Missing fields", "Check request body"],
+          ]}
+        />
       </Card>
     </div>
   );

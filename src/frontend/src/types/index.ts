@@ -2,6 +2,18 @@
 // SHUBH SCHOOL ERP — Complete Type Definitions
 // ──────────────────────────────────────────────────────────
 
+/**
+ * Optional MySQL numeric primary key alongside the existing string id.
+ * Populated when the app is connected to a cPanel MySQL server via api.ts.
+ * Undefined in local-only (localStorage) mode.
+ */
+export interface MySQLRecord {
+  /** Numeric auto-increment PK from MySQL. Undefined in local mode. */
+  dbId?: number;
+  /** ISO timestamp of last server sync. Undefined in local mode. */
+  syncedAt?: string;
+}
+
 export type UserRole =
   | "superadmin"
   | "admin"
@@ -21,7 +33,7 @@ export interface Credentials {
 // ──────────────────────────────────────────────────────────
 // Session
 // ──────────────────────────────────────────────────────────
-export interface Session {
+export interface Session extends MySQLRecord {
   id: string;
   label: string;
   startYear: number;
@@ -34,7 +46,7 @@ export interface Session {
 // ──────────────────────────────────────────────────────────
 // Student
 // ──────────────────────────────────────────────────────────
-export interface Student {
+export interface Student extends MySQLRecord {
   id: string;
   admNo: string;
   fullName: string;
@@ -81,7 +93,7 @@ export interface SubjectAssignment {
   classTo: string;
 }
 
-export interface Staff {
+export interface Staff extends MySQLRecord {
   id: string;
   empId: string;
   name: string;
@@ -143,7 +155,7 @@ export interface ReceiptItem {
   amount: number;
 }
 
-export interface FeeReceipt {
+export interface FeeReceipt extends MySQLRecord {
   id: string;
   receiptNo: string;
   studentId: string;
@@ -209,7 +221,7 @@ export interface OldFeeEntry {
 // ──────────────────────────────────────────────────────────
 // Attendance
 // ──────────────────────────────────────────────────────────
-export interface AttendanceRecord {
+export interface AttendanceRecord extends MySQLRecord {
   id: string;
   studentId?: string;
   staffId?: string;
