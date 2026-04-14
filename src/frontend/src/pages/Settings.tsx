@@ -1,7 +1,9 @@
 import {
   Bell,
+  Bot,
   Clock,
   CreditCard,
+  Database,
   MessageSquare,
   Palette,
   School,
@@ -10,12 +12,14 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
+import DataManagement from "./settings/DataManagement";
 import NotificationScheduler from "./settings/NotificationScheduler";
 import OnlinePaymentSettings from "./settings/OnlinePaymentSettings";
 import SchoolProfile from "./settings/SchoolProfile";
 import SessionManagement from "./settings/SessionManagement";
 import ThemeSettings from "./settings/ThemeSettings";
 import UserManagement from "./settings/UserManagement";
+import WhatsAppAutoReply from "./settings/WhatsAppAutoReply";
 import WhatsAppSettings from "./settings/WhatsAppSettings";
 
 const TABS = [
@@ -28,9 +32,21 @@ const TABS = [
     icon: MessageSquare,
     superAdminOnly: true,
   },
+  {
+    id: "whatsapp-bot",
+    label: "WhatsApp Bot",
+    icon: Bot,
+    superAdminOnly: true,
+  },
   { id: "payment", label: "Online Payment", icon: CreditCard },
   { id: "notifications", label: "Notification Scheduler", icon: Bell },
   { id: "themes", label: "Themes", icon: Palette },
+  {
+    id: "data",
+    label: "Data Management",
+    icon: Database,
+    superAdminOnly: true,
+  },
 ];
 
 interface SettingsProps {
@@ -93,9 +109,11 @@ export default function Settings({ onNavigate: _onNavigate }: SettingsProps) {
         {activeTab === "sessions" && <SessionManagement />}
         {activeTab === "users" && isSuperAdmin && <UserManagement />}
         {activeTab === "whatsapp" && isSuperAdmin && <WhatsAppSettings />}
+        {activeTab === "whatsapp-bot" && isSuperAdmin && <WhatsAppAutoReply />}
         {activeTab === "payment" && <OnlinePaymentSettings />}
         {activeTab === "notifications" && <NotificationScheduler />}
         {activeTab === "themes" && <ThemeSettings />}
+        {activeTab === "data" && isSuperAdmin && <DataManagement />}
       </div>
     </div>
   );

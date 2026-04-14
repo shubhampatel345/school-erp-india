@@ -10,7 +10,6 @@ import {
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type {
-  DiscountEntry,
   FeeHeading,
   FeeReceipt,
   FeesPlan,
@@ -35,13 +34,36 @@ interface ReceiptRow {
   amount: number;
   paidMonths: string[];
   checked: boolean;
-  isTransport?: boolean; // auto-added transport fee row
+  isTransport?: boolean;
 }
 
 interface OtherChargeRow {
   label: string;
   paidAmount: number;
   dueAmount: number;
+}
+
+// Full edit state for the Edit Receipt dialog
+interface EditReceiptState {
+  receiptId: string;
+  date: string;
+  paymentMode: FeeReceipt["paymentMode"];
+  paidAmount: number;
+  discount: number;
+  otherLabel: string;
+  otherAmount: number;
+  remarks: string;
+  // month + amount per item: headingId -> month -> amount
+  itemAmounts: Record<string, Record<string, number>>;
+  // which months are selected
+  selectedMonths: string[];
+  // all headings in receipt
+  headings: Array<{
+    headingId: string;
+    headingName: string;
+    months: string[];
+    rate: number;
+  }>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,9 +122,14 @@ function getOldBalance(studentId: string): number {
   return balances[studentId] ?? 0;
 }
 
+/**
+ * Stores old balance. Positive = student owes (shown red).
+ * Negative = student has credit (shown green, reduces next payment).
+ * Zero = clear.
+ */
 function setOldBalanceStore(studentId: string, balance: number) {
   const balances = ls.get<Record<string, number>>("old_balances", {});
-  if (balance <= 0) delete balances[studentId];
+  if (balance === 0) delete balances[studentId];
   else balances[studentId] = balance;
   ls.set("old_balances", balances);
 }
@@ -167,21 +194,31 @@ function printReceiptHTML(receipt: FeeReceipt) {
     )
     .join("");
 
+  // Old balance row — positive = dues carried forward (red), negative = credit (green)
+  const oldBalAbs = Math.abs(receipt.oldBalance ?? 0);
   const oldBalRow =
-    receipt.oldBalance > 0
-      ? `<tr><td>-</td><td>Old Balance (Carried Forward)</td><td>-</td><td style="text-align:right">₹${receipt.oldBalance.toLocaleString("en-IN")}</td></tr>`
-      : "";
+    (receipt.oldBalance ?? 0) > 0
+      ? `<tr><td>-</td><td>Old Balance (Carried Forward)</td><td>-</td><td style="text-align:right;color:red">₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
+      : (receipt.oldBalance ?? 0) < 0
+        ? `<tr><td>-</td><td>Advance/Credit</td><td>-</td><td style="text-align:right;color:green">-₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
+        : "";
 
   const discRow =
     receipt.discount > 0
       ? `<tr><td>-</td><td>Discount / Concession</td><td>-</td><td style="text-align:right;color:green">-₹${receipt.discount.toLocaleString("en-IN")}</td></tr>`
       : "";
 
+  const balance = receipt.balance ?? 0;
   const paidAmtRow =
     receipt.paidAmount !== undefined &&
     receipt.paidAmount !== receipt.totalAmount
-      ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount ?? receipt.totalAmount).toLocaleString("en-IN")}</td></tr>
-       <tr style="background:#fff5f5"><td colspan="3"><b>Balance</b></td><td style="text-align:right;font-weight:bold;color:red">₹${(receipt.balance ?? 0).toLocaleString("en-IN")}</td></tr>`
+      ? balance < 0
+        ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount ?? receipt.totalAmount).toLocaleString("en-IN")}</td></tr>
+           <tr style="background:#f0fdf4"><td colspan="3"><b>Credit Balance</b></td><td style="text-align:right;font-weight:bold;color:green">-₹${Math.abs(balance).toLocaleString("en-IN")}</td></tr>`
+        : balance > 0
+          ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount ?? receipt.totalAmount).toLocaleString("en-IN")}</td></tr>
+             <tr style="background:#fff5f5"><td colspan="3"><b>Balance Due</b></td><td style="text-align:right;font-weight:bold;color:red">₹${balance.toLocaleString("en-IN")}</td></tr>`
+          : ""
       : "";
 
   const histHtml = historyRows
@@ -285,6 +322,22 @@ function LabelValue({
   );
 }
 
+// ── Family helpers ─────────────────────────────────────────────────────────────
+function getPrimaryMobile(s: Student): string {
+  return (s.fatherMobile?.trim() || s.guardianMobile?.trim() || "").trim();
+}
+
+function getFamilyMembers(student: Student, allStudents: Student[]): Student[] {
+  const pm = getPrimaryMobile(student);
+  if (!pm) return [];
+  return allStudents.filter(
+    (s) =>
+      s.id !== student.id &&
+      s.status === "active" &&
+      getPrimaryMobile(s) === pm,
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function CollectFees() {
   const { currentUser, currentSession, addNotification, isReadOnly } = useApp();
@@ -297,10 +350,13 @@ export default function CollectFees() {
   const dropdownRef = useRef<HTMLDivElement>(null);
   const admNoRef = useRef<HTMLInputElement>(null);
 
+  // ── Family members panel ──────────────────────────────────────────────────
+  const [familyOpen, setFamilyOpen] = useState(true);
+
   // ── Student & fee data ────────────────────────────────────────────────────
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [rows, setRows] = useState<ReceiptRow[]>([]);
-  const [oldBalance, setOldBalance] = useState(0);
+  const [oldBalance, setOldBalance] = useState(0); // negative = credit
   const [receiptHistory, setReceiptHistory] = useState<FeeReceipt[]>([]);
 
   // ── Month panel ───────────────────────────────────────────────────────────
@@ -324,7 +380,7 @@ export default function CollectFees() {
   const [receiptDate, setReceiptDate] = useState(
     new Date().toISOString().split("T")[0],
   );
-  const [receiptNo] = useState(getNextReceiptNo);
+  const [receiptNo, setReceiptNo] = useState(getNextReceiptNo);
   const [remarks, setRemarks] = useState("");
   const [lateFees, setLateFees] = useState(0);
   const [concessionPct, setConcessionPct] = useState(0);
@@ -339,12 +395,9 @@ export default function CollectFees() {
   const [waDone, setWaDone] = useState(false);
   const [waSending, setWaSending] = useState(false);
 
-  // ── Edit receipt ──────────────────────────────────────────────────────────
-  const [editReceiptOpen, setEditReceiptOpen] = useState(false);
-  const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
-  const [editMode, setEditMode] = useState<FeeReceipt["paymentMode"]>("Cash");
-  const [editAmount, setEditAmount] = useState("");
-  const [editRemarks, setEditRemarks] = useState("");
+  // ── Full Edit Receipt ─────────────────────────────────────────────────────
+  const [editOpen, setEditOpen] = useState(false);
+  const [editState, setEditState] = useState<EditReceiptState | null>(null);
 
   const isSuperAdmin = currentUser?.role === "superadmin";
   const canEdit =
@@ -352,12 +405,37 @@ export default function CollectFees() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // ── Load students ──────────────────────────────────────────────────────────
+  // ── Load students + handle preload from global search ─────────────────────
   useEffect(() => {
-    setAllStudents(
-      ls.get<Student[]>("students", []).filter((s) => s.status === "active"),
-    );
+    const loaded = ls
+      .get<Student[]>("students", [])
+      .filter((s) => s.status === "active");
+    setAllStudents(loaded);
+
+    // Check if navigated here from global search with a pre-selected student
+    const preloadId = sessionStorage.getItem("collectFees_preload");
+    if (preloadId) {
+      sessionStorage.removeItem("collectFees_preload");
+      const student = loaded.find((s) => s.id === preloadId);
+      if (student) {
+        setSelectedStudent(student);
+        setAdmNoInput(student.admNo);
+        setShowDropdown(false);
+        setErrorMsg("");
+        setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Load fees when student is preloaded (from global search) ──────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
+  useEffect(() => {
+    if (selectedStudent && currentSession && rows.length === 0) {
+      loadStudentFees(selectedStudent);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedStudent, currentSession]);
 
   // ── Live search ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -392,7 +470,7 @@ export default function CollectFees() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // ── Transport info helper ──────────────────────────────────────────────────
+  // ── Transport helpers ──────────────────────────────────────────────────────
   function getTransportInfo(student: Student): string {
     const st = ls
       .get<
@@ -407,7 +485,6 @@ export default function CollectFees() {
     return st ? `${st.busNo} / ${st.routeName}` : student.transportRoute || "—";
   }
 
-  // ── Get student's pickup point monthly fare from transport_routes_v2 ────────
   function getTransportFare(student: Student): {
     fare: number;
     pickupName: string;
@@ -435,10 +512,7 @@ export default function CollectFees() {
     const pp = route.pickupPoints.find(
       (p) => p.id === assignment.pickupPointId,
     );
-    return {
-      fare: pp?.fare ?? 0,
-      pickupName: assignment.pickupPointName,
-    };
+    return { fare: pp?.fare ?? 0, pickupName: assignment.pickupPointName };
   }
 
   // ── Load fees for selected student ────────────────────────────────────────
@@ -477,11 +551,9 @@ export default function CollectFees() {
       });
     }
 
-    // ── Auto-add Transport Fee row based on pickup point fare ────────────────
+    // ── Transport Fee row ──────────────────────────────────────────────────
     const { fare: transportFare, pickupName } = getTransportFare(student);
     const TRANSPORT_HEADING_ID = `transport_${student.id}`;
-
-    // Only include transport fee for months the student has transport active
     const studentTransportMonths =
       ls.get<Record<string, string[]>>("student_transport_months", {})[
         student.id
@@ -496,7 +568,7 @@ export default function CollectFees() {
       newRows.push({
         headingId: TRANSPORT_HEADING_ID,
         headingName: `Transport Fee (${pickupName})`,
-        applicableMonths: studentTransportMonths, // only selected months
+        applicableMonths: studentTransportMonths,
         amount: transportFare,
         paidMonths: paidTransportMonths,
         checked: true,
@@ -506,8 +578,7 @@ export default function CollectFees() {
 
     setRows(newRows);
 
-    const allPaid = getAllPaidMonths(student.id, currentSession.id);
-    // Auto-select unpaid months
+    void getAllPaidMonths(student.id, currentSession.id);
     const unpaidMonths = MONTHS.filter((m) =>
       newRows.some(
         (row) =>
@@ -534,10 +605,6 @@ export default function CollectFees() {
       )
       .sort((a, b) => b.date.localeCompare(a.date));
     setReceiptHistory(history);
-
-    // Auto-fill receipt amount after computing
-    // Will be updated after render via useEffect
-    void allPaid; // used for future reference
   }
 
   function selectStudent(student: Student) {
@@ -546,6 +613,8 @@ export default function CollectFees() {
     setShowDropdown(false);
     setErrorMsg("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+    // Refresh receipt number in case more receipts were saved since last load
+    setReceiptNo(getNextReceiptNo());
     loadStudentFees(student);
   }
 
@@ -622,18 +691,22 @@ export default function CollectFees() {
   const feesSubtotal = computeFeesSubtotal();
   const otherTotal = otherCharge.paidAmount > 0 ? otherCharge.paidAmount : 0;
   const totalFees = feesSubtotal + otherTotal;
+
+  // oldBalance is negative for credit, positive for dues
+  // netFees: subtract credit (negative oldBalance) and concession, add late fees
   const netFees = Math.max(
     0,
     totalFees + oldBalance + lateFees - concessionAmt,
   );
-  const balanceAmt = Math.max(0, netFees - receiptAmt);
+
+  // balanceAmt: positive = shortfall/underpayment (red), negative = credit/overpayment (green)
+  const balanceAmt = netFees - receiptAmt; // positive means they still owe, negative means credit
 
   // Sync receipt amount when net fees changes
   useEffect(() => {
     setReceiptAmt(netFees);
   }, [netFees]);
 
-  // Update concession amount when percentage changes
   function handleConcessionPctChange(pct: number) {
     const clamped = Math.min(100, Math.max(0, pct));
     setConcessionPct(clamped);
@@ -693,7 +766,10 @@ export default function CollectFees() {
 
     const otherCharges =
       otherCharge.label && otherCharge.paidAmount > 0 ? [otherCharge] : [];
-    const newBalance = balanceAmt;
+
+    // newBalance: positive = student still owes (red carry-forward), negative = credit (green, reduces next bill)
+    // balanceAmt = netFees - receiptAmt: positive means shortfall, negative means credit
+    const newBalance = balanceAmt; // directly: positive = owe, negative = credit
 
     const receipt: FeeReceipt = {
       id: generateId(),
@@ -703,7 +779,7 @@ export default function CollectFees() {
       admNo: selectedStudent.admNo,
       class: selectedStudent.class,
       section: selectedStudent.section,
-      date: formatDate(new Date(receiptDate)),
+      date: formatDate(new Date(`${receiptDate}T00:00:00`)),
       items: receiptItems,
       otherCharges,
       discount: concessionAmt,
@@ -720,6 +796,7 @@ export default function CollectFees() {
 
     const all = ls.get<FeeReceipt[]>("fee_receipts", []);
     ls.set("fee_receipts", [...all, receipt]);
+    // Store balance: negative = credit, positive = dues
     setOldBalanceStore(selectedStudent.id, newBalance);
 
     addNotification(
@@ -733,6 +810,8 @@ export default function CollectFees() {
     setShowDialog(true);
     loadStudentFees(selectedStudent);
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+    // Refresh receipt number so next receipt gets a new sequential number
+    setReceiptNo(getNextReceiptNo());
   }
 
   async function handleWhatsApp() {
@@ -770,39 +849,177 @@ export default function CollectFees() {
       .get<FeeReceipt[]>("fee_receipts", [])
       .map((r) => (r.id === receiptId ? { ...r, isDeleted: true } : r));
     ls.set("fee_receipts", all);
-    if (selectedStudent) loadStudentFees(selectedStudent);
+
+    // Recalculate running balance from all remaining non-deleted receipts
+    if (selectedStudent) {
+      const remaining = all
+        .filter(
+          (r) =>
+            r.studentId === selectedStudent.id &&
+            r.sessionId === (currentSession?.id ?? "") &&
+            !r.isDeleted,
+        )
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      // Running balance: sum of (totalAmount - paidAmount) across all receipts
+      // positive = student still owes, negative = credit
+      let runningBalance = 0;
+      for (const r of remaining) {
+        runningBalance +=
+          (r.totalAmount ?? 0) - (r.paidAmount ?? r.totalAmount ?? 0);
+      }
+      setOldBalanceStore(selectedStudent.id, runningBalance);
+      loadStudentFees(selectedStudent);
+    }
   }
 
+  // ── Open Full Edit Dialog ──────────────────────────────────────────────────
   function openEditReceipt(r: FeeReceipt) {
-    setEditReceiptId(r.id);
-    setEditMode(r.paymentMode);
-    setEditAmount(String(r.paidAmount ?? r.totalAmount));
-    setEditRemarks("");
-    setEditReceiptOpen(true);
+    // Build headings from receipt items
+    const headingMap: Record<
+      string,
+      { headingId: string; headingName: string; months: string[]; rate: number }
+    > = {};
+    for (const item of r.items) {
+      if (!headingMap[item.headingId]) {
+        headingMap[item.headingId] = {
+          headingId: item.headingId,
+          headingName: item.headingName,
+          months: [],
+          rate: item.amount,
+        };
+      }
+      headingMap[item.headingId].months.push(item.month);
+    }
+
+    const headings = Object.values(headingMap);
+    const selectedMonths = [...new Set(r.items.map((i) => i.month))];
+
+    // Build item amounts map
+    const itemAmounts: Record<string, Record<string, number>> = {};
+    for (const item of r.items) {
+      if (!itemAmounts[item.headingId]) itemAmounts[item.headingId] = {};
+      itemAmounts[item.headingId][item.month] = item.amount;
+    }
+
+    const otherC = r.otherCharges?.[0];
+    setEditState({
+      receiptId: r.id,
+      date: r.date,
+      paymentMode: r.paymentMode,
+      paidAmount: r.paidAmount ?? r.totalAmount,
+      discount: r.discount ?? 0,
+      otherLabel: otherC?.label ?? "",
+      otherAmount: otherC?.paidAmount ?? 0,
+      remarks: "",
+      itemAmounts,
+      selectedMonths,
+      headings,
+    });
+    setEditOpen(true);
+  }
+
+  // Compute total from editState
+  function computeEditTotal(state: EditReceiptState): number {
+    let total = 0;
+    for (const h of state.headings) {
+      for (const m of state.selectedMonths) {
+        const amt = state.itemAmounts[h.headingId]?.[m] ?? h.rate;
+        total += amt;
+      }
+    }
+    total += state.otherAmount;
+    total -= state.discount;
+    return Math.max(0, total);
   }
 
   function saveEditReceipt() {
-    if (!editReceiptId) return;
-    const newAmount = Number(editAmount);
-    if (Number.isNaN(newAmount) || newAmount <= 0) return;
-    const all = ls
-      .get<FeeReceipt[]>("fee_receipts", [])
-      .map((r) =>
-        r.id === editReceiptId
-          ? { ...r, paymentMode: editMode, paidAmount: newAmount }
-          : r,
-      );
+    if (!editState || !selectedStudent) return;
+    const all = ls.get<FeeReceipt[]>("fee_receipts", []);
+    const idx = all.findIndex((r) => r.id === editState.receiptId);
+    if (idx < 0) return;
+
+    const original = all[idx];
+    const newTotal = computeEditTotal(editState);
+
+    // Rebuild items
+    const newItems: FeeReceipt["items"] = [];
+    for (const h of editState.headings) {
+      for (const m of editState.selectedMonths) {
+        const amt = editState.itemAmounts[h.headingId]?.[m] ?? h.rate;
+        if (amt > 0) {
+          newItems.push({
+            headingId: h.headingId,
+            headingName: h.headingName,
+            month: m,
+            amount: amt,
+          });
+        }
+      }
+    }
+
+    const newOtherCharges =
+      editState.otherLabel && editState.otherAmount > 0
+        ? [
+            {
+              label: editState.otherLabel,
+              paidAmount: editState.otherAmount,
+              dueAmount: 0,
+            },
+          ]
+        : [];
+
+    const newBalance = editState.paidAmount - newTotal;
+
+    const updated: FeeReceipt = {
+      ...original,
+      date: editState.date,
+      paymentMode: editState.paymentMode,
+      items: newItems,
+      otherCharges: newOtherCharges,
+      discount: editState.discount,
+      totalAmount: newTotal,
+      paidAmount: editState.paidAmount,
+      balance: newBalance,
+    };
+
+    all[idx] = updated;
     ls.set("fee_receipts", all);
-    setEditReceiptOpen(false);
-    setEditReceiptId(null);
-    if (selectedStudent) loadStudentFees(selectedStudent);
+
+    // Recalculate student balance from all non-deleted receipts
+    const studentReceipts = all.filter(
+      (r) => r.studentId === selectedStudent.id && !r.isDeleted,
+    );
+    const lastReceipt = studentReceipts.sort((a, b) =>
+      b.date.localeCompare(a.date),
+    )[0];
+    if (lastReceipt) {
+      setOldBalanceStore(selectedStudent.id, lastReceipt.balance ?? 0);
+    }
+
+    setEditOpen(false);
+    setEditState(null);
+    addNotification("✅ Receipt updated successfully", "success");
+    loadStudentFees(selectedStudent);
   }
 
-  // ── Display months in grid = panelMonths when set, else all applicable ─────
+  // ── Display months in grid ─────────────────────────────────────────────────
   const displayMonths =
     panelMonths.length > 0
       ? panelMonths
       : MONTHS.filter((m) => applicableMonths.includes(m));
+
+  // ── Balance display helpers ────────────────────────────────────────────────
+  // balanceAmt: positive = shortfall (they owe, red), negative = credit (overpaid, green)
+  const isCredit = balanceAmt < 0; // paid MORE than owed → green
+  const isDue = balanceAmt > 0; // paid LESS than owed → red
+  const balanceDisplay = isCredit
+    ? `-₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`
+    : `₹${balanceAmt.toLocaleString("en-IN")}`;
+
+  // oldBalance display: negative = credit from prev payment, positive = dues
+  const isOldCredit = oldBalance < 0;
+  const isOldDue = oldBalance > 0;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -988,7 +1205,6 @@ export default function CollectFees() {
           >
             {/* Photo row */}
             <div className="flex gap-3 p-3 border-b border-border bg-muted/20">
-              {/* Photo */}
               <div className="w-[72px] h-[80px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
                 {selectedStudent.photo ? (
                   <img
@@ -1003,7 +1219,6 @@ export default function CollectFees() {
                   </div>
                 )}
               </div>
-              {/* Student name + class big display */}
               <div className="flex flex-col justify-center gap-0.5 min-w-0">
                 <div className="text-sm font-bold text-foreground truncate">
                   {selectedStudent.fullName}
@@ -1017,7 +1232,6 @@ export default function CollectFees() {
                 <div className="text-[11px] text-muted-foreground">
                   Class:{" "}
                   <span className="font-bold text-foreground">
-                    {" "}
                     {selectedStudent.class} - {selectedStudent.section}
                   </span>
                 </div>
@@ -1036,8 +1250,9 @@ export default function CollectFees() {
                   </button>
                 </div>
               </div>
-              {/* Old Balance badge */}
-              {oldBalance > 0 && (
+
+              {/* Old Balance / Credit Balance badge */}
+              {isOldDue && (
                 <div className="ml-auto flex-shrink-0 flex flex-col items-center justify-center bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-center">
                   <span className="text-[9px] font-bold text-red-500 uppercase tracking-wider">
                     Old Balance
@@ -1047,6 +1262,19 @@ export default function CollectFees() {
                   </span>
                   <span className="text-[8px] text-red-400">
                     Auto-added to total
+                  </span>
+                </div>
+              )}
+              {isOldCredit && (
+                <div className="ml-auto flex-shrink-0 flex flex-col items-center justify-center bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 text-center">
+                  <span className="text-[9px] font-bold text-green-600 uppercase tracking-wider">
+                    Credit Balance
+                  </span>
+                  <span className="text-base font-extrabold text-green-700 leading-tight">
+                    -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
+                  </span>
+                  <span className="text-[8px] text-green-500">
+                    Adjusts next payment
                   </span>
                 </div>
               )}
@@ -1109,14 +1337,12 @@ export default function CollectFees() {
           <div className="w-px bg-border flex-shrink-0" />
 
           {/* RIGHT: Month Selector */}
-          <div className="flex flex-col flex-shrink-0 w-[148px] bg-slate-50/60">
-            {/* Header */}
+          <div className="flex flex-col flex-shrink-0 w-[148px] bg-muted/20">
             <div className="px-2.5 py-2 bg-primary/10 border-b border-border">
               <p className="text-[10px] font-bold text-primary uppercase tracking-wider">
                 Select Month ({panelMonths.length})
               </p>
             </div>
-            {/* Select All */}
             <div className="px-2.5 py-1.5 border-b border-border">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -1131,7 +1357,6 @@ export default function CollectFees() {
                 </span>
               </label>
             </div>
-            {/* Month list */}
             <div className="flex-1 overflow-y-auto">
               {MONTHS.map((month, idx) => {
                 const short = MONTH_SHORT[idx];
@@ -1191,7 +1416,6 @@ export default function CollectFees() {
                 );
               })}
             </div>
-            {/* OK button */}
             <div className="p-2 border-t border-border">
               <button
                 type="button"
@@ -1209,7 +1433,6 @@ export default function CollectFees() {
           </div>
         </div>
       ) : (
-        /* Empty state */
         <div className="bg-card border border-border border-t-0 rounded-b-xl p-12 text-center">
           <div className="text-5xl mb-3">🔍</div>
           <p className="text-base font-semibold text-foreground mb-1">
@@ -1220,6 +1443,106 @@ export default function CollectFees() {
           </p>
         </div>
       )}
+
+      {/* ── FAMILY MEMBERS PANEL ── */}
+      {selectedStudent &&
+        (() => {
+          const familyMembers = getFamilyMembers(selectedStudent, allStudents);
+          if (familyMembers.length === 0) return null;
+          return (
+            <div className="bg-card border border-border border-t-0 shadow-sm">
+              <button
+                type="button"
+                className="w-full px-3 py-2 flex items-center gap-2 bg-violet-50 border-b border-border hover:bg-violet-100 transition-colors"
+                onClick={() => setFamilyOpen((v) => !v)}
+                data-ocid="family-members-toggle"
+              >
+                <span className="text-sm font-bold text-violet-700">
+                  👨‍👩‍👧 Family Members
+                </span>
+                <span className="text-xs bg-violet-200 text-violet-800 px-2 py-0.5 rounded-full font-semibold">
+                  {familyMembers.length} sibling
+                  {familyMembers.length !== 1 ? "s" : ""}
+                </span>
+                <span className="text-xs text-violet-600 ml-auto">
+                  {familyOpen ? "▲ Collapse" : "▼ Expand"} · Click to collect
+                  their fees
+                </span>
+              </button>
+              {familyOpen && (
+                <div className="p-3 flex flex-wrap gap-3">
+                  {familyMembers.map((member) => {
+                    // Calculate net dues for this member
+                    const memberReceipts = ls
+                      .get<FeeReceipt[]>("fee_receipts", [])
+                      .filter(
+                        (r) =>
+                          r.studentId === member.id &&
+                          r.sessionId === (currentSession?.id ?? "") &&
+                          !r.isDeleted,
+                      );
+                    const memberBalance =
+                      ls.get<Record<string, number>>("old_balances", {})[
+                        member.id
+                      ] ?? 0;
+                    const totalPaid = memberReceipts.reduce(
+                      (sum, r) => sum + (r.paidAmount ?? r.totalAmount),
+                      0,
+                    );
+
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        data-ocid="family-member-card"
+                        onClick={() => selectStudent(member)}
+                        className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
+                      >
+                        {member.photo ? (
+                          <img
+                            src={member.photo}
+                            alt={member.fullName}
+                            className="w-10 h-10 rounded-full object-cover flex-shrink-0 border-2 border-border group-hover:border-violet-300"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0 group-hover:bg-violet-200">
+                            {member.fullName[0]}
+                          </div>
+                        )}
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
+                            {member.fullName}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            Class {member.class}-{member.section} · #
+                            {member.admNo}
+                          </div>
+                          <div
+                            className={`text-[11px] font-bold mt-0.5 ${
+                              memberBalance > 0
+                                ? "text-red-600"
+                                : memberBalance < 0
+                                  ? "text-green-600"
+                                  : "text-muted-foreground"
+                            }`}
+                          >
+                            {memberBalance > 0
+                              ? `Due: ₹${memberBalance.toLocaleString("en-IN")}`
+                              : memberBalance < 0
+                                ? `Credit: -₹${Math.abs(memberBalance).toLocaleString("en-IN")}`
+                                : totalPaid > 0
+                                  ? `Paid: ₹${totalPaid.toLocaleString("en-IN")}`
+                                  : "No dues"}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
       {/* ── FEE GRID ── */}
       {selectedStudent && (
@@ -1280,7 +1603,6 @@ export default function CollectFees() {
                         key={row.headingId}
                         className={`hover:bg-muted/10 ${!row.checked ? "opacity-50" : ""} ${row.isTransport ? "bg-blue-50/40" : ""}`}
                       >
-                        {/* Row checkbox */}
                         <td className="border border-border px-2 py-1 text-center sticky left-0 bg-card">
                           <input
                             type="checkbox"
@@ -1425,8 +1747,8 @@ export default function CollectFees() {
                     </td>
                   </tr>
 
-                  {/* Old Balance row */}
-                  {oldBalance > 0 && (
+                  {/* Old Balance row (dues carried forward) */}
+                  {isOldDue && (
                     <tr className="bg-red-50">
                       <td
                         colSpan={3}
@@ -1445,6 +1767,27 @@ export default function CollectFees() {
                       </td>
                     </tr>
                   )}
+
+                  {/* Credit Balance row (advance from previous overpayment) */}
+                  {isOldCredit && (
+                    <tr className="bg-green-50">
+                      <td
+                        colSpan={3}
+                        className="border border-border px-3 py-1 font-medium text-green-700 text-[11px] sticky left-0 bg-green-50"
+                      >
+                        Credit Balance (Advance)
+                      </td>
+                      <td
+                        colSpan={displayMonths.length}
+                        className="border border-border px-2 py-1 text-green-600 text-[10px] italic"
+                      >
+                        advance from previous overpayment — auto-adjusting
+                      </td>
+                      <td className="border border-border px-2 py-1 text-right font-bold text-green-700 sticky right-0 bg-green-50 text-[11px]">
+                        -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1456,174 +1799,179 @@ export default function CollectFees() {
       {selectedStudent && rows.length > 0 && (
         <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
           <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
-            {/* Summary columns */}
-            <div className="flex flex-wrap flex-1 min-w-0 divide-x divide-border">
-              {/* Col 1: Totals breakdown */}
-              <div className="p-3 flex flex-col gap-1 min-w-[170px]">
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                  Fee Summary
-                </p>
+            {/* Col 1: Totals breakdown */}
+            <div className="p-3 flex flex-col gap-1 min-w-[170px]">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+                Fee Summary
+              </p>
+              <div className="flex justify-between text-[11px]">
+                <span className="text-muted-foreground">Fee Installments</span>
+                <span className="font-semibold">
+                  ₹{feesSubtotal.toLocaleString("en-IN")}
+                </span>
+              </div>
+              {otherTotal > 0 && (
                 <div className="flex justify-between text-[11px]">
                   <span className="text-muted-foreground">
-                    Fee Installments
+                    {otherCharge.label || "Other Charges"}
                   </span>
                   <span className="font-semibold">
-                    ₹{feesSubtotal.toLocaleString("en-IN")}
+                    ₹{otherTotal.toLocaleString("en-IN")}
                   </span>
                 </div>
-                {otherTotal > 0 && (
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-muted-foreground">
-                      {otherCharge.label || "Other Charges"}
-                    </span>
-                    <span className="font-semibold">
-                      ₹{otherTotal.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                )}
-                {oldBalance > 0 && (
-                  <div className="flex justify-between text-[11px] text-red-600">
-                    <span>Old Balance</span>
-                    <span className="font-bold">
-                      + ₹{oldBalance.toLocaleString("en-IN")}
-                    </span>
-                  </div>
-                )}
-                <div className="flex justify-between text-[11px] font-bold border-t border-border pt-1">
-                  <span>Total Fees</span>
-                  <span>
-                    ₹{(totalFees + oldBalance).toLocaleString("en-IN")}
+              )}
+              {isOldDue && (
+                <div className="flex justify-between text-[11px] text-red-600">
+                  <span>Old Balance</span>
+                  <span className="font-bold">
+                    + ₹{oldBalance.toLocaleString("en-IN")}
                   </span>
                 </div>
+              )}
+              {isOldCredit && (
+                <div className="flex justify-between text-[11px] text-green-600">
+                  <span>Credit Balance</span>
+                  <span className="font-bold">
+                    -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
+                  </span>
+                </div>
+              )}
+              <div className="flex justify-between text-[11px] font-bold border-t border-border pt-1">
+                <span>Total Fees</span>
+                <span>₹{(totalFees + oldBalance).toLocaleString("en-IN")}</span>
               </div>
+            </div>
 
-              {/* Col 2: Late Fees + Concession */}
-              <div className="p-3 flex flex-col gap-1.5 min-w-[180px]">
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                  Adjustments
-                </p>
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="late-fees-input"
-                    className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                  >
-                    Late Fees ₹
-                  </label>
-                  <input
-                    id="late-fees-input"
-                    type="number"
-                    min="0"
-                    value={lateFees || ""}
-                    placeholder="0"
-                    onChange={(e) =>
-                      setLateFees(Math.max(0, Number(e.target.value)))
-                    }
-                    className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    data-ocid="late-fees-input"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="concession-pct-input"
-                    className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                  >
-                    Concession %
-                  </label>
-                  <input
-                    id="concession-pct-input"
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={concessionPct || ""}
-                    placeholder="0"
-                    onChange={(e) =>
-                      handleConcessionPctChange(Number(e.target.value))
-                    }
-                    className="w-16 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    data-ocid="concession-pct-input"
-                  />
-                </div>
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="concession-amt-input"
-                    className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                  >
-                    Concession ₹
-                  </label>
-                  <input
-                    id="concession-amt-input"
-                    type="number"
-                    min="0"
-                    value={concessionAmt || ""}
-                    placeholder="0"
-                    onChange={(e) =>
-                      handleConcessionAmtChange(Number(e.target.value))
-                    }
-                    className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    data-ocid="concession-amt-input"
-                  />
-                </div>
+            {/* Col 2: Late Fees + Concession */}
+            <div className="p-3 flex flex-col gap-1.5 min-w-[180px]">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+                Adjustments
+              </p>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="late-fees-input"
+                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
+                >
+                  Late Fees ₹
+                </label>
+                <input
+                  id="late-fees-input"
+                  type="number"
+                  min="0"
+                  value={lateFees || ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    setLateFees(Math.max(0, Number(e.target.value)))
+                  }
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  data-ocid="late-fees-input"
+                />
               </div>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="concession-pct-input"
+                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
+                >
+                  Concession %
+                </label>
+                <input
+                  id="concession-pct-input"
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={concessionPct || ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    handleConcessionPctChange(Number(e.target.value))
+                  }
+                  className="w-16 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  data-ocid="concession-pct-input"
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="concession-amt-input"
+                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
+                >
+                  Concession ₹
+                </label>
+                <input
+                  id="concession-amt-input"
+                  type="number"
+                  min="0"
+                  value={concessionAmt || ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    handleConcessionAmtChange(Number(e.target.value))
+                  }
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  data-ocid="concession-amt-input"
+                />
+              </div>
+            </div>
 
-              {/* Col 3: Net + Receipt + Balance */}
-              <div className="p-3 flex flex-col gap-1.5 min-w-[190px]">
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+            {/* Col 3: Net + Receipt + Balance */}
+            <div className="p-3 flex flex-col gap-1.5 min-w-[200px]">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
+                Net Fees
+              </p>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[11px] text-muted-foreground">
                   Net Fees
-                </p>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] text-muted-foreground">
-                    Net Fees
-                  </span>
-                  <span className="text-base font-extrabold text-primary">
-                    ₹{netFees.toLocaleString("en-IN")}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label
-                    htmlFor="receipt-amt-input"
-                    className="text-[11px] text-muted-foreground flex-shrink-0 w-20"
-                  >
-                    Receipt Amt ₹
-                  </label>
-                  <input
-                    id="receipt-amt-input"
-                    type="number"
-                    min="0"
-                    value={receiptAmt || ""}
-                    placeholder="0"
-                    onChange={(e) =>
-                      setReceiptAmt(Math.max(0, Number(e.target.value)))
-                    }
-                    className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    data-ocid="receipt-amt-input"
-                  />
-                </div>
-                <div className="flex items-center justify-between gap-2 pt-0.5">
-                  <span
-                    className={`text-[11px] font-semibold ${balanceAmt > 0 ? "text-red-600" : "text-green-600"}`}
-                  >
-                    Balance Amt
-                  </span>
-                  <span
-                    className={`text-sm font-extrabold ${balanceAmt > 0 ? "text-red-600" : "text-green-600"}`}
-                  >
-                    ₹{balanceAmt.toLocaleString("en-IN")}
-                  </span>
-                </div>
-                {balanceAmt > 0 && (
-                  <div className="text-[9px] text-red-400 flex items-center gap-1">
-                    <span>
-                      ↑ ₹{balanceAmt.toLocaleString("en-IN")} will carry forward
-                      as Old Balance
-                    </span>
-                  </div>
-                )}
+                </span>
+                <span className="text-base font-extrabold text-primary">
+                  ₹{netFees.toLocaleString("en-IN")}
+                </span>
               </div>
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="receipt-amt-input"
+                  className="text-[11px] text-muted-foreground flex-shrink-0 w-20"
+                >
+                  Receipt Amt ₹
+                </label>
+                <input
+                  id="receipt-amt-input"
+                  type="number"
+                  min="0"
+                  value={receiptAmt || ""}
+                  placeholder="0"
+                  onChange={(e) =>
+                    setReceiptAmt(Math.max(0, Number(e.target.value)))
+                  }
+                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  data-ocid="receipt-amt-input"
+                />
+              </div>
+              {/* Balance / Credit display */}
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <span
+                  className={`text-[11px] font-semibold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
+                >
+                  {isCredit ? "Credit Balance" : "Balance Amt"}
+                </span>
+                <span
+                  className={`text-sm font-extrabold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
+                >
+                  {balanceDisplay}
+                </span>
+              </div>
+              {isDue && (
+                <div className="text-[9px] text-red-400 flex items-center gap-1">
+                  ↑ ₹{balanceAmt.toLocaleString("en-IN")} will carry forward as
+                  Old Balance
+                </div>
+              )}
+              {isCredit && (
+                <div className="text-[9px] text-green-500 flex items-center gap-1">
+                  ✦ -₹{Math.abs(balanceAmt).toLocaleString("en-IN")} credit will
+                  adjust in next payment
+                </div>
+              )}
             </div>
 
             {/* Right block: Remarks + Mode + Save */}
             <div className="p-3 flex flex-col gap-2 min-w-[220px]">
-              {/* Remarks */}
               <div>
                 <label
                   htmlFor="remarks-input"
@@ -1641,7 +1989,6 @@ export default function CollectFees() {
                   data-ocid="remarks-input"
                 />
               </div>
-              {/* Payment Mode */}
               <div>
                 <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                   Payment Mode
@@ -1743,93 +2090,105 @@ export default function CollectFees() {
                   </tr>
                 </thead>
                 <tbody>
-                  {receiptHistory.map((r, idx) => (
-                    <tr
-                      key={r.id}
-                      className="border-t border-border hover:bg-muted/20"
-                      data-ocid="receipt-history-row"
-                    >
-                      <td className="px-2.5 py-1.5 text-muted-foreground">
-                        {idx + 1}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">
-                        {r.date}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono font-bold text-primary whitespace-nowrap">
-                        <button
-                          type="button"
-                          className="hover:underline"
-                          onClick={() => handlePrint(r)}
-                        >
-                          {r.receiptNo}
-                        </button>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        {[
-                          ...new Set(r.items.map((i) => i.month.slice(0, 3))),
-                        ].join(", ")}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right font-bold text-green-600 whitespace-nowrap">
-                        {formatCurrency(r.paidAmount ?? r.totalAmount)}
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] h-4 px-1"
-                        >
-                          {r.paymentMode}
-                        </Badge>
-                      </td>
-                      <td
-                        className={`px-2.5 py-1.5 text-right font-semibold whitespace-nowrap ${(r.balance ?? 0) > 0 ? "text-red-600" : "text-muted-foreground"}`}
+                  {receiptHistory.map((r, idx) => {
+                    const bal = r.balance ?? 0;
+                    return (
+                      <tr
+                        key={r.id}
+                        className="border-t border-border hover:bg-muted/20"
+                        data-ocid="receipt-history-row"
                       >
-                        {(r.balance ?? 0) > 0
-                          ? `₹${(r.balance ?? 0).toLocaleString("en-IN")}`
-                          : "—"}
-                      </td>
-                      <td className="px-2.5 py-1.5 whitespace-nowrap">
-                        <span className="font-medium">{r.receivedBy}</span>{" "}
-                        <span className="text-muted-foreground text-[10px]">
-                          ({r.receivedByRole})
-                        </span>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        <div className="flex gap-1 justify-center flex-wrap">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-5 text-[9px] px-1.5"
+                        <td className="px-2.5 py-1.5 text-muted-foreground">
+                          {idx + 1}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">
+                          {r.date}
+                        </td>
+                        <td className="px-2.5 py-1.5 font-mono font-bold text-primary whitespace-nowrap">
+                          <button
+                            type="button"
+                            className="hover:underline"
                             onClick={() => handlePrint(r)}
-                            data-ocid="reprint-receipt-btn"
                           >
-                            🖨️ Reprint
-                          </Button>
-                          {(isSuperAdmin || currentUser?.role === "admin") && (
+                            {r.receiptNo}
+                          </button>
+                        </td>
+                        <td className="px-2.5 py-1.5">
+                          {[
+                            ...new Set(r.items.map((i) => i.month.slice(0, 3))),
+                          ].join(", ")}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right font-bold text-green-600 whitespace-nowrap">
+                          {formatCurrency(r.paidAmount ?? r.totalAmount)}
+                        </td>
+                        <td className="px-2.5 py-1.5">
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] h-4 px-1"
+                          >
+                            {r.paymentMode}
+                          </Badge>
+                        </td>
+                        <td
+                          className={`px-2.5 py-1.5 text-right font-semibold whitespace-nowrap ${
+                            bal < 0
+                              ? "text-green-600"
+                              : bal > 0
+                                ? "text-red-600"
+                                : "text-muted-foreground"
+                          }`}
+                        >
+                          {bal < 0
+                            ? `-₹${Math.abs(bal).toLocaleString("en-IN")}`
+                            : bal > 0
+                              ? `₹${bal.toLocaleString("en-IN")}`
+                              : "—"}
+                        </td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          <span className="font-medium">{r.receivedBy}</span>{" "}
+                          <span className="text-muted-foreground text-[10px]">
+                            ({r.receivedByRole})
+                          </span>
+                        </td>
+                        <td className="px-2.5 py-1.5">
+                          <div className="flex gap-1 justify-center flex-wrap">
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
-                              onClick={() => openEditReceipt(r)}
-                              data-ocid="edit-receipt-btn"
+                              className="h-5 text-[9px] px-1.5"
+                              onClick={() => handlePrint(r)}
+                              data-ocid="reprint-receipt-btn"
                             >
-                              ✏️ Edit
+                              🖨️ Reprint
                             </Button>
-                          )}
-                          {isSuperAdmin && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
-                              onClick={() => handleDeleteReceipt(r.id)}
-                              data-ocid="delete-receipt-btn"
-                            >
-                              🗑️ Del
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                            {(isSuperAdmin ||
+                              currentUser?.role === "admin") && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
+                                onClick={() => openEditReceipt(r)}
+                                data-ocid="edit-receipt-btn"
+                              >
+                                ✏️ Edit
+                              </Button>
+                            )}
+                            {isSuperAdmin && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                                onClick={() => handleDeleteReceipt(r.id)}
+                                data-ocid="delete-receipt-btn"
+                              >
+                                🗑️ Del
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1864,6 +2223,13 @@ export default function CollectFees() {
                 <p className="text-red-600 font-semibold">
                   Balance Carry Forward:{" "}
                   {formatCurrency(savedReceipt?.balance ?? 0)}
+                </p>
+              )}
+              {(savedReceipt?.balance ?? 0) < 0 && (
+                <p className="text-green-600 font-semibold">
+                  ✦ Credit: -₹
+                  {Math.abs(savedReceipt?.balance ?? 0).toLocaleString("en-IN")}{" "}
+                  will adjust in next payment
                 </p>
               )}
               <p>Student: {savedReceipt?.studentName}</p>
@@ -1916,80 +2282,323 @@ export default function CollectFees() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Receipt Dialog ── */}
-      <Dialog open={editReceiptOpen} onOpenChange={setEditReceiptOpen}>
-        <DialogContent className="max-w-sm">
+      {/* ── Full Edit Receipt Dialog ── */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Edit Receipt</DialogTitle>
+            <DialogTitle>✏️ Edit Receipt</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3 pt-2">
-            <div>
-              <p className="text-sm font-medium mb-1">Payment Mode</p>
-              <div className="flex gap-2 flex-wrap">
-                {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
-                  (mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setEditMode(mode)}
-                      className={`px-3 py-1.5 text-xs rounded-full border transition-colors ${
-                        editMode === mode
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "border-border hover:bg-muted/50"
-                      }`}
-                    >
-                      {mode}
-                    </button>
-                  ),
-                )}
+          {editState && (
+            <div className="space-y-4 pt-1">
+              {/* Date + Payment Mode */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label
+                    htmlFor="edit-receipt-date"
+                    className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1"
+                  >
+                    Payment Date
+                  </label>
+                  <input
+                    id="edit-receipt-date"
+                    type="date"
+                    value={editState.date}
+                    onChange={(e) =>
+                      setEditState((s) => s && { ...s, date: e.target.value })
+                    }
+                    className="h-8 w-full px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    data-ocid="edit-receipt-date"
+                  />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                    Payment Mode
+                  </p>
+                  <div className="flex gap-1.5 flex-wrap">
+                    {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
+                      (mode) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() =>
+                            setEditState(
+                              (s) => s && { ...s, paymentMode: mode },
+                            )
+                          }
+                          className={`px-2.5 py-1 text-[11px] rounded-full border font-semibold transition-colors ${
+                            editState.paymentMode === mode
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-border hover:bg-muted/50"
+                          }`}
+                        >
+                          {mode}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Months */}
+              <div>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                  Months Covered
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {MONTHS.map((month, idx) => {
+                    const checked = editState.selectedMonths.includes(month);
+                    return (
+                      <label
+                        key={month}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded border cursor-pointer text-xs transition-colors ${
+                          checked
+                            ? "bg-primary/10 border-primary text-primary font-semibold"
+                            : "border-border hover:bg-muted/40"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() =>
+                            setEditState((s) => {
+                              if (!s) return s;
+                              const sel = checked
+                                ? s.selectedMonths.filter((m) => m !== month)
+                                : [...s.selectedMonths, month];
+                              return { ...s, selectedMonths: sel };
+                            })
+                          }
+                          className="w-3 h-3 accent-primary"
+                        />
+                        {MONTH_SHORT[idx]}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Fee amounts per heading */}
+              {editState.headings.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                    Fee Amounts (per month)
+                  </p>
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="bg-muted/60">
+                          <th className="px-3 py-1.5 text-left font-semibold">
+                            Fee Head
+                          </th>
+                          {editState.selectedMonths.map((m) => (
+                            <th
+                              key={m}
+                              className="px-2 py-1.5 text-center font-semibold min-w-[60px]"
+                            >
+                              {MONTH_SHORT[MONTHS.indexOf(m)] ?? m.slice(0, 3)}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {editState.headings.map((h) => (
+                          <tr
+                            key={h.headingId}
+                            className="border-t border-border"
+                          >
+                            <td className="px-3 py-1.5 font-medium">
+                              {h.headingName}
+                            </td>
+                            {editState.selectedMonths.map((m) => (
+                              <td key={m} className="px-1.5 py-1 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={
+                                    editState.itemAmounts[h.headingId]?.[m] ??
+                                    h.rate
+                                  }
+                                  onChange={(e) => {
+                                    const val = Math.max(
+                                      0,
+                                      Number(e.target.value),
+                                    );
+                                    setEditState((s) => {
+                                      if (!s) return s;
+                                      return {
+                                        ...s,
+                                        itemAmounts: {
+                                          ...s.itemAmounts,
+                                          [h.headingId]: {
+                                            ...(s.itemAmounts[h.headingId] ??
+                                              {}),
+                                            [m]: val,
+                                          },
+                                        },
+                                      };
+                                    });
+                                  }}
+                                  className="w-16 h-6 px-1 text-center text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Other charges + Discount */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Other Charges
+                  </p>
+                  <input
+                    type="text"
+                    placeholder="Label (e.g. Tie, Belt)"
+                    value={editState.otherLabel}
+                    onChange={(e) =>
+                      setEditState(
+                        (s) => s && { ...s, otherLabel: e.target.value },
+                      )
+                    }
+                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="Amount ₹"
+                    value={editState.otherAmount || ""}
+                    onChange={(e) =>
+                      setEditState(
+                        (s) =>
+                          s && {
+                            ...s,
+                            otherAmount: Math.max(0, Number(e.target.value)),
+                          },
+                      )
+                    }
+                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Discount / Concession ₹
+                  </p>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={editState.discount || ""}
+                    onChange={(e) =>
+                      setEditState(
+                        (s) =>
+                          s && {
+                            ...s,
+                            discount: Math.max(0, Number(e.target.value)),
+                          },
+                      )
+                    }
+                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
+              </div>
+
+              {/* Paid Amount + live total */}
+              <div className="flex items-center justify-between gap-4 bg-muted/30 rounded-lg p-3">
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="edit-paid-amount"
+                    className="text-xs font-semibold text-foreground whitespace-nowrap"
+                  >
+                    Receipt Amount ₹
+                  </label>
+                  <input
+                    id="edit-paid-amount"
+                    type="number"
+                    min="0"
+                    value={editState.paidAmount || ""}
+                    onChange={(e) =>
+                      setEditState(
+                        (s) =>
+                          s && {
+                            ...s,
+                            paidAmount: Math.max(0, Number(e.target.value)),
+                          },
+                      )
+                    }
+                    className="w-28 h-8 px-2 text-sm text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                    data-ocid="edit-receipt-amount"
+                  />
+                </div>
+                <div className="text-right">
+                  <div className="text-[10px] text-muted-foreground">
+                    Calculated Net Total
+                  </div>
+                  <div className="text-sm font-bold text-primary">
+                    ₹{computeEditTotal(editState).toLocaleString("en-IN")}
+                  </div>
+                  {(() => {
+                    const diff =
+                      editState.paidAmount - computeEditTotal(editState);
+                    if (diff < 0)
+                      return (
+                        <div className="text-[10px] text-red-500">
+                          Balance Due: ₹{Math.abs(diff).toLocaleString("en-IN")}
+                        </div>
+                      );
+                    if (diff > 0)
+                      return (
+                        <div className="text-[10px] text-green-600">
+                          Credit: -₹{diff.toLocaleString("en-IN")}
+                        </div>
+                      );
+                    return null;
+                  })()}
+                </div>
+              </div>
+
+              {/* Remarks */}
+              <div>
+                <label
+                  htmlFor="edit-receipt-remarks"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1"
+                >
+                  Remarks
+                </label>
+                <Input
+                  id="edit-receipt-remarks"
+                  type="text"
+                  value={editState.remarks}
+                  onChange={(e) =>
+                    setEditState((s) => s && { ...s, remarks: e.target.value })
+                  }
+                  placeholder="Optional notes"
+                />
+              </div>
+
+              <div className="flex gap-2 justify-end pt-1">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditOpen(false);
+                    setEditState(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  onClick={saveEditReceipt}
+                  data-ocid="save-edit-receipt-btn"
+                >
+                  Save Changes
+                </Button>
               </div>
             </div>
-            <div>
-              <label
-                htmlFor="edit-amount"
-                className="text-sm font-medium block mb-1"
-              >
-                Paid Amount (₹)
-              </label>
-              <Input
-                id="edit-amount"
-                type="number"
-                min="1"
-                value={editAmount}
-                onChange={(e) => setEditAmount(e.target.value)}
-                data-ocid="edit-receipt-amount"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="edit-remarks"
-                className="text-sm font-medium block mb-1"
-              >
-                Remarks
-              </label>
-              <Input
-                id="edit-remarks"
-                type="text"
-                value={editRemarks}
-                onChange={(e) => setEditRemarks(e.target.value)}
-                placeholder="Optional notes"
-              />
-            </div>
-            <div className="flex gap-2 justify-end pt-1">
-              <Button
-                variant="outline"
-                onClick={() => setEditReceiptOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={saveEditReceipt}
-                data-ocid="save-edit-receipt-btn"
-              >
-                Save Changes
-              </Button>
-            </div>
-          </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

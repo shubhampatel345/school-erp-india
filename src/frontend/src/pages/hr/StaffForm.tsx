@@ -40,7 +40,6 @@ const DEPARTMENTS = [
   "Housekeeping",
 ];
 
-// Map designation to UserRole
 function designationToRole(designation: string): string {
   const map: Record<string, string> = {
     Teacher: "teacher",
@@ -61,31 +60,57 @@ interface Props {
   onCancel: () => void;
 }
 
+/** Convert a DOB string (dd/mm/yyyy or yyyy-mm-dd) to ddmmyyyy password */
 function dobToPassword(dob: string): string {
   if (!dob) return "00000000";
-  // If ISO date (yyyy-mm-dd from <input type="date">)
-  if (dob.includes("-") && dob.length === 10) {
-    const [y, m, d] = dob.split("-");
-    return `${d?.padStart(2, "0")}${m?.padStart(2, "0")}${y}`;
+  const clean = dob.trim();
+  if (clean.includes("-") && clean.length === 10) {
+    const [y, m, d] = clean.split("-");
+    return `${(d ?? "").padStart(2, "0")}${(m ?? "").padStart(2, "0")}${y ?? ""}`;
   }
-  // If dd/mm/yyyy
-  if (dob.includes("/")) {
-    const [d, m, y] = dob.split("/");
-    return `${d?.padStart(2, "0")}${m?.padStart(2, "0")}${y}`;
+  if (clean.includes("/")) {
+    const parts = clean.split("/");
+    if (parts.length === 3) {
+      const [d, m, y] = parts;
+      return `${(d ?? "").padStart(2, "0")}${(m ?? "").padStart(2, "0")}${y ?? ""}`;
+    }
   }
-  return dob.replace(/\D/g, "");
+  // Already in ddmmyyyy or similar — strip non-digits
+  return clean.replace(/\D/g, "");
+}
+
+/** Parse initial DOB string into DD, MM, YYYY parts */
+function parseDobParts(dob?: string): {
+  day: string;
+  month: string;
+  year: string;
+} {
+  if (!dob) return { day: "", month: "", year: "" };
+  const clean = dob.trim();
+  if (clean.includes("-") && clean.length === 10) {
+    const [y, m, d] = clean.split("-");
+    return { day: d ?? "", month: m ?? "", year: y ?? "" };
+  }
+  if (clean.includes("/")) {
+    const parts = clean.split("/");
+    if (parts.length === 3) {
+      const [d, m, y] = parts;
+      return { day: d ?? "", month: m ?? "", year: y ?? "" };
+    }
+  }
+  return { day: "", month: "", year: "" };
 }
 
 export default function StaffForm({ initial, onSave, onCancel }: Props) {
   const { addNotification } = useApp();
   const photoRef = useRef<HTMLInputElement>(null);
-
-  // DOB refs for auto-advance
   const dobDayRef = useRef<HTMLInputElement>(null);
   const dobMonthRef = useRef<HTMLInputElement>(null);
   const dobYearRef = useRef<HTMLInputElement>(null);
 
   const [step, setStep] = useState(1);
+
+  // Basic fields
   const [name, setName] = useState(initial?.name ?? "");
   const [empId, setEmpId] = useState(
     initial?.empId ?? `EMP${Date.now().toString().slice(-5)}`,
@@ -94,23 +119,11 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
   const [department, setDepartment] = useState(initial?.department ?? "");
   const [mobile, setMobile] = useState(initial?.mobile ?? "");
 
-  // DOB split for auto-advance inputs
-  const parsedDob = (() => {
-    const dob = initial?.dob ?? "";
-    if (dob.includes("-") && dob.length === 10) {
-      const [y, m, d] = dob.split("-");
-      return { day: d ?? "", month: m ?? "", year: y ?? "" };
-    }
-    if (dob.includes("/")) {
-      const [d, m, y] = dob.split("/");
-      return { day: d ?? "", month: m ?? "", year: y ?? "" };
-    }
-    return { day: "", month: "", year: "" };
-  })();
-
-  const [dobDay, setDobDay] = useState(parsedDob.day);
-  const [dobMonth, setDobMonth] = useState(parsedDob.month);
-  const [dobYear, setDobYear] = useState(parsedDob.year);
+  // DOB split parts
+  const initDob = parseDobParts(initial?.dob);
+  const [dobDay, setDobDay] = useState(initDob.day);
+  const [dobMonth, setDobMonth] = useState(initDob.month);
+  const [dobYear, setDobYear] = useState(initDob.year);
 
   const [email, setEmail] = useState(initial?.email ?? "");
   const [address, setAddress] = useState(initial?.address ?? "");
@@ -119,23 +132,26 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
   );
   const [joiningDate, setJoiningDate] = useState(initial?.joiningDate ?? "");
   const [salary, setSalary] = useState(
-    initial?.salary ? String(initial.salary) : "",
+    initial?.salary != null ? String(initial.salary) : "",
   );
   const [status, setStatus] = useState<"active" | "inactive">(
     initial?.status ?? "active",
   );
   const [photo, setPhoto] = useState(initial?.photo ?? "");
   const [subjects, setSubjects] = useState<SubjectAssignment[]>(
-    initial?.subjects ?? [],
+    initial?.subjects?.length ? [...initial.subjects] : [],
   );
   const [ctError, setCtError] = useState("");
 
-  // Build full dob string from parts: dd/mm/yyyy
+  const isTeacher = designation === "Teacher";
+
+  // Reconstruct full DOB string as dd/mm/yyyy
   const dobFull =
     dobDay && dobMonth && dobYear
       ? `${dobDay.padStart(2, "0")}/${dobMonth.padStart(2, "0")}/${dobYear}`
       : "";
 
+  // Subject list from academics + defaults
   const academicSubjects = ls
     .get<{ name: string }[]>("academics_subjects", [])
     .map((s) => s.name);
@@ -160,12 +176,16 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
   function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (file.size > 3 * 1024 * 1024) {
+      alert("Photo must be under 3MB.");
+      return;
+    }
     const reader = new FileReader();
     reader.onload = (ev) => setPhoto(ev.target?.result as string);
     reader.readAsDataURL(file);
+    e.target.value = "";
   }
 
-  // Auto-advance: day → month → year
   function handleDobDayChange(val: string) {
     const digits = val.replace(/\D/g, "").slice(0, 2);
     setDobDay(digits);
@@ -206,25 +226,43 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
 
   function handleSave() {
     setCtError("");
-    if (!name.trim() || !designation || !mobile.trim()) {
-      alert("Please fill Name, Designation, and Mobile.");
+
+    // Validate required fields
+    if (!name.trim()) {
+      alert("Please enter the staff member's full name.");
+      setStep(1);
       return;
     }
+    if (!designation) {
+      alert("Please select a designation.");
+      setStep(1);
+      return;
+    }
+    if (!mobile.trim() || mobile.trim().length < 10) {
+      alert("Please enter a valid 10-digit mobile number.");
+      setStep(1);
+      return;
+    }
+
+    // For teachers, require at least one subject
     if (isTeacher && subjects.filter((s) => s.subject.trim()).length === 0) {
       setCtError("Teachers must have at least one subject assignment.");
       setStep(2);
       return;
     }
 
-    const password = dobToPassword(dobFull || initial?.dob || "");
+    // Build password from DOB
+    const dobString = dobFull || initial?.dob || "";
+    const password = dobToPassword(dobString) || mobile.trim();
+
     const staffMember: Staff = {
       id: initial?.id ?? generateId(),
-      empId,
+      empId: empId.trim() || `EMP${generateId()}`,
       name: name.trim(),
       designation,
       department: department || undefined,
       mobile: mobile.trim(),
-      dob: dobFull || initial?.dob || "",
+      dob: dobString,
       email: email.trim() || undefined,
       address: address.trim() || undefined,
       qualification: qualification.trim() || undefined,
@@ -236,7 +274,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
       credentials: { username: mobile.trim(), password },
     };
 
-    // Auto-create AppUser only when adding new staff (not editing)
+    // Create AppUser entry when adding NEW staff (not editing)
     if (!initial) {
       const role = designationToRole(designation) as
         | "teacher"
@@ -245,6 +283,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
         | "accountant"
         | "librarian"
         | "driver";
+
       const newUser: AppUser = {
         id: generateId(),
         username: mobile.trim(),
@@ -253,15 +292,31 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
         mobile: mobile.trim(),
         staffId: staffMember.id,
       };
+
       const appUsers = ls.get<AppUser[]>("app_users", []);
-      // Avoid duplicate username
+      // Only create user if username doesn't already exist
       if (!appUsers.some((u) => u.username === mobile.trim())) {
         ls.set("app_users", [...appUsers, newUser]);
       }
+
       // Store password in user_passwords map
       const passwords = ls.get<Record<string, string>>("user_passwords", {});
       passwords[mobile.trim()] = password;
       ls.set("user_passwords", passwords);
+    } else {
+      // On edit: update password if DOB or mobile changed
+      const passwords = ls.get<Record<string, string>>("user_passwords", {});
+      passwords[mobile.trim()] = password;
+      ls.set("user_passwords", passwords);
+
+      // Update username in app_users if mobile changed
+      const appUsers = ls.get<AppUser[]>("app_users", []);
+      const updated = appUsers.map((u) =>
+        u.staffId === initial.id
+          ? { ...u, username: mobile.trim(), name: name.trim() }
+          : u,
+      );
+      ls.set("app_users", updated);
     }
 
     addNotification(
@@ -269,18 +324,18 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
       "success",
       "👤",
     );
+
     onSave(staffMember);
   }
 
-  const isTeacher = designation === "Teacher";
-
+  // ── RENDER ─────────────────────────────────────────────
   return (
     <div className="p-4 lg:p-6 max-w-3xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-xl font-display font-bold text-foreground">
-            {initial ? "Edit Staff" : "Add Staff Member"}
+            {initial ? "Edit Staff Member" : "Add Staff Member"}
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isTeacher ? `Step ${step} of 2` : "Fill in staff details below"}
@@ -311,12 +366,12 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
         </div>
       )}
 
-      {/* Step 1: Basic Info */}
+      {/* ── STEP 1: Basic Info ─────────────────────────── */}
       {step === 1 && (
         <Card className="p-6 space-y-5">
           {/* Photo upload */}
           <div className="flex items-center gap-4">
-            <div className="relative">
+            <div className="relative shrink-0">
               {photo ? (
                 <img
                   src={photo}
@@ -357,7 +412,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 </Button>
               )}
               <p className="text-xs text-muted-foreground mt-1">
-                JPG/PNG, max 2MB
+                JPG/PNG, max 3MB. Stored as base64.
               </p>
             </div>
           </div>
@@ -373,17 +428,27 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 data-ocid="staff-name"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="sf-empid">Employee ID</Label>
               <Input
                 id="sf-empid"
                 value={empId}
                 onChange={(e) => setEmpId(e.target.value)}
+                placeholder="Auto-generated"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label>Designation *</Label>
-              <Select value={designation} onValueChange={setDesignation}>
+              <Select
+                value={designation}
+                onValueChange={(v) => {
+                  setDesignation(v);
+                  // If switching away from Teacher, go back to step 1
+                  if (v !== "Teacher") setStep(1);
+                }}
+              >
                 <SelectTrigger data-ocid="staff-designation">
                   <SelectValue placeholder="Select designation" />
                 </SelectTrigger>
@@ -396,14 +461,18 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
               <Label>Department</Label>
-              <Select value={department} onValueChange={setDepartment}>
+              <Select
+                value={department || "__none__"}
+                onValueChange={(v) => setDepartment(v === "__none__" ? "" : v)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">None</SelectItem>
+                  <SelectItem value="__none__">None</SelectItem>
                   {DEPARTMENTS.map((d) => (
                     <SelectItem key={d} value={d}>
                       {d}
@@ -412,23 +481,25 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="sf-mobile">Mobile No. * (Username)</Label>
+              <Label htmlFor="sf-mobile">Mobile No. * (Login Username)</Label>
               <Input
                 id="sf-mobile"
                 value={mobile}
                 onChange={(e) =>
                   setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))
                 }
-                placeholder="10-digit mobile"
+                placeholder="10-digit mobile number"
                 maxLength={10}
+                inputMode="numeric"
                 data-ocid="staff-mobile"
               />
             </div>
 
             {/* DOB with auto-advance: DD → MM → YYYY */}
             <div className="space-y-1.5">
-              <Label>Date of Birth * (Password = ddmmyyyy)</Label>
+              <Label>Date of Birth (Password = ddmmyyyy)</Label>
               <div className="flex items-center gap-1.5">
                 <Input
                   ref={dobDayRef}
@@ -475,6 +546,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 placeholder="name@school.in"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="sf-qual">Qualification</Label>
               <Input
@@ -484,6 +556,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 placeholder="e.g. B.Ed., M.A."
               />
             </div>
+
             <div className="space-y-1.5">
               <Label htmlFor="sf-join">Joining Date</Label>
               <Input
@@ -493,17 +566,22 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 onChange={(e) => setJoiningDate(e.target.value)}
               />
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="sf-salary">Salary (₹)</Label>
+              <Label htmlFor="sf-salary">Net Salary (₹)</Label>
               <Input
                 id="sf-salary"
                 type="number"
                 value={salary}
-                onChange={(e) => setSalary(e.target.value.replace(/^0+/, ""))}
+                onChange={(e) =>
+                  setSalary(e.target.value.replace(/^0+(?=\d)/, ""))
+                }
                 placeholder="e.g. 25000"
                 min={0}
+                data-ocid="staff-salary"
               />
             </div>
+
             <div className="space-y-1.5">
               <Label>Status</Label>
               <Select
@@ -540,9 +618,10 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
 
           {/* Credential preview */}
           {mobile && (
-            <div className="bg-muted/40 rounded-lg p-3 text-xs space-y-0.5">
+            <div className="bg-muted/40 rounded-lg p-3 text-xs space-y-0.5 border border-border">
               <p className="font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                Auto Login Credentials{initial ? " (set on first add)" : ""}
+                Auto Login Credentials
+                {initial ? " (password updated on save)" : ""}
               </p>
               <p>
                 <span className="text-muted-foreground">Username: </span>
@@ -555,7 +634,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
                 <span className="font-mono font-medium text-foreground">
                   {dobFull
                     ? `${dobDay.padStart(2, "0")}${dobMonth.padStart(2, "0")}${dobYear}`
-                    : "ddmmyyyy (from DOB)"}
+                    : "ddmmyyyy (complete DOB above)"}
                 </span>
               </p>
             </div>
@@ -566,17 +645,19 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
               Cancel
             </Button>
             {isTeacher ? (
-              <Button onClick={() => setStep(2)}>Next: Subjects →</Button>
+              <Button onClick={() => setStep(2)} data-ocid="staff-next">
+                Next: Subjects →
+              </Button>
             ) : (
               <Button onClick={handleSave} data-ocid="staff-save">
-                Save Staff Member
+                {initial ? "Update Staff" : "Save Staff Member"}
               </Button>
             )}
           </div>
         </Card>
       )}
 
-      {/* Step 2: Subject Assignment (Teacher only) */}
+      {/* ── STEP 2: Subject Assignment (Teacher only) ───── */}
       {step === 2 && isTeacher && (
         <Card className="p-6 space-y-5">
           <div className="flex items-center justify-between">
@@ -596,8 +677,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
           {subjects.length === 0 ? (
             <div className="py-10 text-center text-muted-foreground border border-dashed border-border rounded-lg">
               <p className="text-sm">
-                No subjects assigned yet. Add the subjects this teacher will
-                teach.
+                No subjects assigned yet. Add the subjects this teacher teaches.
               </p>
               <Button size="sm" className="mt-3" onClick={addSubject}>
                 <Plus className="w-3.5 h-3.5 mr-1" /> Add Subject
@@ -711,7 +791,7 @@ export default function StaffForm({ initial, onSave, onCancel }: Props) {
               ← Back
             </Button>
             <Button onClick={handleSave} data-ocid="staff-save">
-              Save Staff Member
+              {initial ? "Update Staff" : "Save Staff Member"}
             </Button>
           </div>
         </Card>

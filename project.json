@@ -1,28 +1,23 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular, web-based School Management ERP tailored for Indian schools. It supports multi-school/branch operations, all user roles (Super Admin, Admin, Teacher, Parent, Student, Driver), 15+ integrated modules, real WhatsApp messaging, PWA installation on Android/iOS, and complete session management with infinite archive.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular school management system for Indian schools. It covers student management, fee collection, attendance, timetables, HR, transport, communication, and more — fully mobile-optimized as a PWA.",
   "features": [
-    "Student Information Management with photo, credentials, transport integration",
-    "Fees Collection with class/section-wise plans, 4 receipt templates, balance carry-forward, real WhatsApp API",
-    "Attendance: RFID/QR/biometric, Welcome Display, summary by class/route",
-    "Exam Timetable Maker: wizard-based, drag-drop, combined Excel view",
-    "Teacher Timetable Maker: conflict-free auto-generation, per-period duration",
-    "Student Promotion Workflow with infinite session archive and month-wise dues carry-forward",
-    "HR with teacher subject-class range wizard and class teacher assignment",
-    "Template Studio: full design freedom for all 8 school document types",
-    "PWA: installable on Android/iOS with offline support and mobile bottom nav",
-    "Multi-role login: Super Admin, Admin, Teacher, Parent, Student, Driver"
+    "Dashboard with fees awaiting (tuition + transport), school background branding",
+    "Global student search by name, mobile, parent name, village, class with family grouping",
+    "Collect Fees with family member quick-panel for sibling billing",
+    "Transport fees integrated into fee calculations and dashboard",
+    "Session management with infinite archive",
+    "Role-based access for 7 user roles",
+    "WhatsApp integration via wacoder.in",
+    "PWA installable on Android/iOS"
   ],
   "category": "education",
   "tags": [
     "school-erp",
-    "education",
-    "india",
-    "fees-management",
+    "fee-management",
     "attendance",
-    "pwa",
-    "timetable",
-    "hr-management",
-    "student-management"
+    "transport",
+    "india",
+    "pwa"
   ],
-  "last_updated": "2026-04-10T14:47:12.601Z"
+  "last_updated": "2026-04-13T15:52:34.701Z"
 }

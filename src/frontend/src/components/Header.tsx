@@ -8,14 +8,20 @@ import {
   KeyRound,
   LogOut,
   Menu,
+  Search,
   User,
+  X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import type { Student } from "../types";
+import { ls } from "../utils/localStorage";
 import NotificationBell from "./NotificationBell";
 
 interface HeaderProps {
   onMenuToggle: () => void;
+  onNavigateToFees?: (studentId: string) => void;
+  onNavigate?: (page: string) => void;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -30,7 +36,25 @@ const ROLE_LABELS: Record<string, string> = {
   librarian: "Librarian",
 };
 
-export default function Header({ onMenuToggle }: HeaderProps) {
+/** Get the primary mobile for family grouping */
+function getPrimaryMobile(s: Student): string {
+  return (s.fatherMobile?.trim() || s.guardianMobile?.trim() || "").trim();
+}
+
+/** Get sibling count label */
+function getSiblingCount(student: Student, allStudents: Student[]): number {
+  const pm = getPrimaryMobile(student);
+  if (!pm) return 0;
+  return allStudents.filter(
+    (s) => s.id !== student.id && getPrimaryMobile(s) === pm,
+  ).length;
+}
+
+export default function Header({
+  onMenuToggle,
+  onNavigateToFees,
+  onNavigate,
+}: HeaderProps) {
   const {
     currentUser,
     currentSession,
@@ -49,16 +73,75 @@ export default function Header({ onMenuToggle }: HeaderProps) {
   const sessionRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
 
+  // ── Global Search ─────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Student[]>([]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
+
+  useEffect(() => {
+    setAllStudents(
+      ls.get<Student[]>("students", []).filter((s) => s.status === "active"),
+    );
+  }, []);
+
+  useEffect(() => {
+    if (searchQuery.length < 2) {
+      setSearchResults([]);
+      setSearchOpen(false);
+      return;
+    }
+    const q = searchQuery.toLowerCase();
+    const results = allStudents
+      .filter((s) => {
+        return (
+          s.fullName.toLowerCase().includes(q) ||
+          s.admNo.toLowerCase().includes(q) ||
+          s.fatherMobile?.includes(q) ||
+          s.motherMobile?.includes(q) ||
+          s.guardianMobile?.includes(q) ||
+          s.mobile?.includes(q) ||
+          s.fatherName?.toLowerCase().includes(q) ||
+          s.motherName?.toLowerCase().includes(q) ||
+          s.address?.toLowerCase().includes(q) ||
+          s.class?.toLowerCase().includes(q)
+        );
+      })
+      .slice(0, 10);
+    setSearchResults(results);
+    setSearchOpen(results.length > 0);
+  }, [searchQuery, allStudents]);
+
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (sessionRef.current && !sessionRef.current.contains(e.target as Node))
         setSessionOpen(false);
       if (userRef.current && !userRef.current.contains(e.target as Node))
         setUserOpen(false);
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setSearchOpen(false);
+        setShowSearch(false);
+      }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  function handleSearchSelect(student: Student) {
+    setSearchQuery("");
+    setSearchOpen(false);
+    setShowSearch(false);
+    if (onNavigateToFees) {
+      onNavigateToFees(student.id);
+    } else if (onNavigate) {
+      // Store the selected student ID for CollectFees to pick up
+      sessionStorage.setItem("collectFees_preload", student.id);
+      onNavigate("fees/collect");
+    }
+  }
 
   const handlePasswordChange = (e: React.FormEvent) => {
     e.preventDefault();
@@ -184,7 +267,117 @@ export default function Header({ onMenuToggle }: HeaderProps) {
           )}
         </div>
 
-        <div className="flex-1" />
+        {/* Global Search — desktop inline, mobile icon */}
+        <div
+          ref={searchRef}
+          className={`relative flex-1 max-w-xs ml-2 ${showSearch ? "block" : "hidden sm:block"}`}
+        >
+          <div className="relative">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              placeholder="Search student, mobile, name, village..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => {
+                if (searchQuery.length >= 2) setSearchOpen(true);
+              }}
+              className="w-full h-8 pl-8 pr-3 text-xs border border-input rounded-lg bg-muted/30 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:bg-background transition-colors"
+              data-ocid="global-search-input"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchQuery("");
+                  setSearchOpen(false);
+                }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label="Clear search"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Search Results Dropdown */}
+          {searchOpen && searchResults.length > 0 && (
+            <div className="absolute left-0 top-full mt-1 w-[340px] bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up max-h-80 overflow-y-auto">
+              <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground border-b border-border bg-muted/30 uppercase tracking-wide">
+                {searchResults.length} student
+                {searchResults.length !== 1 ? "s" : ""} found — click to collect
+                fees
+              </div>
+              {searchResults.map((s) => {
+                const siblingCount = getSiblingCount(s, allStudents);
+                return (
+                  <button
+                    key={s.id}
+                    type="button"
+                    data-ocid="global-search-result"
+                    onClick={() => handleSearchSelect(s)}
+                    className="w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-3 border-b border-border/50 last:border-0 transition-colors"
+                  >
+                    {s.photo ? (
+                      <img
+                        src={s.photo}
+                        alt={s.fullName}
+                        className="w-8 h-8 rounded-full object-cover flex-shrink-0 border border-border"
+                      />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                        {s.fullName[0]}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-sm font-semibold text-foreground truncate">
+                          {s.fullName}
+                        </span>
+                        {siblingCount > 0 && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 flex-shrink-0">
+                            {siblingCount + 1} siblings
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-[11px] text-primary font-mono">
+                          #{s.admNo}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          Class {s.class}-{s.section}
+                        </span>
+                        {s.fatherName && (
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            F: {s.fatherName}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] text-muted-foreground flex-shrink-0 border border-border rounded px-1.5 py-0.5">
+                      Fees →
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Mobile search toggle */}
+        <button
+          type="button"
+          className="sm:hidden p-2 rounded-lg hover:bg-muted transition-colors flex-shrink-0"
+          aria-label="Search"
+          onClick={() => {
+            setShowSearch((v) => !v);
+            setTimeout(() => searchInputRef.current?.focus(), 50);
+          }}
+          data-ocid="mobile-search-toggle"
+        >
+          <Search className="w-4 h-4 text-foreground" />
+        </button>
 
         {/* Notification Bell */}
         <NotificationBell />

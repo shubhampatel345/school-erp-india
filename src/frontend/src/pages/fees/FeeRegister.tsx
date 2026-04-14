@@ -236,6 +236,34 @@ export default function FeeRegister() {
       .get<FeeReceipt[]>("fee_receipts", [])
       .map((r) => (r.id === id ? { ...r, isDeleted: true } : r));
     ls.set("fee_receipts", all);
+
+    // Recalculate running balance for affected student
+    const deletedReceipt = ls
+      .get<FeeReceipt[]>("fee_receipts", [])
+      .find((r) => r.id === id);
+    const studentId = deletedReceipt?.studentId;
+    const sessionId = deletedReceipt?.sessionId;
+    if (studentId && sessionId) {
+      const remaining = all
+        .filter(
+          (r) =>
+            r.studentId === studentId &&
+            r.sessionId === sessionId &&
+            !r.isDeleted,
+        )
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      let runningBalance = 0;
+      for (const r of remaining) {
+        runningBalance +=
+          (r.totalAmount ?? 0) - (r.paidAmount ?? r.totalAmount ?? 0);
+      }
+      const balances = ls.get<Record<string, number>>("old_balances", {});
+      if (runningBalance === 0) delete balances[studentId];
+      else balances[studentId] = runningBalance;
+      ls.set("old_balances", balances);
+    }
+
     setDetailOpen(false);
     loadReceipts();
   }

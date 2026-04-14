@@ -61,7 +61,7 @@ const EMPTY_ROUTE: Omit<RouteRecord, "id" | "pickupPoints"> = {
   driverStaffId: "",
   driverName: "",
   driverMobile: "",
-  monthlyFare: 0,
+  monthlyFare: 0, // kept in type for backward compat with saved data; not shown in UI
 };
 
 // ── Component ──────────────────────────────────────────────
@@ -383,7 +383,7 @@ export default function Transport() {
                   "Bus No.",
                   "Route Name",
                   "Driver",
-                  "Monthly Fare",
+                  "Stops / Fare Range",
                   "Students",
                   "Actions",
                 ].map((h) => (
@@ -401,7 +401,7 @@ export default function Transport() {
                 const count = studentTransports.filter(
                   (s) => s.routeId === route.id,
                 ).length;
-                // Compute fare range for display
+                // Compute fare range from pickup points (not route-level)
                 const fares = route.pickupPoints
                   .map((p) => p.fare ?? 0)
                   .filter((f) => f > 0);
@@ -432,13 +432,12 @@ export default function Transport() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-medium">
+                    <td className="px-4 py-3 font-medium">
                       <div className="text-sm">{fareDisplay}</div>
-                      {fares.length > 1 && (
-                        <div className="text-[10px] text-muted-foreground">
-                          {route.pickupPoints.length} stops
-                        </div>
-                      )}
+                      <div className="text-[10px] text-muted-foreground">
+                        {route.pickupPoints.length} stop
+                        {route.pickupPoints.length !== 1 ? "s" : ""}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <Badge variant={count > 0 ? "secondary" : "outline"}>
@@ -1123,21 +1122,10 @@ export default function Transport() {
                   </div>
                 </div>
               )}
-              <div>
-                <Label>Monthly Fare (₹)</Label>
-                <Input
-                  type="number"
-                  value={routeForm.monthlyFare}
-                  onChange={(e) =>
-                    setRouteForm((p) => ({
-                      ...p,
-                      monthlyFare: Number(e.target.value),
-                    }))
-                  }
-                  placeholder="0"
-                  data-ocid="route-fare-input"
-                />
-              </div>
+              <p className="text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
+                💡 Monthly fares are set per pickup point in the{" "}
+                <strong>Pickup Points</strong> tab.
+              </p>
               <div className="flex gap-2 pt-1">
                 <Button onClick={handleSaveRoute} data-ocid="save-route-btn">
                   Save Route

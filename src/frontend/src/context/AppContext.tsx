@@ -16,6 +16,8 @@ interface AppContextValue {
   notifications: Notification[];
   unreadCount: number;
   isReadOnly: boolean;
+  /** Super Admin can always write, even in archived sessions */
+  canWrite: boolean;
   login: (username: string, password: string) => boolean;
   logout: () => void;
   changePassword: (userId: string, newPassword: string) => boolean;
@@ -61,6 +63,14 @@ function initDefaultSession(): Session {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  // Ensure the app is marked as initialized — prevents any future seed/demo
+  // data logic from running on a fresh install.
+  if (!ls.get<string>("initialized", "")) {
+    ls.set("initialized", "true");
+    // Do NOT add any demo/seed data here. App starts empty except for
+    // the default session and superadmin credentials.
+  }
+
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() =>
     ls.get<AppUser | null>("current_user", null),
   );
@@ -78,6 +88,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const currentSession =
     sessions.find((s) => s.id === currentSessionId) ?? sessions[0] ?? null;
   const isReadOnly = currentSession?.isArchived ?? false;
+  /** Super Admin bypasses read-only — they can always write in any session */
+  const canWrite = !isReadOnly || currentUser?.role === "superadmin";
   const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   // Expose addNotification globally for non-React code
@@ -347,6 +359,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notifications,
         unreadCount,
         isReadOnly,
+        canWrite,
         login,
         logout,
         changePassword,

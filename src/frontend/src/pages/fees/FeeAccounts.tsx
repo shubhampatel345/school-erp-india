@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
-import type { FeeAccount, FeeReceipt } from "../../types";
+import type { FeeAccount, FeeHeading, FeeReceipt } from "../../types";
 import { formatCurrency, generateId, ls } from "../../utils/localStorage";
 
 export default function FeeAccounts() {
@@ -55,12 +55,62 @@ export default function FeeAccounts() {
 
   const totalReceipts = sessionReceipts.reduce((s, r) => s + r.totalAmount, 0);
 
+  // ── Heading-wise breakdown ─────────────────────────────────
+  const feeHeadings = ls.get<FeeHeading[]>("fee_headings", []);
+
+  // Sum amounts per headingId across all session receipts
+  const headingTotals: Record<string, number> = {};
+  let otherChargesTotal = 0;
+  for (const receipt of sessionReceipts) {
+    for (const item of receipt.items) {
+      headingTotals[item.headingId] =
+        (headingTotals[item.headingId] ?? 0) + item.amount;
+    }
+    // Sum otherCharges array amounts
+    if (Array.isArray(receipt.otherCharges)) {
+      for (const oc of receipt.otherCharges) {
+        otherChargesTotal += oc.paidAmount ?? 0;
+      }
+    }
+  }
+
+  // Build display rows: known headings first, then any orphaned headingIds
+  const headingRows: { id: string; name: string; total: number }[] = [];
+  const seenIds = new Set<string>();
+  for (const h of feeHeadings) {
+    const total = headingTotals[h.id] ?? 0;
+    if (total > 0) {
+      headingRows.push({ id: h.id, name: h.name, total });
+      seenIds.add(h.id);
+    }
+  }
+  // Add any headingIds in receipts that don't have a matching FeeHeading (deleted headings)
+  for (const [hId, total] of Object.entries(headingTotals)) {
+    if (!seenIds.has(hId) && total > 0) {
+      // Try to get name from the receipt items
+      let name = "(Deleted Heading)";
+      outer: for (const receipt of sessionReceipts) {
+        for (const item of receipt.items) {
+          if (item.headingId === hId && item.headingName) {
+            name = item.headingName;
+            break outer;
+          }
+        }
+      }
+      headingRows.push({ id: hId, name, total });
+    }
+  }
+  headingRows.sort((a, b) => b.total - a.total);
+
+  const grandTotal =
+    headingRows.reduce((s, r) => s + r.total, 0) + otherChargesTotal;
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div>
         <h3 className="font-semibold text-foreground">Fee Accounts</h3>
         <p className="text-sm text-muted-foreground">
-          Manage account names and view account-wise received fees
+          Manage account names and view heading-wise received fees
         </p>
       </div>
 
@@ -117,9 +167,6 @@ export default function FeeAccounts() {
                 <th className="px-4 py-3 text-left font-semibold">
                   Account Name
                 </th>
-                <th className="px-4 py-3 text-right font-semibold">
-                  Fees Received
-                </th>
                 {canEdit && (
                   <th className="px-4 py-3 text-center font-semibold">
                     Actions
@@ -166,12 +213,6 @@ export default function FeeAccounts() {
                       <span className="font-medium">{acc.name}</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold text-green-600">
-                    {/* First account shows total session receipts; others show 0 until tagged */}
-                    {idx === 0
-                      ? formatCurrency(totalReceipts)
-                      : formatCurrency(0)}
-                  </td>
                   {canEdit && (
                     <td className="px-4 py-3 text-center">
                       <div className="flex gap-2 justify-center">
@@ -191,7 +232,7 @@ export default function FeeAccounts() {
                             <Button
                               size="sm"
                               variant="outline"
-                              className="text-red-600 border-red-200 hover:bg-red-50"
+                              className="text-destructive border-destructive/20 hover:bg-destructive/10"
                               onClick={() => deleteAccount(acc.id)}
                               data-ocid="delete-account-btn"
                             >
@@ -208,6 +249,89 @@ export default function FeeAccounts() {
           </table>
         </div>
       )}
+
+      {/* ── Heading-wise Collections ─────────────────────────── */}
+      <div>
+        <div className="mb-3">
+          <h3 className="font-semibold text-foreground">
+            Fee Heading-wise Collections (Current Session)
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Total amount received per fee heading from all receipts in this
+            session
+          </p>
+        </div>
+
+        {headingRows.length === 0 && otherChargesTotal === 0 ? (
+          <div className="bg-card border border-border rounded-xl p-10 text-center text-muted-foreground">
+            <p className="text-2xl mb-2">📋</p>
+            <p className="font-medium">No fee collections recorded yet</p>
+            <p className="text-sm mt-1">
+              Collections will appear here once fee receipts are saved.
+            </p>
+          </div>
+        ) : (
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <table className="w-full text-sm" data-ocid="heading-wise-table">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    #
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    Fee Heading
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                    Amount Received
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {headingRows.map((row, idx) => (
+                  <tr
+                    key={row.id}
+                    className="border-t border-border hover:bg-muted/20"
+                    data-ocid="heading-collection-row"
+                  >
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {idx + 1}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {row.name}
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-primary">
+                      {formatCurrency(row.total)}
+                    </td>
+                  </tr>
+                ))}
+                {otherChargesTotal > 0 && (
+                  <tr className="border-t border-border hover:bg-muted/20">
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {headingRows.length + 1}
+                    </td>
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      Other Charges
+                    </td>
+                    <td className="px-4 py-3 text-right font-semibold text-primary">
+                      {formatCurrency(otherChargesTotal)}
+                    </td>
+                  </tr>
+                )}
+                {/* Grand total row */}
+                <tr className="border-t-2 border-border bg-muted/30">
+                  <td className="px-4 py-3" />
+                  <td className="px-4 py-3 font-bold text-foreground">
+                    Grand Total
+                  </td>
+                  <td className="px-4 py-3 text-right font-bold text-foreground text-base">
+                    {formatCurrency(grandTotal)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

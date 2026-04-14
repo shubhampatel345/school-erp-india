@@ -71,10 +71,13 @@ const DESIGNATIONS = [
   "Other",
 ];
 
+/** Read staff from localStorage — always fresh from storage */
+function loadStaff(): Staff[] {
+  return ls.get<Staff[]>("staff", []);
+}
+
 export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
-  const [staff, setStaff] = useState<Staff[]>(() =>
-    ls.get<Staff[]>("staff", []),
-  );
+  const [staff, setStaff] = useState<Staff[]>(loadStaff);
   const [search, setSearch] = useState("");
   const [filterDesignation, setFilterDesignation] = useState("All");
   const [showForm, setShowForm] = useState(false);
@@ -83,11 +86,12 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const filtered = staff.filter((s) => {
+    const q = search.toLowerCase();
     const matchSearch =
-      s.name.toLowerCase().includes(search.toLowerCase()) ||
-      s.empId.toLowerCase().includes(search.toLowerCase()) ||
-      s.designation.toLowerCase().includes(search.toLowerCase()) ||
-      (s.department ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      s.name.toLowerCase().includes(q) ||
+      s.empId.toLowerCase().includes(q) ||
+      s.designation.toLowerCase().includes(q) ||
+      (s.department ?? "").toLowerCase().includes(q) ||
       s.mobile.includes(search);
     const matchDesignation =
       filterDesignation === "All" || s.designation === filterDesignation;
@@ -113,10 +117,17 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       ls.set("staff", updated);
       return updated;
     });
+    setViewStaff(null);
   }
 
   function handleEdit(s: Staff) {
-    setEditStaff(s);
+    setEditStaff({ ...s }); // clone to avoid reference mutation
+    setViewStaff(null);
+    setShowForm(true);
+  }
+
+  function handleAddNew() {
+    setEditStaff(undefined);
     setShowForm(true);
   }
 
@@ -149,7 +160,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       s.joiningDate ?? "",
       s.salary ?? "",
       s.status ?? "active",
-      s.subjects
+      (s.subjects ?? [])
         .map((x) => `${x.subject}:${x.classFrom}-${x.classTo}`)
         .join("; "),
     ]);
@@ -167,83 +178,109 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const lines = (ev.target?.result as string)
-        .split("\n")
-        .slice(1)
-        .filter((l) => l.trim());
-      const imported: Staff[] = lines.map((line) => {
-        const cols = line
-          .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
-          .map((c) => c.replace(/^"|"$/g, "").trim());
-        const [
-          empIdRaw,
-          name,
-          designation,
-          department,
-          mobile,
-          dob,
-          email,
-          address,
-          qualification,
-          joiningDate,
-          salaryRaw,
-          status,
-          subjectsRaw,
-        ] = cols;
-        const dobStr = dob ?? "";
-        const [d, m, y] = dobStr.includes("/")
-          ? dobStr.split("/")
-          : dobStr.includes("-")
-            ? dobStr.split("-").reverse()
-            : ["", "", ""];
-        const password =
-          y && m && d
-            ? `${d.padStart(2, "0")}${m.padStart(2, "0")}${y}`
-            : (mobile ?? "");
-        const subjects = (subjectsRaw ?? "")
-          .split(";")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((s) => {
-            const [subj, range] = s.split(":");
-            const [from, to] = (range ?? "").split("-");
-            return {
-              subject: subj?.trim() ?? "",
-              classFrom: from?.trim() ?? "1",
-              classTo: to?.trim() ?? "10",
-            };
-          })
-          .filter((s) => s.subject);
-        return {
-          id: generateId(),
-          empId: empIdRaw?.trim() || generateId(),
-          name: name?.trim() ?? "",
-          designation: designation?.trim() ?? "Other",
-          department: department?.trim(),
-          mobile: mobile?.trim() ?? "",
-          dob: dobStr,
-          email: email?.trim(),
-          address: address?.trim(),
-          qualification: qualification?.trim(),
-          joiningDate: joiningDate?.trim(),
-          salary: salaryRaw ? Number(salaryRaw) : undefined,
-          status: (status?.trim() === "inactive" ? "inactive" : "active") as
-            | "active"
-            | "inactive",
-          subjects,
-          credentials: { username: mobile?.trim() ?? "", password },
-        };
-      });
-      setStaff((prev) => {
-        const updated = [...prev, ...imported];
-        ls.set("staff", updated);
-        return updated;
-      });
+      try {
+        const text = ev.target?.result as string;
+        const lines = text
+          .split("\n")
+          .slice(1) // skip header row
+          .filter((l) => l.trim());
+
+        const imported: Staff[] = lines.map((line) => {
+          // Handle quoted CSV properly
+          const cols = line
+            .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+            .map((c) => c.replace(/^"|"$/g, "").trim());
+
+          const [
+            empIdRaw,
+            name,
+            designation,
+            department,
+            mobile,
+            dob,
+            email,
+            address,
+            qualification,
+            joiningDate,
+            salaryRaw,
+            status,
+            subjectsRaw,
+          ] = cols;
+
+          const dobStr = dob ?? "";
+          // Parse dob for password generation (ddmmyyyy)
+          let password = mobile?.trim() ?? "";
+          if (dobStr) {
+            if (dobStr.includes("/")) {
+              const [d, m, y] = dobStr.split("/");
+              if (d && m && y)
+                password = `${d.padStart(2, "0")}${m.padStart(2, "0")}${y}`;
+            } else if (dobStr.includes("-") && dobStr.length === 10) {
+              const [y, m, d] = dobStr.split("-");
+              if (d && m && y)
+                password = `${d.padStart(2, "0")}${m.padStart(2, "0")}${y}`;
+            }
+          }
+
+          const subjects = (subjectsRaw ?? "")
+            .split(";")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((s) => {
+              const [subj, range] = s.split(":");
+              const [from, to] = (range ?? "").split("-");
+              return {
+                subject: subj?.trim() ?? "",
+                classFrom: from?.trim() ?? "1",
+                classTo: to?.trim() ?? "10",
+              };
+            })
+            .filter((s) => s.subject);
+
+          return {
+            id: generateId(),
+            empId: empIdRaw?.trim() || `EMP${generateId()}`,
+            name: name?.trim() ?? "",
+            designation: designation?.trim() || "Other",
+            department: department?.trim() || undefined,
+            mobile: mobile?.trim() ?? "",
+            dob: dobStr,
+            email: email?.trim() || undefined,
+            address: address?.trim() || undefined,
+            qualification: qualification?.trim() || undefined,
+            joiningDate: joiningDate?.trim() || undefined,
+            salary: salaryRaw ? Number(salaryRaw) : undefined,
+            status: (status?.trim() === "inactive" ? "inactive" : "active") as
+              | "active"
+              | "inactive",
+            subjects,
+            credentials: { username: mobile?.trim() ?? "", password },
+          };
+        });
+
+        if (imported.length === 0) {
+          alert("No valid staff records found in the CSV.");
+          return;
+        }
+
+        setStaff((prev) => {
+          const updated = [...prev, ...imported];
+          ls.set("staff", updated);
+          return updated;
+        });
+
+        alert(`Successfully imported ${imported.length} staff member(s).`);
+      } catch (err) {
+        alert("Failed to parse CSV. Please check the file format.");
+        console.error(err);
+      }
     };
     reader.readAsText(file);
+    // Reset so same file can be re-imported if needed
     e.target.value = "";
   }
 
+  // ── FORM VIEW ──────────────────────────────────────────
   if (showForm) {
     return (
       <StaffForm
@@ -257,8 +294,10 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     );
   }
 
-  // Staff detail view
+  // ── DETAIL VIEW ────────────────────────────────────────
   if (viewStaff) {
+    // Always re-read from current state in case of stale ref
+    const current = staff.find((s) => s.id === viewStaff.id) ?? viewStaff;
     return (
       <div className="p-4 lg:p-6 max-w-2xl mx-auto space-y-5">
         <div className="flex items-center justify-between">
@@ -275,29 +314,29 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         </div>
         <Card className="p-6 space-y-5">
           <div className="flex items-center gap-4">
-            {viewStaff.photo ? (
+            {current.photo ? (
               <img
-                src={viewStaff.photo}
-                alt={viewStaff.name}
+                src={current.photo}
+                alt={current.name}
                 className="w-20 h-20 rounded-full object-cover border-2 border-border"
               />
             ) : (
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary text-3xl font-bold">
-                {viewStaff.name.charAt(0)}
+                {current.name.charAt(0)}
               </div>
             )}
             <div>
               <h3 className="text-lg font-bold text-foreground">
-                {viewStaff.name}
+                {current.name}
               </h3>
               <div className="flex items-center gap-2 mt-1">
                 <Badge variant="default" className="text-xs">
-                  {viewStaff.designation}
+                  {current.designation}
                 </Badge>
-                <StatusBadge status={viewStaff.status} />
+                <StatusBadge status={current.status} />
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                {viewStaff.department}
+                {current.department}
               </p>
             </div>
           </div>
@@ -305,19 +344,19 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
           <div className="grid grid-cols-2 gap-4 text-sm">
             {(
               [
-                ["Emp ID", viewStaff.empId],
-                ["Mobile", viewStaff.mobile],
-                ["Email", viewStaff.email],
-                ["Date of Birth", viewStaff.dob],
-                ["Joining Date", viewStaff.joiningDate],
-                ["Qualification", viewStaff.qualification],
+                ["Emp ID", current.empId],
+                ["Mobile", current.mobile],
+                ["Email", current.email],
+                ["Date of Birth", current.dob],
+                ["Joining Date", current.joiningDate],
+                ["Qualification", current.qualification],
                 [
-                  "Salary",
-                  viewStaff.salary
-                    ? `₹${viewStaff.salary.toLocaleString("en-IN")}`
+                  "Net Salary",
+                  current.salary
+                    ? `₹${current.salary.toLocaleString("en-IN")}`
                     : null,
                 ],
-                ["Address", viewStaff.address],
+                ["Address", current.address],
               ] as [string, string | undefined | null][]
             ).map(([label, value]) =>
               value ? (
@@ -329,13 +368,13 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             )}
           </div>
 
-          {viewStaff.subjects.length > 0 && (
+          {(current.subjects ?? []).length > 0 && (
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                 Subject Assignments
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {viewStaff.subjects.map((s) => (
+                {(current.subjects ?? []).map((s) => (
                   <Badge
                     key={`${s.subject}-${s.classFrom}-${s.classTo}`}
                     variant="secondary"
@@ -355,35 +394,25 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             <p className="text-sm">
               <span className="text-muted-foreground">Username:</span>{" "}
               <span className="font-mono font-medium">
-                {viewStaff.credentials.username}
+                {current.credentials?.username ?? current.mobile}
               </span>
             </p>
             <p className="text-sm">
               <span className="text-muted-foreground">Password:</span>{" "}
               <span className="font-mono font-medium">
-                {viewStaff.credentials.password}
+                {current.credentials?.password ?? "—"}
               </span>
             </p>
           </div>
 
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={() => {
-                setEditStaff(viewStaff);
-                setViewStaff(null);
-                setShowForm(true);
-              }}
-            >
+            <Button size="sm" onClick={() => handleEdit(current)}>
               Edit
             </Button>
             <Button
               size="sm"
               variant="destructive"
-              onClick={() => {
-                handleDelete(viewStaff.id);
-                setViewStaff(null);
-              }}
+              onClick={() => handleDelete(current.id)}
             >
               Delete
             </Button>
@@ -393,6 +422,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     );
   }
 
+  // ── LIST VIEW ──────────────────────────────────────────
   return (
     <div className="p-4 lg:p-6 space-y-4">
       {/* Toolbar */}
@@ -402,7 +432,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
               data-ocid="staff-search"
-              placeholder="Search by name, mobile…"
+              placeholder="Search by name, mobile, designation…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-9"
@@ -439,20 +469,19 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             variant="outline"
             size="sm"
             onClick={() => fileRef.current?.click()}
+            data-ocid="staff-import"
           >
             <Upload className="w-4 h-4 mr-1.5" /> Import CSV
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            data-ocid="staff-export"
+          >
             <Download className="w-4 h-4 mr-1.5" /> Export CSV
           </Button>
-          <Button
-            size="sm"
-            data-ocid="staff-add"
-            onClick={() => {
-              setEditStaff(undefined);
-              setShowForm(true);
-            }}
-          >
+          <Button size="sm" data-ocid="staff-add" onClick={handleAddNew}>
             <Plus className="w-4 h-4 mr-1.5" /> Add Staff
           </Button>
         </div>
@@ -481,11 +510,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               : "No staff yet. Add your first staff member."}
           </p>
           {!search && filterDesignation === "All" && (
-            <Button
-              className="mt-4"
-              size="sm"
-              onClick={() => setShowForm(true)}
-            >
+            <Button className="mt-4" size="sm" onClick={handleAddNew}>
               <Plus className="w-4 h-4 mr-1.5" /> Add Staff
             </Button>
           )}
@@ -511,8 +536,8 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
                     Mobile
                   </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                    Joining Date
+                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                    Net Salary
                   </th>
                   <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
                     Status
@@ -566,15 +591,15 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                     <td className="px-4 py-3 text-muted-foreground">
                       {s.mobile}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden lg:table-cell text-xs">
-                      {s.joiningDate ?? "—"}
+                    <td className="px-4 py-3 text-right font-mono text-sm hidden lg:table-cell">
+                      {s.salary ? `₹${s.salary.toLocaleString("en-IN")}` : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <StatusBadge status={s.status} />
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <div className="flex flex-wrap gap-1 max-w-[180px]">
-                        {s.subjects.slice(0, 2).map((sub) => (
+                        {(s.subjects ?? []).slice(0, 2).map((sub) => (
                           <Badge
                             key={`${s.id}-${sub.subject}`}
                             variant="outline"
@@ -583,12 +608,12 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                             {sub.subject} ({sub.classFrom}–{sub.classTo})
                           </Badge>
                         ))}
-                        {s.subjects.length > 2 && (
+                        {(s.subjects ?? []).length > 2 && (
                           <Badge variant="outline" className="text-xs">
-                            +{s.subjects.length - 2}
+                            +{(s.subjects ?? []).length - 2}
                           </Badge>
                         )}
-                        {s.subjects.length === 0 && (
+                        {(s.subjects ?? []).length === 0 && (
                           <span className="text-xs text-muted-foreground">
                             —
                           </span>
@@ -611,7 +636,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          aria-label="Edit"
+                          aria-label="Edit staff"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleEdit(s);
@@ -622,7 +647,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          aria-label="Delete"
+                          aria-label="Delete staff"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDelete(s.id);
@@ -642,10 +667,10 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       )}
 
       <p className="text-xs text-muted-foreground">
-        CSV columns: EmpID, Name, Designation, Department, Mobile, DOB, Email,
-        Address, Qualification, Joining Date, Salary, Status, Subjects
-        (Subject:ClassFrom-ClassTo; separated) — double-click a row for full
-        details.
+        CSV columns: EmpID, Name, Designation, Department, Mobile, DOB
+        (DD/MM/YYYY), Email, Address, Qualification, Joining Date, Salary,
+        Status (active/inactive), Subjects (Subject:ClassFrom-ClassTo;
+        separated) — double-click a row for full details.
       </p>
     </div>
   );

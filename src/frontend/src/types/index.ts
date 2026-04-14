@@ -194,6 +194,19 @@ export interface FeeAccount {
 }
 
 // ──────────────────────────────────────────────────────────
+// Old Fee Entry (manual previous-session dues)
+// ──────────────────────────────────────────────────────────
+export interface OldFeeEntry {
+  id: string;
+  studentId: string;
+  sessionLabel: string; // e.g. "2024-25"
+  month: string; // April … March
+  headingName: string; // fee heading name or "Other"
+  amount: number;
+  remarks?: string;
+}
+
+// ──────────────────────────────────────────────────────────
 // Attendance
 // ──────────────────────────────────────────────────────────
 export interface AttendanceRecord {

@@ -3,7 +3,14 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Building2, CreditCard, Save, Upload } from "lucide-react";
+import {
+  Building2,
+  CreditCard,
+  ImageIcon,
+  Save,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import type {
   BankDetails,
@@ -13,6 +20,7 @@ import { ls } from "../../utils/localStorage";
 
 interface FullProfile extends SchoolProfileType {
   bank: BankDetails;
+  dashboardBackground?: string;
 }
 
 const DEFAULT_PROFILE: FullProfile = {
@@ -34,17 +42,18 @@ const DEFAULT_PROFILE: FullProfile = {
     ifscCode: "",
     branchName: "",
   },
+  dashboardBackground: "",
 };
 
 export default function SchoolProfile() {
   const [profile, setProfile] = useState<FullProfile>(() => {
     const saved = ls.get<FullProfile>("school_profile", DEFAULT_PROFILE);
-    // Ensure bank object exists for old data
     if (!saved.bank) saved.bank = DEFAULT_PROFILE.bank;
     return saved;
   });
   const [saved, setSaved] = useState(false);
   const logoRef = useRef<HTMLInputElement>(null);
+  const bgRef = useRef<HTMLInputElement>(null);
 
   function handleChange(field: keyof SchoolProfileType, value: string) {
     setProfile((p) => ({ ...p, [field]: value }));
@@ -63,6 +72,18 @@ export default function SchoolProfile() {
     reader.onload = (ev) => {
       const base64 = ev.target?.result as string;
       setProfile((p) => ({ ...p, logo: base64 }));
+      setSaved(false);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function handleBgUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const base64 = ev.target?.result as string;
+      setProfile((p) => ({ ...p, dashboardBackground: base64 }));
       setSaved(false);
     };
     reader.readAsDataURL(file);
@@ -185,6 +206,101 @@ export default function SchoolProfile() {
             placeholder="Full school address (shown on receipts)"
             data-ocid="school-profile-address"
           />
+        </div>
+      </Card>
+
+      {/* Dashboard Background Image */}
+      <Card className="p-6 space-y-5">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center">
+            <ImageIcon className="w-5 h-5 text-violet-600" />
+          </div>
+          <div>
+            <h2 className="font-display font-semibold text-foreground">
+              Dashboard Background Image
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Shown as hero banner on the dashboard. Text stays readable via
+              dark overlay.
+            </p>
+          </div>
+        </div>
+
+        <Separator />
+
+        <div className="flex items-start gap-4 flex-wrap">
+          {/* Preview */}
+          <div className="w-48 h-24 rounded-xl border-2 border-border overflow-hidden flex-shrink-0 relative bg-muted">
+            {profile.dashboardBackground ? (
+              <>
+                <img
+                  src={profile.dashboardBackground}
+                  alt="Dashboard background preview"
+                  className="w-full h-full object-cover"
+                />
+                <div className="absolute inset-0 bg-black/50 flex items-end p-2">
+                  <span className="text-white text-[9px] font-semibold opacity-80">
+                    Preview (with overlay)
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-1 bg-gradient-to-br from-primary/30 to-accent/20">
+                <ImageIcon className="w-6 h-6 text-muted-foreground/40" />
+                <span className="text-[10px] text-muted-foreground/60">
+                  No image set
+                </span>
+                <span className="text-[9px] text-muted-foreground/40">
+                  Uses gradient fallback
+                </span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 justify-center">
+            <p className="text-sm font-medium text-foreground">
+              {profile.dashboardBackground
+                ? "Background image set ✓"
+                : "No background image"}
+            </p>
+            <p className="text-xs text-muted-foreground max-w-xs">
+              Upload a school building photo, campus view, or any image. A dark
+              overlay will keep text readable. Recommended: 1600×500px or wider.
+            </p>
+            <div className="flex gap-2 mt-1">
+              <input
+                ref={bgRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleBgUpload}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => bgRef.current?.click()}
+                data-ocid="dashboard-bg-upload"
+              >
+                <Upload className="w-3.5 h-3.5 mr-1.5" />
+                {profile.dashboardBackground ? "Change Image" : "Upload Image"}
+              </Button>
+              {profile.dashboardBackground && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                  onClick={() => {
+                    setProfile((p) => ({ ...p, dashboardBackground: "" }));
+                    setSaved(false);
+                  }}
+                  data-ocid="dashboard-bg-remove"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                  Remove
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </Card>
 

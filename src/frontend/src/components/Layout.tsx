@@ -41,7 +41,7 @@ export default function Layout({
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
       {/* Header — visually elevated with bg-card */}
-      <Header onMenuToggle={handleMenuToggle} />
+      <Header onMenuToggle={handleMenuToggle} onNavigate={handleNavigate} />
 
       {/* Archived session read-only banner */}
       {isArchived && (

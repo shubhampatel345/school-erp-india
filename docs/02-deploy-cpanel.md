@@ -1,67 +1,150 @@
 # Deploy on cPanel Hosting
 
-Host SHUBH SCHOOL ERP on any Indian shared hosting that supports cPanel.
+Host SHUBH SCHOOL ERP on any Indian shared hosting with cPanel. No Node.js server required on the host — the app runs entirely as a static web application.
+
+> **Important:** SHUBH SCHOOL ERP is a static React app. You only need basic shared hosting with cPanel — no Node.js, PHP database, or backend server required.
+
+---
 
 ## Prerequisites
-- cPanel hosting with File Manager access
-- Node.js 18+ on your local machine
-- pnpm package manager
+
+- cPanel hosting account (any Indian provider — see recommended list below)
+- Node.js 18+ and pnpm on your **local** computer (for building)
+- A custom domain (optional but recommended for HTTPS and PWA features)
+
+---
 
 ## Step-by-Step Deployment
 
-### Step 1: Build the App
+### Step 1 — Build the Project Locally
+
+Run these commands on your computer:
 
 ```bash
-# In project root
+# In the project root folder
 pnpm install
+
+# Build the frontend
 cd src/frontend
 pnpm build
-# Output is in src/frontend/dist/
+
+# Build output will be at:
+# src/frontend/dist/
 ```
 
-### Step 2: Compress the dist/ folder
+### Step 2 — Locate the dist/ Folder
 
-Right-click the `dist/` folder → Compress as ZIP. Name it `school-erp.zip`.
+After the build completes, find `src/frontend/dist/`. It contains:
 
-### Step 3: Upload via File Manager
+```
+dist/
+├── index.html          ← main HTML entry point
+├── assets/
+│   ├── index-[hash].js   ← bundled JavaScript
+│   ├── index-[hash].css  ← bundled CSS
+│   └── ...               ← fonts, icons, images
+└── manifest.json        ← PWA manifest
+```
 
-Login to cPanel → File Manager → navigate to `public_html/` (or a subdirectory) → Upload → select the ZIP → Extract it here.
+### Step 3 — Log In to cPanel
 
-### Step 4: Create .htaccess for React Router
+Go to your hosting provider's cPanel URL (usually `yourdomain.com/cpanel` or as provided in your hosting welcome email). Log in with your cPanel credentials.
 
-Create or edit `public_html/.htaccess`:
+### Step 4 — Open File Manager → public_html
+
+In cPanel, click **File Manager**. Navigate to the `public_html/` folder — this is your website's root directory.
+
+### Step 5 — Upload dist Folder Contents
+
+> ⚠️ Upload the **contents** of `dist/`, not the dist folder itself.
+
+1. Compress the `dist/` folder as a ZIP file on your computer
+2. In File Manager, click **Upload** → select the ZIP file
+3. After upload, right-click the ZIP → **Extract**
+4. Confirm that `index.html`, `assets/`, and `manifest.json` are directly inside `public_html/`
+5. Delete the ZIP file after extraction
+
+### Step 6 — Create .htaccess (Required for React Router)
+
+Without this file, refreshing any page will show a 404 error.
+
+In File Manager, click **+ File**, name it `.htaccess` (with the dot prefix), and paste:
 
 ```apache
 Options -MultiViews
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
-RewriteRule ^ index.html [QR,L]
+RewriteRule ^ index.html [QSA,L]
 ```
 
-### Step 5: Enable SSL (HTTPS)
+> Note: Use `QSA,L` — not `QR,L`. The `QSA` flag correctly passes query strings.
 
-cPanel → SSL/TLS → Install Free Let's Encrypt certificate for your domain.  
-HTTPS is **required** for camera (QR scanner) and PWA install features.
+### Step 7 — Enable SSL via Let's Encrypt
 
-### Step 6: Verify
+In cPanel, go to **SSL/TLS** → **Free SSL Certificate (Let's Encrypt)** → click **Issue** for your domain.
 
-Open your domain in a browser. Login with `superadmin` / `admin123`.  
-Go to Settings → School Profile and fill in your school details.
+HTTPS is **mandatory** for:
+- QR code camera scanner (browser security requirement)
+- PWA installation on Android/iOS
+- WhatsApp API calls from production
+
+### Step 8 — Point Custom Domain (if applicable)
+
+If you have a domain (e.g. `school.in`), update DNS at your registrar:
+
+```
+Type: A Record
+Name: @ (root) or erp (subdomain)
+Value: [Your server IP from cPanel > General Info]
+TTL: 3600
+```
+
+DNS changes take 15 minutes to 24 hours to propagate.
+
+### Step 9 — Verify the Deployment
+
+1. Open `https://yourdomain.com` — the login screen should appear
+2. Login with `superadmin` / `admin123`
+3. Go to **Settings → School Profile** and enter your school details
+4. Open the app in Chrome on your phone → look for the "Add to Home Screen" prompt
+5. Test: Students → Add Student, Fees → Collect Fees, Attendance → QR Scanner
+
+---
 
 ## Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| Page refresh shows 404 | Check `.htaccess` RewriteRule and that `mod_rewrite` is enabled |
-| App loads but shows blank white | Check browser console (F12). Usually a JS build error — rebuild. |
-| Can't install PWA | Must be HTTPS. Chrome on Android only. Check `manifest.json` is accessible. |
-| QR Scanner camera blocked | Chrome Settings → Site Settings → Camera → Allow your domain. |
-| Data lost after browser update | localStorage cleared — restore from JSON backup. |
+| Problem | Cause | Solution |
+|---------|-------|----------|
+| Blank white page | Missing files or build error | Open F12 console. Rebuild with `pnpm build`. Ensure all `dist/` contents are in `public_html/` |
+| 404 on page refresh | Missing .htaccess | Create `.htaccess` with the RewriteRule above. Check mod_rewrite is enabled |
+| CSS / styles not loading | Wrong asset paths | Rebuild the app — Vite uses relative paths. Verify `assets/` folder is alongside `index.html` |
+| Slow first load | Normal PWA behavior | Service worker caches after first visit. Subsequent loads are instant |
+| Can't install PWA | Not HTTPS or wrong browser | Ensure SSL is active. Use Chrome on Android. iOS requires Safari |
+| QR scanner blocked | Camera permission denied | Chrome Settings → Site Settings → Camera → find domain → Allow |
+| WhatsApp CORS error | Localhost restriction | Deploy to real domain — CORS only occurs in preview/localhost |
+
+---
 
 ## Recommended Indian Hosting Providers
 
-| Provider | Plan | Price | Notes |
-|----------|------|-------|-------|
-| Hostinger India | Web Hosting Starter | ₹79/mo | Best value, 1-click SSL |
-| BigRock | Starter Plan | ₹99/mo | Reliable Indian hosting |
-| GoDaddy India | Economy | ₹149/mo | 24/7 support |
+| Provider | cPanel | Price/mo | Node.js | SSL | Notes |
+|----------|--------|----------|---------|-----|-------|
+| Hostinger India | ✅ | ₹69 | ✅ | ✅ Free | Best value, fast NVMe SSD, recommended |
+| MilesWeb | ✅ | ₹49 | ❌ | ✅ Free | Cheapest, good for small schools |
+| ResellerClub | ✅ | ✅₹79 | ❌ | ✅ Free | Good Indian support, reliable |
+| BigRock | ✅ | ₹89 | ❌ | ✅ Free | ICANN accredited, popular in India |
+| HostGator India | ✅ | ₹99 | ❌ | ✅ Free | 24/7 support, very popular |
+
+> Node.js is **not required** for deployment — only for building on your local machine.
+
+---
+
+## Post-Deployment Checklist
+
+- [ ] Login works (superadmin / admin123)
+- [ ] School profile filled with real school name and logo
+- [ ] SSL certificate active (padlock in browser)
+- [ ] Page refresh does not show 404
+- [ ] QR scanner camera works on mobile
+- [ ] WhatsApp test message sends successfully
+- [ ] PWA "Add to Home Screen" prompt appears on Android Chrome

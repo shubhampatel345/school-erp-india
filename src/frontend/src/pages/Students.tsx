@@ -1,6 +1,12 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -9,17 +15,22 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Cake,
+  Columns3,
   Download,
   List,
-  Pencil,
+  MessageCircle,
   Plus,
   Search,
   Trash2,
   Upload,
   Users,
+  X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
@@ -27,27 +38,144 @@ import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
 import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
 
+// ── Column definitions ────────────────────────────────────────────────────────
+interface ColDef {
+  key: string;
+  label: string;
+  defaultVisible: boolean;
+  width: number;
+  sortable?: boolean;
+}
+
+const ALL_COLUMNS: ColDef[] = [
+  {
+    key: "admNo",
+    label: "Adm. No.",
+    defaultVisible: true,
+    width: 80,
+    sortable: true,
+  },
+  { key: "photo", label: "Photo", defaultVisible: true, width: 50 },
+  {
+    key: "fullName",
+    label: "Full Name",
+    defaultVisible: true,
+    width: 160,
+    sortable: true,
+  },
+  {
+    key: "class",
+    label: "Class",
+    defaultVisible: true,
+    width: 60,
+    sortable: true,
+  },
+  { key: "section", label: "Section", defaultVisible: true, width: 60 },
+  { key: "gender", label: "Gender", defaultVisible: false, width: 80 },
+  { key: "dob", label: "DOB", defaultVisible: false, width: 100 },
+  { key: "fatherName", label: "Father Name", defaultVisible: true, width: 140 },
+  {
+    key: "fatherMobile",
+    label: "Father Mobile",
+    defaultVisible: false,
+    width: 120,
+  },
+  { key: "motherName", label: "Mother Name", defaultVisible: true, width: 140 },
+  {
+    key: "motherMobile",
+    label: "Mother Mobile",
+    defaultVisible: false,
+    width: 120,
+  },
+  { key: "category", label: "Category", defaultVisible: false, width: 90 },
+  { key: "address", label: "Address", defaultVisible: false, width: 180 },
+  { key: "aadhaarNo", label: "Aadhaar No.", defaultVisible: false, width: 130 },
+  { key: "srNo", label: "S.R. No.", defaultVisible: false, width: 100 },
+  { key: "penNo", label: "Pen No.", defaultVisible: false, width: 100 },
+  { key: "apaarNo", label: "Apaar No.", defaultVisible: false, width: 100 },
+  {
+    key: "previousSchool",
+    label: "Previous School",
+    defaultVisible: true,
+    width: 160,
+  },
+  {
+    key: "admissionDate",
+    label: "Admission Date",
+    defaultVisible: false,
+    width: 120,
+  },
+  { key: "transportRoute", label: "Route", defaultVisible: false, width: 120 },
+  { key: "transportBusNo", label: "Bus No.", defaultVisible: false, width: 90 },
+  {
+    key: "transportPickup",
+    label: "Pickup Point",
+    defaultVisible: false,
+    width: 120,
+  },
+  { key: "status", label: "Status", defaultVisible: true, width: 100 },
+];
+
+const DEFAULT_VISIBLE = ALL_COLUMNS.filter((c) => c.defaultVisible).map(
+  (c) => c.key,
+);
+const LS_COL_KEY = "student_grid_columns";
+
+// ── Print column list ─────────────────────────────────────────────────────────
 const PRINT_COLS = [
   { key: "admNo", label: "Adm.No" },
   { key: "fullName", label: "Name" },
   { key: "class", label: "Class" },
   { key: "section", label: "Section" },
   { key: "fatherName", label: "Father Name" },
+  { key: "motherName", label: "Mother Name" },
   { key: "dob", label: "DOB" },
   { key: "gender", label: "Gender" },
   { key: "mobile", label: "Mobile" },
+  { key: "fatherMobile", label: "Father Mobile" },
   { key: "category", label: "Category" },
   { key: "address", label: "Address" },
+  { key: "previousSchool", label: "Previous School" },
+  { key: "aadhaarNo", label: "Aadhaar No." },
+  { key: "srNo", label: "S.R. No." },
+  { key: "penNo", label: "Pen No." },
+  { key: "apaarNo", label: "Apaar No." },
+  { key: "admissionDate", label: "Admission Date" },
+  { key: "transportRoute", label: "Route" },
+  { key: "transportBusNo", label: "Bus No." },
+  { key: "status", label: "Status" },
 ];
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function getCellValue(student: Student, key: string): string {
+  const s = student as unknown as Record<string, string | undefined>;
+  return s[key] ?? "";
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function Students() {
-  const { currentSession, isReadOnly, currentUser } = useApp();
+  const { currentSession, canWrite, currentUser } = useApp();
+
+  // ── State ──────────────────────────────────────────────────────────────────
   const [students, setStudents] = useState<Student[]>(() =>
     ls.get<Student[]>("students", []),
   );
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterGender, setFilterGender] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterRoute, setFilterRoute] = useState("all");
+
+  const [sortKey, setSortKey] = useState<string | null>(null);
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+
+  const [visibleCols, setVisibleCols] = useState<string[]>(() =>
+    ls.get<string[]>(LS_COL_KEY, DEFAULT_VISIBLE),
+  );
+
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
   const [editStudent, setEditStudent] = useState<Student | null>(null);
   const [showImportExport, setShowImportExport] = useState(false);
@@ -64,40 +192,146 @@ export default function Students() {
   ]);
   const [showBirthdays, setShowBirthdays] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null);
+  const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
 
   const canManage =
     currentUser?.role === "superadmin" ||
     currentUser?.role === "admin" ||
     currentUser?.role === "receptionist";
 
-  function reload() {
+  // ── Reload ─────────────────────────────────────────────────────────────────
+  const reload = useCallback(() => {
     setStudents(ls.get<Student[]>("students", []));
-  }
+  }, []);
+
+  // ── Save column prefs ──────────────────────────────────────────────────────
+  useEffect(() => {
+    ls.set(LS_COL_KEY, visibleCols);
+  }, [visibleCols]);
+
+  // ── Derived data ───────────────────────────────────────────────────────────
+  const uniqueRoutes = useMemo(() => {
+    const routes = new Set<string>();
+    for (const s of students) {
+      if (s.transportRoute) routes.add(s.transportRoute);
+    }
+    return Array.from(routes).sort();
+  }, [students]);
+
+  const stats = useMemo(() => {
+    const active = students.filter((s) => s.status === "active");
+    return {
+      total: students.length,
+      active: active.length,
+      discontinued: students.length - active.length,
+      boys: students.filter((s) => s.gender === "Male").length,
+      girls: students.filter((s) => s.gender === "Female").length,
+    };
+  }, [students]);
 
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return students.filter((s) => {
-      const matchClass = filterClass === "all" || s.class === filterClass;
-      const matchSection =
-        filterSection === "all" || s.section === filterSection;
-      const matchSearch =
-        !q ||
-        s.fullName.toLowerCase().includes(q) ||
-        s.admNo.toLowerCase().includes(q) ||
-        (s.fatherName ?? "").toLowerCase().includes(q) ||
-        s.class.toLowerCase().includes(q) ||
-        s.section.toLowerCase().includes(q);
-      return matchClass && matchSection && matchSearch;
+    const q = search.toLowerCase().trim();
+    let list = students.filter((s) => {
+      if (filterClass !== "all" && s.class !== filterClass) return false;
+      if (filterSection !== "all" && s.section !== filterSection) return false;
+      if (filterStatus !== "all" && s.status !== filterStatus) return false;
+      if (filterGender !== "all" && s.gender !== filterGender) return false;
+      if (filterCategory !== "all" && (s.category ?? "") !== filterCategory)
+        return false;
+      if (filterRoute !== "all" && (s.transportRoute ?? "") !== filterRoute)
+        return false;
+      if (q) {
+        const haystack = [
+          s.fullName,
+          s.admNo,
+          s.fatherName,
+          s.motherName,
+          s.mobile,
+          s.fatherMobile ?? "",
+          s.address,
+          `${s.class}${s.section}`,
+          s.class,
+          s.section,
+        ]
+          .join(" ")
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+      return true;
     });
-  }, [students, search, filterClass, filterSection]);
 
+    if (sortKey) {
+      list = [...list].sort((a, b) => {
+        const av = getCellValue(a, sortKey);
+        const bv = getCellValue(b, sortKey);
+        const cmp = av.localeCompare(bv, "en-IN", { numeric: true });
+        return sortDir === "asc" ? cmp : -cmp;
+      });
+    }
+    return list;
+  }, [
+    students,
+    search,
+    filterClass,
+    filterSection,
+    filterStatus,
+    filterGender,
+    filterCategory,
+    filterRoute,
+    sortKey,
+    sortDir,
+  ]);
+
+  const activeVisibleCols = useMemo(
+    () => ALL_COLUMNS.filter((c) => visibleCols.includes(c.key)),
+    [visibleCols],
+  );
+
+  // ── Birthdays ──────────────────────────────────────────────────────────────
   const today = new Date();
-  const currentMonth = String(today.getMonth() + 1).padStart(2, "0");
+  const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
   const birthdayStudents = students.filter((s) => {
-    const parts = s.dob.split("/");
-    return parts[1] === currentMonth;
+    const parts = s.dob?.split("/");
+    return parts && parts.length >= 2 && parts[1] === currentMonthStr;
   });
 
+  // ── Sort handler ───────────────────────────────────────────────────────────
+  function handleSort(key: string) {
+    if (!ALL_COLUMNS.find((c) => c.key === key)?.sortable) return;
+    if (sortKey === key) {
+      if (sortDir === "asc") setSortDir("desc");
+      else {
+        setSortKey(null);
+        setSortDir("asc");
+      }
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  }
+
+  // ── Selection ──────────────────────────────────────────────────────────────
+  const allVisibleSelected =
+    filtered.length > 0 && filtered.every((s) => selectedIds.has(s.id));
+
+  function toggleAll() {
+    if (allVisibleSelected) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filtered.map((s) => s.id)));
+    }
+  }
+
+  function toggleRow(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
   function handleSaved(_student: Student) {
     reload();
     setShowForm(false);
@@ -114,6 +348,26 @@ export default function Students() {
     reload();
   }
 
+  function handleBulkDelete() {
+    const all = ls
+      .get<Student[]>("students", [])
+      .filter((s) => !selectedIds.has(s.id));
+    ls.set("students", all);
+    setSelectedIds(new Set());
+    setBulkDeleteConfirm(false);
+    reload();
+  }
+
+  function clearFilters() {
+    setSearch("");
+    setFilterClass("all");
+    setFilterSection("all");
+    setFilterStatus("all");
+    setFilterGender("all");
+    setFilterCategory("all");
+    setFilterRoute("all");
+  }
+
   function handlePrint() {
     const schoolProfile = ls.get("school_profile", {
       name: "SHUBH SCHOOL ERP",
@@ -122,8 +376,8 @@ export default function Students() {
       (c) => c.label,
     );
     const rows = filtered.map((s) =>
-      PRINT_COLS.filter((c) => printCols.includes(c.key)).map(
-        (c) => (s as unknown as Record<string, string>)[c.key] ?? "",
+      PRINT_COLS.filter((c) => printCols.includes(c.key)).map((c) =>
+        getCellValue(s, c.key),
       ),
     );
     const printWin = window.open("", "_blank");
@@ -131,87 +385,470 @@ export default function Students() {
     printWin.document.write(`
       <html><head><title>Student List</title>
       <style>
-        body { font-family: Arial, sans-serif; font-size: 11px; margin: 10mm; }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #f0f0f0; border: 1px solid #999; padding: 4px 6px; text-align: left; }
-        td { border: 1px solid #ccc; padding: 4px 6px; }
-        h2 { text-align: center; margin-bottom: 4px; }
-        p { text-align: center; margin: 0 0 8px; font-size: 10px; }
+        body{font-family:Arial,sans-serif;font-size:10px;margin:8mm}
+        table{width:100%;border-collapse:collapse}
+        th{background:#f0f0f0;border:1px solid #999;padding:3px 5px;text-align:left;white-space:nowrap}
+        td{border:1px solid #ddd;padding:3px 5px;white-space:nowrap}
+        h2{text-align:center;margin-bottom:2px;font-size:14px}
+        p{text-align:center;margin:0 0 6px;font-size:9px;color:#666}
       </style></head><body>
       <h2>${schoolProfile.name}</h2>
-      <p>Student List – ${filterClass !== "all" ? `Class ${filterClass}` : "All Classes"} ${filterSection !== "all" ? filterSection : ""} | ${new Date().toLocaleDateString("en-IN")}</p>
+      <p>Student List – ${filterClass !== "all" ? `Class ${filterClass}` : "All Classes"}${filterSection !== "all" ? ` ${filterSection}` : ""} | ${new Date().toLocaleDateString("en-IN")} | ${filtered.length} students</p>
       <table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
-      <tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>
+      <tbody>${rows.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#f9f9f9" : ""}">${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>
       </table></body></html>`);
     printWin.document.close();
     printWin.print();
   }
 
-  return (
-    <div className="p-4 md:p-6 space-y-4">
-      {/* Page Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold font-display text-foreground flex items-center gap-2">
-            <Users className="w-6 h-6 text-primary" />
-            Student Information
-          </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {filtered.length} of {students.length} students
-            {currentSession && ` · Session ${currentSession.label}`}
-          </p>
+  function handleExportCSV() {
+    const cols = PRINT_COLS;
+    const header = cols.map((c) => c.label).join(",");
+    const rows = filtered.map((s) =>
+      cols
+        .map((c) => `"${getCellValue(s, c.key).replace(/"/g, '""')}"`)
+        .join(","),
+    );
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `students_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Column toggle ──────────────────────────────────────────────────────────
+  function toggleCol(key: string) {
+    setVisibleCols((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  }
+
+  // ── Cell renderer ──────────────────────────────────────────────────────────
+  const tableRef = useRef<HTMLDivElement>(null);
+
+  function renderCell(student: Student, colKey: string) {
+    const isDiscontinued = student.status === "discontinued";
+
+    if (colKey === "photo") {
+      return (
+        <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
+          {student.photo ? (
+            <img
+              src={student.photo}
+              alt={student.fullName}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <span className="text-[9px] font-bold text-primary">
+              {student.fullName.charAt(0)}
+            </span>
+          )}
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {!isReadOnly && canManage && (
-            <Button
-              onClick={() => {
-                setEditStudent(null);
-                setShowForm(true);
-              }}
-              data-ocid="add-student-btn"
-            >
-              <Plus className="w-4 h-4 mr-1" /> Add Student
-            </Button>
-          )}
-          {!isReadOnly && canManage && (
-            <Button
-              variant="outline"
-              onClick={() => setShowImportExport(true)}
-              data-ocid="students-importexport-btn"
-            >
-              <Upload className="w-4 h-4 mr-1" /> Import/Export
-            </Button>
-          )}
-          <Button variant="outline" onClick={() => setShowPrintDialog(true)}>
-            <List className="w-4 h-4 mr-1" /> List
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => setShowBirthdays(!showBirthdays)}
-            className="relative"
-          >
-            <Cake className="w-4 h-4 mr-1" /> Birthdays
-            {birthdayStudents.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[10px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                {birthdayStudents.length}
-              </span>
+      );
+    }
+
+    if (colKey === "admNo") {
+      return (
+        <span
+          className={`text-xs font-mono font-semibold ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
+        >
+          {student.admNo}
+        </span>
+      );
+    }
+
+    if (colKey === "fullName") {
+      return (
+        <span
+          className={`font-medium text-xs ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
+        >
+          {student.fullName}
+        </span>
+      );
+    }
+
+    if (colKey === "class") {
+      return (
+        <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded font-medium">
+          {student.class}
+        </span>
+      );
+    }
+
+    if (colKey === "section") {
+      return <span className="text-xs text-foreground">{student.section}</span>;
+    }
+
+    if (colKey === "status") {
+      return (
+        <Badge
+          variant={student.status === "active" ? "default" : "destructive"}
+          className="text-[9px] px-1.5 py-0"
+        >
+          {student.status === "active" ? "Active" : "Discontinued"}
+        </Badge>
+      );
+    }
+
+    if (colKey === "category" && student.category) {
+      return (
+        <Badge variant="outline" className="text-[9px] px-1 py-0">
+          {student.category}
+        </Badge>
+      );
+    }
+
+    return (
+      <span className="text-xs text-muted-foreground truncate max-w-[140px] block">
+        {getCellValue(student, colKey) || "—"}
+      </span>
+    );
+  }
+
+  // ── Sort icon ──────────────────────────────────────────────────────────────
+  function SortIcon({ colKey }: { colKey: string }) {
+    if (!ALL_COLUMNS.find((c) => c.key === colKey)?.sortable) return null;
+    if (sortKey !== colKey)
+      return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30 inline" />;
+    return sortDir === "asc" ? (
+      <ArrowUp className="w-3 h-3 ml-1 text-primary inline" />
+    ) : (
+      <ArrowDown className="w-3 h-3 ml-1 text-primary inline" />
+    );
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* ── Page Header ───────────────────────────────────────────────── */}
+      <div className="px-4 md:px-6 pt-4 pb-2 bg-card border-b border-border flex-shrink-0">
+        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
+          <div>
+            <h1 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary" />
+              Student Information
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {currentSession && `Session ${currentSession.label} · `}
+              Showing {filtered.length} of {students.length} students
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            {canWrite && canManage && (
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditStudent(null);
+                  setShowForm(true);
+                }}
+                data-ocid="add-student-btn"
+              >
+                <Plus className="w-3.5 h-3.5 mr-1" /> Add Student
+              </Button>
             )}
+            {canWrite && canManage && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setShowImportExport(true)}
+                data-ocid="students-importexport-btn"
+              >
+                <Upload className="w-3.5 h-3.5 mr-1" /> Import/Export
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowPrintDialog(true)}
+            >
+              <List className="w-3.5 h-3.5 mr-1" /> Print List
+            </Button>
+            <Button size="sm" variant="outline" onClick={handleExportCSV}>
+              <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowBirthdays(!showBirthdays)}
+              className="relative"
+            >
+              <Cake className="w-3.5 h-3.5 mr-1" /> Birthdays
+              {birthdayStudents.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                  {birthdayStudents.length}
+                </span>
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* ── Stats Bar ───────────────────────────────────────────────── */}
+        <div className="flex gap-3 flex-wrap text-xs mb-3">
+          {[
+            { label: "Total", value: stats.total, color: "text-foreground" },
+            { label: "Active", value: stats.active, color: "text-emerald-600" },
+            {
+              label: "Discontinued",
+              value: stats.discontinued,
+              color: "text-destructive",
+            },
+            { label: "Boys", value: stats.boys, color: "text-blue-600" },
+            { label: "Girls", value: stats.girls, color: "text-pink-600" },
+          ].map(({ label, value, color }) => (
+            <div
+              key={label}
+              className="bg-muted/50 rounded-md px-3 py-1.5 flex items-center gap-1.5"
+            >
+              <span className="text-muted-foreground">{label}:</span>
+              <span className={`font-bold ${color}`}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Filter Bar ──────────────────────────────────────────────── */}
+        <div className="flex gap-2 flex-wrap items-center">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[180px] max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+            <Input
+              className="pl-8 h-8 text-xs"
+              placeholder="Search name, Adm.No, father, mother, mobile…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              data-ocid="students-search"
+            />
+          </div>
+
+          {/* Class */}
+          <Select
+            value={filterClass}
+            onValueChange={(v) => {
+              setFilterClass(v);
+              setFilterSection("all");
+            }}
+          >
+            <SelectTrigger
+              className="w-28 h-8 text-xs"
+              data-ocid="students-filter-class"
+            >
+              <SelectValue placeholder="All Classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {CLASSES.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Section */}
+          <Select
+            value={filterSection}
+            onValueChange={setFilterSection}
+            disabled={filterClass === "all"}
+          >
+            <SelectTrigger
+              className="w-24 h-8 text-xs"
+              data-ocid="students-filter-section"
+            >
+              <SelectValue placeholder="Section" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              {SECTIONS.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Status */}
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-28 h-8 text-xs">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="discontinued">Discontinued</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Gender */}
+          <Select value={filterGender} onValueChange={setFilterGender}>
+            <SelectTrigger className="w-24 h-8 text-xs">
+              <SelectValue placeholder="Gender" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Gender</SelectItem>
+              <SelectItem value="Male">Male</SelectItem>
+              <SelectItem value="Female">Female</SelectItem>
+              <SelectItem value="Other">Other</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Category */}
+          <Select value={filterCategory} onValueChange={setFilterCategory}>
+            <SelectTrigger className="w-28 h-8 text-xs">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Category</SelectItem>
+              {["General", "OBC", "SC", "ST", "EWS", "Minority"].map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Route */}
+          {uniqueRoutes.length > 0 && (
+            <Select value={filterRoute} onValueChange={setFilterRoute}>
+              <SelectTrigger className="w-28 h-8 text-xs">
+                <SelectValue placeholder="Route" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Routes</SelectItem>
+                {uniqueRoutes.map((r) => (
+                  <SelectItem key={r} value={r}>
+                    {r}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Clear */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 text-xs px-2"
+            onClick={clearFilters}
+          >
+            <X className="w-3 h-3 mr-1" /> Clear
           </Button>
+
+          {/* Column Visibility */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs ml-auto"
+                data-ocid="columns-toggle-btn"
+              >
+                <Columns3 className="w-3.5 h-3.5 mr-1" /> Columns
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-64 p-3" align="end">
+              <p className="text-xs font-semibold text-foreground mb-2">
+                Show / Hide Columns
+              </p>
+              <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
+                {ALL_COLUMNS.map((col) => (
+                  <label
+                    key={col.key}
+                    htmlFor={`col-chk-${col.key}`}
+                    className="flex items-center gap-1.5 cursor-pointer text-xs hover:text-foreground text-muted-foreground"
+                  >
+                    <Checkbox
+                      id={`col-chk-${col.key}`}
+                      checked={visibleCols.includes(col.key)}
+                      onCheckedChange={() => toggleCol(col.key)}
+                      className="w-3.5 h-3.5"
+                    />
+                    {col.label}
+                  </label>
+                ))}
+              </div>
+              <div className="flex gap-1 mt-2 pt-2 border-t border-border">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-6 flex-1"
+                  onClick={() => setVisibleCols(ALL_COLUMNS.map((c) => c.key))}
+                >
+                  Show All
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-xs h-6 flex-1"
+                  onClick={() => setVisibleCols(DEFAULT_VISIBLE)}
+                >
+                  Reset
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
-      {/* Birthdays panel */}
+      {/* ── Bulk Actions Bar ────────────────────────────────────────────── */}
+      {selectedIds.size > 0 && (
+        <div className="flex-shrink-0 bg-primary/5 border-b border-primary/20 px-4 py-2 flex items-center gap-3 flex-wrap">
+          <span className="text-xs font-semibold text-primary">
+            {selectedIds.size} student{selectedIds.size > 1 ? "s" : ""} selected
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={() => setShowPrintDialog(true)}
+          >
+            <List className="w-3 h-3 mr-1" /> Print List
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-xs"
+            onClick={handleExportCSV}
+          >
+            <Download className="w-3 h-3 mr-1" /> Export CSV
+          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs">
+            <MessageCircle className="w-3 h-3 mr-1" /> WhatsApp
+          </Button>
+          {currentUser?.role === "superadmin" && (
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 text-xs"
+              onClick={() => setBulkDeleteConfirm(true)}
+            >
+              <Trash2 className="w-3 h-3 mr-1" /> Delete
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs ml-auto"
+            onClick={() => setSelectedIds(new Set())}
+          >
+            <X className="w-3 h-3 mr-1" /> Clear
+          </Button>
+        </div>
+      )}
+
+      {/* ── Birthdays Panel ──────────────────────────────────────────────── */}
       {showBirthdays && birthdayStudents.length > 0 && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-          <h3 className="text-sm font-semibold text-amber-800 mb-2 flex items-center gap-1">
-            <Cake className="w-4 h-4" /> Birthdays This Month (
+        <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-3">
+          <h3 className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1">
+            <Cake className="w-3.5 h-3.5" /> Birthdays This Month (
             {birthdayStudents.length})
           </h3>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap gap-1.5">
             {birthdayStudents.map((s) => (
               <div
                 key={s.id}
-                className="bg-card border border-amber-300 rounded-md px-3 py-1.5 text-xs"
+                className="bg-card border border-amber-300 rounded px-2 py-1 text-xs"
               >
                 <span className="font-medium text-amber-900">{s.fullName}</span>
                 <span className="text-amber-600 ml-1">({s.dob})</span>
@@ -225,193 +862,120 @@ export default function Students() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Search by name, Adm.No, class..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            data-ocid="students-search"
-          />
-        </div>
-        <Select value={filterClass} onValueChange={setFilterClass}>
-          <SelectTrigger className="w-36" data-ocid="students-filter-class">
-            <SelectValue placeholder="All Classes" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Classes</SelectItem>
-            {CLASSES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={filterSection} onValueChange={setFilterSection}>
-          <SelectTrigger className="w-28" data-ocid="students-filter-section">
-            <SelectValue placeholder="All Sections" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Sections</SelectItem>
-            {SECTIONS.map((s) => (
-              <SelectItem key={s} value={s}>
-                {s}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 border-b border-border sticky top-0">
-              <tr>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Photo
+      {/* ── Grid ──────────────────────────────────────────────────────────── */}
+      <div ref={tableRef} className="flex-1 overflow-auto">
+        <table
+          className="w-full text-xs border-collapse"
+          style={{ minWidth: "600px" }}
+        >
+          {/* Sticky Header */}
+          <thead className="sticky top-0 z-10 bg-muted border-b border-border shadow-sm">
+            <tr>
+              {/* Checkbox */}
+              <th className="w-8 px-2 py-2 border-r border-border">
+                <Checkbox
+                  checked={allVisibleSelected}
+                  onCheckedChange={toggleAll}
+                  aria-label="Select all"
+                  className="w-3.5 h-3.5"
+                />
+              </th>
+              {activeVisibleCols.map((col) => (
+                <th
+                  key={col.key}
+                  className={`px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap border-r border-border last:border-r-0 ${col.sortable ? "cursor-pointer hover:bg-muted/80 select-none" : ""}`}
+                  style={{
+                    minWidth: `${col.width}px`,
+                    width: `${col.width}px`,
+                  }}
+                  onClick={() => handleSort(col.key)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") handleSort(col.key);
+                  }}
+                  tabIndex={col.sortable ? 0 : undefined}
+                  role={col.sortable ? "button" : undefined}
+                >
+                  {col.label}
+                  <SortIcon colKey={col.key} />
                 </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Adm.No
+              ))}
+              {/* Actions */}
+              {canWrite && canManage && (
+                <th className="px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-16">
+                  Actions
                 </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Student
-                </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Class
-                </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
-                  Guardian
-                </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden lg:table-cell">
-                  Category
-                </th>
-                <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Status
-                </th>
-                {!isReadOnly && canManage && (
-                  <th className="text-left p-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Actions
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="p-8 text-center text-muted-foreground"
-                  >
-                    <Users className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    <p className="font-medium">No students found</p>
-                    <p className="text-xs mt-1">
-                      Add students or adjust your filters
-                    </p>
-                  </td>
-                </tr>
               )}
-              {filtered.map((student) => (
+            </tr>
+          </thead>
+
+          <tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td
+                  colSpan={activeVisibleCols.length + 2}
+                  className="py-16 text-center text-muted-foreground"
+                >
+                  <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="font-medium text-sm">No students found</p>
+                  <p className="text-xs mt-1 opacity-60">
+                    Adjust your filters or add students
+                  </p>
+                </td>
+              </tr>
+            )}
+
+            {filtered.map((student, idx) => {
+              const isDiscontinued = student.status === "discontinued";
+              const isChecked = selectedIds.has(student.id);
+              return (
                 <tr
                   key={student.id}
-                  className="hover:bg-muted/30 transition-colors cursor-pointer"
+                  className={[
+                    "group cursor-pointer transition-colors border-b border-border/60",
+                    isChecked
+                      ? "bg-primary/5"
+                      : isDiscontinued
+                        ? idx % 2 === 0
+                          ? "bg-muted/20 opacity-70"
+                          : "bg-muted/30 opacity-70"
+                        : idx % 2 === 0
+                          ? "bg-background hover:bg-muted/20"
+                          : "bg-muted/10 hover:bg-muted/30",
+                  ].join(" ")}
+                  style={{ height: "36px" }}
                   data-ocid={`student-row-${student.id}`}
                   onDoubleClick={() => setSelectedStudent(student)}
                 >
-                  {/* Photo */}
-                  <td className="p-3">
-                    <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
-                      {student.photo ? (
-                        <img
-                          src={student.photo}
-                          alt={student.fullName}
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <span className="text-[10px] font-bold text-primary">
-                          {student.fullName.charAt(0)}
-                        </span>
-                      )}
-                    </div>
+                  {/* Checkbox */}
+                  <td className="w-8 px-2 border-r border-border/40">
+                    <Checkbox
+                      checked={isChecked}
+                      onCheckedChange={() => toggleRow(student.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label={`Select ${student.fullName}`}
+                      className="w-3.5 h-3.5"
+                    />
                   </td>
-                  {/* Adm No */}
-                  <td className="p-3">
-                    <span
-                      className={`text-xs font-mono font-medium ${
-                        student.status === "discontinued"
-                          ? "line-through text-muted-foreground"
-                          : "text-foreground"
-                      }`}
+
+                  {/* Data cells */}
+                  {activeVisibleCols.map((col) => (
+                    <td
+                      key={col.key}
+                      className="px-2 py-1 border-r border-border/40 last:border-r-0 overflow-hidden"
+                      style={{ maxWidth: `${col.width}px` }}
                     >
-                      {student.admNo}
-                    </span>
-                  </td>
-                  {/* Name */}
-                  <td className="p-3">
-                    <button
-                      type="button"
-                      className="text-left w-full"
-                      onClick={() => setSelectedStudent(student)}
-                    >
-                      <span
-                        className={`font-medium text-sm block ${
-                          student.status === "discontinued"
-                            ? "line-through text-muted-foreground"
-                            : "text-foreground hover:text-primary"
-                        }`}
-                      >
-                        {student.fullName}
-                      </span>
-                    </button>
-                  </td>
-                  {/* Class */}
-                  <td className="p-3">
-                    <span className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full font-medium">
-                      {student.class}
-                      {student.section}
-                    </span>
-                  </td>
-                  {/* Guardian */}
-                  <td className="p-3 text-sm text-muted-foreground hidden md:table-cell">
-                    <div>{student.fatherName || "—"}</div>
-                    {(student.fatherMobile || student.mobile) && (
-                      <div className="text-xs">
-                        {student.fatherMobile || student.mobile}
-                      </div>
-                    )}
-                  </td>
-                  {/* Category */}
-                  <td className="p-3 hidden lg:table-cell">
-                    {student.category ? (
-                      <Badge variant="outline" className="text-[10px]">
-                        {student.category}
-                      </Badge>
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  {/* Status */}
-                  <td className="p-3">
-                    <Badge
-                      variant={
-                        student.status === "active" ? "default" : "destructive"
-                      }
-                      className="text-[10px]"
-                    >
-                      {student.status === "active" ? "Active" : "Discontinued"}
-                    </Badge>
-                  </td>
+                      {renderCell(student, col.key)}
+                    </td>
+                  ))}
+
                   {/* Actions */}
-                  {!isReadOnly && canManage && (
-                    <td className="p-3">
-                      <div className="flex gap-1">
+                  {canWrite && canManage && (
+                    <td className="px-1 py-1">
+                      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="w-7 h-7 text-muted-foreground hover:text-primary"
+                          className="w-6 h-6 text-muted-foreground hover:text-primary"
                           aria-label="Edit student"
                           data-ocid={`student-edit-${student.id}`}
                           onClick={(e) => {
@@ -420,12 +984,22 @@ export default function Students() {
                             setShowForm(true);
                           }}
                         >
-                          <Pencil className="w-3.5 h-3.5" />
+                          <svg
+                            aria-hidden="true"
+                            className="w-3 h-3"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                          >
+                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                          </svg>
                         </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="w-7 h-7 text-muted-foreground hover:text-destructive"
+                          className="w-6 h-6 text-muted-foreground hover:text-destructive"
                           aria-label="Delete student"
                           data-ocid={`student-delete-${student.id}`}
                           onClick={(e) => {
@@ -433,33 +1007,43 @@ export default function Students() {
                             setDeleteConfirm(student);
                           }}
                         >
-                          <Trash2 className="w-3.5 h-3.5" />
+                          <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
                     </td>
                   )}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
 
-      {/* Print Dialog */}
+      {/* ── Print Dialog ──────────────────────────────────────────────────── */}
       {showPrintDialog && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
-            <h3 className="text-lg font-semibold font-display text-foreground flex items-center gap-2">
-              <List className="w-5 h-5" /> Print Student List
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Select columns to include:
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-semibold font-display text-foreground flex items-center gap-2">
+                <List className="w-4 h-4" /> Print Student List
+              </h3>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="w-7 h-7"
+                onClick={() => setShowPrintDialog(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Select columns to include in the printed list:
             </p>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
               {PRINT_COLS.map((col) => (
                 <label
                   key={col.key}
-                  className="flex items-center gap-2 cursor-pointer text-sm"
+                  className="flex items-center gap-2 cursor-pointer text-xs hover:text-foreground"
                 >
                   <input
                     type="checkbox"
@@ -472,58 +1056,64 @@ export default function Students() {
                           prev.filter((k) => k !== col.key),
                         );
                     }}
-                    className="rounded"
+                    className="rounded w-3.5 h-3.5"
                   />
-                  {col.label}
+                  <span className="text-muted-foreground">{col.label}</span>
                 </label>
               ))}
             </div>
-            <div className="flex gap-2 justify-end">
+            <div className="flex gap-2 justify-end pt-2 border-t border-border">
               <Button
                 variant="outline"
+                size="sm"
                 onClick={() => setShowPrintDialog(false)}
               >
                 Cancel
               </Button>
               <Button
+                size="sm"
                 onClick={() => {
                   handlePrint();
                   setShowPrintDialog(false);
                 }}
                 data-ocid="students-print-btn"
               >
-                <Download className="w-4 h-4 mr-1" /> Print
+                <Download className="w-3.5 h-3.5 mr-1" /> Print
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirm Dialog */}
+      {/* ── Delete Confirm ────────────────────────────────────────────────── */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-5 h-5 text-destructive" />
+              <div className="w-9 h-9 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-4 h-4 text-destructive" />
               </div>
               <div>
-                <h3 className="font-semibold text-foreground">
+                <h3 className="font-semibold text-foreground text-sm">
                   Delete Student?
                 </h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Are you sure you want to delete{" "}
-                  <strong>{deleteConfirm.fullName}</strong> (
-                  {deleteConfirm.admNo})? This action cannot be undone.
+                <p className="text-xs text-muted-foreground mt-1">
+                  Delete <strong>{deleteConfirm.fullName}</strong> (
+                  {deleteConfirm.admNo})? This cannot be undone.
                 </p>
               </div>
             </div>
             <div className="flex gap-2 justify-end">
-              <Button variant="outline" onClick={() => setDeleteConfirm(null)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteConfirm(null)}
+              >
                 Cancel
               </Button>
               <Button
                 variant="destructive"
+                size="sm"
                 onClick={() => handleDelete(deleteConfirm)}
                 data-ocid="confirm-delete-student-btn"
               >
@@ -534,8 +1124,46 @@ export default function Students() {
         </div>
       )}
 
-      {/* Add/Edit Student Form */}
-      {showForm && !isReadOnly && (
+      {/* ── Bulk Delete Confirm ───────────────────────────────────────────── */}
+      {bulkDeleteConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                <Trash2 className="w-4 h-4 text-destructive" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground text-sm">
+                  Delete {selectedIds.size} Students?
+                </h3>
+                <p className="text-xs text-muted-foreground mt-1">
+                  This will permanently delete {selectedIds.size} selected
+                  students and cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkDeleteConfirm(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleBulkDelete}
+              >
+                Delete All
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Add/Edit Student Form ─────────────────────────────────────────── */}
+      {showForm && canWrite && (
         <StudentForm
           student={editStudent ?? undefined}
           onSave={handleSaved}
@@ -546,7 +1174,7 @@ export default function Students() {
         />
       )}
 
-      {/* Import/Export */}
+      {/* ── Import/Export ─────────────────────────────────────────────────── */}
       {showImportExport && (
         <StudentImportExport
           onClose={() => setShowImportExport(false)}
@@ -554,7 +1182,7 @@ export default function Students() {
         />
       )}
 
-      {/* Student Detail Modal */}
+      {/* ── Student Detail Modal ──────────────────────────────────────────── */}
       {selectedStudent && (
         <StudentDetailModal
           student={selectedStudent}

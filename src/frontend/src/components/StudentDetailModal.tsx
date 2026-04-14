@@ -19,18 +19,21 @@ import {
   CreditCard,
   FileText,
   Lock,
+  Pencil,
   Plus,
   Trash2,
   UserCheck,
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import type {
   DiscountEntry,
   FeeHeading,
   FeeReceipt,
   FeesPlan,
+  OldFeeEntry,
   Student,
   TransportRoute,
 } from "../types";
@@ -89,7 +92,20 @@ export default function StudentDetailModal({
   const [newDiscAmt, setNewDiscAmt] = useState("");
   const [newDiscReason, setNewDiscReason] = useState("");
   // Discount scope: which fee-type IDs (headingIds + 'transport') this discount applies to
-  const [newDiscScope, setNewDiscScope] = useState<string[]>([]);
+  // Always explicit — starts with all applicable items pre-selected
+  const [newDiscScope, setNewDiscScope] = useState<string[]>(() => {
+    const allHeadings = ls.get<FeeHeading[]>("fee_headings", []);
+    const applicable = allHeadings.filter(
+      (h) =>
+        !h.applicableClasses ||
+        h.applicableClasses.length === 0 ||
+        h.applicableClasses.includes(student.class),
+    );
+    return [...applicable.map((h) => h.id), "transport"];
+  });
+
+  // Default 11 months: all except June (index 2 in Apr-Mar MONTHS array)
+  const DEFAULT_TRANSPORT_MONTHS = MONTHS.filter((m) => m !== "June");
 
   // Transport months wizard state
   const [transportMonths, setTransportMonths] = useState<string[]>(() => {
@@ -97,8 +113,9 @@ export default function StudentDetailModal({
       "student_transport_months",
       {},
     );
-    // Default: all months checked
-    return stored[student.id] ?? MONTHS;
+    // If student already has saved data, use it. Otherwise default to 11 months (June excluded).
+    if (stored[student.id] !== undefined) return stored[student.id];
+    return DEFAULT_TRANSPORT_MONTHS;
   });
   const [transportMonthsSaved, setTransportMonthsSaved] = useState(false);
 
@@ -132,6 +149,106 @@ export default function StudentDetailModal({
         (d) => d.studentId === student.id && d.sessionId === currentSession?.id,
       ),
   );
+
+  // ── Old Fee Entries (manual, editable) ──────────────────
+  const [oldFeeEntries, setOldFeeEntries] = useState<OldFeeEntry[]>(() =>
+    ls
+      .get<OldFeeEntry[]>("old_fee_entries", [])
+      .filter((e) => e.studentId === student.id),
+  );
+
+  // Form state for Add/Edit old fee entry
+  const [oldFeeFormOpen, setOldFeeFormOpen] = useState(false);
+  const [editingOldFeeId, setEditingOldFeeId] = useState<string | null>(null);
+  const [oldFeeFormData, setOldFeeFormData] = useState({
+    sessionLabel: "",
+    month: MONTHS[0],
+    headingName: "",
+    amount: "",
+    remarks: "",
+  });
+
+  function openAddOldFee() {
+    setEditingOldFeeId(null);
+    setOldFeeFormData({
+      sessionLabel: "",
+      month: MONTHS[0],
+      headingName: feeHeadings[0]?.name ?? "",
+      amount: "",
+      remarks: "",
+    });
+    setOldFeeFormOpen(true);
+  }
+
+  function openEditOldFee(entry: OldFeeEntry) {
+    setEditingOldFeeId(entry.id);
+    setOldFeeFormData({
+      sessionLabel: entry.sessionLabel,
+      month: entry.month,
+      headingName: entry.headingName,
+      amount: String(entry.amount),
+      remarks: entry.remarks ?? "",
+    });
+    setOldFeeFormOpen(true);
+  }
+
+  function saveOldFeeEntry() {
+    const amt = Number.parseFloat(oldFeeFormData.amount);
+    if (!oldFeeFormData.sessionLabel.trim()) {
+      toast.error("Session label is required");
+      return;
+    }
+    if (!oldFeeFormData.headingName.trim()) {
+      toast.error("Fee heading is required");
+      return;
+    }
+    if (Number.isNaN(amt) || amt <= 0) {
+      toast.error("Enter a valid amount");
+      return;
+    }
+
+    const all = ls.get<OldFeeEntry[]>("old_fee_entries", []);
+
+    if (editingOldFeeId) {
+      const idx = all.findIndex((e) => e.id === editingOldFeeId);
+      if (idx >= 0) {
+        all[idx] = {
+          ...all[idx],
+          sessionLabel: oldFeeFormData.sessionLabel.trim(),
+          month: oldFeeFormData.month,
+          headingName: oldFeeFormData.headingName.trim(),
+          amount: amt,
+          remarks: oldFeeFormData.remarks.trim() || undefined,
+        };
+      }
+    } else {
+      const entry: OldFeeEntry = {
+        id: generateId(),
+        studentId: student.id,
+        sessionLabel: oldFeeFormData.sessionLabel.trim(),
+        month: oldFeeFormData.month,
+        headingName: oldFeeFormData.headingName.trim(),
+        amount: amt,
+        remarks: oldFeeFormData.remarks.trim() || undefined,
+      };
+      all.push(entry);
+    }
+
+    ls.set("old_fee_entries", all);
+    setOldFeeEntries(all.filter((e) => e.studentId === student.id));
+    setOldFeeFormOpen(false);
+    setEditingOldFeeId(null);
+    toast.success(editingOldFeeId ? "Entry updated" : "Old fee entry added");
+  }
+
+  function deleteOldFeeEntry(id: string) {
+    const all = ls
+      .get<OldFeeEntry[]>("old_fee_entries", [])
+      .filter((e) => e.id !== id);
+    ls.set("old_fee_entries", all);
+    setOldFeeEntries(all.filter((e) => e.studentId === student.id));
+    toast.success("Entry removed");
+  }
 
   // Use v2 transport data (from Transport module)
   const studentTransportV2 = ls
@@ -176,6 +293,10 @@ export default function StudentDetailModal({
     {},
   );
   const studentPrevDues = prevDues[student.id] ?? {};
+
+  // Current academic month index: Apr=0 … Mar=11
+  const jsMonth = new Date().getMonth(); // 0=Jan … 11=Dec
+  const currentAcademicMonthIndex = (jsMonth + 9) % 12;
 
   function handleFieldChange(field: keyof Student, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -283,21 +404,9 @@ export default function StudentDetailModal({
     });
   }
 
-  // Initialize discount scope to all fee headings applicable to student's class + transport
-  function buildDefaultScope(): string[] {
-    const applicableHeadings = feeHeadings.filter(
-      (h) =>
-        !h.applicableClasses ||
-        h.applicableClasses.length === 0 ||
-        h.applicableClasses.includes(student.class),
-    );
-    return [...applicableHeadings.map((h) => h.id), "transport"];
-  }
-
   function addDiscount() {
     const amt = Number.parseFloat(newDiscAmt);
     if (!newDiscMonth || Number.isNaN(amt) || amt <= 0) return;
-    const scope = newDiscScope.length > 0 ? newDiscScope : buildDefaultScope();
     const entry: DiscountEntry = {
       id: generateId(),
       studentId: student.id,
@@ -305,7 +414,7 @@ export default function StudentDetailModal({
       amount: amt,
       reason: newDiscReason,
       sessionId: currentSession?.id ?? "sess_2025",
-      applicableTo: scope,
+      applicableTo: newDiscScope,
     };
     const all = ls.get<DiscountEntry[]>("discounts", []);
     all.push(entry);
@@ -339,19 +448,70 @@ export default function StudentDetailModal({
     setTimeout(() => window.print(), 300);
   }
 
+  // ── Net Payable calculation (fix3) ──────────────────────────────────────
+  // A. Fee master amount: only months up to current academic month
   const totalFees = feeHeadings.reduce((sum, h) => {
     const plan = getApplicablePlan(h.id);
     const amt = plan?.amount ?? h.amount;
-    const monthCount = MONTHS.filter((m) => h.months.includes(m)).length;
+    const monthCount = MONTHS.filter((m) => {
+      if (!h.months.includes(m)) return false;
+      const idx = MONTHS.indexOf(m);
+      return idx >= 0 && idx <= currentAcademicMonthIndex;
+    }).length;
     return sum + amt * monthCount;
   }, 0);
-  const totalDiscounts = discounts.reduce((sum, d) => sum + d.amount, 0);
-  const totalOldBalance = Object.values(studentPrevDues).reduce(
+
+  // B. Transport fees: pickup fare × applicable transport months up to current month
+  const ppIdForNet = (
+    studentTransportV2 as { pickupPointId?: string } | undefined
+  )?.pickupPointId;
+  const assignedPPForNet =
+    ppIdForNet && assignedRouteV2
+      ? assignedRouteV2.pickupPoints.find((p) => p.id === ppIdForNet)
+      : null;
+  const pickupFareForNet = assignedPPForNet?.fare ?? 0;
+  const appliedTransportMonths = transportMonths.filter((m) => {
+    const idx = MONTHS.indexOf(m);
+    return idx >= 0 && idx <= currentAcademicMonthIndex;
+  });
+  const totalTransportFees = pickupFareForNet * appliedTransportMonths.length;
+
+  // C. Other charges: sum from non-deleted receipts' otherCharges
+  const totalOtherCharges = receipts.reduce(
+    (sum, r) =>
+      sum + (r.otherCharges ?? []).reduce((s, c) => s + (c.paidAmount ?? 0), 0),
+    0,
+  );
+
+  // D. Discount: only months up to current academic month
+  const totalDiscounts = discounts.reduce((sum, d) => {
+    const mIdx = MONTHS.indexOf(d.month);
+    if (mIdx < 0 || mIdx > currentAcademicMonthIndex) return sum;
+    return sum + d.amount;
+  }, 0);
+
+  // E. Old balance: promoted dues + manually entered old fee entries
+  const totalPrevDues = Object.values(studentPrevDues).reduce(
     (s, a) => s + (a as number),
     0,
   );
-  const totalPaid = receipts.reduce((sum, r) => sum + r.totalAmount, 0);
-  const netPayable = totalFees - totalDiscounts + totalOldBalance - totalPaid;
+  const totalManualOldFees = oldFeeEntries.reduce((s, e) => s + e.amount, 0);
+  const totalOldBalance = totalPrevDues + totalManualOldFees;
+
+  // F. Already paid (paidAmount from non-deleted receipts)
+  const totalPaid = receipts.reduce(
+    (sum, r) => sum + (r.paidAmount ?? r.totalAmount ?? 0),
+    0,
+  );
+
+  // Net Payable = (A + B + C + E) - D - F
+  const netPayable =
+    totalFees +
+    totalTransportFees +
+    totalOtherCharges +
+    totalOldBalance -
+    totalDiscounts -
+    totalPaid;
 
   return (
     <>
@@ -1255,6 +1415,52 @@ export default function StudentDetailModal({
                           (select which fee types get this discount)
                         </span>
                       </p>
+                      {/* Select All row */}
+                      {(() => {
+                        const applicableIds = [
+                          ...feeHeadings
+                            .filter(
+                              (h) =>
+                                !h.applicableClasses ||
+                                h.applicableClasses.length === 0 ||
+                                h.applicableClasses.includes(student.class),
+                            )
+                            .map((h) => h.id),
+                          "transport",
+                        ];
+                        const checkedCount = applicableIds.filter((id) =>
+                          newDiscScope.includes(id),
+                        ).length;
+                        const allChecked =
+                          checkedCount === applicableIds.length;
+                        const someChecked =
+                          checkedCount > 0 &&
+                          checkedCount < applicableIds.length;
+                        return (
+                          <label className="flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[11px] font-bold transition-colors bg-primary/5 border-primary/30 text-foreground mb-1 select-none">
+                            <input
+                              type="checkbox"
+                              className="w-3 h-3 accent-primary"
+                              checked={allChecked}
+                              ref={(el) => {
+                                if (el) el.indeterminate = someChecked;
+                              }}
+                              onChange={() => {
+                                if (allChecked) {
+                                  setNewDiscScope([]);
+                                } else {
+                                  setNewDiscScope(applicableIds);
+                                }
+                              }}
+                              data-ocid="disc-scope-select-all"
+                            />
+                            <span>Select All</span>
+                            <span className="ml-auto text-muted-foreground font-normal">
+                              {checkedCount}/{applicableIds.length} selected
+                            </span>
+                          </label>
+                        );
+                      })()}
                       <div className="flex flex-wrap gap-1.5">
                         {/* One checkbox per applicable fee heading */}
                         {feeHeadings
@@ -1265,10 +1471,7 @@ export default function StudentDetailModal({
                               h.applicableClasses.includes(student.class),
                           )
                           .map((h) => {
-                            const checked =
-                              newDiscScope.length === 0
-                                ? true
-                                : newDiscScope.includes(h.id);
+                            const checked = newDiscScope.includes(h.id);
                             return (
                               <label
                                 key={h.id}
@@ -1283,28 +1486,11 @@ export default function StudentDetailModal({
                                   className="w-3 h-3 accent-primary"
                                   checked={checked}
                                   onChange={() => {
-                                    setNewDiscScope((prev) => {
-                                      // First interaction: expand from "all" to explicit list
-                                      const defaultScope = [
-                                        ...feeHeadings
-                                          .filter(
-                                            (fh) =>
-                                              !fh.applicableClasses ||
-                                              fh.applicableClasses.length ===
-                                                0 ||
-                                              fh.applicableClasses.includes(
-                                                student.class,
-                                              ),
-                                          )
-                                          .map((fh) => fh.id),
-                                        "transport",
-                                      ];
-                                      const base =
-                                        prev.length === 0 ? defaultScope : prev;
-                                      return base.includes(h.id)
-                                        ? base.filter((x) => x !== h.id)
-                                        : [...base, h.id];
-                                    });
+                                    setNewDiscScope((prev) =>
+                                      prev.includes(h.id)
+                                        ? prev.filter((x) => x !== h.id)
+                                        : [...prev, h.id],
+                                    );
                                   }}
                                   data-ocid={`disc-scope-${h.id}`}
                                 />
@@ -1314,10 +1500,7 @@ export default function StudentDetailModal({
                           })}
                         {/* Transport checkbox */}
                         {(() => {
-                          const checked =
-                            newDiscScope.length === 0
-                              ? true
-                              : newDiscScope.includes("transport");
+                          const checked = newDiscScope.includes("transport");
                           return (
                             <label
                               className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[11px] transition-colors ${
@@ -1331,26 +1514,11 @@ export default function StudentDetailModal({
                                 className="w-3 h-3 accent-blue-600"
                                 checked={checked}
                                 onChange={() => {
-                                  setNewDiscScope((prev) => {
-                                    const defaultScope = [
-                                      ...feeHeadings
-                                        .filter(
-                                          (fh) =>
-                                            !fh.applicableClasses ||
-                                            fh.applicableClasses.length === 0 ||
-                                            fh.applicableClasses.includes(
-                                              student.class,
-                                            ),
-                                        )
-                                        .map((fh) => fh.id),
-                                      "transport",
-                                    ];
-                                    const base =
-                                      prev.length === 0 ? defaultScope : prev;
-                                    return base.includes("transport")
-                                      ? base.filter((x) => x !== "transport")
-                                      : [...base, "transport"];
-                                  });
+                                  setNewDiscScope((prev) =>
+                                    prev.includes("transport")
+                                      ? prev.filter((x) => x !== "transport")
+                                      : [...prev, "transport"],
+                                  );
                                 }}
                                 data-ocid="disc-scope-transport"
                               />
@@ -1378,8 +1546,8 @@ export default function StudentDetailModal({
                       )}
                       {newDiscScope.length === 0 && (
                         <p className="text-[10px] text-muted-foreground">
-                          No scope selected — discount will apply to all fee
-                          types.
+                          No scope selected — discount will not apply to any fee
+                          type.
                         </p>
                       )}
                     </div>
@@ -1539,20 +1707,34 @@ export default function StudentDetailModal({
 
             {/* Old Fees Tab */}
             <TabsContent value="oldfees">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground mb-3">
-                  Unpaid dues from previous session carried forward as old
-                  balance
-                </p>
-                {Object.keys(studentPrevDues).length === 0 ? (
-                  <p className="text-center text-muted-foreground py-6 text-sm">
-                    No old balance carried forward
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Previous session dues carried forward + manually added old
+                    fees
                   </p>
-                ) : (
-                  <div className="overflow-x-auto">
+                  {isAdmin && (
+                    <Button
+                      size="sm"
+                      onClick={openAddOldFee}
+                      data-ocid="add-old-fee-btn"
+                    >
+                      <Plus className="w-3 h-3 mr-1" /> Add Old Fee Entry
+                    </Button>
+                  )}
+                </div>
+
+                {/* Promoted dues (read-only from session promotion) */}
+                {Object.keys(studentPrevDues).length > 0 && (
+                  <div className="border border-border rounded-lg overflow-hidden">
+                    <div className="bg-muted/40 px-3 py-2 border-b border-border">
+                      <p className="text-xs font-bold text-foreground uppercase tracking-wide">
+                        📋 Promoted Session Dues (read-only)
+                      </p>
+                    </div>
                     <table className="w-full text-sm">
                       <thead>
-                        <tr className="bg-muted/50">
+                        <tr className="bg-muted/30">
                           <th className="text-left p-2 text-xs font-medium text-muted-foreground">
                             Month
                           </th>
@@ -1576,16 +1758,141 @@ export default function StudentDetailModal({
                       <tfoot>
                         <tr className="border-t-2 border-border bg-muted/30">
                           <td className="p-2 text-xs font-bold">
-                            Total Old Balance
+                            Sub-total (Promoted)
                           </td>
                           <td className="p-2 text-right text-xs font-bold text-destructive">
-                            {formatCurrency(totalOldBalance)}
+                            {formatCurrency(totalPrevDues)}
                           </td>
                         </tr>
                       </tfoot>
                     </table>
                   </div>
                 )}
+
+                {/* Manual old fee entries (add/edit/delete) */}
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="bg-muted/40 px-3 py-2 border-b border-border">
+                    <p className="text-xs font-bold text-foreground uppercase tracking-wide">
+                      ✏️ Manual Old Fee Entries
+                    </p>
+                  </div>
+                  {oldFeeEntries.length === 0 ? (
+                    <div className="py-6 text-center text-muted-foreground text-sm">
+                      No manual old fee entries.{" "}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={openAddOldFee}
+                          className="text-primary underline hover:opacity-80"
+                        >
+                          Add one
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/30">
+                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
+                              Session
+                            </th>
+                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
+                              Month
+                            </th>
+                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
+                              Heading
+                            </th>
+                            <th className="text-right p-2 text-xs font-medium text-muted-foreground">
+                              Amount
+                            </th>
+                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
+                              Remarks
+                            </th>
+                            {isAdmin && (
+                              <th className="p-2 w-16 text-xs font-medium text-muted-foreground text-center">
+                                Actions
+                              </th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {oldFeeEntries.map((entry) => (
+                            <tr
+                              key={entry.id}
+                              className="border-t border-border hover:bg-muted/20"
+                              data-ocid={`old-fee-row-${entry.id}`}
+                            >
+                              <td className="p-2 text-xs font-medium">
+                                {entry.sessionLabel}
+                              </td>
+                              <td className="p-2 text-xs">{entry.month}</td>
+                              <td className="p-2 text-xs">
+                                {entry.headingName}
+                              </td>
+                              <td className="p-2 text-right text-xs font-semibold text-destructive">
+                                {formatCurrency(entry.amount)}
+                              </td>
+                              <td className="p-2 text-xs text-muted-foreground max-w-[120px] truncate">
+                                {entry.remarks || "—"}
+                              </td>
+                              {isAdmin && (
+                                <td className="p-2">
+                                  <div className="flex gap-1 justify-center">
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditOldFee(entry)}
+                                      className="text-primary hover:opacity-70 transition-opacity"
+                                      aria-label="Edit entry"
+                                      data-ocid={`old-fee-edit-${entry.id}`}
+                                    >
+                                      <Pencil className="w-3.5 h-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        deleteOldFeeEntry(entry.id)
+                                      }
+                                      className="text-destructive hover:opacity-70 transition-opacity"
+                                      aria-label="Delete entry"
+                                      data-ocid={`old-fee-delete-${entry.id}`}
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr className="border-t-2 border-border bg-muted/30">
+                            <td
+                              colSpan={isAdmin ? 3 : 3}
+                              className="p-2 text-xs font-bold"
+                            >
+                              Sub-total (Manual)
+                            </td>
+                            <td className="p-2 text-right text-xs font-bold text-destructive">
+                              {formatCurrency(totalManualOldFees)}
+                            </td>
+                            <td colSpan={isAdmin ? 2 : 1} />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                {/* Grand total */}
+                <div className="bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-3 flex items-center justify-between">
+                  <span className="text-sm font-bold text-foreground">
+                    Total Old Balance (feeds into Net Payable)
+                  </span>
+                  <span className="text-base font-bold text-destructive">
+                    {formatCurrency(totalOldBalance)}
+                  </span>
+                </div>
               </div>
             </TabsContent>
 
@@ -1710,6 +2017,172 @@ export default function StudentDetailModal({
               </Button>
               <Button variant="destructive" onClick={handleDiscontinue}>
                 Confirm Discontinue
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Old Fee Add/Edit Modal */}
+      {oldFeeFormOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold font-display text-foreground">
+                {editingOldFeeId ? "Edit Old Fee Entry" : "Add Old Fee Entry"}
+              </h3>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setOldFeeFormOpen(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  Session Label{" "}
+                  <span className="text-muted-foreground font-normal">
+                    e.g. 2024-25
+                  </span>
+                </Label>
+                <Input
+                  value={oldFeeFormData.sessionLabel}
+                  onChange={(e) =>
+                    setOldFeeFormData((p) => ({
+                      ...p,
+                      sessionLabel: e.target.value,
+                    }))
+                  }
+                  placeholder="2024-25"
+                  data-ocid="old-fee-session-input"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Month</Label>
+                  <Select
+                    value={oldFeeFormData.month}
+                    onValueChange={(v) =>
+                      setOldFeeFormData((p) => ({ ...p, month: v }))
+                    }
+                  >
+                    <SelectTrigger data-ocid="old-fee-month-select">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MONTHS.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Amount (₹)</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={oldFeeFormData.amount}
+                    onChange={(e) =>
+                      setOldFeeFormData((p) => ({
+                        ...p,
+                        amount: e.target.value,
+                      }))
+                    }
+                    placeholder="0"
+                    data-ocid="old-fee-amount-input"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  Fee Heading{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (select or type)
+                  </span>
+                </Label>
+                <div className="flex gap-2">
+                  {feeHeadings.length > 0 ? (
+                    <Select
+                      value={
+                        feeHeadings.some(
+                          (h) => h.name === oldFeeFormData.headingName,
+                        )
+                          ? oldFeeFormData.headingName
+                          : "__other__"
+                      }
+                      onValueChange={(v) => {
+                        if (v !== "__other__") {
+                          setOldFeeFormData((p) => ({ ...p, headingName: v }));
+                        } else {
+                          setOldFeeFormData((p) => ({ ...p, headingName: "" }));
+                        }
+                      }}
+                    >
+                      <SelectTrigger
+                        className="flex-1"
+                        data-ocid="old-fee-heading-select"
+                      >
+                        <SelectValue placeholder="Select heading" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {feeHeadings.map((h) => (
+                          <SelectItem key={h.id} value={h.name}>
+                            {h.name}
+                          </SelectItem>
+                        ))}
+                        <SelectItem value="__other__">
+                          Other (type below)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : null}
+                  <Input
+                    value={oldFeeFormData.headingName}
+                    onChange={(e) =>
+                      setOldFeeFormData((p) => ({
+                        ...p,
+                        headingName: e.target.value,
+                      }))
+                    }
+                    placeholder="e.g. Tuition Fee"
+                    className={feeHeadings.length > 0 ? "w-36" : "flex-1"}
+                    data-ocid="old-fee-heading-input"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">
+                  Remarks{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
+                <Input
+                  value={oldFeeFormData.remarks}
+                  onChange={(e) =>
+                    setOldFeeFormData((p) => ({
+                      ...p,
+                      remarks: e.target.value,
+                    }))
+                  }
+                  placeholder="Any notes"
+                  data-ocid="old-fee-remarks-input"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end pt-1">
+              <Button
+                variant="outline"
+                onClick={() => setOldFeeFormOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button onClick={saveOldFeeEntry} data-ocid="old-fee-save-btn">
+                {editingOldFeeId ? "Update Entry" : "Add Entry"}
               </Button>
             </div>
           </div>

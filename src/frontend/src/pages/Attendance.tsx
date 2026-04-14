@@ -1,6 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import {
   ClipboardList,
+  Cpu,
   Fingerprint,
   Monitor,
   PieChart,
@@ -8,6 +9,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import AttendanceSummary from "./attendance/AttendanceSummary";
+import BiometricDevices from "./attendance/BiometricDevices";
 import ManualAttendance from "./attendance/ManualAttendance";
 import QRAttendance from "./attendance/QRAttendance";
 import RFIDAttendance from "./attendance/RFIDAttendance";
@@ -19,6 +21,7 @@ const TABS = [
   { id: "qr", label: "QR Scanner", icon: QrCode },
   { id: "display", label: "Welcome Display", icon: Monitor },
   { id: "summary", label: "Summary", icon: PieChart },
+  { id: "biometric", label: "Biometric Devices", icon: Cpu },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -75,7 +78,9 @@ export default function Attendance() {
                       ? "QR"
                       : tab.id === "display"
                         ? "Display"
-                        : "Summary"}
+                        : tab.id === "biometric"
+                          ? "Devices"
+                          : "Summary"}
               </span>
               {tab.id === "display" && (
                 <Badge
@@ -83,6 +88,14 @@ export default function Attendance() {
                   className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
                 >
                   TV
+                </Badge>
+              )}
+              {tab.id === "biometric" && (
+                <Badge
+                  variant="secondary"
+                  className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
+                >
+                  ESSL
                 </Badge>
               )}
             </button>
@@ -103,6 +116,7 @@ export default function Attendance() {
         {activeTab === "summary" && (
           <AttendanceSummary date={date} onDateChange={setDate} />
         )}
+        {activeTab === "biometric" && <BiometricDevices />}
       </div>
     </div>
   );
