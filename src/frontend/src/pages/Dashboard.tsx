@@ -15,6 +15,7 @@ import {
   Plus,
   RefreshCw,
   Server,
+  ShieldAlert,
   Users,
   WifiOff,
   X,
@@ -90,6 +91,7 @@ function SyncBar() {
     triggerSync,
     isPolling,
     serverInfo,
+    needsAuth,
   } = useSync();
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -128,14 +130,40 @@ function SyncBar() {
       badgeCls: "bg-destructive/10 text-destructive border-destructive/30",
       badgeText: "Offline",
     },
+    auth_error: {
+      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-300/60",
+      icon: <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />,
+      label: "Server auth required — open Settings to fix",
+      labelClass: "text-xs font-medium text-amber-700",
+      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
+      badgeText: "Auth Required",
+    },
   };
 
-  const cfg = barConfig[mode];
+  const cfg = barConfig[mode] ?? barConfig.offline;
+
+  // Navigate to settings when auth is required
+  function handleAuthClick() {
+    const event = new CustomEvent("erp:navigate", { detail: "settings" });
+    window.dispatchEvent(event);
+  }
 
   return (
     <div
       className={`${cfg.bg} px-6 py-2 flex items-center gap-2`}
       data-ocid="dashboard.sync_status"
+      style={{ cursor: needsAuth ? "pointer" : "default" }}
+      onClick={needsAuth ? handleAuthClick : undefined}
+      onKeyDown={
+        needsAuth
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") handleAuthClick();
+            }
+          : undefined
+      }
+      role={needsAuth ? "button" : undefined}
+      tabIndex={needsAuth ? 0 : undefined}
+      title={needsAuth ? "Click to open Settings and authenticate" : undefined}
     >
       {cfg.icon}
       <span className={cfg.labelClass}>{cfg.label}</span>
@@ -164,8 +192,23 @@ function SyncBar() {
         </span>
       )}
 
+      {needsAuth && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="ml-2 h-6 text-[10px] px-2 border-amber-500/50 text-amber-700 hover:bg-amber-500/10"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleAuthClick();
+          }}
+          data-ocid="dashboard.sync_auth.button"
+        >
+          Fix in Settings
+        </Button>
+      )}
+
       {/* Refresh button */}
-      {mode !== "local" && (
+      {mode !== "local" && !needsAuth && (
         <button
           type="button"
           onClick={() => void triggerSync()}
@@ -201,6 +244,11 @@ function SyncBar() {
                   <Info className="w-3.5 h-3.5 text-muted-foreground" />{" "}
                   Device-Local Storage
                 </>
+              ) : mode === "auth_error" ? (
+                <>
+                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Server
+                  Auth Required
+                </>
               ) : mode === "offline" ? (
                 <>
                   <WifiOff className="w-3.5 h-3.5 text-destructive" /> Server
@@ -228,6 +276,12 @@ function SyncBar() {
                 Data is stored in this browser only. Configure a MySQL server in
                 Settings → Data Management → Database Server to sync across all
                 devices.
+              </p>
+            ) : mode === "auth_error" ? (
+              <p className="text-muted-foreground leading-relaxed">
+                The server rejected the request with "Super Admin only". Go to{" "}
+                <strong>Settings → Data Management → Database Server</strong>{" "}
+                and click <strong>Authenticate Now</strong> to fix this.
               </p>
             ) : mode === "offline" ? (
               <p className="text-muted-foreground leading-relaxed">

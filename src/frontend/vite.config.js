@@ -37,6 +37,10 @@ export default defineConfig({
       clientPort: 443,
       protocol: "wss",
     },
+    headers: {
+      "X-Frame-Options": "ALLOWALL",
+      "Access-Control-Allow-Origin": "*",
+    },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:4943",

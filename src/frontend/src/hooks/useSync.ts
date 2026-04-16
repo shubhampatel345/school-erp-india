@@ -3,6 +3,9 @@
  *
  * Polls /api/sync/status every 5 s when an API URL is configured.
  * Returns live connection state consumed by Dashboard and other components.
+ *
+ * Special handling: if the server returns "Super Admin only" the hook
+ * sets needsAuth=true and backs off for 30 s instead of retrying every 5 s.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,7 +19,8 @@ export type SyncMode =
   | "local" // no API URL set — purely localStorage
   | "connected" // API reachable
   | "syncing" // in-flight request
-  | "offline"; // API configured but unreachable
+  | "offline" // API configured but unreachable
+  | "auth_error"; // API reachable but auth rejected (Super Admin only)
 
 export interface SyncState {
   mode: SyncMode;
@@ -24,6 +28,7 @@ export interface SyncState {
   lastSyncError: string | null;
   isSynced: boolean;
   isPolling: boolean;
+  needsAuth: boolean;
   serverInfo: {
     version?: string;
     db_version?: string;
@@ -34,6 +39,7 @@ export interface SyncState {
 }
 
 const POLL_INTERVAL_MS = 5_000;
+const AUTH_BACKOFF_MS = 30_000;
 const LS_LAST_SYNC_KEY = "shubh_erp_last_sync_time";
 
 function persistLastSync(ts: Date) {
@@ -55,49 +61,101 @@ function loadLastSync(): Date | null {
   }
 }
 
+function isSuperAdminOnlyError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return (
+    lower.includes("super admin") ||
+    lower.includes("superadmin") ||
+    lower.includes("super_admin") ||
+    lower.includes("unauthorized") ||
+    lower.includes("unauthenticated") ||
+    lower.includes("forbidden")
+  );
+}
+
 export function useSync(): SyncState {
   const [mode, setMode] = useState<SyncMode>(() =>
     isApiConfigured() ? "syncing" : "local",
   );
   const [lastSyncTime, setLastSyncTime] = useState<Date | null>(loadLastSync);
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
+  const [needsAuth, setNeedsAuth] = useState(false);
   const [serverInfo, setServerInfo] = useState<SyncState["serverInfo"]>(null);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(true);
 
+  // Stable ref to restart polling at a given interval
+  const restartPoll = useCallback(
+    (intervalMs: number, checkFn: () => Promise<void>) => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      intervalRef.current = setInterval(() => {
+        void checkFn();
+      }, intervalMs);
+    },
+    [],
+  );
+
   const runCheck = useCallback(async () => {
     if (!isApiConfigured()) {
       setMode("local");
+      setNeedsAuth(false);
       return;
     }
     setMode("syncing");
     try {
       const result: SyncStatusResponse = await fetchSyncStatus();
       if (!activeRef.current) return;
+
       if (result.status === "ok") {
         const now = new Date();
         setMode("connected");
         setLastSyncTime(now);
         setLastSyncError(null);
+        setNeedsAuth(false);
         persistLastSync(now);
         setServerInfo({
           version: result.version,
           db_version: result.db_version,
           last_backup: result.last_backup,
         });
+        // Restore normal poll interval after auth recovery
+        restartPoll(POLL_INTERVAL_MS, runCheck);
       } else {
-        setMode("offline");
-        setLastSyncError(result.message ?? "Server returned an error");
+        const msg = result.message ?? "Server returned an error";
+        if (isSuperAdminOnlyError(msg)) {
+          setMode("auth_error");
+          setNeedsAuth(true);
+          setLastSyncError(
+            "Server requires Super Admin authentication. Go to Settings → Data Management → Database Server to authenticate.",
+          );
+          restartPoll(AUTH_BACKOFF_MS, runCheck);
+        } else {
+          setMode("offline");
+          setNeedsAuth(false);
+          setLastSyncError(msg);
+        }
       }
     } catch (err) {
       if (!activeRef.current) return;
-      setMode("offline");
-      setLastSyncError(
-        err instanceof Error ? err.message : "Connection failed",
-      );
+      const msg = err instanceof Error ? err.message : "Connection failed";
+      if (isSuperAdminOnlyError(msg)) {
+        setMode("auth_error");
+        setNeedsAuth(true);
+        setLastSyncError(
+          "Server requires Super Admin authentication. Go to Settings → Data Management → Database Server to authenticate.",
+        );
+        restartPoll(AUTH_BACKOFF_MS, runCheck);
+      } else {
+        setMode("offline");
+        setNeedsAuth(false);
+        setLastSyncError(msg);
+      }
     }
-  }, []);
+  }, [restartPoll]);
 
   // Start/stop polling based on whether API is configured
   useEffect(() => {
@@ -108,7 +166,6 @@ export function useSync(): SyncState {
       return;
     }
 
-    // Initial check immediately
     void runCheck();
 
     intervalRef.current = setInterval(() => {
@@ -124,25 +181,33 @@ export function useSync(): SyncState {
     };
   }, [runCheck]);
 
-  // Re-evaluate when localStorage API URL changes (storage event from other tabs)
+  // Re-evaluate when localStorage API URL or JWT changes (storage event from other tabs)
   useEffect(() => {
     function handleStorageChange(e: StorageEvent) {
       if (e.key === "shubh_erp_api_url") {
         if (e.newValue) {
+          restartPoll(POLL_INTERVAL_MS, runCheck);
           void runCheck();
         } else {
-          setMode("local");
-          setLastSyncError(null);
           if (intervalRef.current !== null) {
             clearInterval(intervalRef.current);
             intervalRef.current = null;
           }
+          setMode("local");
+          setLastSyncError(null);
+          setNeedsAuth(false);
         }
+      }
+      // If JWT was updated (e.g. authenticated from Settings), retry immediately
+      if (e.key === "shubh_erp_jwt_token" && e.newValue) {
+        setNeedsAuth(false);
+        restartPoll(POLL_INTERVAL_MS, runCheck);
+        void runCheck();
       }
     }
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
-  }, [runCheck]);
+  }, [runCheck, restartPoll]);
 
   return {
     mode,
@@ -150,6 +215,7 @@ export function useSync(): SyncState {
     lastSyncError,
     isSynced: mode === "connected",
     isPolling: mode === "syncing",
+    needsAuth,
     serverInfo,
     triggerSync: runCheck,
   };

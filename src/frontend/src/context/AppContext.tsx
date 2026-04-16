@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import type { AppUser, Notification, Session, UserRole } from "../types";
+import { backendLogin, clearTokens, isApiConfigured } from "../utils/api";
 import { generateId, ls } from "../utils/localStorage";
 
 interface AppContextValue {
@@ -132,6 +133,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (password !== validPw) return false;
       setCurrentUser(SUPER_ADMIN);
       ls.set("current_user", SUPER_ADMIN);
+      // Attempt backend JWT login in background — failure is silent, local auth still works
+      if (isApiConfigured()) {
+        void backendLogin(username, password);
+      }
       return true;
     }
 
@@ -261,6 +266,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setCurrentUser(null);
     ls.remove("current_user");
+    clearTokens();
   }, []);
 
   const changePassword = useCallback(

@@ -8,9 +8,12 @@ import {
   HardDrive,
   HardDriveDownload,
   Info,
+  KeyRound,
   Loader2,
+  Lock,
   RefreshCcw,
   Server,
+  ShieldCheck,
   Trash2,
   Upload,
   WifiOff,
@@ -33,7 +36,12 @@ import {
 import { useApp } from "../../context/AppContext";
 import {
   type ConnectionTestResult,
+  backendLogin,
+  clearTokens,
   getApiUrl,
+  getJwt,
+  getJwtRole,
+  isJwtExpired,
   migrateLocalData,
   setApiUrl,
   testConnection,
@@ -181,6 +189,20 @@ export default function DataManagement() {
   const [isTesting, setIsTesting] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [savedApiUrl, setSavedApiUrl] = useState(getApiUrl);
+
+  // ── Auth panel state ──────────────────────────────────
+  const [authPassword, setAuthPassword] = useState("");
+  const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [authStatus, setAuthStatus] = useState<"idle" | "success" | "error">(
+    "idle",
+  );
+  const [authError, setAuthError] = useState("");
+
+  // Derive current auth state from JWT
+  const jwtRole = getJwtRole();
+  const jwtPresent = !!getJwt() && !isJwtExpired();
+  const isServerAuthenticated =
+    jwtPresent && (jwtRole === "super_admin" || jwtRole === "superadmin");
 
   useEffect(() => {
     setHistory(getBackupHistory());
@@ -359,6 +381,9 @@ export default function DataManagement() {
 
   // ── Database Server handlers ──────────────────────────
 
+  const urlLooksInvalid =
+    apiUrlInput.length > 0 && !/^https?:\/\/.+/.test(apiUrlInput);
+
   async function handleTestConnection() {
     setIsTesting(true);
     setTestResult(null);
@@ -380,6 +405,41 @@ export default function DataManagement() {
     } else {
       toast.info("API server URL cleared. Running in local-only mode.");
     }
+  }
+
+  async function handleAuthenticate() {
+    if (!authPassword) {
+      setAuthError("Please enter your server Super Admin password.");
+      return;
+    }
+    setIsAuthenticating(true);
+    setAuthStatus("idle");
+    setAuthError("");
+    const result = await backendLogin("superadmin", authPassword);
+    setIsAuthenticating(false);
+    if (result.success) {
+      setAuthStatus("success");
+      setAuthPassword("");
+      toast.success("Authenticated as Super Admin on server.");
+      // Dispatch storage event so useSync in other components can react
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: "shubh_erp_jwt_token",
+          newValue: localStorage.getItem("shubh_erp_jwt_token"),
+        }),
+      );
+    } else {
+      setAuthStatus("error");
+      setAuthError(result.error ?? "Authentication failed. Check password.");
+      toast.error(result.error ?? "Authentication failed");
+    }
+  }
+
+  function handleSignOut() {
+    clearTokens();
+    setAuthStatus("idle");
+    setAuthError("");
+    toast.info("Signed out from server. Sync will require re-authentication.");
   }
 
   async function handleMigrateData() {
@@ -498,6 +558,16 @@ export default function DataManagement() {
                 Leave blank to use local-only mode. URL should point to the root
                 of your PHP API.
               </p>
+              {urlLooksInvalid && (
+                <div className="flex items-start gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2">
+                  <AlertTriangle className="w-4 h-4 text-yellow-600 mt-0.5 shrink-0" />
+                  <p className="text-xs text-yellow-800 dark:text-yellow-300">
+                    URL looks invalid — it must start with{" "}
+                    <code className="font-mono">http://</code> or{" "}
+                    <code className="font-mono">https://</code>.
+                  </p>
+                </div>
+              )}
             </div>
 
             {/* Test Connection */}
@@ -549,6 +619,146 @@ export default function DataManagement() {
               )}
             </div>
           </Card>
+
+          {/* ── Server Authentication Card ── */}
+          {savedApiUrl && (
+            <Card className="p-5 space-y-4">
+              <div className="flex items-center gap-2 mb-1">
+                <Lock className="w-4 h-4 text-primary" />
+                <h3 className="font-semibold text-foreground">
+                  Server Authentication
+                </h3>
+                {isServerAuthenticated ? (
+                  <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
+                    Authenticated
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-yellow-500/50 text-yellow-700 bg-yellow-500/10"
+                  >
+                    Not Authenticated
+                  </Badge>
+                )}
+              </div>
+
+              {isServerAuthenticated ? (
+                /* Authenticated state */
+                <div className="space-y-3">
+                  <div
+                    className="flex items-center gap-3 rounded-lg border border-emerald-500/30 bg-emerald-500/8 px-4 py-3"
+                    data-ocid="server.auth.success_state"
+                  >
+                    <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0" />
+                    <div>
+                      <p className="text-sm font-semibold text-emerald-700">
+                        Authenticated as Super Admin ✓
+                      </p>
+                      <p className="text-xs text-emerald-600 mt-0.5">
+                        All sync and configuration operations are authorised.
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSignOut}
+                    data-ocid="server.auth.signout.button"
+                    className="text-muted-foreground"
+                  >
+                    Sign out from server
+                  </Button>
+                </div>
+              ) : (
+                /* Not-authenticated state */
+                <div className="space-y-3">
+                  <div
+                    className="flex items-start gap-3 rounded-lg border border-yellow-500/40 bg-yellow-500/8 px-4 py-3"
+                    data-ocid="server.auth.warning_state"
+                  >
+                    <AlertTriangle className="w-5 h-5 text-yellow-600 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-semibold text-yellow-800 dark:text-yellow-300">
+                        Not authenticated with server
+                      </p>
+                      <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-0.5">
+                        Sync and configuration require Super Admin login on the
+                        server. Enter your server password below to fix the{" "}
+                        <code className="bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">
+                          Super Admin only
+                        </code>{" "}
+                        error.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <div className="flex-1 space-y-1">
+                      <Label htmlFor="auth-password" className="text-xs">
+                        Server Super Admin Password
+                      </Label>
+                      <Input
+                        id="auth-password"
+                        type="password"
+                        placeholder="Enter server password"
+                        value={authPassword}
+                        onChange={(e) => {
+                          setAuthPassword(e.target.value);
+                          setAuthError("");
+                          setAuthStatus("idle");
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") void handleAuthenticate();
+                        }}
+                        data-ocid="server.auth.password.input"
+                        className="max-w-xs"
+                      />
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        onClick={() => void handleAuthenticate()}
+                        disabled={isAuthenticating || !authPassword}
+                        data-ocid="server.auth.authenticate.button"
+                      >
+                        {isAuthenticating ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Authenticating…
+                          </>
+                        ) : (
+                          <>
+                            <KeyRound className="w-4 h-4 mr-2" />
+                            Authenticate Now
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {authStatus === "error" && authError && (
+                    <div
+                      className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2"
+                      data-ocid="server.auth.error_state"
+                    >
+                      <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+                      <p className="text-sm text-destructive">{authError}</p>
+                    </div>
+                  )}
+                  {authStatus === "success" && (
+                    <div
+                      className="flex items-start gap-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2"
+                      data-ocid="server.auth.success_state"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 mt-0.5 shrink-0" />
+                      <p className="text-sm text-emerald-700">
+                        Authenticated as Super Admin. Sync is now active.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Current storage mode summary */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

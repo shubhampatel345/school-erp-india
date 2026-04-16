@@ -234,7 +234,21 @@ export default function SystemUpdate() {
     try {
       const resp = await fetch(MANIFEST_URL, { cache: "no-store" });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-      const manifest: VersionManifest = await resp.json();
+      // Guard against HTML error pages returned by proxy/CDN
+      const ct = resp.headers.get("content-type") ?? "";
+      if (ct.includes("text/html") || ct.includes("application/xhtml")) {
+        throw new Error(
+          "Could not check for updates. Server may be unavailable.",
+        );
+      }
+      let manifest: VersionManifest;
+      try {
+        manifest = (await resp.json()) as VersionManifest;
+      } catch {
+        throw new Error(
+          "Could not check for updates. Invalid response from update server.",
+        );
+      }
       const isUpToDate = !semverGt(manifest.version, CURRENT_VERSION);
       result = {
         checkedAt,
@@ -245,7 +259,6 @@ export default function SystemUpdate() {
         error: null,
       };
     } catch (err) {
-      void err;
       result = {
         checkedAt,
         fetchedVersion: null,
@@ -253,7 +266,9 @@ export default function SystemUpdate() {
         changelog: [],
         isUpToDate: null,
         error:
-          "Could not connect to update server. Check your internet connection.",
+          err instanceof Error
+            ? err.message
+            : "Could not connect to update server. Check your internet connection.",
       };
     }
     const updated = [result, ...history].slice(0, MAX_HISTORY);

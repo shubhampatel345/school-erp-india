@@ -3,15 +3,28 @@
  * SHUBH SCHOOL ERP — Database Configuration
  * PDO singleton, utf8mb4 charset, environment-driven credentials.
  *
- * Deployment: copy this file to your cPanel server and update the constants
- * below (or set them as PHP environment variables for better security).
+ * cPanel MySQL Setup for SHUBH SCHOOL ERP
+ * ----------------------------------------
+ * Database Name : psmkgsco_shubherp_db
+ * Database User : psmkgsco_shubherp_user
+ *
+ * These credentials match the cPanel MySQL database created for SHUBH SCHOOL ERP
+ * on the psmkgsco hosting account. All tables are created automatically on first
+ * run via the /api/install.php endpoint.
+ *
+ * Security Note : DB_PASS (and all other credentials) can be overridden at runtime
+ * by setting the corresponding PHP environment variable (DB_HOST, DB_PORT, DB_NAME,
+ * DB_USER, DB_PASS) in your cPanel PHP environment or .htaccess — the getenv()
+ * pattern below will always prefer the environment variable over the hardcoded default.
+ *
+ * Deployment: copy this file to your cPanel server; credentials are ready to use.
  */
 
 define('DB_HOST',     getenv('DB_HOST')     ?: 'localhost');
 define('DB_PORT',     getenv('DB_PORT')     ?: '3306');
-define('DB_NAME',     getenv('DB_NAME')     ?: 'shubh_erp');
-define('DB_USER',     getenv('DB_USER')     ?: 'root');
-define('DB_PASS',     getenv('DB_PASS')     ?: '');
+define('DB_NAME',     getenv('DB_NAME')     ?: 'psmkgsco_shubherp_db');
+define('DB_USER',     getenv('DB_USER')     ?: 'psmkgsco_shubherp_user');
+define('DB_PASS',     getenv('DB_PASS')     ?: 'Shubh@420');
 define('DB_CHARSET',  'utf8mb4');
 
 // JWT secret — change this to a long random string in production
