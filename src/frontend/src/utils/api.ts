@@ -15,10 +15,53 @@ const KEY_API_URL = "shubh_erp_api_url";
 const KEY_JWT = "shubh_erp_jwt_token";
 const KEY_JWT_REFRESH = "shubh_erp_jwt_refresh_token";
 
+/** Production API default — used when no override is saved in localStorage */
+const DEFAULT_API_URL = "https://shubh.psmkgs.com/api";
+
+// ── URL Migration (auto-correct old wrong URLs on module load) ────────────────
+// Covers all known bad URL patterns: missing subdomain, bare domain, http, etc.
+(function migrateApiUrl() {
+  try {
+    const stored = localStorage.getItem(KEY_API_URL);
+    if (!stored) return;
+    const needsFix =
+      stored === "https://psmkgs.com/api" ||
+      stored === "https://psmkgs.com" ||
+      stored === "http://psmkgs.com/api" ||
+      stored === "http://psmkgs.com" ||
+      stored === "psmkgs.com/api" ||
+      stored === "psmkgs.com" ||
+      stored.startsWith("https://psmkgs.com/") ||
+      stored.startsWith("http://psmkgs.com/") ||
+      // catches "psmkgs.com" without protocol prefix
+      (stored.includes("psmkgs.com") && !stored.includes("shubh.psmkgs.com"));
+    if (needsFix) {
+      localStorage.setItem(KEY_API_URL, DEFAULT_API_URL);
+    }
+  } catch {
+    // ignore — localStorage may not be available
+  }
+})();
+
 // ── URL helpers ───────────────────────────────────────────
 
 export function getApiUrl(): string {
-  return localStorage.getItem(KEY_API_URL)?.replace(/\/$/, "") ?? "";
+  const stored = localStorage.getItem(KEY_API_URL);
+  if (stored) {
+    // Inline correction on every read — never return a bad URL
+    const clean = stored.replace(/\/$/, "");
+    if (clean.includes("psmkgs.com") && !clean.includes("shubh.psmkgs.com")) {
+      localStorage.setItem(KEY_API_URL, DEFAULT_API_URL);
+      return DEFAULT_API_URL;
+    }
+    return clean;
+  }
+  // Fall back to the production default so the app auto-connects on first load
+  return DEFAULT_API_URL;
+}
+
+export function getDefaultApiUrl(): string {
+  return DEFAULT_API_URL;
 }
 
 export function setApiUrl(url: string) {
@@ -529,13 +572,15 @@ export async function testConnection(
     try {
       data = await safeParseJson<SyncStatusResponse>(res);
     } catch (parseErr) {
+      const errMsg = parseErr instanceof Error ? parseErr.message : "";
+      const isHtml = errMsg.includes("HTML") || errMsg.includes("<!DOCTYPE");
       return {
         connected: false,
         latencyMs,
-        error:
-          parseErr instanceof Error
-            ? parseErr.message
-            : "API files not found. Please upload the api/ folder to your cPanel hosting. See api/README.md for instructions.",
+        error: isHtml
+          ? "Server returned an HTML page. This means either: (1) The api/ folder is not uploaded to cPanel, or (2) The api/.htaccess file is missing. Download your build and upload the public_html/api/ folder to cPanel, then try again."
+          : errMsg ||
+            "API files not found. Please upload the api/ folder to your cPanel hosting. See api/README.md for instructions.",
       };
     }
 

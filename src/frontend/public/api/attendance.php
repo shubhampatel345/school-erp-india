@@ -218,7 +218,7 @@ function att_devices(string $method, ?string $devId, int $schoolId, array $body,
         json_success(null, 'Device updated');
     }
     if ($method === 'DELETE' && $devId) {
-        if ($route['role'] !== 'super_admin') json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE biometric_devices SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$devId, ':sid' => $schoolId]);
         json_success(null, 'Device deleted');
     }

@@ -23,11 +23,8 @@ $schoolId = $route['schoolId'] ?? 1;
 $segments = $route['segments'];
 $action   = $segments[1] ?? 'status';
 
-// Only require super_admin for status (informational), not for run/seed
-// run and seed are public to allow initial database creation
-if ($action === 'status' && $route['role'] !== 'super_admin') {
-    // Allow GET status publicly too — helpful for setup verification
-}
+// migrate/run and migrate/seed are PUBLIC (no auth) for initial database setup.
+// migrate/status is also allowed publicly for setup verification.
 
 try {
     $db = DB::get();
@@ -69,7 +66,8 @@ function migrate_status(string $method, PDO $db): void {
 
 // ── Run Pending Migrations ────────────────────────────────────────────────────
 function migrate_run(string $method, int $schoolId, PDO $db): void {
-    if ($method !== 'POST') json_error('Method not allowed', 405);
+    // Allow both GET and POST so admins can trigger from browser URL too
+    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
 
     // Ensure migrations table
     $db->exec('CREATE TABLE IF NOT EXISTS migrations (
@@ -127,7 +125,7 @@ function migrate_seed(string $method, int $schoolId, array $body, array $route, 
     $chkSA->execute([':u' => $saUser, ':sid' => $schoolId]);
     if (!$chkSA->fetch()) {
         $hash = password_hash($saPass, PASSWORD_BCRYPT, ['cost' => 12]);
-        $db->prepare('INSERT INTO users (school_id, username, password_hash, full_name, role, is_active, created_at, updated_at) VALUES (:sid,:u,:h,"Super Admin","super_admin",1,NOW(),NOW())')
+        $db->prepare('INSERT INTO users (school_id, username, password_hash, full_name, role, is_active, created_at, updated_at) VALUES (:sid,:u,:h,"Super Admin","superadmin",1,NOW(),NOW())')
            ->execute([':sid' => $schoolId, ':u' => $saUser, ':h' => $hash]);
         $seeded[] = 'superadmin user';
     }

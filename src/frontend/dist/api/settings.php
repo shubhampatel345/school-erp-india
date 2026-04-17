@@ -81,7 +81,7 @@ function settings_sessions(string $method, ?string $sessId, ?string $subAct, int
 
     // POST /settings/sessions/:id/promote
     if ($method === 'POST' && $sessId && $subAct === 'promote') {
-        if (!in_array($route['role'], ['super_admin'])) json_error('Only Super Admin can promote sessions', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Only Super Admin can promote sessions', 403);
 
         $fromSessId = (int)$sessId;
         $toSessId   = (int)($body['to_session_id'] ?? 0);
@@ -171,7 +171,7 @@ function settings_sessions(string $method, ?string $sessId, ?string $subAct, int
         json_success(null, 'Session updated');
     }
     if ($method === 'DELETE' && $sessId) {
-        if ($route['role'] !== 'super_admin') json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE sessions SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$sessId, ':sid' => $schoolId]);
         json_success(null, 'Session deleted');
     }
@@ -180,7 +180,7 @@ function settings_sessions(string $method, ?string $sessId, ?string $subAct, int
 
 // ── User Management ───────────────────────────────────────────────────────────
 function settings_users(string $method, ?string $userId, int $schoolId, array $body, array $route): void {
-    if ($route['role'] !== 'super_admin') json_error('Super Admin only', 403);
+    if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Super Admin only', 403);
     $db = DB::get();
 
     if ($method === 'GET') {
@@ -262,7 +262,7 @@ function settings_whatsapp(string $method, ?string $sub, int $schoolId, array $b
         json_success($stmt->fetch() ?: new stdClass());
     }
     if ($method === 'PUT') {
-        if (!in_array($route['role'], ['super_admin'])) json_error('Super Admin only', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Super Admin only', 403);
         $sets = []; $params = [];
         foreach (['whatsapp_app_key', 'whatsapp_auth_key', 'whatsapp_enabled', 'rcs_enabled'] as $f) {
             if (array_key_exists($f, $body)) { $sets[] = "$f=:$f"; $params[":$f"] = $body[$f]; }

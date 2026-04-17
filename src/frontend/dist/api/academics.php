@@ -79,7 +79,7 @@ function academics_crud(string $method, ?string $rowId, string $table, string $e
     }
 
     if ($method === 'DELETE' && $rowId) {
-        if (!in_array($route['role'], ['super_admin','admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
         $db->prepare("UPDATE $table SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid")->execute([':id' => (int)$rowId, ':sid' => $schoolId]);
         json_success(null, ucfirst(rtrim($table, 's')) . ' deleted');
     }

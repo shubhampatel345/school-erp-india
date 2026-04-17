@@ -231,7 +231,7 @@ if ($method === 'PUT' && $studentId) {
 
 // ── DELETE ────────────────────────────────────────────────────────────────────
 if ($method === 'DELETE' && $studentId) {
-    if (!in_array($route['role'], ['super_admin','admin'])) json_error('Forbidden', 403);
+    if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
     $db->prepare('UPDATE students SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')
        ->execute([':id' => $studentId, ':sid' => $schoolId]);
     json_success(null, 'Student deleted');

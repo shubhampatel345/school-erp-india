@@ -99,7 +99,7 @@ function inv_items(string $method, ?string $itemId, int $schoolId, array $body, 
     }
 
     if ($method === 'DELETE' && $itemId) {
-        if (!in_array($route['role'], ['super_admin', 'admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin', 'admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE inventory_items SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')
            ->execute([':id' => (int)$itemId, ':sid' => $schoolId]);
         json_success(null, 'Item deleted');
@@ -174,7 +174,7 @@ function inv_purchases(string $method, ?string $purchId, int $schoolId, array $b
     }
 
     if ($method === 'DELETE' && $purchId) {
-        if (!in_array($route['role'], ['super_admin', 'admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin', 'admin'], true)) json_error('Forbidden', 403);
 
         // Reverse the stock increase
         $p = $db->prepare('SELECT item_id, quantity FROM inventory_purchases WHERE id=:id AND school_id=:sid AND is_deleted=0 LIMIT 1');
@@ -269,7 +269,7 @@ function inv_sales(string $method, ?string $saleId, int $schoolId, array $body, 
     }
 
     if ($method === 'DELETE' && $saleId) {
-        if (!in_array($route['role'], ['super_admin', 'admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin', 'admin'], true)) json_error('Forbidden', 403);
 
         $s = $db->prepare('SELECT item_id, quantity FROM inventory_sales WHERE id=:id AND school_id=:sid AND is_deleted=0 LIMIT 1');
         $s->execute([':id' => (int)$saleId, ':sid' => $schoolId]);

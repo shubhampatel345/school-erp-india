@@ -125,7 +125,7 @@ function hr_staff(string $method, ?string $staffId, int $schoolId, array $body, 
 
     // DELETE /hr/staff/:id
     if ($method === 'DELETE' && $staffId) {
-        if (!in_array($route['role'], ['super_admin','admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE staff SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$staffId, ':sid' => $schoolId]);
         json_success(null, 'Staff deleted');
     }

@@ -73,6 +73,7 @@ function sync_status(string $method, int $schoolId): void {
         'version'     => APP_VERSION,
         'db_version'  => $dbVersion,
         'server_time' => gmdate('c'),
+        'timestamp'   => gmdate('c'),   // alias for TypeScript SyncStatusResponse.timestamp
         'connected'   => $connected,
         'school'      => $school,
         'counts'      => $counts,
@@ -84,7 +85,7 @@ function sync_status(string $method, int $schoolId): void {
 // ── Bulk Push (localStorage → MySQL migration) ────────────────────────────────
 function sync_push(string $method, int $schoolId, array $body, array $route): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if ($route['role'] !== 'super_admin') json_error('Super Admin only', 403);
+    if (!in_array($route['role'], ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
 
     $db = DB::get();
 

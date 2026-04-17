@@ -123,7 +123,7 @@ if ($method === 'POST' && $sub === 'change-password') {
     $user = $stmt->fetch();
     if (!$user) json_error('User not found', 404);
 
-    $isSuperAdmin = ($route['role'] === 'super_admin');
+    $isSuperAdmin = in_array($route['role'], ['superadmin', 'super_admin'], true);
     $isSelf       = ($currentUserId === $targetId);
 
     if (!$isSuperAdmin) {

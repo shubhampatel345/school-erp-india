@@ -137,6 +137,7 @@ $handlers = [
     'backup'     => 'backup.php',
     'sync'       => 'sync.php',
     'migrate'    => 'migrate.php',
+    'data'       => 'data.php',   // generic CRUD for collections
 ];
 
 if ($resource === '' || $resource === 'health') {

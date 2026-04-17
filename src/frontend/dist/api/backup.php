@@ -31,7 +31,7 @@ match ($action) {
 // ── Export all school data ────────────────────────────────────────────────────
 function backup_export(string $method, int $schoolId, array $route): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
-    if (!in_array($route['role'], ['super_admin', 'admin'])) json_error('Forbidden', 403);
+    if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
 
     $db = DB::get();
 
@@ -83,7 +83,7 @@ function backup_export(string $method, int $schoolId, array $route): void {
 // ── Import / Restore ──────────────────────────────────────────────────────────
 function backup_import(string $method, int $schoolId, array $body, array $route): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if ($route['role'] !== 'super_admin') json_error('Super Admin only', 403);
+    if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Super Admin only', 403);
 
     $data = $body['data'] ?? null;
     if (!$data || !isset($data['tables'])) json_error('Invalid backup data — missing tables key', 400);
@@ -162,7 +162,7 @@ function backup_history(string $method, int $schoolId): void {
 // ── Factory Reset ─────────────────────────────────────────────────────────────
 function backup_factory_reset(string $method, int $schoolId, array $body, array $route): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if ($route['role'] !== 'super_admin') json_error('Super Admin only', 403);
+    if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Super Admin only', 403);
 
     // Require 3-step confirmation
     $confirmation = $body['confirmation'] ?? '';
@@ -193,7 +193,7 @@ function backup_factory_reset(string $method, int $schoolId, array $body, array 
             }
         }
         // Reset users except superadmin
-        $db->prepare("DELETE FROM users WHERE school_id=:sid AND role != 'super_admin'")->execute([':sid' => $schoolId]);
+        $db->prepare("DELETE FROM users WHERE school_id=:sid AND role NOT IN ('super_admin','superadmin')")->execute([':sid' => $schoolId]);
         $db->commit();
         json_success(null, 'Factory reset complete. All data has been wiped.');
     } catch (Throwable $e) {

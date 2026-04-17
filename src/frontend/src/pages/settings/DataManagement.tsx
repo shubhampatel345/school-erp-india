@@ -12,6 +12,7 @@ import {
   Loader2,
   Lock,
   RefreshCcw,
+  RotateCcw,
   Server,
   ShieldCheck,
   Trash2,
@@ -39,6 +40,7 @@ import {
   backendLogin,
   clearTokens,
   getApiUrl,
+  getDefaultApiUrl,
   getJwt,
   getJwtRole,
   isJwtExpired,
@@ -182,13 +184,17 @@ export default function DataManagement() {
   }>({ used: 0, quota: 0, supported: false });
 
   // ── Database Server tab state ─────────────────────────
-  const [apiUrlInput, setApiUrlInput] = useState(getApiUrl);
+  const [apiUrlInput, setApiUrlInput] = useState(
+    () => getApiUrl() || getDefaultApiUrl(),
+  );
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(
     null,
   );
   const [isTesting, setIsTesting] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
-  const [savedApiUrl, setSavedApiUrl] = useState(getApiUrl);
+  const [savedApiUrl, setSavedApiUrl] = useState(
+    () => getApiUrl() || getDefaultApiUrl(),
+  );
 
   // ── Auth panel state ──────────────────────────────────
   const [authPassword, setAuthPassword] = useState("");
@@ -202,7 +208,7 @@ export default function DataManagement() {
   const jwtRole = getJwtRole();
   const jwtPresent = !!getJwt() && !isJwtExpired();
   const isServerAuthenticated =
-    jwtPresent && (jwtRole === "super_admin" || jwtRole === "superadmin");
+    jwtPresent && (jwtRole === "superadmin" || jwtRole === "super_admin");
 
   useEffect(() => {
     setHistory(getBackupHistory());
@@ -384,6 +390,11 @@ export default function DataManagement() {
   const urlLooksInvalid =
     apiUrlInput.length > 0 && !/^https?:\/\/.+/.test(apiUrlInput);
 
+  // True when the URL contains "psmkgs.com" but is MISSING the "shubh." subdomain
+  const urlMissingSubdomain =
+    apiUrlInput.includes("psmkgs.com") &&
+    !apiUrlInput.includes("shubh.psmkgs.com");
+
   async function handleTestConnection() {
     setIsTesting(true);
     setTestResult(null);
@@ -410,6 +421,28 @@ export default function DataManagement() {
   async function handleAuthenticate() {
     if (!authPassword) {
       setAuthError("Please enter your server Super Admin password.");
+      return;
+    }
+    // Validate URL before attempting auth — catch the most common misconfiguration
+    const currentUrl = getApiUrl();
+    if (
+      currentUrl.includes("psmkgs.com") &&
+      !currentUrl.includes("shubh.psmkgs.com")
+    ) {
+      setAuthStatus("error");
+      setAuthError(
+        "The API URL appears to be incorrect. It should be https://shubh.psmkgs.com/api — click Reset to fix it.",
+      );
+      return;
+    }
+    if (
+      !currentUrl.startsWith("https://") &&
+      !currentUrl.startsWith("http://")
+    ) {
+      setAuthStatus("error");
+      setAuthError(
+        "The API URL is invalid. It must start with https://. Check the URL field above.",
+      );
       return;
     }
     setIsAuthenticating(true);
@@ -529,11 +562,44 @@ export default function DataManagement() {
               )}
             </div>
 
+            {/* Step-by-step setup guide */}
+            <div className="rounded-lg border border-blue-500/20 bg-blue-500/5 p-4 space-y-2">
+              <p className="text-xs font-semibold text-blue-800 dark:text-blue-300 mb-1">
+                📋 Setup Steps
+              </p>
+              {[
+                {
+                  n: 1,
+                  text: "Enter API URL below (default is pre-filled for your domain)",
+                },
+                {
+                  n: 2,
+                  text: "Upload the api/ folder from your build to cPanel public_html/",
+                },
+                {
+                  n: 3,
+                  text: "Open https://shubh.psmkgs.com/api/migrate/run in browser to create DB tables",
+                },
+                { n: 4, text: "Click Test Connection — should show green" },
+                { n: 5, text: "Authenticate with Super Admin password below" },
+              ].map(({ n, text }) => (
+                <div
+                  key={n}
+                  className="flex items-start gap-2 text-xs text-blue-700 dark:text-blue-400"
+                >
+                  <span className="w-4 h-4 rounded-full bg-blue-500/20 text-blue-700 dark:text-blue-300 font-bold flex items-center justify-center text-[10px] shrink-0 mt-0.5">
+                    {n}
+                  </span>
+                  <span>{text}</span>
+                </div>
+              ))}
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="api-url-input" className="text-sm">
                 Server URL (e.g.{" "}
                 <code className="bg-muted px-1 rounded text-xs">
-                  https://yourschool.com/api
+                  https://shubh.psmkgs.com/api
                 </code>
                 )
               </Label>
@@ -541,11 +607,26 @@ export default function DataManagement() {
                 <Input
                   id="api-url-input"
                   data-ocid="server.api_url.input"
-                  placeholder="https://yourschool.com/api"
+                  placeholder="https://shubh.psmkgs.com/api"
                   value={apiUrlInput}
                   onChange={(e) => setApiUrlInput(e.target.value)}
                   className="font-mono text-sm flex-1"
                 />
+                <Button
+                  variant="outline"
+                  size="icon"
+                  title="Reset to default URL"
+                  onClick={() => {
+                    const def = getDefaultApiUrl();
+                    setApiUrlInput(def);
+                    setApiUrl(def);
+                    setSavedApiUrl(def);
+                    toast.success(`URL reset to default: ${def}`);
+                  }}
+                  data-ocid="server.reset_url.button"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </Button>
                 <Button
                   variant="outline"
                   onClick={handleSaveApiUrl}
@@ -555,8 +636,9 @@ export default function DataManagement() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Leave blank to use local-only mode. URL should point to the root
-                of your PHP API.
+                Default:{" "}
+                <code className="font-mono">https://shubh.psmkgs.com/api</code>
+                {" — "}Leave blank to use local-only mode.
               </p>
               {urlLooksInvalid && (
                 <div className="flex items-start gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2">
@@ -565,6 +647,18 @@ export default function DataManagement() {
                     URL looks invalid — it must start with{" "}
                     <code className="font-mono">http://</code> or{" "}
                     <code className="font-mono">https://</code>.
+                  </p>
+                </div>
+              )}
+              {urlMissingSubdomain && !urlLooksInvalid && (
+                <div className="flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 mt-0.5 shrink-0" />
+                  <p className="text-xs text-red-800 dark:text-red-300">
+                    The API URL appears to be incorrect. It should be{" "}
+                    <code className="font-mono">
+                      https://shubh.psmkgs.com/api
+                    </code>{" "}
+                    — click the <strong>Reset</strong> button to fix it.
                   </p>
                 </div>
               )}
@@ -613,7 +707,15 @@ export default function DataManagement() {
                   <span>
                     {testResult.connected
                       ? `Connected · ${testResult.latencyMs}ms${testResult.db_version ? ` · MySQL ${testResult.db_version}` : ""}`
-                      : testResult.error}
+                      : testResult.error?.includes("HTML") ||
+                          testResult.error?.includes("api/ folder") ||
+                          testResult.error?.includes("htaccess") ||
+                          testResult.error?.includes(".htaccess")
+                        ? "Server returned an HTML page. This means either: (1) The api/ folder is not uploaded to cPanel, or (2) The api/.htaccess file is missing. Download your build and upload the public_html/api/ folder to cPanel, then try again."
+                        : testResult.error?.includes("Failed to fetch") ||
+                            testResult.error?.includes("Network")
+                          ? "Cannot reach server. Check the URL and ensure cPanel is reachable."
+                          : testResult.error}
                   </span>
                 </div>
               )}
@@ -682,12 +784,14 @@ export default function DataManagement() {
                         Not authenticated with server
                       </p>
                       <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-0.5">
-                        Sync and configuration require Super Admin login on the
-                        server. Enter your server password below to fix the{" "}
+                        Enter your server Super Admin password to fix the{" "}
                         <code className="bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">
                           Super Admin only
                         </code>{" "}
-                        error.
+                        sync error. Default password:{" "}
+                        <code className="bg-yellow-100 dark:bg-yellow-900/50 px-1 rounded">
+                          admin123
+                        </code>
                       </p>
                     </div>
                   </div>
@@ -741,7 +845,21 @@ export default function DataManagement() {
                       data-ocid="server.auth.error_state"
                     >
                       <XCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
-                      <p className="text-sm text-destructive">{authError}</p>
+                      <div>
+                        <p className="text-sm text-destructive">{authError}</p>
+                        {(authError.includes("HTML") ||
+                          authError.includes("error page")) && (
+                          <p className="text-xs text-destructive/80 mt-1">
+                            The PHP API backend is not installed at this URL.
+                            Upload the <code className="font-mono">api/</code>{" "}
+                            folder to{" "}
+                            <code className="font-mono">public_html/</code> on
+                            cPanel, then visit{" "}
+                            <code className="font-mono">/api/migrate/run</code>{" "}
+                            to set up the database.
+                          </p>
+                        )}
+                      </div>
                     </div>
                   )}
                   {authStatus === "success" && (

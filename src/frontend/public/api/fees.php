@@ -57,7 +57,7 @@ function fees_headings(string $method, ?string $hId, int $schoolId, array $body,
         json_success(null, 'Fee heading updated');
     }
     if ($method === 'DELETE' && $hId) {
-        if ($route['role'] !== 'super_admin') json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE fee_heads SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$hId, ':sid' => $schoolId]);
         json_success(null, 'Fee heading deleted');
     }
@@ -77,7 +77,7 @@ function fees_plan(string $method, ?string $planId, int $schoolId, array $body, 
         json_success($stmt->fetchAll());
     }
     if (in_array($method, ['POST','PUT'])) {
-        if ($route['role'] !== 'super_admin') json_error('Only Super Admin can edit fee plans', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Only Super Admin can edit fee plans', 403);
         $db->prepare('INSERT INTO fees_plan (school_id, session_id, class_id, section_id, fee_head_id, monthly_amount, is_deleted, created_by, created_at, updated_at) VALUES (:sid,:sess,:cid,:secid,:fhid,:amt,0,:by,NOW(),NOW()) ON DUPLICATE KEY UPDATE monthly_amount=:amt, is_deleted=0, updated_at=NOW()')
            ->execute([':sid' => $schoolId, ':sess' => $body['session_id'] ?? null, ':cid' => (int)($body['class_id'] ?? 0), ':secid' => isset($body['section_id']) ? (int)$body['section_id'] : null, ':fhid' => (int)($body['fee_head_id'] ?? 0), ':amt' => (float)($body['monthly_amount'] ?? 0), ':by' => $route['userId']]);
         json_success(null, 'Fee plan saved');
@@ -177,7 +177,7 @@ function fees_receipt(string $method, ?string $rcptId, int $schoolId, array $bod
         json_success($rcpt);
     }
     if ($method === 'PUT') {
-        if (!in_array($route['role'], ['super_admin','admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
         $fields = ['payment_date','months_paid','net_fee','paid_amount','payment_mode','other_fee_amount','other_fee_desc'];
         $sets = []; $params = [];
         foreach ($fields as $f) {
@@ -189,7 +189,7 @@ function fees_receipt(string $method, ?string $rcptId, int $schoolId, array $bod
         json_success(null, 'Receipt updated');
     }
     if ($method === 'DELETE') {
-        if ($route['role'] !== 'super_admin') json_error('Only Super Admin can delete receipts', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Only Super Admin can delete receipts', 403);
         $r = $db->prepare('SELECT student_id, session_id FROM fee_receipts WHERE id=:id AND school_id=:sid AND is_deleted=0 LIMIT 1');
         $r->execute([':id' => $rid, ':sid' => $schoolId]);
         $rcpt = $r->fetch();
@@ -299,7 +299,7 @@ function fees_accounts(string $method, ?string $accId, int $schoolId, array $bod
         json_success(null, 'Account updated');
     }
     if ($method === 'DELETE' && $accId) {
-        if ($route['role'] !== 'super_admin') json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE accounts SET is_deleted=1 WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$accId, ':sid' => $schoolId]);
         json_success(null, 'Account deleted');
     }

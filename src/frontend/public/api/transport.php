@@ -58,7 +58,7 @@ function transport_routes(string $method, ?string $routeId, int $schoolId, array
         json_success(null, 'Route updated');
     }
     if ($method === 'DELETE' && $routeId) {
-        if (!in_array($route['role'], ['super_admin','admin'])) json_error('Forbidden', 403);
+        if (!in_array($route['role'], ['superadmin','super_admin','admin'], true)) json_error('Forbidden', 403);
         $db->prepare('UPDATE routes SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid')->execute([':id' => (int)$routeId, ':sid' => $schoolId]);
         json_success(null, 'Route deleted');
     }
