@@ -197,8 +197,16 @@ export default function DataManagement() {
   );
 
   // ── Auth panel state ──────────────────────────────────
-  const [authPassword, setAuthPassword] = useState("");
+  // Pre-fill with stored server password (or default admin123)
+  const [authPassword, setAuthPassword] = useState(() => {
+    try {
+      return localStorage.getItem("shubh_server_password") ?? "admin123";
+    } catch {
+      return "admin123";
+    }
+  });
   const [isAuthenticating, setIsAuthenticating] = useState(false);
+  const [isRunningSetup, setIsRunningSetup] = useState(false);
   const [authStatus, setAuthStatus] = useState<"idle" | "success" | "error">(
     "idle",
   );
@@ -452,7 +460,6 @@ export default function DataManagement() {
     setIsAuthenticating(false);
     if (result.success) {
       setAuthStatus("success");
-      setAuthPassword("");
       toast.success("Authenticated as Super Admin on server.");
       // Dispatch storage event so useSync in other components can react
       window.dispatchEvent(
@@ -463,8 +470,77 @@ export default function DataManagement() {
       );
     } else {
       setAuthStatus("error");
-      setAuthError(result.error ?? "Authentication failed. Check password.");
-      toast.error(result.error ?? "Authentication failed");
+      // Show the exact server error message (e.g. "User not found")
+      const errMsg = result.error ?? "Authentication failed. Check password.";
+      setAuthError(errMsg);
+      toast.error(errMsg);
+    }
+  }
+
+  /** Run database setup then seed, then auto-authenticate */
+  async function handleRunSetup() {
+    const currentUrl = getApiUrl();
+    if (!currentUrl) {
+      setAuthError("Save the API URL first.");
+      return;
+    }
+    setIsRunningSetup(true);
+    setAuthStatus("idle");
+    setAuthError("");
+    try {
+      // Step 1: Run migrations
+      const runRes = await fetch(`${currentUrl}/migrate/run`, {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(20_000),
+      });
+      const runCt = runRes.headers.get("content-type") ?? "";
+      if (runCt.includes("text/html")) {
+        setAuthStatus("error");
+        setAuthError(
+          "Server returned HTML. Make sure the api/ folder is uploaded to cPanel public_html/ and .htaccess is in place.",
+        );
+        setIsRunningSetup(false);
+        return;
+      }
+      // Step 2: Seed
+      await fetch(`${currentUrl}/migrate/seed`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({}),
+        signal: AbortSignal.timeout(10_000),
+      });
+      // Step 3: Authenticate
+      const loginResult = await backendLogin(
+        "superadmin",
+        authPassword || "admin123",
+      );
+      if (loginResult.success) {
+        setAuthStatus("success");
+        toast.success("Database setup complete! Authenticated as Super Admin.");
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: "shubh_erp_jwt_token",
+            newValue: localStorage.getItem("shubh_erp_jwt_token"),
+          }),
+        );
+      } else {
+        setAuthStatus("error");
+        setAuthError(
+          `Setup ran, but login failed: ${loginResult.error ?? "Check password"}`,
+        );
+        toast.error("Setup complete but auth failed — try Authenticate Now");
+      }
+    } catch (err) {
+      setAuthStatus("error");
+      const msg = err instanceof Error ? err.message : "Setup failed";
+      setAuthError(msg);
+      toast.error(msg);
+    } finally {
+      setIsRunningSetup(false);
     }
   }
 
@@ -804,7 +880,7 @@ export default function DataManagement() {
                       <Input
                         id="auth-password"
                         type="password"
-                        placeholder="Enter server password"
+                        placeholder="Enter server password (default: admin123)"
                         value={authPassword}
                         onChange={(e) => {
                           setAuthPassword(e.target.value);
@@ -817,11 +893,23 @@ export default function DataManagement() {
                         data-ocid="server.auth.password.input"
                         className="max-w-xs"
                       />
+                      <p className="text-[10px] text-muted-foreground">
+                        Default password is{" "}
+                        <code className="font-mono bg-muted px-1 rounded">
+                          admin123
+                        </code>
+                        . Reset anytime at{" "}
+                        <code className="font-mono text-[10px]">
+                          /api/migrate/reset-superadmin
+                        </code>
+                      </p>
                     </div>
-                    <div className="flex items-end">
+                    <div className="flex items-end gap-2 flex-wrap">
                       <Button
                         onClick={() => void handleAuthenticate()}
-                        disabled={isAuthenticating || !authPassword}
+                        disabled={
+                          isAuthenticating || isRunningSetup || !authPassword
+                        }
                         data-ocid="server.auth.authenticate.button"
                       >
                         {isAuthenticating ? (
@@ -833,6 +921,25 @@ export default function DataManagement() {
                           <>
                             <KeyRound className="w-4 h-4 mr-2" />
                             Authenticate Now
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => void handleRunSetup()}
+                        disabled={isRunningSetup || isAuthenticating}
+                        title="First time setup: runs migrations, seeds superadmin, then authenticates"
+                        data-ocid="server.auth.run_setup.button"
+                      >
+                        {isRunningSetup ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            Setting up…
+                          </>
+                        ) : (
+                          <>
+                            <Database className="w-4 h-4 mr-2" />
+                            Run Setup (first time)
                           </>
                         )}
                       </Button>

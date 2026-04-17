@@ -74,7 +74,7 @@ if ($rawBody) {
 $publicRoutes = [
     'auth'    => ['login', 'refresh'],
     'sync'    => ['status'],          // ← health check must be public
-    'migrate' => ['run', 'seed', 'status', ''],  // ← setup endpoints
+    'migrate' => ['run', 'seed', 'status', 'reset-superadmin', ''],  // ← setup/recovery endpoints
 ];
 
 $isPublic = false;

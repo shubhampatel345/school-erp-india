@@ -14,12 +14,32 @@ require_once __DIR__ . '/config.php';
 $route  = $GLOBALS['route'];
 $method = $route['method'];
 $sub    = $route['sub'];
-$body   = $route['body'];
+
+// ── Body: accept JSON body OR form-data OR raw POST ───────────────────────────
+// Router already decoded JSON into $route['body']; also try $_POST as fallback.
+$body = $route['body'];
+if (empty($body) && !empty($_POST)) {
+    $body = $_POST;
+}
+// Final fallback: re-read and decode raw input (handles some edge cases)
+if (empty($body)) {
+    $raw = file_get_contents('php://input');
+    if ($raw) {
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            $body = $decoded;
+        } else {
+            // Try form-encoded
+            parse_str($raw, $parsed);
+            if (!empty($parsed)) $body = $parsed;
+        }
+    }
+}
 
 // ── POST /auth/login ──────────────────────────────────────────────────────────
 if ($method === 'POST' && $sub === 'login') {
     $username = trim($body['username'] ?? '');
-    $password = $body['password'] ?? '';
+    $password = trim($body['password'] ?? '');
 
     if (!$username || !$password) {
         json_error('username and password are required', 400);
@@ -36,9 +56,39 @@ if ($method === 'POST' && $sub === 'login') {
     $stmt->execute([':un' => $username]);
     $user = $stmt->fetch();
 
-    if (!$user || !password_verify($password, $user['password_hash'])) {
+    if (!$user) {
+        // Distinct message so we can debug: user doesn't exist at all
+        json_error('User not found. Run /api/migrate/run then /api/migrate/seed to create the superadmin.', 401);
+    }
+
+    $passwordHash = $user['password_hash'] ?? '';
+
+    // Handle NULL / empty hash (e.g. legacy plaintext or seed didn't hash)
+    if (empty($passwordHash)) {
+        json_error('Account has no password set. Please run /api/migrate/reset-superadmin to reset.', 401);
+    }
+
+    // Detect if stored value looks like a bcrypt hash ($2y$...)
+    $isBcrypt = (strpos($passwordHash, '$2') === 0);
+
+    $passwordOk = false;
+    if ($isBcrypt) {
+        $passwordOk = password_verify($password, $passwordHash);
+    } else {
+        // Legacy: plaintext stored — do direct compare, then re-hash on success
+        $passwordOk = ($password === $passwordHash);
+        if ($passwordOk) {
+            // Upgrade to bcrypt silently
+            $newHash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
+            $db->prepare('UPDATE users SET password_hash=:h, updated_at=NOW() WHERE id=:id')
+               ->execute([':h' => $newHash, ':id' => $user['id']]);
+        }
+    }
+
+    if (!$passwordOk) {
         json_error('Invalid username or password', 401);
     }
+
     if ((int)$user['is_active'] === 0) {
         json_error('Account disabled — contact Super Admin', 403);
     }
@@ -55,7 +105,7 @@ if ($method === 'POST' && $sub === 'login') {
     $token = jwt_encode($payload);
 
     $refreshPayload = $payload;
-    $refreshPayload['exp'] = $now + JWT_REFRESH;
+    $refreshPayload['exp']  = $now + JWT_REFRESH;
     $refreshPayload['type'] = 'refresh';
     $refreshToken = jwt_encode($refreshPayload);
 
@@ -133,7 +183,7 @@ if ($method === 'POST' && $sub === 'change-password') {
         }
     }
 
-    $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 12]);
+    $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 10]);
     $db->prepare('UPDATE users SET password_hash=:h, updated_at=NOW() WHERE id=:id')
        ->execute([':h' => $hash, ':id' => $targetId]);
 

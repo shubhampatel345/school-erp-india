@@ -171,45 +171,113 @@ export async function backendLogin(
     const res = await fetch(`${baseUrl}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username, password }),
-      signal: AbortSignal.timeout(8_000),
+      body: JSON.stringify({
+        username: username.trim(),
+        password: password.trim(),
+      }),
+      signal: AbortSignal.timeout(10_000),
     });
 
     const ct = res.headers.get("content-type") ?? "";
     if (ct.includes("text/html")) {
       return {
         success: false,
-        error: "Server returned an error page. Check the API URL in Settings.",
+        error:
+          "Server returned an HTML page. This means: (1) The api/ folder is not uploaded to cPanel, or (2) The .htaccess file is missing. Upload api/ to public_html/ and visit /api/migrate/run to set up the database.",
       };
     }
 
-    let data: {
-      token?: string;
-      refresh_token?: string;
-      role?: string;
-      message?: string;
-    } = {};
+    let raw = "";
     try {
-      data = (await res.json()) as typeof data;
+      raw = await res.text();
     } catch {
-      return { success: false, error: "Invalid JSON response from server" };
+      return { success: false, error: "Could not read server response" };
     }
 
-    if (res.ok && data.token) {
-      setJwt(data.token);
-      if (data.refresh_token) setRefreshToken(data.refresh_token);
-      return { success: true, role: data.role };
+    // Guard against HTML slipping through (e.g. content-type not set by server)
+    const trimmed = raw.trimStart();
+    if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
+      return {
+        success: false,
+        error:
+          "Server returned an HTML error page instead of JSON. Check that the api/ folder is uploaded to cPanel and .htaccess is in place.",
+      };
     }
 
-    return {
-      success: false,
-      error: data.message ?? `Auth failed: HTTP ${res.status}`,
-    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: Record<string, any> = {};
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>;
+    } catch {
+      return {
+        success: false,
+        error: `Invalid JSON from server. Response was: ${raw.substring(0, 200)}`,
+      };
+    }
+
+    // The API wraps success in { status, message, data: { token, refresh_token, user } }
+    // but some older builds return token at root level — handle both.
+    const nestedData = (parsed.data ?? {}) as Record<string, unknown>;
+    const token: string =
+      (parsed.token as string) ?? (nestedData.token as string) ?? "";
+    const refreshToken: string =
+      (parsed.refresh_token as string) ??
+      (nestedData.refresh_token as string) ??
+      "";
+    const user = (parsed.user ?? nestedData.user ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const role: string =
+      (parsed.role as string) ??
+      (nestedData.role as string) ??
+      (user.role as string) ??
+      "";
+    const serverMsg: string =
+      (parsed.message as string) ?? (nestedData.message as string) ?? "";
+
+    if (res.ok && token) {
+      setJwt(token);
+      if (refreshToken) setRefreshToken(refreshToken);
+
+      // Store password so auto-re-auth works after token expiry
+      try {
+        const passwords = JSON.parse(
+          localStorage.getItem("shubh_erp_user_passwords") ?? "{}",
+        ) as Record<string, string>;
+        passwords[username.trim()] = password.trim();
+        localStorage.setItem(
+          "shubh_erp_user_passwords",
+          JSON.stringify(passwords),
+        );
+        // Also persist under 'shubh_server_password' for direct access
+        localStorage.setItem("shubh_server_password", password.trim());
+      } catch {
+        // ignore localStorage errors
+      }
+
+      return { success: true, role };
+    }
+
+    // Failed login — return the exact server message so the UI can show it
+    const errorMsg =
+      serverMsg ||
+      (parsed.status === "error"
+        ? "Invalid username or password"
+        : `Auth failed: HTTP ${res.status}`);
+    return { success: false, error: errorMsg };
   } catch (err) {
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Network error during login",
-    };
+    const msg =
+      err instanceof Error ? err.message : "Network error during login";
+    // Improve timeout message
+    if (msg.includes("timeout") || msg.includes("AbortError")) {
+      return {
+        success: false,
+        error:
+          "Connection timed out. The server did not respond within 10 seconds. Check the API URL.",
+      };
+    }
+    return { success: false, error: msg };
   }
 }
 

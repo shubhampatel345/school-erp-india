@@ -2,13 +2,15 @@
 /**
  * SHUBH SCHOOL ERP — Database Migration Runner
  *
- * GET  /migrate/status    Show which migrations have run
- * POST /migrate/run       Run all pending migrations (PUBLIC — for initial setup)
- * POST /migrate/seed      Seed default data (superadmin + default school + session)
+ * GET  /migrate/status          Show which migrations have run
+ * GET  /migrate/run             Run all pending migrations (PUBLIC — for initial setup)
+ * POST /migrate/run             Same as GET — supports both
+ * POST /migrate/seed            Seed default data (superadmin + default school + session)
+ * GET  /migrate/reset-superadmin  Reset superadmin password to admin123 (recovery endpoint)
  *
- * NOTE: migrate/run and migrate/seed are PUBLIC so they can be called during initial
+ * NOTE: All migrate endpoints are PUBLIC so they can be called during initial
  * setup before any user account exists. After first setup, you can restrict these
- * by checking a secret token or removing access via .htaccess.
+ * by adding a secret token check or removing access via .htaccess.
  */
 
 error_reporting(0);
@@ -19,12 +21,11 @@ require_once __DIR__ . '/config.php';
 $route    = $GLOBALS['route'];
 $method   = $route['method'];
 $body     = $route['body'];
-$schoolId = $route['schoolId'] ?? 1;
+$schoolId = (int)($route['schoolId'] ?? 1);
 $segments = $route['segments'];
 $action   = $segments[1] ?? 'status';
 
-// migrate/run and migrate/seed are PUBLIC (no auth) for initial database setup.
-// migrate/status is also allowed publicly for setup verification.
+// All migrate endpoints are PUBLIC (no auth required).
 
 try {
     $db = DB::get();
@@ -33,10 +34,11 @@ try {
 }
 
 match ($action) {
-    'status' => migrate_status($method, $db),
-    'run'    => migrate_run($method, $schoolId, $db),
-    'seed'   => migrate_seed($method, $schoolId, $body, $route, $db),
-    default  => json_error("Unknown migrate action: $action", 404),
+    'status'            => migrate_status($method, $db),
+    'run'               => migrate_run($method, $schoolId, $db),
+    'seed'              => migrate_seed($method, $schoolId, $body, $db),
+    'reset-superadmin'  => reset_superadmin($method, $schoolId, $db),
+    default             => json_error("Unknown migrate action: $action", 404),
 };
 
 // ── Status ────────────────────────────────────────────────────────────────────
@@ -92,20 +94,24 @@ function migrate_run(string $method, int $schoolId, PDO $db): void {
         }
     }
 
+    // Always seed superadmin after running migrations
+    seed_superadmin_record($schoolId, $db);
+
     $code = empty($errors) ? 200 : 207;
     http_response_code($code);
     header('Content-Type: application/json');
     echo json_encode([
         'status'  => empty($errors) ? 'success' : 'partial',
-        'message' => count($applied) . ' migration(s) applied',
+        'message' => count($applied) . ' migration(s) applied. Superadmin seeded.',
         'data'    => ['applied' => $applied, 'errors' => $errors],
     ]);
     exit;
 }
 
 // ── Seed Default Data ─────────────────────────────────────────────────────────
-function migrate_seed(string $method, int $schoolId, array $body, array $route, PDO $db): void {
-    if ($method !== 'POST') json_error('Method not allowed', 405);
+function migrate_seed(string $method, int $schoolId, array $body, PDO $db): void {
+    // Accept both GET and POST for easier browser-based setup
+    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
 
     $seeded = [];
 
@@ -118,17 +124,9 @@ function migrate_seed(string $method, int $schoolId, array $body, array $route, 
         $seeded[] = 'school';
     }
 
-    // Default super admin
-    $saUser = $body['superadmin_username'] ?? 'superadmin';
-    $saPass = $body['superadmin_password'] ?? 'admin123';
-    $chkSA  = $db->prepare('SELECT id FROM users WHERE username=:u AND school_id=:sid AND is_deleted=0 LIMIT 1');
-    $chkSA->execute([':u' => $saUser, ':sid' => $schoolId]);
-    if (!$chkSA->fetch()) {
-        $hash = password_hash($saPass, PASSWORD_BCRYPT, ['cost' => 12]);
-        $db->prepare('INSERT INTO users (school_id, username, password_hash, full_name, role, is_active, created_at, updated_at) VALUES (:sid,:u,:h,"Super Admin","superadmin",1,NOW(),NOW())')
-           ->execute([':sid' => $schoolId, ':u' => $saUser, ':h' => $hash]);
-        $seeded[] = 'superadmin user';
-    }
+    // Upsert superadmin — always ensure it exists with correct credentials
+    $result = seed_superadmin_record($schoolId, $db, $body['superadmin_username'] ?? 'superadmin', $body['superadmin_password'] ?? 'admin123');
+    $seeded[] = $result;
 
     // Default current session
     $chkSess = $db->prepare('SELECT id FROM sessions WHERE school_id=:sid AND is_current=1 LIMIT 1');
@@ -139,7 +137,95 @@ function migrate_seed(string $method, int $schoolId, array $body, array $route, 
         $seeded[] = 'default session';
     }
 
-    json_success(['seeded' => $seeded], 'Seed complete');
+    json_success(['seeded' => $seeded], 'Seed complete. Login with superadmin / admin123');
+}
+
+// ── Reset Superadmin Password (recovery endpoint) ─────────────────────────────
+function reset_superadmin(string $method, int $schoolId, PDO $db): void {
+    // Allow GET for easy browser access
+    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
+
+    $result = seed_superadmin_record($schoolId, $db, 'superadmin', 'admin123', true);
+
+    json_success([
+        'action'   => $result,
+        'username' => 'superadmin',
+        'password' => 'admin123',
+    ], 'Superadmin password reset to admin123. You can now login.');
+}
+
+// ── Shared: seed/upsert the superadmin user ───────────────────────────────────
+function seed_superadmin_record(
+    int $schoolId,
+    PDO $db,
+    string $username = 'superadmin',
+    string $password = 'admin123',
+    bool $forceUpdate = false
+): string {
+    // Use cost=10 for broad PHP version compatibility
+    $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
+
+    // First ensure the schools table exists (might be called before migrations)
+    try {
+        $db->exec('CREATE TABLE IF NOT EXISTS schools (
+            id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            name       VARCHAR(200) NOT NULL,
+            address    TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+
+        $db->exec('CREATE TABLE IF NOT EXISTS users (
+            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            school_id     INT UNSIGNED NOT NULL,
+            username      VARCHAR(100) NOT NULL,
+            password_hash VARCHAR(255) NOT NULL,
+            full_name     VARCHAR(200),
+            role          VARCHAR(50) NOT NULL DEFAULT \'teacher\',
+            is_active     TINYINT(1) DEFAULT 1,
+            refresh_token VARCHAR(500),
+            last_login    TIMESTAMP NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            created_by    INT UNSIGNED,
+            is_deleted    TINYINT(1) DEFAULT 0,
+            UNIQUE KEY uq_school_username (school_id, username)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    } catch (Throwable $e) {
+        // Tables already exist — ignore
+    }
+
+    // Ensure school record exists
+    try {
+        $db->prepare('INSERT IGNORE INTO schools (id, name) VALUES (:id, :name)')
+           ->execute([':id' => $schoolId, ':name' => 'SHUBH SCHOOL ERP']);
+    } catch (Throwable $e) { /* ignore */ }
+
+    // Check if superadmin exists
+    $stmt = $db->prepare('SELECT id, password_hash FROM users WHERE username=:u AND school_id=:sid AND is_deleted=0 LIMIT 1');
+    $stmt->execute([':u' => $username, ':sid' => $schoolId]);
+    $existing = $stmt->fetch();
+
+    if (!$existing) {
+        // Insert new superadmin
+        $db->prepare('INSERT INTO users (school_id, username, password_hash, full_name, role, is_active, created_at, updated_at) VALUES (:sid,:u,:h,"Super Admin","superadmin",1,NOW(),NOW())')
+           ->execute([':sid' => $schoolId, ':u' => $username, ':h' => $hash]);
+        return 'superadmin user created';
+    }
+
+    // Always update hash — this fixes corrupted/empty/plaintext hashes
+    // If forceUpdate=false, still update because we want to ensure the hash is valid
+    $existingHash = $existing['password_hash'] ?? '';
+    $needsUpdate  = $forceUpdate
+        || empty($existingHash)
+        || strpos($existingHash, '$2') !== 0; // not a bcrypt hash
+
+    if ($needsUpdate) {
+        $db->prepare('UPDATE users SET password_hash=:h, is_active=1, is_deleted=0, role="superadmin", full_name="Super Admin", updated_at=NOW() WHERE id=:id')
+           ->execute([':h' => $hash, ':id' => $existing['id']]);
+        return 'superadmin user updated (hash re-set)';
+    }
+
+    return 'superadmin user already exists (hash intact)';
 }
 
 // ── Migration Definitions ─────────────────────────────────────────────────────

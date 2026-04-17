@@ -248,7 +248,7 @@ function auto_create_student_user(PDO $db, int $schoolId, int $studentId, string
 
     $parts   = explode('-', $dob); // YYYY-MM-DD
     $passRaw = count($parts) === 3 ? $parts[2] . $parts[1] . $parts[0] : $admNo;
-    $hash    = password_hash($passRaw, PASSWORD_BCRYPT, ['cost' => 12]);
+    $hash    = password_hash($passRaw, PASSWORD_BCRYPT, ['cost' => 10]); // cost=10 for cPanel compatibility
 
     $db->prepare('INSERT INTO users (school_id,username,password_hash,full_name,role,reference_id,is_active,created_at,updated_at) VALUES (:sid,:u,:h,:n,"student",:ref,1,NOW(),NOW())')
        ->execute([':sid' => $schoolId, ':u' => $admNo, ':h' => $hash, ':n' => $name, ':ref' => $studentId]);

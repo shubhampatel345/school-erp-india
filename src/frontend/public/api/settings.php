@@ -213,7 +213,7 @@ function settings_users(string $method, ?string $userId, int $schoolId, array $b
         $chk->execute([':u' => $username, ':sid' => $schoolId]);
         if ($chk->fetch()) json_error('Username already exists', 409);
 
-        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 12]);
+        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]); // cost=10 for cPanel compatibility
         $db->prepare('INSERT INTO users (school_id, username, password_hash, full_name, role, is_active, created_by, created_at, updated_at) VALUES (:sid,:u,:h,:n,:role,1,:by,NOW(),NOW())')
            ->execute([':sid' => $schoolId, ':u' => $username, ':h' => $hash, ':n' => $fullName, ':role' => $role, ':by' => $route['userId']]);
         json_success(['id' => (int)$db->lastInsertId()], 'User created', 201);
@@ -226,7 +226,7 @@ function settings_users(string $method, ?string $userId, int $schoolId, array $b
         if (array_key_exists('is_active', $body))   { $sets[] = 'is_active=:act'; $params[':act'] = (int)$body['is_active']; }
         if (!empty($body['password'])) {
             $sets[] = 'password_hash=:h';
-            $params[':h'] = password_hash($body['password'], PASSWORD_BCRYPT, ['cost' => 12]);
+            $params[':h'] = password_hash($body['password'], PASSWORD_BCRYPT, ['cost' => 10]); // cost=10 for cPanel compatibility
         }
         if (empty($sets)) json_error('No fields to update', 400);
         $params[':id'] = (int)$userId; $params[':sid'] = $schoolId;

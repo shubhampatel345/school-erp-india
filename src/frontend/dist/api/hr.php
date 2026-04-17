@@ -239,7 +239,7 @@ function auto_create_staff_user(PDO $db, int $schoolId, int $staffId, array $bod
 
     $parts   = explode('-', $dob);
     $passRaw = count($parts) === 3 ? $parts[2] . $parts[1] . $parts[0] : $mobile;
-    $hash    = password_hash($passRaw, PASSWORD_BCRYPT, ['cost' => 12]);
+    $hash    = password_hash($passRaw, PASSWORD_BCRYPT, ['cost' => 10]); // cost=10 for cPanel compatibility
     $role    = strtolower($body['designation'] ?? 'teacher') === 'driver' ? 'driver' : 'teacher';
     $db->prepare('INSERT INTO users (school_id,username,password_hash,full_name,role,reference_id,is_active,created_at,updated_at) VALUES (:sid,:u,:h,:n,:role,:ref,1,NOW(),NOW())')->execute([':sid' => $schoolId, ':u' => $mobile, ':h' => $hash, ':n' => $body['full_name'] ?? '', ':role' => $role, ':ref' => $staffId]);
 }
