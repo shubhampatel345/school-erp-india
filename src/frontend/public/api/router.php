@@ -4,64 +4,122 @@
  *
  * Routes incoming requests to the correct handler file.
  * Validates JWT on every protected endpoint.
- * Injects $auth (decoded token payload) into the handler scope.
  *
- * URL pattern:  /api/<resource>[/<sub>][/<id>]
- * Examples:
- *   GET  /api/students           → students.php  action=list
- *   POST /api/auth/login         → auth.php      action=login  (public)
- *   GET  /api/fees/plan          → fees.php      action=plan
+ * PUBLIC (no JWT):
+ *   POST /auth/login
+ *   POST /auth/refresh
+ *   GET  /sync/status   ← health check, always public
+ *   POST /migrate/run   ← initial DB setup (IP-restricted in production)
+ *   POST /migrate/seed  ← seed default data
+ *   GET  /migrate/status
  */
+
+// Silence notices so they can't corrupt JSON
+error_reporting(0);
+ini_set('display_errors', '0');
 
 require_once __DIR__ . '/config.php';
 
-// ── CORS pre-flight (already handled by .htaccess but belt+braces) ───────────
+// CORS + preflight already handled in index.php, but set content-type again to be sure
+if (!headers_sent()) {
+    header('Content-Type: application/json; charset=utf-8');
+}
+
+// Handle OPTIONS preflight (belt-and-braces in case router is loaded directly)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    http_response_code(204);
+    http_response_code(200);
+    echo json_encode(['status' => 'ok']);
     exit;
 }
 
-header('Content-Type: application/json');
-
 // ── Parse URI ─────────────────────────────────────────────────────────────────
-$requestUri  = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
-$scriptDir   = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/');
-$path        = '/' . ltrim(substr($requestUri, strlen($scriptDir)), '/');
-$segments    = array_values(array_filter(explode('/', $path)));
-// segments[0] = 'api', segments[1] = resource, segments[2+] = sub/id
-array_shift($segments); // drop 'api' prefix if present
+$requestUri = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$scriptDir  = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/'), '/');
+
+// Strip script directory prefix (handles both /api/... and /...)
+$path = $requestUri;
+if ($scriptDir && strpos($requestUri, $scriptDir) === 0) {
+    $path = substr($requestUri, strlen($scriptDir));
+}
+$path     = '/' . ltrim($path, '/');
+$segments = array_values(array_filter(explode('/', $path)));
+
+// Drop leading 'api' segment if present (when served as /api/...)
+if (isset($segments[0]) && $segments[0] === 'api') {
+    array_shift($segments);
+}
+// Drop 'index.php' if present
+if (isset($segments[0]) && $segments[0] === 'index.php') {
+    array_shift($segments);
+}
 
 $resource = $segments[0] ?? '';
 $sub      = $segments[1] ?? '';
-$id       = $segments[2] ?? $sub; // convenience alias
 
 $method = $_SERVER['REQUEST_METHOD'];
-$body   = json_decode(file_get_contents('php://input'), true) ?? [];
+
+// Read body — handle both JSON and form-data
+$rawBody = file_get_contents('php://input');
+$body    = [];
+if ($rawBody) {
+    $decoded = json_decode($rawBody, true);
+    if (json_last_error() === JSON_ERROR_NONE) {
+        $body = $decoded ?? [];
+    }
+}
 
 // ── Public endpoints (no JWT required) ───────────────────────────────────────
+// sync/status is always public — it's polled by the frontend as a health check
+// migrate endpoints are public to allow initial database setup
 $publicRoutes = [
-    'auth' => ['login', 'refresh'],
+    'auth'    => ['login', 'refresh'],
+    'sync'    => ['status'],          // ← health check must be public
+    'migrate' => ['run', 'seed', 'status', ''],  // ← setup endpoints
 ];
 
-$isPublic = isset($publicRoutes[$resource]) && in_array($sub, $publicRoutes[$resource], true);
+$isPublic = false;
+if (isset($publicRoutes[$resource])) {
+    if (in_array($sub, $publicRoutes[$resource], true)) {
+        $isPublic = true;
+    }
+    // Also allow empty sub for migrate (GET /migrate)
+    if ($resource === 'sync' && ($sub === '' || $sub === 'status')) {
+        $isPublic = true;
+    }
+}
 
 // ── JWT validation ────────────────────────────────────────────────────────────
 $auth = null;
 if (!$isPublic) {
-    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['HTTP_X_AUTHORIZATION'] ?? '');
+    $authHeader = '';
+    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (isset($_SERVER['HTTP_X_AUTHORIZATION'])) {
+        $authHeader = $_SERVER['HTTP_X_AUTHORIZATION'];
+    } elseif (function_exists('apache_request_headers')) {
+        $apacheHeaders = apache_request_headers();
+        $authHeader = $apacheHeaders['Authorization'] ?? $apacheHeaders['authorization'] ?? '';
+    }
+
     if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
-        json_error('Missing or invalid Authorization header', 401);
+        json_error('Missing or invalid Authorization header. Please login first.', 401);
     }
     $auth = jwt_verify($m[1]);
     if (!$auth) {
-        json_error('Token expired or invalid', 401);
+        json_error('Token expired or invalid. Please login again.', 401);
     }
+}
 
-    // Multi-school: require X-School-ID header
-    $schoolId = (int)($_SERVER['HTTP_X_SCHOOL_ID'] ?? 0);
-    if ($schoolId <= 0) {
-        json_error('Missing X-School-ID header', 400);
-    }
+// ── School ID — default to 1 if not provided ─────────────────────────────────
+// X-School-ID is optional; defaults to 1 for single-school deployments
+$schoolId = 1;
+if (isset($_SERVER['HTTP_X_SCHOOL_ID']) && (int)$_SERVER['HTTP_X_SCHOOL_ID'] > 0) {
+    $schoolId = (int)$_SERVER['HTTP_X_SCHOOL_ID'];
+} elseif ($auth && isset($auth['school_id']) && (int)$auth['school_id'] > 0) {
+    $schoolId = (int)$auth['school_id'];
+}
+
+if ($auth) {
     $auth['school_id'] = $schoolId;
 }
 
@@ -81,27 +139,37 @@ $handlers = [
     'migrate'    => 'migrate.php',
 ];
 
+if ($resource === '' || $resource === 'health') {
+    // Root or health ping — always return 200 JSON
+    json_success([
+        'status'     => 'ok',
+        'version'    => APP_VERSION,
+        'server'     => 'SHUBH SCHOOL ERP API',
+        'time'       => gmdate('c'),
+    ], 'API is running');
+}
+
 if (!isset($handlers[$resource])) {
-    json_error("Unknown resource: $resource", 404);
+    json_error("Unknown endpoint: /$resource", 404);
 }
 
 $handlerFile = __DIR__ . '/' . $handlers[$resource];
 if (!file_exists($handlerFile)) {
-    json_error("Handler not found", 500);
+    json_error("Handler not found for: $resource", 500);
 }
 
 // Make routing context available to handlers
 $GLOBALS['route'] = [
     'resource' => $resource,
     'sub'      => $sub,
-    'id'       => $id,
+    'id'       => $segments[2] ?? $sub,
     'segments' => $segments,
     'method'   => $method,
     'body'     => $body,
     'auth'     => $auth,
-    'schoolId' => $auth['school_id'] ?? 0,
-    'userId'   => $auth['user_id']   ?? 0,
-    'role'     => $auth['role']      ?? '',
+    'schoolId' => $schoolId,
+    'userId'   => $auth['user_id'] ?? 0,
+    'role'     => $auth['role']    ?? '',
 ];
 
 require $handlerFile;

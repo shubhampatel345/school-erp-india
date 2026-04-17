@@ -229,22 +229,45 @@ export interface ApiError {
 }
 
 // ── Safe JSON parser ──────────────────────────────────────
-// Checks content-type BEFORE calling .json() so an HTML error page
-// (404/403/500 from cPanel) never causes "Unexpected token '<'" crashes.
+// Checks BOTH content-type AND response body prefix before calling .json()
+// so an HTML error page (404/403/500 from cPanel) never causes
+// "Unexpected token '<', '<!DOCTYPE ...' is not valid JSON" crashes.
 
 async function safeParseJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get("content-type") ?? "";
+
+  // Check content-type first
   if (ct.includes("text/html") || ct.includes("application/xhtml")) {
     throw new Error(
-      "Server returned an error page instead of JSON. " +
-        "Check your Database Server URL in Settings → Data Management.",
+      "Server returned an HTML page instead of JSON. " +
+        "This usually means the api/ folder is not uploaded to cPanel, " +
+        "or the .htaccess rewrite rules are not working. " +
+        "See api/README.md for setup instructions.",
     );
   }
+
+  let text = "";
   try {
-    return (await res.json()) as T;
+    text = await res.text();
+  } catch {
+    throw new Error("Could not read response from server.");
+  }
+
+  // Extra guard: if body starts with HTML tag regardless of content-type
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
+    throw new Error(
+      "Server returned HTML instead of JSON. " +
+        "Please upload the api/ folder to your cPanel public_html directory " +
+        "and ensure mod_rewrite is enabled. See api/README.md.",
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
   } catch {
     throw new Error(
-      "Invalid response from server. Expected JSON but received non-parseable content.",
+      `Invalid JSON from server. Response was: ${trimmed.substring(0, 200)}`,
     );
   }
 }
@@ -428,7 +451,7 @@ export async function migrateLocalData(
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
 
   try {
-    const res = await fetch(`${baseUrl}/migrate.php`, {
+    const res = await fetch(`${baseUrl}/migrate/run`, {
       method: "POST",
       headers,
       body: JSON.stringify({ data }),
@@ -493,28 +516,29 @@ export async function testConnection(
 
   const start = performance.now();
   try {
-    const headers: Record<string, string> = {
-      "X-School-ID": getSchoolId(),
-    };
-    const jwt = getJwt();
-    if (jwt) headers.Authorization = `Bearer ${jwt}`;
-
+    // sync/status is a public endpoint — no JWT or X-School-ID required
     const res = await fetch(`${urlToTest}/sync/status`, {
       method: "GET",
-      headers,
+      headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(8_000),
     });
     const latencyMs = Math.round(performance.now() - start);
 
-    if (!res.ok) {
+    // Even a non-200 is ok if it's JSON — parse it
+    let data: SyncStatusResponse | null = null;
+    try {
+      data = await safeParseJson<SyncStatusResponse>(res);
+    } catch (parseErr) {
       return {
         connected: false,
         latencyMs,
-        error: `HTTP ${res.status} ${res.statusText}`,
+        error:
+          parseErr instanceof Error
+            ? parseErr.message
+            : "API files not found. Please upload the api/ folder to your cPanel hosting. See api/README.md for instructions.",
       };
     }
 
-    const data = await safeParseJson<SyncStatusResponse>(res);
     if (data?.status === "ok") {
       return {
         connected: true,
@@ -527,14 +551,20 @@ export async function testConnection(
     return {
       connected: false,
       latencyMs,
-      error: data?.message ?? "Unexpected response",
+      error: data?.message ?? "Unexpected response from server",
     };
   } catch (err) {
     const latencyMs = Math.round(performance.now() - start);
+    const msg = err instanceof Error ? err.message : "Connection failed";
+    // Add helpful hint for the most common error
+    const hint =
+      msg.includes("HTML") || msg.includes("JSON")
+        ? ` Make sure api/ folder is uploaded to ${urlToTest.replace(/\/api$/, "")}/api/ on cPanel.`
+        : "";
     return {
       connected: false,
       latencyMs,
-      error: err instanceof Error ? err.message : "Connection failed",
+      error: msg + hint,
     };
   }
 }

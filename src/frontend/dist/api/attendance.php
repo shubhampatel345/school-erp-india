@@ -1,4 +1,7 @@
 <?php
+error_reporting(0);
+ini_set('display_errors', '0');
+
 /**
  * SHUBH SCHOOL ERP — Attendance API
  * POST /attendance/mark             — RFID/QR/manual mark attendance

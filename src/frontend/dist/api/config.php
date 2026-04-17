@@ -1,4 +1,8 @@
 <?php
+// Silence notices/warnings at the config level too (belt-and-braces)
+error_reporting(0);
+ini_set('display_errors', '0');
+
 /**
  * SHUBH SCHOOL ERP — Database Configuration
  * PDO singleton, utf8mb4 charset, environment-driven credentials.
@@ -27,8 +31,8 @@ define('DB_USER',     getenv('DB_USER')     ?: 'psmkgsco_shubherp_user');
 define('DB_PASS',     getenv('DB_PASS')     ?: 'Shubh@420');
 define('DB_CHARSET',  'utf8mb4');
 
-// JWT secret — change this to a long random string in production
-define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'CHANGE_ME_IN_PRODUCTION_USE_64_RANDOM_CHARS');
+// JWT secret — fixed value for SHUBH SCHOOL ERP
+define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'shubh_erp_secret_key_2024_psmkgs_school');
 define('JWT_EXPIRY',  86400);          // 24 hours
 define('JWT_REFRESH', 604800);         // 7 days
 
