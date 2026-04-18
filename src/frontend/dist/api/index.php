@@ -961,6 +961,7 @@ function collection_table_map(): array {
     return [
         'students'              => 'students',
         'staff'                 => 'staff',
+        'classes'               => 'classes',
         'fees_plan'             => 'fees_plan',
         'fee_plans'             => 'fees_plan',
         'fee_headings'          => 'fee_headings',
@@ -1014,78 +1015,97 @@ function get_table_definitions(): array {
     return [
 
         // ── students ──────────────────────────────────────────────────────────
+        // Column names match EXACTLY what the frontend JS sends (camelCase)
         'students' => "CREATE TABLE `students` (
-            `id`              VARCHAR(36) PRIMARY KEY,
-            `admNo`           VARCHAR(100),
-            `name`            VARCHAR(255),
-            `dob`             VARCHAR(50),
-            `gender`          VARCHAR(20),
-            `class`           VARCHAR(100),
-            `section`         VARCHAR(50),
-            `fatherName`      VARCHAR(255),
-            `motherName`      VARCHAR(255),
-            `fatherMobile`    VARCHAR(50),
-            `motherMobile`    VARCHAR(50),
-            `address`         TEXT,
-            `village`         VARCHAR(255),
-            `category`        VARCHAR(100),
-            `aadhaar`         VARCHAR(50),
-            `srNo`            VARCHAR(100),
-            `penNo`           VARCHAR(100),
-            `apaarNo`         VARCHAR(100),
-            `previousSchool`  VARCHAR(255),
-            `admissionDate`   VARCHAR(50),
-            `status`          VARCHAR(50) DEFAULT 'Active',
-            `photo`           TEXT,
-            `routeId`         VARCHAR(36),
-            `pickupPoint`     VARCHAR(255),
-            `session`         VARCHAR(100),
-            `bloodGroup`      VARCHAR(20),
-            `religion`        VARCHAR(100),
-            `caste`           VARCHAR(100),
-            `nationality`     VARCHAR(100),
-            `annualIncome`    VARCHAR(100),
-            `busNo`           VARCHAR(50),
-            `email`           VARCHAR(255),
-            `alternatePhone`  VARCHAR(50),
+            `id`               VARCHAR(36) PRIMARY KEY,
+            `admNo`            VARCHAR(100),
+            `name`             VARCHAR(255),
+            `dob`              VARCHAR(50),
+            `gender`           VARCHAR(20),
+            `class`            VARCHAR(100),
+            `section`          VARCHAR(50),
+            `fatherName`       VARCHAR(255),
+            `motherName`       VARCHAR(255),
+            `fatherMobile`     VARCHAR(50),
+            `motherMobile`     VARCHAR(50),
+            `address`          TEXT,
+            `village`          VARCHAR(255),
+            `category`         VARCHAR(100),
+            `photo`            TEXT,
+            `aadharNo`         VARCHAR(50),
+            `srNo`             VARCHAR(100),
+            `penNo`            VARCHAR(100),
+            `apaarNo`          VARCHAR(100),
+            `previousSchool`   VARCHAR(255),
+            `admissionDate`    VARCHAR(50),
+            `status`           VARCHAR(50) DEFAULT 'Active',
+            `routeId`          VARCHAR(36),
+            `pickupPointId`    VARCHAR(36),
+            `busNo`            VARCHAR(50),
+            `transportMonths`  TEXT,
+            `discount`         DECIMAL(12,2) DEFAULT 0,
+            `discountAppliedTo` TEXT,
+            `primaryMobile`    VARCHAR(50),
+            `siblingGroup`     VARCHAR(36),
+            `session`          VARCHAR(100),
+            `bloodGroup`       VARCHAR(20),
+            `religion`         VARCHAR(100),
+            `caste`            VARCHAR(100),
+            `nationality`      VARCHAR(100),
+            `annualIncome`     VARCHAR(100),
+            `email`            VARCHAR(255),
+            `alternatePhone`   VARCHAR(50),
             `emergencyContact` VARCHAR(50)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── staff ─────────────────────────────────────────────────────────────
+        // Column names match EXACTLY what the frontend JS sends (camelCase)
         'staff' => "CREATE TABLE `staff` (
-            `id`          VARCHAR(36) PRIMARY KEY,
-            `empId`       VARCHAR(100),
-            `name`        VARCHAR(255),
-            `designation` VARCHAR(255),
-            `department`  VARCHAR(255),
-            `mobile`      VARCHAR(50),
-            `email`       VARCHAR(255),
-            `address`     TEXT,
-            `joinDate`    VARCHAR(50),
-            `salary`      DECIMAL(12,2) DEFAULT 0,
-            `status`      VARCHAR(50) DEFAULT 'Active',
-            `photo`       TEXT,
-            `gender`      VARCHAR(20),
-            `dob`         VARCHAR(50),
-            `aadhaar`     VARCHAR(50),
-            `bankAccount` VARCHAR(100),
-            `ifsc`        VARCHAR(50),
-            `bankName`    VARCHAR(255),
-            `panNo`       VARCHAR(50),
+            `id`            VARCHAR(36) PRIMARY KEY,
+            `empId`         VARCHAR(100),
+            `name`          VARCHAR(255),
+            `designation`   VARCHAR(255),
+            `department`    VARCHAR(255),
+            `mobile`        VARCHAR(50),
+            `email`         VARCHAR(255),
+            `address`       TEXT,
+            `joiningDate`   VARCHAR(50),
+            `salary`        DECIMAL(12,2) DEFAULT 0,
+            `status`        VARCHAR(50) DEFAULT 'Active',
+            `photo`         TEXT,
+            `gender`        VARCHAR(20),
+            `dob`           VARCHAR(50),
+            `aadharNo`      VARCHAR(50),
+            `bankAccount`   VARCHAR(100),
+            `ifscCode`      VARCHAR(50),
+            `bankName`      VARCHAR(255),
+            `panNo`         VARCHAR(50),
+            `subject`       VARCHAR(255),
             `qualification` VARCHAR(255),
-            `experience`  VARCHAR(255),
-            `session`     VARCHAR(100)
+            `experience`    VARCHAR(255),
+            `session`       VARCHAR(100)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── fees_plan ─────────────────────────────────────────────────────────
+        // Frontend sends: { id, classId, sectionId, headingId, amounts }
         'fees_plan' => "CREATE TABLE `fees_plan` (
-            `id`         VARCHAR(36) PRIMARY KEY,
-            `classId`    VARCHAR(100),
-            `section`    VARCHAR(50),
-            `headingId`  VARCHAR(36),
-            `amount`     DECIMAL(12,2) DEFAULT 0,
-            `months`     TEXT,
-            `session`    VARCHAR(100)
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `classId`   VARCHAR(100),
+            `sectionId` VARCHAR(50),
+            `headingId` VARCHAR(36),
+            `amounts`   TEXT,
+            `amount`    DECIMAL(12,2) DEFAULT 0,
+            `months`    TEXT,
+            `session`   VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── classes ───────────────────────────────────────────────────────────
+        // Frontend sends: { id, name, sections } where sections is array→JSON
+        'classes' => "CREATE TABLE `classes` (
+            `id`       VARCHAR(36) PRIMARY KEY,
+            `name`     VARCHAR(255),
+            `sections` TEXT,
+            `session`  VARCHAR(100)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── fee_headings ──────────────────────────────────────────────────────
@@ -1150,12 +1170,13 @@ function get_table_definitions(): array {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── routes ────────────────────────────────────────────────────────────
+        // Frontend sends: { id, name, description, pickupPoints }
         'routes' => "CREATE TABLE `routes` (
-            `id`          VARCHAR(36) PRIMARY KEY,
-            `name`        VARCHAR(255),
-            `description` TEXT,
-            `stops`       TEXT,
-            `session`     VARCHAR(100)
+            `id`           VARCHAR(36) PRIMARY KEY,
+            `name`         VARCHAR(255),
+            `description`  TEXT,
+            `pickupPoints` TEXT,
+            `session`      VARCHAR(100)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── pickup_points ─────────────────────────────────────────────────────
