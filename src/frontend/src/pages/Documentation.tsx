@@ -504,11 +504,11 @@ const FAQS = [
   },
   {
     q: "I get 'Unexpected token < ... is not valid JSON' error when syncing.",
-    a: "This means the server is returning an HTML error page instead of JSON — usually because the PHP API files are not uploaded, the config.php credentials are wrong, or the API URL is incorrect. Check: 1) Open https://yourschool.com/api/health in browser — if you see HTML instead of JSON, the API is missing. 2) Verify config.php has correct DB_NAME and DB_USER (with cPanel prefix). 3) Ensure API URL in Settings ends with /api not /api/.",
+    a: "This means the server is returning an HTML error page instead of JSON. The new API uses DIRECT FILE ROUTING — no .htaccess needed. Check: 1) Open https://shubh.psmkgs.com/api/index.php?route=health in browser — if you see HTML instead of JSON, api/index.php is missing. 2) Upload the entire api/ folder to public_html/api/ on cPanel. 3) Verify config.php has correct DB_NAME and DB_USER (with cPanel prefix). 4) Run https://shubh.psmkgs.com/api/index.php?route=migrate/run to create tables.",
   },
   {
     q: "I get 'Invalid username or password' when authenticating with server.",
-    a: "The server authentication requires a superadmin account in the MySQL users table. If you just ran the migration, the users table may be empty. Open https://yourschool.com/api/migrate.php?action=run in your browser — this creates tables AND seeds the default superadmin (username: superadmin, password: admin123). Then try authenticating again with those credentials.",
+    a: "The server authentication requires a superadmin account in the MySQL users table. If you just ran the migration, try: 1) Open https://shubh.psmkgs.com/api/index.php?route=migrate/run in browser — this creates tables AND seeds the default superadmin (username: superadmin, password: admin123). 2) Then authenticate with password: admin123 in Settings → Data → Database Server.",
   },
 ];
 
@@ -2157,17 +2157,34 @@ pnpm build
             </ol>
           </Step>
 
-          <Step num={6} title="Create .htaccess file (required for routing)">
+          <Step
+            num={6}
+            title="Create .htaccess file (for SPA routing only — NOT required for API)"
+          >
             <p className="text-sm text-muted-foreground mb-2">
-              Without this, page refreshes return a 404. In File Manager, click{" "}
-              <strong>+ File</strong>, name it{" "}
+              The <strong>.htaccess is only needed for the frontend SPA</strong>{" "}
+              (so page refreshes don't return 404). The PHP API does NOT need
+              .htaccess — it uses direct file routing via{" "}
+              <code className="text-xs bg-muted px-1 rounded">
+                index.php?route=
+              </code>
+              . In File Manager, create{" "}
               <code className="text-xs bg-muted px-1 rounded">.htaccess</code>{" "}
-              (with dot), and paste:
+              in{" "}
+              <code className="text-xs bg-muted px-1 rounded">
+                public_html/
+              </code>{" "}
+              and paste:
             </p>
             <Code>{`Options -MultiViews
 RewriteEngine On
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteRule ^ index.html [QSA,L]`}</Code>
+            <p className="text-xs text-muted-foreground mt-2">
+              ⚠️ Do NOT put .htaccess inside{" "}
+              <code className="font-mono">public_html/api/</code> — it is not
+              needed and may cause issues.
+            </p>
           </Step>
 
           <Step
@@ -2681,9 +2698,12 @@ function MySqlSetup() {
       </div>
 
       <Alert type="info">
-        ℹ️ <strong>Prerequisites:</strong> cPanel hosting with PHP 7.4+ and MySQL
-        5.7+, SSL certificate active, React app already deployed to public_html
-        (see Deploy on cPanel section).
+        ℹ️ <strong>No .htaccess needed for the API.</strong> The PHP backend uses
+        DIRECT FILE ROUTING — all API calls go to{" "}
+        <code className="text-xs bg-muted px-1 rounded">
+          /api/index.php?route=ROUTE_NAME
+        </code>
+        . No Apache mod_rewrite required.
       </Alert>
 
       <Card className="p-5 space-y-5">
@@ -2724,29 +2744,26 @@ function MySqlSetup() {
           Step 2 — Upload API Files
         </h3>
         <p className="text-sm text-muted-foreground">
-          The PHP API is in{" "}
-          <code className="text-xs bg-muted px-1 rounded">
-            src/frontend/public/api/
-          </code>{" "}
-          in the project. After building, it is in{" "}
-          <code className="text-xs bg-muted px-1 rounded">
-            src/frontend/dist/api/
-          </code>
-          .
-        </p>
-        <p className="text-sm text-muted-foreground">
-          Upload the <code className="text-xs bg-muted px-1 rounded">api/</code>{" "}
-          folder to{" "}
+          The PHP API consists of just <strong>two files</strong>:{" "}
+          <code className="text-xs bg-muted px-1 rounded">index.php</code> (the
+          entire router + logic) and{" "}
+          <code className="text-xs bg-muted px-1 rounded">config.php</code> (DB
+          credentials). Upload both to{" "}
           <code className="text-xs bg-muted px-1 rounded">
             public_html/api/
           </code>
           .
         </p>
-        <Code>{`public_html/api/
-├── config.php     ← Edit this with your DB credentials
-├── index.php      ← API router
-├── migrate.php    ← Creates all MySQL tables
-└── endpoints/     ← Module endpoints`}</Code>
+        <Code>{`public_html/
+├── index.html          ← React SPA
+├── assets/             ← JS/CSS/fonts
+├── manifest.json
+└── api/
+    ├── index.php       ← ENTIRE PHP API (router + all logic)
+    └── config.php      ← Database credentials (EDIT THIS)
+
+Note: NO .htaccess needed inside api/ folder!
+Note: NO other PHP files needed — index.php handles everything.`}</Code>
       </Card>
 
       <Card className="p-5 space-y-4">
@@ -2762,19 +2779,20 @@ function MySqlSetup() {
         </p>
         <Code>{`<?php
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'cpanelusername_shubherp_db');  // Full prefixed name
-define('DB_USER', 'cpanelusername_shubherp_user'); // Full prefixed name
-define('DB_PASS', 'YourStrongPassword');
+define('DB_PORT', '3306');
+define('DB_NAME', 'psmkgsco_shubherp_db');   // Full prefixed name
+define('DB_USER', 'psmkgsco_shubherp_user');  // Full prefixed name
+define('DB_PASS', 'Shubh@420');
 define('DB_CHARSET', 'utf8mb4');
 define('JWT_SECRET', 'change-this-to-a-32-char-random-string');
-define('ALLOWED_ORIGIN', 'https://yourdomain.com');
+define('ALLOWED_ORIGIN', 'https://shubh.psmkgs.com');
 ?>`}</Code>
         <Alert type="warn">
           ⚠️ Change{" "}
           <code className="text-xs bg-muted px-1 rounded">JWT_SECRET</code> to a
-          random 32-character string. Change{" "}
+          random 32-character string. Set{" "}
           <code className="text-xs bg-muted px-1 rounded">ALLOWED_ORIGIN</code>{" "}
-          to your exact domain.
+          to your exact domain to prevent unauthorized API access.
         </Alert>
       </Card>
 
@@ -2783,30 +2801,59 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
           Step 4 — Run Migration (Create Tables)
         </h3>
         <p className="text-sm text-muted-foreground">
-          Open your browser and navigate to:
+          Open your browser and navigate to this URL — it uses the new direct
+          file routing:
         </p>
-        <Code>{"https://yourdomain.com/api/migrate.php?action=run"}</Code>
+        <Code>
+          {"https://shubh.psmkgs.com/api/index.php?route=migrate/run"}
+        </Code>
         <p className="text-sm text-muted-foreground">Expected response:</p>
         <Code>{`{
-  "success": true,
+  "status": "ok",
   "message": "Migration complete",
   "tables_created": ["students", "staff", "fee_receipts", "attendance", ...]
 }`}</Code>
         <Alert type="info">
           ℹ️ Run migration once. If run again, it safely skips tables that
-          already exist.
+          already exist. To reset Super Admin password:{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            /api/index.php?route=migrate/reset-superadmin
+          </code>
+        </Alert>
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <h3 className="font-semibold text-foreground">Step 5 — Test the API</h3>
+        <p className="text-sm text-muted-foreground">
+          Open this URL in your browser to verify the API is working:
+        </p>
+        <Code>
+          {"https://shubh.psmkgs.com/api/index.php?route=sync/status"}
+        </Code>
+        <p className="text-sm text-muted-foreground">Expected response:</p>
+        <Code>{`{"status":"ok","version":"1.0","timestamp":"2025-04-18T..."}`}</Code>
+        <Alert type="danger">
+          🚨 If you see an HTML page or 404 error: verify{" "}
+          <code className="text-xs bg-muted px-1 rounded">api/index.php</code>{" "}
+          is uploaded to{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            public_html/api/
+          </code>
+          . Make sure the filename is exactly{" "}
+          <code className="text-xs bg-muted px-1 rounded">index.php</code> (not
+          Index.PHP or api.php).
         </Alert>
       </Card>
 
       <Card className="p-5 space-y-4">
         <h3 className="font-semibold text-foreground">
-          Step 5 — Connect ERP to Database
+          Step 6 — Connect ERP to Database
         </h3>
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
             1. Open your ERP:{" "}
             <code className="text-xs bg-muted px-1 rounded">
-              https://yourdomain.com
+              https://shubh.psmkgs.com
             </code>
           </li>
           <li>2. Log in as Super Admin</li>
@@ -2818,39 +2865,35 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
             tab
           </li>
           <li>
-            4. Enter API URL:{" "}
+            4. Enter base URL:{" "}
             <code className="text-xs bg-muted px-1 rounded">
-              https://yourdomain.com/api
-            </code>
+              https://shubh.psmkgs.com
+            </code>{" "}
+            (just the domain — no /api suffix)
           </li>
           <li>
             5. Click <strong>Test Connection</strong> — green ✅ = success
           </li>
           <li>
             6. Click <strong>Authenticate Now</strong> and enter your Super
-            Admin password (default: admin123) to get a server JWT token
+            Admin password (default: admin123)
           </li>
           <li>
-            7. Click <strong>Save API URL</strong>
+            7. Click <strong>Save URL</strong>
           </li>
         </ol>
-        <Alert type="warn">
-          ⚠️ If you get "Invalid username or password", run the migration first:{" "}
+        <Alert type="info">
+          ℹ️ If you get "Invalid username or password", run the migration first:{" "}
           <code className="text-xs bg-muted px-1 rounded">
-            https://yourdomain.com/api/migrate.php?action=run
+            /api/index.php?route=migrate/run
           </code>{" "}
-          — this seeds the default superadmin account. If you need to reset it:
-          visit{" "}
-          <code className="text-xs bg-muted px-1 rounded">
-            https://yourdomain.com/api/migrate/reset-superadmin
-          </code>
-          .
+          — this seeds the default superadmin account (admin123).
         </Alert>
       </Card>
 
       <Card className="p-5 space-y-4">
         <h3 className="font-semibold text-foreground">
-          Step 6 — Migrate Existing Data
+          Step 7 — Migrate Existing Data
         </h3>
         <p className="text-sm text-muted-foreground">
           If you already have data in localStorage (from before MySQL setup):
@@ -2866,46 +2909,37 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
             2. Click{" "}
             <strong className="text-foreground">
               Push Local Data to Server
-            </strong>{" "}
-            (or <strong>Migrate Data to Server</strong>)
+            </strong>
           </li>
-          <li>3. All 27 localStorage collections upload to MySQL</li>
+          <li>
+            3. All 27 localStorage collections upload to MySQL in one batch
+          </li>
           <li>4. Sync indicator on dashboard turns green ✅</li>
         </ol>
         <Alert type="info">
           ℹ️ After migration, all new writes go to MySQL first. localStorage is
-          used as a local cache only. You can use "Push Local Data to Server"
-          again any time you have made changes offline and want to force-upload
-          them.
+          used as a local cache only.
         </Alert>
-      </Card>
-
-      <Card className="p-5 space-y-4">
-        <h3 className="font-semibold text-foreground">
-          Step 7 — Test Multi-Device Sync
-        </h3>
-        <ol className="space-y-2 text-sm text-muted-foreground">
-          <li>1. Open ERP on a second device (computer or phone)</li>
-          <li>2. Log in — same students, fees, and settings should appear</li>
-          <li>
-            3. Add a student on Device A → appears on Device B within 5 seconds
-          </li>
-        </ol>
       </Card>
 
       <Card className="p-5">
         <h3 className="font-semibold text-foreground mb-3">
-          Sync Status Indicator
+          How the API Routing Works
         </h3>
-        <DocTable
-          headers={["Status", "Meaning"]}
-          rows={[
-            ["🟢 Local", "No server configured — data in localStorage only"],
-            ["🟢 Connected", "MySQL server connected, data in sync"],
-            ["🔄 Syncing", "Actively transferring data to/from server"],
-            ["🔴 Offline", "Server configured but currently unreachable"],
-          ]}
-        />
+        <p className="text-sm text-muted-foreground mb-3">
+          The new API uses <strong>direct file routing</strong> — no .htaccess
+          or mod_rewrite needed. All calls use this pattern:
+        </p>
+        <Code>{`# All API calls use this URL format:
+https://yourdomain.com/api/index.php?route=ROUTE_NAME
+
+# Examples:
+GET  /api/index.php?route=sync/status    → Health check
+POST /api/index.php?route=auth/login     → Login
+GET  /api/index.php?route=data/students  → List students
+POST /api/index.php?route=data/students  → Save student
+POST /api/index.php?route=sync/push      → Bulk push
+GET  /api/index.php?route=migrate/run    → Create tables`}</Code>
       </Card>
 
       <Card className="p-5">
@@ -2913,6 +2947,10 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
         <DocTable
           headers={["Problem", "Solution"]}
           rows={[
+            [
+              "HTML page instead of JSON",
+              "api/index.php not uploaded. Check public_html/api/index.php exists.",
+            ],
             [
               "Test Connection fails",
               "Check config.php credentials. Verify DB_NAME/DB_USER include cPanel prefix",
@@ -2930,12 +2968,12 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
               "Check PHP version in cPanel → MultiPHP Manager — use PHP 7.4 or 8.x",
             ],
             [
-              "Sync not updating",
-              "Verify API URL saved in Settings → Data → Database Server",
-            ],
-            [
               '"Access denied for user"',
               "In cPanel → MySQL Databases → verify user has ALL PRIVILEGES",
+            ],
+            [
+              "Push shows 0 records saved",
+              "Re-authenticate in Settings → Database Server, then try Push again",
             ],
           ]}
         />
@@ -3159,36 +3197,43 @@ function ApiReference() {
           REST API Reference
         </h2>
         <p className="text-sm text-muted-foreground">
-          Complete reference for the PHP REST API used in MySQL Mode.
+          The API uses DIRECT FILE ROUTING — all requests go to{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            /api/index.php?route=ROUTE_NAME
+          </code>
+          . No .htaccess or mod_rewrite required.
         </p>
       </div>
 
       <Card className="p-5 space-y-4">
-        <h3 className="font-semibold text-foreground">Base URL & Auth</h3>
-        <Code>{`Base URL: https://yourdomain.com/api
+        <h3 className="font-semibold text-foreground">URL Format & Auth</h3>
+        <Code>{`# ALL API calls use this format:
+https://shubh.psmkgs.com/api/index.php?route=ROUTE_NAME
 
-# All requests (except login) require:
-Authorization: Bearer {jwt_token}
-
-# Login to get token:
-POST /auth/login
+# Login (no auth required):
+POST /api/index.php?route=auth/login
 {"username": "superadmin", "password": "admin123"}
+# Response: {"status":"ok","data":{"token":"eyJ...","role":"superadmin"}}
 
-# Response:
-{"success": true, "token": "eyJ...", "role": "superadmin"}`}</Code>
+# All other calls require Authorization header:
+Authorization: Bearer {jwt_token}
+Content-Type: application/json`}</Code>
         <Alert type="info">
-          ℹ️ JWT tokens expire after 24 hours. Re-login to get a fresh token. The
-          ERP auto-refreshes tokens on re-login.
+          ℹ️ JWT tokens expire after 24 hours. The ERP auto-refreshes tokens on
+          re-login. You can also reset Super Admin password at:{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            /api/index.php?route=migrate/reset-superadmin
+          </code>
         </Alert>
       </Card>
 
       <Card className="p-5 space-y-3">
         <h3 className="font-semibold text-foreground">Response Format</h3>
         <Code>{`// Success
-{"success": true, "data": {...} | [...], "message": "..."}
+{"status":"ok","data":{...}|[...],"message":"..."}
 
 // Error
-{"success": false, "error": "Error description"}
+{"status":"error","message":"Error description"}
 
 // HTTP Status Codes
 200 — Success
@@ -3196,208 +3241,143 @@ POST /auth/login
 400 — Bad request (missing/invalid fields)
 401 — Unauthorized (missing or expired token)
 403 — Forbidden (insufficient role)
-404 — Not found
-500 — Server error`}</Code>
+404 — Route not found
+500 — Server/DB error`}</Code>
       </Card>
 
-      <Accordion title="Auth Endpoints (/auth)" defaultOpen>
+      <Accordion title="Auth Routes (route=auth/...)" defaultOpen>
         <DocTable
-          headers={["Method", "Endpoint", "Description", "Auth"]}
+          headers={["Method", "Route", "Description", "Auth"]}
           rows={[
-            ["POST", "/auth/login", "Login, get JWT token", "No"],
-            ["POST", "/auth/logout", "Invalidate token", "Yes"],
-            ["POST", "/auth/change-password", "Change own password", "Yes"],
+            ["POST", "auth/login", "Login, get JWT token", "No"],
+            ["POST", "auth/logout", "Invalidate token", "Yes"],
+            ["POST", "auth/change-password", "Change own password", "Yes"],
             [
               "POST",
-              "/auth/reset-password",
+              "auth/reset-password",
               "Reset any user password",
               "Super Admin",
             ],
-            ["GET", "/auth/me", "Get current user info", "Yes"],
           ]}
         />
       </Accordion>
 
-      <Accordion title="Students Endpoints (/students)">
+      <Accordion title="Data Routes (route=data/COLLECTION)">
         <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Generic CRUD for all 27 collections. Replace{" "}
+            <code className="text-xs bg-muted px-1 rounded">students</code> with
+            any collection name.
+          </p>
           <DocTable
-            headers={["Method", "Endpoint", "Description", "Auth"]}
+            headers={["Method", "Route", "Description"]}
             rows={[
-              ["GET", "/students", "List all students (filterable)", "Yes"],
-              ["GET", "/students/{id}", "Get single student", "Yes"],
-              ["POST", "/students", "Add new student", "Admin+"],
-              ["PUT", "/students/{id}", "Update student", "Admin+"],
-              ["DELETE", "/students/{id}", "Delete student", "Super Admin"],
-              ["GET", "/students/export", "Export CSV", "Admin+"],
-              ["POST", "/students/import", "Import from CSV", "Admin+"],
-              ["GET", "/students/search?q={}", "Search students", "Yes"],
+              ["GET", "data/students", "List all students"],
+              ["GET", "data/students?limit=100&class=Class+5", "Filtered list"],
+              ["POST", "data/students", "Save/upsert a student record"],
+              ["PUT", "data/students/123", "Update student by server ID"],
+              ["DELETE", "data/students/123", "Delete student by server ID"],
             ]}
           />
           <p className="text-xs text-muted-foreground">
-            Query params for list:{" "}
-            <code className="bg-muted px-1 rounded">
-              ?class=Class+5&section=A&status=Active&session_id=abc
-            </code>
+            Collections: students, staff, attendance, fee_receipts, fees_plan,
+            fee_heads, fee_headings, fee_balances, transport_routes,
+            pickup_points, inventory_items, expenses, expense_heads, homework,
+            alumni, sessions, classes, sections, subjects, notifications,
+            biometric_devices, payroll_setup, payslips, whatsapp_logs,
+            old_fee_entries, student_transport, student_discounts
           </p>
         </div>
       </Accordion>
 
-      <Accordion title="Fees Endpoints (/fees)">
+      <Accordion title="Sync Routes (route=sync/...)">
         <DocTable
-          headers={["Method", "Endpoint", "Description", "Auth"]}
+          headers={["Method", "Route", "Description", "Auth"]}
           rows={[
-            ["GET", "/fees/headings", "List fee headings", "Yes"],
-            ["POST", "/fees/headings", "Create heading", "Super Admin"],
-            ["PUT", "/fees/headings/{id}", "Update heading", "Super Admin"],
-            ["GET", "/fees/plan", "Get fee plan", "Yes"],
-            ["POST", "/fees/plan", "Set fee amount", "Super Admin"],
-            ["GET", "/fees/receipts", "List receipts", "Yes"],
-            ["POST", "/fees/receipts", "Create receipt", "Accountant+"],
-            ["PUT", "/fees/receipts/{id}", "Edit receipt", "Admin+"],
-            ["DELETE", "/fees/receipts/{id}", "Delete receipt", "Super Admin"],
-            ["GET", "/fees/due", "Get dues report", "Admin+"],
-            ["GET", "/fees/accounts", "Account-wise summary", "Accountant+"],
-          ]}
-        />
-      </Accordion>
-
-      <Accordion title="Attendance Endpoints (/attendance)">
-        <DocTable
-          headers={["Method", "Endpoint", "Description", "Auth"]}
-          rows={[
-            ["GET", "/attendance", "Get records (filter by date/class)", "Yes"],
-            ["POST", "/attendance", "Mark attendance (bulk)", "Teacher+"],
-            ["PUT", "/attendance/{id}", "Update single record", "Teacher+"],
-            ["GET", "/attendance/summary?date={}", "Class-wise summary", "Yes"],
+            ["GET", "sync/status", "Health check + DB version", "No"],
+            ["POST", "sync/push", "Bulk push collection to MySQL", "Admin+"],
             [
               "GET",
-              "/attendance/student/{id}?month={}",
-              "Monthly student attendance",
+              "sync/pull?since=timestamp",
+              "Pull changes since timestamp",
               "Yes",
             ],
           ]}
         />
-      </Accordion>
-
-      <Accordion title="HR Endpoints (/hr)">
-        <DocTable
-          headers={["Method", "Endpoint", "Description", "Auth"]}
-          rows={[
-            ["GET", "/hr/staff", "List all staff", "Yes"],
-            ["POST", "/hr/staff", "Add staff member", "Admin+"],
-            ["PUT", "/hr/staff/{id}", "Update staff", "Admin+"],
-            ["DELETE", "/hr/staff/{id}", "Delete staff", "Super Admin"],
-            [
-              "GET",
-              "/hr/payroll?month={}&year={}",
-              "Payroll summary",
-              "Admin+",
-            ],
-            ["POST", "/hr/payroll/generate", "Generate payroll", "Admin+"],
-          ]}
-        />
-      </Accordion>
-
-      <Accordion title="Backup & Sync Endpoints (/backup, /sync, /data.php)">
-        <div className="space-y-3">
-          <DocTable
-            headers={["Method", "Endpoint", "Description", "Auth"]}
-            rows={[
-              [
-                "GET",
-                "/backup/export",
-                "Export full DB as JSON",
-                "Super Admin",
-              ],
-              ["POST", "/backup/import", "Import JSON to DB", "Super Admin"],
-              [
-                "POST",
-                "/backup/reset",
-                "Factory reset all tables",
-                "Super Admin",
-              ],
-              ["GET", "/sync/status", "Check server status", "Yes"],
-              ["POST", "/sync/push", "Push localStorage to server", "Admin+"],
-              [
-                "GET",
-                "/sync/pull?since={timestamp}",
-                "Pull changes since timestamp",
-                "Yes",
-              ],
-            ]}
-          />
-          <p className="text-sm text-muted-foreground font-medium">
-            data.php — Generic collection CRUD (used by DataService):
+        <div className="mt-3">
+          <p className="text-sm text-muted-foreground font-medium mb-2">
+            sync/push request body:
           </p>
-          <Code>{`// GET all items in a collection
-GET /data.php?collection=students
+          <Code>{`POST /api/index.php?route=sync/push
+{
+  "collection": "students",
+  "items": [{...}, {...}]   // array of records to upsert
+}
 
-// POST — save a new item
-POST /data.php?collection=fee_receipts
-{"id": "uuid", "student_id": "...", ...}
+// Response:
+{"status":"ok","data":{"results":{"students":{"pushed":45,"errors":[]}}}}
 
-// PUT — update existing item
-PUT /data.php?collection=attendance&id=123
-
-// DELETE — remove item
-DELETE /data.php?collection=inventory_items&id=123
-
-// Whitelisted collections in data.php:
-// students, staff, attendance, fee_receipts, fees_plan,
-// fee_heads, fee_headings, fee_balances, transport_routes,
-// pickup_points, inventory_items, expenses, expense_heads,
-// homework, alumni, sessions, classes, sections, subjects,
-// notifications, biometric_devices, payroll_setup, payslips,
-// whatsapp_logs, old_fee_entries, student_transport, student_discounts`}</Code>
+// Or on error:
+{"status":"error","message":"Authentication required"}`}</Code>
         </div>
       </Accordion>
 
-      <Accordion title="Migration Endpoint (/migrate.php)">
+      <Accordion title="Migration Routes (route=migrate/...)">
         <DocTable
-          headers={["URL", "Description"]}
+          headers={["Method", "Route", "Description"]}
           rows={[
             [
-              "/api/migrate.php?action=run",
-              "Create all tables — run once on first setup",
+              "GET",
+              "migrate/run",
+              "Create all MySQL tables (run once on setup)",
             ],
-            ["/api/migrate.php?action=status", "Check which tables exist"],
+            ["GET", "migrate/status", "Check which tables exist"],
             [
-              "/api/migrate.php?action=rollback",
-              "Drop all tables (use with extreme caution)",
+              "GET",
+              "migrate/reset-superadmin",
+              "Reset Super Admin password to admin123",
             ],
+            ["POST", "migrate/seed", "Seed default superadmin user"],
           ]}
         />
         <Alert type="info">
-          ℹ️ Migration endpoints are not behind JWT auth — they are intended for
-          one-time browser-based setup. Safe to leave in place after migration.
+          ℹ️ Migration routes don't require JWT auth — they are for one-time
+          browser-based setup.
         </Alert>
       </Accordion>
 
       <Card className="p-5">
         <h3 className="font-semibold text-foreground mb-3">
-          Common Error Codes
+          Common Error Messages
         </h3>
         <DocTable
-          headers={["Code", "Meaning", "Common Cause"]}
+          headers={["Message", "Cause", "Fix"]}
           rows={[
-            ["AUTH_REQUIRED", "No token", "Missing Authorization header"],
             [
-              "AUTH_EXPIRED",
-              "Token expired",
-              "Token older than 24 hours — re-login",
+              "Server returned HTML instead of JSON",
+              "api/index.php not uploaded",
+              "Upload api/index.php to public_html/api/",
             ],
             [
-              "ROLE_FORBIDDEN",
-              "Insufficient role",
-              "Action requires higher permission",
+              "Super Admin only",
+              "Not authenticated",
+              "Login in Settings → Database Server → Authenticate Now",
             ],
             [
-              "DUPLICATE_ENTRY",
-              "Unique constraint",
-              "Admission No. or mobile already exists",
+              "Invalid username or password",
+              "Users table empty or wrong password",
+              "Run /api/index.php?route=migrate/run first",
             ],
-            ["DB_ERROR", "MySQL error", "Check config.php credentials"],
-            ["VALIDATION_ERROR", "Missing fields", "Check request body"],
+            [
+              "Access denied for user",
+              "MySQL permissions",
+              "Add ALL PRIVILEGES to user in cPanel MySQL Databases",
+            ],
+            [
+              "Cannot read properties of undefined (reading 'length')",
+              "Wrong response shape from push endpoint",
+              "Update to latest api/index.php — fixed in current version",
+            ],
           ]}
         />
       </Card>

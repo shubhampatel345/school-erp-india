@@ -128,6 +128,8 @@ export function useSync(): SyncState {
       if (!activeRef.current) return;
 
       if (result.status === "ok") {
+        // Only set connected if server responds with ok status
+        // counts may be undefined on first run (tables just created)
         const now = new Date();
         setMode("connected");
         setLastSyncTime(now);

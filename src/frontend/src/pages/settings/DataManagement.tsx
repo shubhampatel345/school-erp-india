@@ -40,7 +40,8 @@ import {
   backendLogin,
   batchPushCollection,
   clearTokens,
-  getApiUrl,
+  getApiIndexUrl,
+  getBaseUrl,
   getDefaultApiUrl,
   getJwt,
   getJwtRole,
@@ -187,7 +188,7 @@ export default function DataManagement() {
 
   // ── Database Server tab state ─────────────────────────
   const [apiUrlInput, setApiUrlInput] = useState(
-    () => getApiUrl() || getDefaultApiUrl(),
+    () => getBaseUrl() || getDefaultApiUrl(),
   );
   const [testResult, setTestResult] = useState<ConnectionTestResult | null>(
     null,
@@ -195,7 +196,7 @@ export default function DataManagement() {
   const [isTesting, setIsTesting] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [savedApiUrl, setSavedApiUrl] = useState(
-    () => getApiUrl() || getDefaultApiUrl(),
+    () => getBaseUrl() || getDefaultApiUrl(),
   );
 
   // ── Auth panel state ──────────────────────────────────
@@ -419,6 +420,7 @@ export default function DataManagement() {
   }
 
   function handleSaveApiUrl() {
+    // setApiUrl strips /api suffix internally
     setApiUrl(apiUrlInput);
     setSavedApiUrl(apiUrlInput);
     if (apiUrlInput) {
@@ -434,14 +436,14 @@ export default function DataManagement() {
       return;
     }
     // Validate URL before attempting auth — catch the most common misconfiguration
-    const currentUrl = getApiUrl();
+    const currentUrl = getBaseUrl();
     if (
       currentUrl.includes("psmkgs.com") &&
       !currentUrl.includes("shubh.psmkgs.com")
     ) {
       setAuthStatus("error");
       setAuthError(
-        "The API URL appears to be incorrect. It should be https://shubh.psmkgs.com/api — click Reset to fix it.",
+        "The API URL appears to be incorrect. It should be https://shubh.psmkgs.com — click Reset to fix it.",
       );
       return;
     }
@@ -481,32 +483,38 @@ export default function DataManagement() {
 
   /** Run database setup then seed, then auto-authenticate */
   async function handleRunSetup() {
-    const currentUrl = getApiUrl();
-    if (!currentUrl) {
+    const currentBase = getBaseUrl();
+    if (!currentBase) {
       setAuthError("Save the API URL first.");
       return;
     }
+    const indexUrl = getApiIndexUrl();
     setIsRunningSetup(true);
     setAuthStatus("idle");
     setAuthError("");
     try {
-      // Step 1: Run migrations
-      const runRes = await fetch(`${currentUrl}/migrate/run`, {
+      // Step 1: Run migrations via ?route= routing
+      const runRes = await fetch(`${indexUrl}?route=migrate/run`, {
         method: "GET",
         headers: { Accept: "application/json" },
         signal: AbortSignal.timeout(20_000),
       });
       const runCt = runRes.headers.get("content-type") ?? "";
       if (runCt.includes("text/html")) {
-        setAuthStatus("error");
-        setAuthError(
-          "Server returned HTML. Make sure the api/ folder is uploaded to cPanel public_html/ and .htaccess is in place.",
-        );
-        setIsRunningSetup(false);
-        return;
+        // Try to read the body to check if it's really HTML
+        const text = await runRes.text();
+        const isHtml = text.trimStart().startsWith("<");
+        if (isHtml) {
+          setAuthStatus("error");
+          setAuthError(
+            "Server returned HTML. Make sure api/index.php is uploaded to cPanel public_html/api/. No .htaccess file is needed — the API uses direct file routing.",
+          );
+          setIsRunningSetup(false);
+          return;
+        }
       }
       // Step 2: Seed
-      await fetch(`${currentUrl}/migrate/seed`, {
+      await fetch(`${indexUrl}?route=migrate/seed`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -660,7 +668,7 @@ export default function DataManagement() {
       let diagnostic = `❌ Batch endpoint test failed: ${msg}`;
       if (status === 404) {
         diagnostic =
-          "❌ Batch endpoint not found (404) — please re-upload the api/ folder to cPanel. The sync.php file needs to be the latest version.";
+          "❌ Batch endpoint not found (404) — please re-upload the api/ folder to cPanel. Verify api/index.php exists.";
       } else if (status === 401 || status === 403) {
         diagnostic =
           "❌ Authentication failed (401/403) — please re-authenticate in the Database Server tab.";
@@ -668,7 +676,7 @@ export default function DataManagement() {
         diagnostic = `❌ Server error (${status}) — check PHP error logs on cPanel. Details: ${msg}`;
       } else if (msg.includes("HTML") || msg.includes("<!DOCTYPE")) {
         diagnostic =
-          "❌ Server returned HTML instead of JSON — api/ folder not uploaded or .htaccess not working. Upload api/ to cPanel public_html/.";
+          "❌ Server returned HTML instead of JSON — api/index.php not uploaded or missing. Upload api/ to cPanel public_html/api/. No .htaccess needed.";
       }
 
       setPushProgress([diagnostic]);
@@ -713,24 +721,60 @@ export default function DataManagement() {
         }
 
         const result = await batchPushCollection(collection, items);
-        totalPushed += result.pushed;
 
-        if (result.pushed === items.length) {
+        // Safely read pushed count — server returns { status, data: { results: { [col]: { pushed, errors } } } }
+        // or directly { pushed, errors } depending on endpoint version
+        const rawResult = result as unknown as {
+          status?: string;
+          data?: {
+            results?: Record<string, { pushed?: number; errors?: string[] }>;
+          };
+          pushed?: number;
+          errors?: string[];
+        };
+
+        let pushedCount = 0;
+        let errorList: string[] = [];
+
+        if (typeof rawResult.pushed === "number") {
+          // Direct shape: { pushed, errors }
+          pushedCount = rawResult.pushed;
+          errorList = rawResult.errors ?? [];
+        } else if (rawResult.data?.results) {
+          // Nested shape: { data: { results: { [collection]: { pushed, errors } } } }
+          const colResult = rawResult.data.results[collection];
+          if (colResult) {
+            pushedCount = colResult.pushed ?? 0;
+            errorList = colResult.errors ?? [];
+          }
+        } else {
+          // Unknown shape — treat as failure
+          totalFailed++;
           finalLog.push(
-            `✅ ${collection}: ${result.pushed}/${items.length} records saved to server`,
+            `❌ ${collection}: FAILED — unexpected response from server (check PHP logs)`,
           );
-        } else if (result.pushed > 0) {
+          setPushProgress([...finalLog]);
+          continue;
+        }
+
+        totalPushed += pushedCount;
+
+        if (pushedCount === items.length) {
           finalLog.push(
-            `⚠️ ${collection}: ${result.pushed}/${items.length} saved — ${result.errors.length} error(s)`,
+            `✅ ${collection}: ${pushedCount}/${items.length} records saved to server`,
           );
-          if (result.errors.length > 0) {
-            finalLog.push(`   └ First error: ${result.errors[0]}`);
+        } else if (pushedCount > 0) {
+          finalLog.push(
+            `⚠️ ${collection}: ${pushedCount}/${items.length} saved — ${errorList.length} error(s)`,
+          );
+          if (errorList.length > 0) {
+            finalLog.push(`   └ First error: ${errorList[0]}`);
           }
         } else {
           totalFailed++;
           const errDetail =
-            result.errors.length > 0
-              ? result.errors[0]
+            errorList.length > 0
+              ? errorList[0]
               : "All items rejected by server";
           finalLog.push(`❌ ${collection}: FAILED — ${errDetail}`);
         }
@@ -843,15 +887,15 @@ export default function DataManagement() {
               {[
                 {
                   n: 1,
-                  text: "Enter API URL below (default is pre-filled for your domain)",
+                  text: "Enter base URL below (e.g. https://shubh.psmkgs.com — no /api suffix needed)",
                 },
                 {
                   n: 2,
-                  text: "Upload the api/ folder from your build to cPanel public_html/",
+                  text: "Upload the api/ folder from your build to cPanel public_html/api/",
                 },
                 {
                   n: 3,
-                  text: "Open https://shubh.psmkgs.com/api/migrate/run in browser to create DB tables",
+                  text: "Open https://shubh.psmkgs.com/api/index.php?route=migrate/run in browser to create DB tables",
                 },
                 { n: 4, text: "Click Test Connection — should show green" },
                 { n: 5, text: "Authenticate with Super Admin password below" },
@@ -870,9 +914,9 @@ export default function DataManagement() {
 
             <div className="space-y-2">
               <Label htmlFor="api-url-input" className="text-sm">
-                Server URL (e.g.{" "}
+                Server Base URL (e.g.{" "}
                 <code className="bg-muted px-1 rounded text-xs">
-                  https://shubh.psmkgs.com/api
+                  https://shubh.psmkgs.com
                 </code>
                 )
               </Label>
@@ -880,7 +924,7 @@ export default function DataManagement() {
                 <Input
                   id="api-url-input"
                   data-ocid="server.api_url.input"
-                  placeholder="https://shubh.psmkgs.com/api"
+                  placeholder="https://shubh.psmkgs.com"
                   value={apiUrlInput}
                   onChange={(e) => setApiUrlInput(e.target.value)}
                   className="font-mono text-sm flex-1"
@@ -909,9 +953,12 @@ export default function DataManagement() {
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                Default:{" "}
-                <code className="font-mono">https://shubh.psmkgs.com/api</code>
-                {" — "}Leave blank to use local-only mode.
+                Enter just the domain:{" "}
+                <code className="font-mono">https://shubh.psmkgs.com</code>
+                {" — "}API calls automatically go to{" "}
+                <code className="font-mono text-[10px]">
+                  /api/index.php?route=...
+                </code>
               </p>
               {urlLooksInvalid && (
                 <div className="flex items-start gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 px-3 py-2">
@@ -982,9 +1029,8 @@ export default function DataManagement() {
                       ? `Connected · ${testResult.latencyMs}ms${testResult.db_version ? ` · MySQL ${testResult.db_version}` : ""}`
                       : testResult.error?.includes("HTML") ||
                           testResult.error?.includes("api/ folder") ||
-                          testResult.error?.includes("htaccess") ||
-                          testResult.error?.includes(".htaccess")
-                        ? "Server returned an HTML page. This means either: (1) The api/ folder is not uploaded to cPanel, or (2) The api/.htaccess file is missing. Download your build and upload the public_html/api/ folder to cPanel, then try again."
+                          testResult.error?.includes("index.php")
+                        ? "Server returned HTML instead of JSON. Upload api/index.php to cPanel public_html/api/ — no .htaccess needed. Visit /api/index.php?route=migrate/run to create tables."
                         : testResult.error?.includes("Failed to fetch") ||
                             testResult.error?.includes("Network")
                           ? "Cannot reach server. Check the URL and ensure cPanel is reachable."
@@ -1097,7 +1143,7 @@ export default function DataManagement() {
                         </code>
                         . Reset anytime at{" "}
                         <code className="font-mono text-[10px]">
-                          /api/migrate/reset-superadmin
+                          /api/index.php?route=migrate/reset-superadmin
                         </code>
                       </p>
                     </div>
@@ -1158,9 +1204,12 @@ export default function DataManagement() {
                             Upload the <code className="font-mono">api/</code>{" "}
                             folder to{" "}
                             <code className="font-mono">public_html/</code> on
-                            cPanel, then visit{" "}
-                            <code className="font-mono">/api/migrate/run</code>{" "}
-                            to set up the database.
+                            cPanel. No .htaccess needed — the API uses direct
+                            file routing via{" "}
+                            <code className="font-mono text-[10px]">
+                              /api/index.php?route=migrate/run
+                            </code>
+                            .
                           </p>
                         )}
                       </div>
@@ -1245,6 +1294,10 @@ export default function DataManagement() {
                         <span className="font-mono text-[10px] break-all">
                           {savedApiUrl}
                         </span>
+                        <br />
+                        <span className="text-[9px] opacity-70">
+                          API: /api/index.php?route=...
+                        </span>
                       </>
                     ) : (
                       "Not configured"
@@ -1311,11 +1364,15 @@ export default function DataManagement() {
                   <p className="font-semibold text-foreground">
                     Push Local Data to Server
                   </p>
-                  <p className="text-sm text-muted-foreground mt-0.5">
+                  <p className="text-xs text-muted-foreground">
                     Uploads all data currently stored in this browser (students,
                     fees, attendance, etc.) to your MySQL database. Run this
                     once after connecting to migrate existing data. After this,
-                    all new data will automatically sync to the server.
+                    all new data will automatically sync to the server. Uses
+                    direct routing:{" "}
+                    <code className="font-mono text-[10px]">
+                      /api/index.php?route=sync/push
+                    </code>
                   </p>
                 </div>
               </div>

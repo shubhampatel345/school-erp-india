@@ -120,8 +120,8 @@ function SyncBar() {
       bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
       icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
       label: countSummary
-        ? `Server Synced — ${countSummary}`
-        : "Server Connected — syncing across all devices",
+        ? `Synced to MySQL — ${countSummary} — all devices share this data`
+        : "Synced to MySQL server — all devices see the same data",
       labelClass: "text-xs font-medium text-emerald-700",
       badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
       badgeText: "Synced",
@@ -139,7 +139,7 @@ function SyncBar() {
     offline: {
       bg: "bg-destructive/5 border-b border-destructive/20",
       icon: <WifiOff className="w-4 h-4 text-destructive flex-shrink-0" />,
-      label: "Offline Mode — server unreachable, using local data",
+      label: "Offline Mode — server unreachable, data saved locally only",
       labelClass: "text-xs font-medium text-destructive",
       badgeCls: "bg-destructive/10 text-destructive border-destructive/30",
       badgeText: "Offline",
@@ -147,7 +147,7 @@ function SyncBar() {
     auth_error: {
       bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-300/60",
       icon: <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />,
-      label: "Server auth required — open Settings to fix",
+      label: "Server auth required — data not syncing. Open Settings to fix",
       labelClass: "text-xs font-medium text-amber-700",
       badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
       badgeText: "Auth Required",

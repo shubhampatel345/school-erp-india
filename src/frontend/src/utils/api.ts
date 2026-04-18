@@ -1,79 +1,112 @@
 /**
  * SHUBH SCHOOL ERP — cPanel MySQL API Client
  *
- * Provides typed fetch-based wrappers for the PHP REST API.
- * Falls back to localStorage-only mode when no API URL is configured.
+ * Uses DIRECT FILE ROUTING — no .htaccess needed.
+ * ALL API calls go to: {baseUrl}/api/index.php?route=ROUTE_NAME
  *
- * Storage keys used:
- *   shubh_erp_api_url         — base URL e.g. https://yourschool.com/api
- *   shubh_erp_jwt_token       — JWT returned by /api/auth/login
- *   shubh_erp_jwt_refresh_token — refresh token for JWT auto-renewal
+ * Storage keys:
+ *   shubh_erp_api_base_url      — base URL e.g. https://shubh.psmkgs.com
+ *   shubh_erp_jwt_token         — JWT returned by auth/login
+ *   shubh_erp_jwt_refresh_token — refresh token
  */
 
 // ── Key constants ─────────────────────────────────────────
 const KEY_API_URL = "shubh_erp_api_url";
+const KEY_API_BASE = "shubh_erp_api_base_url";
 const KEY_JWT = "shubh_erp_jwt_token";
 const KEY_JWT_REFRESH = "shubh_erp_jwt_refresh_token";
 
-/** Production API default — used when no override is saved in localStorage */
-const DEFAULT_API_URL = "https://shubh.psmkgs.com/api";
+/** Default base domain — NO /api suffix here */
+const DEFAULT_BASE_URL = "https://shubh.psmkgs.com";
 
-// ── URL Migration (auto-correct old wrong URLs on module load) ────────────────
-// Covers all known bad URL patterns: missing subdomain, bare domain, http, etc.
+// ── URL Migration (auto-correct old wrong URL formats) ────────────────
 (function migrateApiUrl() {
   try {
-    const stored = localStorage.getItem(KEY_API_URL);
-    if (!stored) return;
-    const needsFix =
-      stored === "https://psmkgs.com/api" ||
-      stored === "https://psmkgs.com" ||
-      stored === "http://psmkgs.com/api" ||
-      stored === "http://psmkgs.com" ||
-      stored === "psmkgs.com/api" ||
-      stored === "psmkgs.com" ||
-      stored.startsWith("https://psmkgs.com/") ||
-      stored.startsWith("http://psmkgs.com/") ||
-      // catches "psmkgs.com" without protocol prefix
-      (stored.includes("psmkgs.com") && !stored.includes("shubh.psmkgs.com"));
-    if (needsFix) {
-      localStorage.setItem(KEY_API_URL, DEFAULT_API_URL);
+    // Migrate from old KEY_API_URL that stored the full /api path
+    const oldStored = localStorage.getItem(KEY_API_URL);
+    if (oldStored) {
+      // Extract the base domain from whatever was stored
+      let base = oldStored
+        .replace(/\/api\/index\.php.*$/, "")
+        .replace(/\/api\/?$/, "")
+        .replace(/\/$/, "");
+      // Fix missing subdomain
+      if (base.includes("psmkgs.com") && !base.includes("shubh.psmkgs.com")) {
+        base = DEFAULT_BASE_URL;
+      }
+      if (base) {
+        localStorage.setItem(KEY_API_BASE, base);
+      }
+      localStorage.removeItem(KEY_API_URL);
+    }
+    // Fix bad base URL
+    const base = localStorage.getItem(KEY_API_BASE);
+    if (base) {
+      const needsFix =
+        base.includes("psmkgs.com") && !base.includes("shubh.psmkgs.com");
+      if (needsFix) {
+        localStorage.setItem(KEY_API_BASE, DEFAULT_BASE_URL);
+      }
     }
   } catch {
-    // ignore — localStorage may not be available
+    // ignore
   }
 })();
 
 // ── URL helpers ───────────────────────────────────────────
 
-export function getApiUrl(): string {
-  const stored = localStorage.getItem(KEY_API_URL);
+/** Returns the stored base URL (e.g. https://shubh.psmkgs.com), never with /api */
+export function getBaseUrl(): string {
+  const stored = localStorage.getItem(KEY_API_BASE);
   if (stored) {
-    // Inline correction on every read — never return a bad URL
-    const clean = stored.replace(/\/$/, "");
+    // Strip any accidental /api suffix
+    const clean = stored
+      .replace(/\/api\/index\.php.*$/, "")
+      .replace(/\/api\/?$/, "")
+      .replace(/\/$/, "");
+    // Auto-fix missing subdomain
     if (clean.includes("psmkgs.com") && !clean.includes("shubh.psmkgs.com")) {
-      localStorage.setItem(KEY_API_URL, DEFAULT_API_URL);
-      return DEFAULT_API_URL;
+      localStorage.setItem(KEY_API_BASE, DEFAULT_BASE_URL);
+      return DEFAULT_BASE_URL;
     }
     return clean;
   }
-  // Fall back to the production default so the app auto-connects on first load
-  return DEFAULT_API_URL;
+  return DEFAULT_BASE_URL;
+}
+
+/** Returns the full path to index.php: {base}/api/index.php */
+export function getApiIndexUrl(): string {
+  return `${getBaseUrl()}/api/index.php`;
+}
+
+/**
+ * @deprecated Use getBaseUrl() + getApiIndexUrl()
+ * Legacy helper that returns base/api — kept for backward compatibility
+ * in components that show the URL to the user.
+ */
+export function getApiUrl(): string {
+  return `${getBaseUrl()}/api`;
 }
 
 export function getDefaultApiUrl(): string {
-  return DEFAULT_API_URL;
+  return DEFAULT_BASE_URL;
 }
 
-export function setApiUrl(url: string) {
-  if (url) {
-    localStorage.setItem(KEY_API_URL, url.replace(/\/$/, ""));
-  } else {
-    localStorage.removeItem(KEY_API_URL);
+export function setApiUrl(rawUrl: string) {
+  if (!rawUrl) {
+    localStorage.removeItem(KEY_API_BASE);
+    return;
   }
+  // Accept either "https://domain.com" or "https://domain.com/api" — store just the base
+  const clean = rawUrl
+    .replace(/\/api\/index\.php.*$/, "")
+    .replace(/\/api\/?$/, "")
+    .replace(/\/$/, "");
+  localStorage.setItem(KEY_API_BASE, clean);
 }
 
 export function isApiConfigured(): boolean {
-  return getApiUrl().length > 0;
+  return getBaseUrl().length > 0;
 }
 
 // ── JWT helpers ───────────────────────────────────────────
@@ -113,7 +146,6 @@ export function decodeJwtPayload(token: string): JwtPayload | null {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
     const payload = parts[1];
-    // pad base64url to base64
     const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
     const padded = base64.padEnd(
       base64.length + ((4 - (base64.length % 4)) % 4),
@@ -145,14 +177,10 @@ export function isJwtExpired(): boolean {
   if (!token) return true;
   const payload = decodeJwtPayload(token);
   if (!payload?.exp) return false;
-  // expired if exp < now (seconds)
   return payload.exp < Math.floor(Date.now() / 1000);
 }
 
 // ── Backend login ─────────────────────────────────────────
-// Attempts to log in to the backend and stores JWT on success.
-// Returns true if successful, false if failed.
-// Never throws — failures are silent (local auth continues to work).
 
 export interface BackendLoginResult {
   success: boolean;
@@ -164,11 +192,12 @@ export async function backendLogin(
   username: string,
   password: string,
 ): Promise<BackendLoginResult> {
-  const baseUrl = getApiUrl();
-  if (!baseUrl) return { success: false, error: "No API URL configured" };
+  const indexUrl = getApiIndexUrl();
+  if (!indexUrl) return { success: false, error: "No API URL configured" };
 
   try {
-    const res = await fetch(`${baseUrl}/auth/login`, {
+    const url = `${indexUrl}?route=auth/login`;
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -183,7 +212,7 @@ export async function backendLogin(
       return {
         success: false,
         error:
-          "Server returned an HTML page. This means: (1) The api/ folder is not uploaded to cPanel, or (2) The .htaccess file is missing. Upload api/ to public_html/ and visit /api/migrate/run to set up the database.",
+          "Server returned an HTML page. The api/ folder is not uploaded to cPanel, or index.php is missing. Upload the api/ folder to public_html/ and visit /api/index.php?route=migrate/run to set up the database.",
       };
     }
 
@@ -194,13 +223,12 @@ export async function backendLogin(
       return { success: false, error: "Could not read server response" };
     }
 
-    // Guard against HTML slipping through (e.g. content-type not set by server)
     const trimmed = raw.trimStart();
     if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
       return {
         success: false,
         error:
-          "Server returned an HTML error page instead of JSON. Check that the api/ folder is uploaded to cPanel and .htaccess is in place.",
+          "Server returned an HTML error page instead of JSON. Check that api/index.php is uploaded to cPanel public_html/api/.",
       };
     }
 
@@ -215,8 +243,6 @@ export async function backendLogin(
       };
     }
 
-    // The API wraps success in { status, message, data: { token, refresh_token, user } }
-    // but some older builds return token at root level — handle both.
     const nestedData = (parsed.data ?? {}) as Record<string, unknown>;
     const token: string =
       (parsed.token as string) ?? (nestedData.token as string) ?? "";
@@ -240,7 +266,6 @@ export async function backendLogin(
       setJwt(token);
       if (refreshToken) setRefreshToken(refreshToken);
 
-      // Store password so auto-re-auth works after token expiry
       try {
         const passwords = JSON.parse(
           localStorage.getItem("shubh_erp_user_passwords") ?? "{}",
@@ -250,16 +275,14 @@ export async function backendLogin(
           "shubh_erp_user_passwords",
           JSON.stringify(passwords),
         );
-        // Also persist under 'shubh_server_password' for direct access
         localStorage.setItem("shubh_server_password", password.trim());
       } catch {
-        // ignore localStorage errors
+        // ignore
       }
 
       return { success: true, role };
     }
 
-    // Failed login — return the exact server message so the UI can show it
     const errorMsg =
       serverMsg ||
       (parsed.status === "error"
@@ -269,7 +292,6 @@ export async function backendLogin(
   } catch (err) {
     const msg =
       err instanceof Error ? err.message : "Network error during login";
-    // Improve timeout message
     if (msg.includes("timeout") || msg.includes("AbortError")) {
       return {
         success: false,
@@ -282,18 +304,13 @@ export async function backendLogin(
 }
 
 // ── Auto-login helper ─────────────────────────────────────
-// Called lazily before protected API calls when no JWT is present.
-// Uses stored superadmin password (defaults to admin123).
-// Returns false silently — the original call proceeds regardless.
 
 let _autoLoginInProgress = false;
 
 async function ensureAuthenticated(): Promise<void> {
-  // Already have a valid JWT
   const jwt = getJwt();
   if (jwt && !isJwtExpired()) return;
 
-  // Only attempt auto-login for superadmin
   const currentUserRaw = localStorage.getItem("shubh_erp_current_user");
   if (!currentUserRaw) return;
 
@@ -309,7 +326,6 @@ async function ensureAuthenticated(): Promise<void> {
     return;
   }
 
-  // Prevent concurrent auto-login storms
   if (_autoLoginInProgress) return;
   _autoLoginInProgress = true;
 
@@ -340,20 +356,16 @@ export interface ApiError {
 }
 
 // ── Safe JSON parser ──────────────────────────────────────
-// Checks BOTH content-type AND response body prefix before calling .json()
-// so an HTML error page (404/403/500 from cPanel) never causes
-// "Unexpected token '<', '<!DOCTYPE ...' is not valid JSON" crashes.
 
 async function safeParseJson<T>(res: Response): Promise<T> {
   const ct = res.headers.get("content-type") ?? "";
 
-  // Check content-type first
   if (ct.includes("text/html") || ct.includes("application/xhtml")) {
     throw new Error(
       "Server returned an HTML page instead of JSON. " +
         "This usually means the api/ folder is not uploaded to cPanel, " +
-        "or the .htaccess rewrite rules are not working. " +
-        "See api/README.md for setup instructions.",
+        "or api/index.php is missing. " +
+        "Upload api/ to public_html/ and visit /api/index.php?route=migrate/run.",
     );
   }
 
@@ -364,13 +376,12 @@ async function safeParseJson<T>(res: Response): Promise<T> {
     throw new Error("Could not read response from server.");
   }
 
-  // Extra guard: if body starts with HTML tag regardless of content-type
   const trimmed = text.trimStart();
   if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
     throw new Error(
       "Server returned HTML instead of JSON. " +
-        "Please upload the api/ folder to your cPanel public_html directory " +
-        "and ensure mod_rewrite is enabled. See api/README.md.",
+        "Please upload api/index.php to your cPanel public_html/api/ directory. " +
+        "No .htaccess required — use direct file routing.",
     );
   }
 
@@ -395,18 +406,19 @@ function isValidUrl(url: string): boolean {
 }
 
 // ── Internal fetch wrapper ────────────────────────────────
+// Uses ?route= query string — NO .htaccess needed.
 
 async function apiFetch<T>(
   method: string,
-  path: string,
+  route: string,
   body?: unknown,
   retried = false,
 ): Promise<T> {
-  const baseUrl = getApiUrl();
-  if (!baseUrl) throw new Error("API not configured — running in offline mode");
+  const indexUrl = getApiIndexUrl();
+  if (!indexUrl)
+    throw new Error("API not configured — running in offline mode");
 
-  // Ensure JWT before making protected calls (skip for auth endpoints)
-  const isAuthEndpoint = path.startsWith("/auth/");
+  const isAuthEndpoint = route.startsWith("auth/");
   if (!isAuthEndpoint && !retried) {
     await ensureAuthenticated();
   }
@@ -418,12 +430,16 @@ async function apiFetch<T>(
   const jwt = getJwt();
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
 
+  // Strip leading slash from route
+  const cleanRoute = route.replace(/^\/+/, "");
+  const url = `${indexUrl}?route=${encodeURIComponent(cleanRoute)}`;
+
   const init: RequestInit = { method, headers };
   if (body !== undefined) init.body = JSON.stringify(body);
 
   let res: Response;
   try {
-    res = await fetch(`${baseUrl}${path}`, init);
+    res = await fetch(url, init);
   } catch (err) {
     throw {
       message: err instanceof Error ? err.message : "Network request failed",
@@ -436,7 +452,8 @@ async function apiFetch<T>(
     const refresh = getRefreshToken();
     if (refresh) {
       try {
-        const refreshRes = await fetch(`${baseUrl}/auth/refresh`, {
+        const refreshUrl = `${indexUrl}?route=auth/refresh`;
+        const refreshRes = await fetch(refreshUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ refresh_token: refresh }),
@@ -444,16 +461,15 @@ async function apiFetch<T>(
         if (refreshRes.ok) {
           const data = await safeParseJson<{ token: string }>(refreshRes);
           setJwt(data.token);
-          return apiFetch<T>(method, path, body, true);
+          return apiFetch<T>(method, route, body, true);
         }
       } catch {
         clearTokens();
       }
     }
-    // Attempt full re-login on 401 with no refresh token
     if (!retried) {
       await ensureAuthenticated();
-      return apiFetch<T>(method, path, body, true);
+      return apiFetch<T>(method, route, body, true);
     }
   }
 
@@ -487,30 +503,29 @@ async function apiFetch<T>(
 
 // ── Core typed API functions ──────────────────────────────
 
-export async function apiGet<T>(path: string): Promise<T> {
-  return apiFetch<T>("GET", path);
+export async function apiGet<T>(route: string): Promise<T> {
+  return apiFetch<T>("GET", route);
 }
 
 export async function apiPost<T, B = unknown>(
-  path: string,
+  route: string,
   body: B,
 ): Promise<T> {
-  return apiFetch<T>("POST", path, body);
+  return apiFetch<T>("POST", route, body);
 }
 
 export async function apiPut<T, B = unknown>(
-  path: string,
+  route: string,
   body: B,
 ): Promise<T> {
-  return apiFetch<T>("PUT", path, body);
+  return apiFetch<T>("PUT", route, body);
 }
 
-export async function apiDelete<T>(path: string): Promise<T> {
-  return apiFetch<T>("DELETE", path);
+export async function apiDelete<T>(route: string): Promise<T> {
+  return apiFetch<T>("DELETE", route);
 }
 
 // ── Generic collection CRUD ───────────────────────────────
-// Maps to PHP /api/data/{collection} endpoints
 
 export interface CollectionListResult<T> {
   rows: T[];
@@ -519,7 +534,6 @@ export interface CollectionListResult<T> {
   offset: number;
 }
 
-/** Fetch all records for a collection from the server */
 export async function fetchCollection<T>(
   collection: string,
   filters?: Record<string, string | number>,
@@ -530,38 +544,72 @@ export async function fetchCollection<T>(
       Object.entries(filters ?? {}).map(([k, v]) => [k, String(v)]),
     ),
   });
-  const res = await apiGet<{ status: string; data: CollectionListResult<T> }>(
-    `/data/${collection}?${params.toString()}`,
-  );
-  return (res as unknown as CollectionListResult<T>).rows ?? [];
+
+  // Build the full URL manually to combine route= and additional params
+  const indexUrl = getApiIndexUrl();
+  const url = `${indexUrl}?route=data/${collection}&${params.toString()}`;
+
+  await ensureAuthenticated();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-School-ID": getSchoolId(),
+  };
+  const jwt = getJwt();
+  if (jwt) headers.Authorization = `Bearer ${jwt}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "GET", headers });
+  } catch (err) {
+    console.error(
+      `[DataService] fetchCollection(${collection}) network error:`,
+      err,
+    );
+    throw err;
+  }
+
+  const parsed = await safeParseJson<{
+    status?: string;
+    data?: CollectionListResult<T> | T[];
+    rows?: T[];
+  }>(res);
+
+  // Support multiple response shapes:
+  // { data: [...] }          — from handle_data_collection (json_success(array))
+  // { data: { rows: [...] } } — legacy paginated shape
+  // { rows: [...] }           — direct rows
+  if (Array.isArray(parsed.data)) return parsed.data as T[];
+  if (
+    parsed.data &&
+    Array.isArray((parsed.data as CollectionListResult<T>).rows)
+  )
+    return (parsed.data as CollectionListResult<T>).rows;
+  if (Array.isArray(parsed.rows)) return parsed.rows;
+  return [];
 }
 
-/** Save (upsert) a single item to a collection */
 export async function saveCollectionItem<T extends Record<string, unknown>>(
   collection: string,
   item: T,
 ): Promise<{ id: number }> {
-  return apiFetch<{ id: number }>("POST", `/data/${collection}`, item);
+  return apiFetch<{ id: number }>("POST", `data/${collection}`, item);
 }
 
-/** Update an existing item in a collection by server ID */
 export async function updateCollectionItem<T extends Record<string, unknown>>(
   collection: string,
   id: number,
   item: T,
 ): Promise<void> {
-  await apiFetch<void>("PUT", `/data/${collection}/${id}`, item);
+  await apiFetch<void>("PUT", `data/${collection}/${id}`, item);
 }
 
-/** Soft-delete an item from a collection by server ID */
 export async function deleteCollectionItem(
   collection: string,
   id: number,
 ): Promise<void> {
-  await apiFetch<void>("DELETE", `/data/${collection}/${id}`);
+  await apiFetch<void>("DELETE", `data/${collection}/${id}`);
 }
 
-/** Bulk-fetch multiple collections in parallel */
 export async function syncAllCollections(
   collectionNames: string[],
 ): Promise<Record<string, unknown[]>> {
@@ -574,6 +622,8 @@ export async function syncAllCollections(
   for (const result of results) {
     if (result.status === "fulfilled") {
       out[result.value.name] = result.value.rows;
+    } else {
+      console.warn("[DataService] Failed to sync collection:", result.reason);
     }
   }
   return out;
@@ -587,11 +637,27 @@ export interface SyncStatusResponse {
   db_version?: string;
   last_backup?: string;
   timestamp: string;
+  counts?: Record<string, number>;
   message?: string;
 }
 
 export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
-  return apiGet<SyncStatusResponse>("/sync/status");
+  // Public endpoint — call directly without auth to avoid auth loops
+  const indexUrl = getApiIndexUrl();
+  const url = `${indexUrl}?route=sync/status`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (err) {
+    throw new Error(err instanceof Error ? err.message : "Cannot reach server");
+  }
+
+  return safeParseJson<SyncStatusResponse>(res);
 }
 
 // ── Migration endpoint ────────────────────────────────────
@@ -605,23 +671,14 @@ export interface MigrateResponse {
 export async function migrateLocalData(
   data: Record<string, unknown>,
 ): Promise<MigrateResponse> {
-  const baseUrl = getApiUrl();
-  if (!baseUrl) {
+  const indexUrl = getApiIndexUrl();
+  if (!isValidUrl(getBaseUrl())) {
     return {
       success: false,
-      message:
-        "Database Server URL is not configured. Go to Settings → Data Management to set it.",
-    };
-  }
-  if (!isValidUrl(baseUrl)) {
-    return {
-      success: false,
-      message:
-        "Database Server URL is invalid. It must start with http:// or https://.",
+      message: "Database Server URL is invalid. It must start with https://.",
     };
   }
 
-  // Ensure we're authenticated before migrating
   await ensureAuthenticated();
 
   const headers: Record<string, string> = {
@@ -632,21 +689,18 @@ export async function migrateLocalData(
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
 
   try {
-    const res = await fetch(`${baseUrl}/migrate/run`, {
+    const res = await fetch(`${indexUrl}?route=migrate/run`, {
       method: "POST",
       headers,
       body: JSON.stringify({ data }),
     });
 
     if (!res.ok) {
-      // Try to parse a meaningful error message
       try {
         const ct = res.headers.get("content-type") ?? "";
         if (!ct.includes("text/html")) {
           const json = (await res.json()) as { message?: string };
-          if (json.message) {
-            return { success: false, message: json.message };
-          }
+          if (json.message) return { success: false, message: json.message };
         }
       } catch {
         /* ignore */
@@ -668,9 +722,7 @@ export async function migrateLocalData(
   }
 }
 
-// ── Batch push for a single named collection ─────────────────────────────────
-// POST /sync/batch  { collection, items }
-// Used by the "Push Local Data to Server" feature in DataManagement.
+// ── Batch push ────────────────────────────────────────────
 
 export interface BatchPushResult {
   pushed: number;
@@ -684,10 +736,26 @@ export async function batchPushCollection(
   collection: string,
   items: unknown[],
 ): Promise<BatchPushResult> {
-  return apiFetch<BatchPushResult>("POST", "/sync/batch", {
+  // Use sync/batch for single-collection pushes — returns { pushed, total, errors, collection, table }
+  // sync/push also accepts this format (via auto-redirect), but sync/batch is more explicit.
+  const raw = await apiFetch<unknown>("POST", "sync/batch", {
     collection,
     items,
   });
+  // Handle both direct shape { pushed, errors } and wrapped { data: { pushed, errors } }
+  const r = raw as Record<string, unknown>;
+  if (typeof r.pushed === "number") {
+    return r as unknown as BatchPushResult;
+  }
+  // Unwrap nested data field if present
+  const d = (r.data ?? r) as Record<string, unknown>;
+  return {
+    pushed: (d.pushed as number) ?? 0,
+    total: (d.total as number) ?? items.length,
+    errors: (d.errors as string[]) ?? [],
+    collection: (d.collection as string) ?? collection,
+    table: d.table as string | undefined,
+  };
 }
 
 // ── Connection test ───────────────────────────────────────
@@ -702,13 +770,19 @@ export interface ConnectionTestResult {
 }
 
 export async function testConnection(
-  overrideUrl?: string,
+  overrideBaseUrl?: string,
 ): Promise<ConnectionTestResult> {
-  const urlToTest = overrideUrl?.replace(/\/$/, "") ?? getApiUrl();
-  if (!urlToTest) {
+  let base = overrideBaseUrl ?? getBaseUrl();
+  // Accept "https://domain.com/api" or "https://domain.com" — normalize to base
+  base = base
+    .replace(/\/api\/index\.php.*$/, "")
+    .replace(/\/api\/?$/, "")
+    .replace(/\/$/, "");
+
+  if (!base) {
     return { connected: false, latencyMs: 0, error: "No API URL configured" };
   }
-  if (!isValidUrl(urlToTest)) {
+  if (!isValidUrl(base)) {
     return {
       connected: false,
       latencyMs: 0,
@@ -717,17 +791,16 @@ export async function testConnection(
     };
   }
 
+  const testUrl = `${base}/api/index.php?route=sync/status`;
   const start = performance.now();
   try {
-    // sync/status is a public endpoint — no JWT or X-School-ID required
-    const res = await fetch(`${urlToTest}/sync/status`, {
+    const res = await fetch(testUrl, {
       method: "GET",
       headers: { Accept: "application/json" },
       signal: AbortSignal.timeout(8_000),
     });
     const latencyMs = Math.round(performance.now() - start);
 
-    // Even a non-200 is ok if it's JSON — parse it
     let data: SyncStatusResponse | null = null;
     try {
       data = await safeParseJson<SyncStatusResponse>(res);
@@ -738,9 +811,9 @@ export async function testConnection(
         connected: false,
         latencyMs,
         error: isHtml
-          ? "Server returned an HTML page. This means either: (1) The api/ folder is not uploaded to cPanel, or (2) The api/.htaccess file is missing. Download your build and upload the public_html/api/ folder to cPanel, then try again."
+          ? "Server returned HTML instead of JSON. Upload api/index.php to cPanel public_html/api/ and visit /api/index.php?route=migrate/run to set up the database. No .htaccess required."
           : errMsg ||
-            "API files not found. Please upload the api/ folder to your cPanel hosting. See api/README.md for instructions.",
+            "API file not found. Upload api/index.php to public_html/api/ on cPanel.",
       };
     }
 
@@ -761,15 +834,10 @@ export async function testConnection(
   } catch (err) {
     const latencyMs = Math.round(performance.now() - start);
     const msg = err instanceof Error ? err.message : "Connection failed";
-    // Add helpful hint for the most common error
-    const hint =
-      msg.includes("HTML") || msg.includes("JSON")
-        ? ` Make sure api/ folder is uploaded to ${urlToTest.replace(/\/api$/, "")}/api/ on cPanel.`
-        : "";
     return {
       connected: false,
       latencyMs,
-      error: msg + hint,
+      error: msg,
     };
   }
 }
