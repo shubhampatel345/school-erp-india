@@ -143,8 +143,9 @@ export function useSync(): SyncState {
         });
         // Restore normal poll interval after auth recovery
         restartPoll(POLL_INTERVAL_MS, runCheck);
-        // Trigger DataService to load/refresh all collections when connected
-        void dataService.init();
+        // Trigger DataService to load/refresh all collections when connected.
+        // force=true ensures fresh MySQL data is fetched even if init ran before.
+        void dataService.init(true);
       } else {
         const msg = result.message ?? "Server returned an error";
         if (isSuperAdminOnlyError(msg)) {
@@ -187,11 +188,23 @@ export function useSync(): SyncState {
       return;
     }
 
+    // Force a fresh server fetch on every app startup (not just first time).
+    // This is what ensures Device B sees the same data as Device A after login.
+    void dataService.init(true);
     void runCheck();
 
     intervalRef.current = setInterval(() => {
       void runCheck();
     }, POLL_INTERVAL_MS);
+
+    // When the user switches back to this tab (window focus), re-fetch data.
+    // This is the cross-device sync fix: coming back to the ERP always shows fresh data.
+    function handleFocus() {
+      if (isApiConfigured()) {
+        void dataService.init(true);
+      }
+    }
+    window.addEventListener("focus", handleFocus);
 
     return () => {
       activeRef.current = false;
@@ -199,6 +212,7 @@ export function useSync(): SyncState {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
+      window.removeEventListener("focus", handleFocus);
     };
   }, [runCheck]);
 

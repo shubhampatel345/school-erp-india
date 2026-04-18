@@ -533,6 +533,24 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
     $failed = 0;
     $errors = [];
 
+    // ── Bug 1 fix: fullName ↔ name mapping for students table ────────────────
+    // The frontend Student type uses `fullName`; the MySQL column is `name`.
+    // Accept both: store as `name`, also return `fullName` alias on reads.
+    if ($table === 'students') {
+        foreach ($rows as &$row) {
+            if (!is_array($row)) continue;
+            // fullName present but name absent/null → copy to name
+            if (isset($row['fullName']) && (!isset($row['name']) || $row['name'] === null || $row['name'] === '')) {
+                $row['name'] = $row['fullName'];
+            }
+            // name present but fullName absent → copy to fullName (so batchUpsert filters don't drop it)
+            if (isset($row['name']) && (!isset($row['fullName']) || $row['fullName'] === null || $row['fullName'] === '')) {
+                $row['fullName'] = $row['name'];
+            }
+        }
+        unset($row); // break reference
+    }
+
     // Cache known columns from live DB schema to prevent SQLSTATE[42S22]
     $tableColumns = [];
     try {
@@ -686,11 +704,12 @@ function handle_sync_pull(string $method, ?array $auth, int $sid): void {
     $pull = [];
     foreach ($tables as $table) {
         try {
+            // Bug 1 fix: students table — return both `name` and `fullName` alias
+            $selectExpr = ($table === 'students') ? '*, `name` AS `fullName`' : '*';
             if ($since) {
-                // Only tables that have a timestamp-ish column can filter by since
-                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 1000");
+                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 1000");
             } else {
-                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 1000");
+                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 1000");
             }
             $stmt->execute();
             $rows = $stmt->fetchAll();
@@ -873,8 +892,12 @@ function handle_data_collection(string $method, string $collection, array $body,
     $db    = getDB();
 
     if ($method === 'GET') {
+        // Bug 1 fix: students table has `name` column but frontend expects `fullName`.
+        // Return BOTH: `name` (for raw SQL) and `name AS fullName` alias.
+        $selectExpr = ($table === 'students') ? '*, `name` AS `fullName`' : '*';
+
         if ($id !== null) {
-            $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE `id`=:id LIMIT 1");
+            $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` WHERE `id`=:id LIMIT 1");
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
             if (!$row) json_error('Record not found', 404);
@@ -883,7 +906,7 @@ function handle_data_collection(string $method, string $collection, array $body,
             $limit  = min((int)($_GET['limit'] ?? 1000), 5000);
             $offset = max((int)($_GET['offset'] ?? 0), 0);
             try {
-                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
+                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
                 $stmt->execute();
                 json_success($stmt->fetchAll());
             } catch (Throwable $e) {

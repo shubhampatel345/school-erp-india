@@ -43,6 +43,7 @@ import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
+import { isApiConfigured } from "../utils/api";
 import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
 
@@ -173,19 +174,40 @@ export default function Students({ onNavigate }: StudentsProps) {
     dataService.getMode(),
   );
 
-  // Reload from DataService/server when the component mounts or DataService updates
-  useEffect(() => {
-    reload();
-    // Trigger a server refresh in the background so fresh data always loads
-    void dataService.refresh("students").catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ── State ──────────────────────────────────────────────────────────────────
   const [students, setStudents] = useState<Student[]>(() => {
+    // Initial state: prefer DataService cache, fall back to localStorage.
+    // The mount effect below will immediately overwrite with fresh server data.
     const ds = dataService.get<Student>("students");
     return ds.length > 0 ? ds : ls.get<Student[]>("students", []);
   });
+
+  // ── Reload from cache ──────────────────────────────────────────────────────
+  const reload = useCallback(() => {
+    const ds = dataService.get<Student>("students");
+    setStudents(ds.length > 0 ? ds : ls.get<Student[]>("students", []));
+  }, []);
+
+  // ── Fetch fresh data from MySQL on every mount ─────────────────────────────
+  // Fix for "1184 students in MySQL but ERP shows 0":
+  // Always pull from the server when the page opens, regardless of what's in
+  // the local cache. This ensures every device always sees the real MySQL data.
+  useEffect(() => {
+    if (isApiConfigured()) {
+      void dataService
+        .refreshFromServer<Student>("students")
+        .then((rows) => {
+          if (rows.length > 0) {
+            setStudents(rows);
+          } else {
+            reload();
+          }
+        })
+        .catch(() => reload());
+    } else {
+      reload();
+    }
+  }, [reload]); // reload is stable (useCallback with []) — runs once on mount
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
@@ -224,12 +246,6 @@ export default function Students({ onNavigate }: StudentsProps) {
     currentUser?.role === "superadmin" ||
     currentUser?.role === "admin" ||
     currentUser?.role === "receptionist";
-
-  // ── Reload ─────────────────────────────────────────────────────────────────
-  const reload = useCallback(() => {
-    const ds = dataService.get<Student>("students");
-    setStudents(ds.length > 0 ? ds : ls.get<Student[]>("students", []));
-  }, []);
 
   // ── Save column prefs ──────────────────────────────────────────────────────
   useEffect(() => {

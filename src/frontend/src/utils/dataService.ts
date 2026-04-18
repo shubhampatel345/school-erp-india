@@ -75,6 +75,8 @@ class DataService {
   private listeners: Set<() => void> = new Set();
   private initPromise: Promise<void> | null = null;
   private counts: Record<string, number> = {};
+  /** Timestamp of the last successful full-server sync (ms) */
+  private lastSyncMs = 0;
 
   /** Subscribe to cache changes (re-render consumers) */
   subscribe(fn: () => void): () => void {
@@ -98,10 +100,28 @@ class DataService {
 
   /**
    * Initialize: load all collections from the server.
-   * Call once on app startup (after JWT is ready).
-   * Safe to call multiple times — only runs once.
+   * - In server-connected mode: ALWAYS fetches fresh data from MySQL.
+   *   The previous guard (`if (this.isInitialized && !force)`) was the root
+   *   cause of cross-device sync being broken — it silently skipped the server
+   *   fetch after the first call, leaving Device B with empty localStorage data.
+   * - In offline mode: loads from localStorage as before.
+   * - Safe to call multiple times — debounced to 60 s when not forced.
    */
   async init(force = false): Promise<void> {
+    // If API is configured, always allow re-fetch (server is the source of truth).
+    // Debounce to 60 s to avoid hammering on rapid re-calls, but ALWAYS run on force=true.
+    if (isApiConfigured()) {
+      const age = Date.now() - this.lastSyncMs;
+      if (!force && age < 60_000 && this.mode === "ready") {
+        // Recently synced — skip, but return the existing promise if still in flight
+        return this.initPromise ?? Promise.resolve();
+      }
+      // Start a fresh full sync
+      this.initPromise = this._doInit();
+      return this.initPromise;
+    }
+
+    // Offline mode: only init once
     if (this.initPromise && !force) return this.initPromise;
     this.initPromise = this._doInit();
     return this.initPromise;
@@ -125,6 +145,7 @@ class DataService {
         // Mirror to localStorage as offline fallback
         ls.set(this.lsKey(name), rows);
       }
+      this.lastSyncMs = Date.now();
       this.mode = "ready";
     } catch {
       // Fall back to localStorage
@@ -145,6 +166,30 @@ class DataService {
       return this.cache.get(collection) as T[];
     }
     return ls.get<T[]>(this.lsKey(collection), []);
+  }
+
+  /**
+   * Fetch a single collection DIRECTLY from the server, update cache + localStorage,
+   * and return the fresh rows. Falls back to cache if API is unreachable.
+   *
+   * This is the fix for "ERP shows 0 students on Device B":
+   * Call this on component mount so every page load pulls fresh MySQL data.
+   */
+  async refreshFromServer<T>(collection: string): Promise<T[]> {
+    if (!isApiConfigured()) {
+      return this.get<T>(collection);
+    }
+    try {
+      const rows = await fetchCollection<T>(collection);
+      this.cache.set(collection, rows as unknown[]);
+      this.counts[collection] = rows.length;
+      ls.set(this.lsKey(collection), rows);
+      this.notify();
+      return rows;
+    } catch {
+      // Return whatever is in cache / localStorage
+      return this.get<T>(collection);
+    }
   }
 
   /**

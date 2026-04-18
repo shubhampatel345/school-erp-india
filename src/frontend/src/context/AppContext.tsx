@@ -115,10 +115,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isSyncLoading = dsVersion === "loading";
   const syncCounts = dataService.getCounts();
 
-  // Initialize DataService when user is logged in and API is configured
+  // Initialize DataService when user is logged in and API is configured.
+  // force=true ensures fresh MySQL data is fetched on every login,
+  // not just on the first load — this is critical for cross-device sync.
   useEffect(() => {
     if (currentUser && isApiConfigured()) {
-      void dataService.init();
+      void dataService.init(true);
     }
   }, [currentUser]);
 
