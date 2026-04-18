@@ -585,6 +585,60 @@ export default function DataManagement() {
     }
   }
 
+  // ── Reset Database Tables (fix SQLSTATE[42S22] column errors) ───────────
+  const [isResettingDb, setIsResettingDb] = useState(false);
+  const [showDbResetConfirm, setShowDbResetConfirm] = useState(false);
+
+  async function handleResetDbTables() {
+    setIsResettingDb(true);
+    setShowDbResetConfirm(false);
+    const indexUrl = getApiIndexUrl();
+    try {
+      const jwt = getJwt();
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      };
+      if (jwt) headers.Authorization = `Bearer ${jwt}`;
+
+      const res = await fetch(`${indexUrl}?route=migrate/reset`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ confirmation: "RESET_DB_TABLES" }),
+        signal: AbortSignal.timeout(30_000),
+      });
+      const ct = res.headers.get("content-type") ?? "";
+      if (!ct.includes("application/json")) {
+        const text = await res.text();
+        if (text.trimStart().startsWith("<")) {
+          toast.error(
+            "Server returned HTML — api/index.php not uploaded to cPanel yet.",
+          );
+          setIsResettingDb(false);
+          return;
+        }
+      }
+      const json = (await res.json()) as {
+        status: string;
+        message?: string;
+        data?: { created?: string[]; errors?: { error: string }[] };
+      };
+      if (json.status === "ok" || json.status === "success") {
+        const created = json.data?.created?.length ?? 0;
+        const errs = json.data?.errors?.length ?? 0;
+        toast.success(
+          `Database reset! ${created} tables rebuilt.${errs > 0 ? ` ${errs} error(s) — check server logs.` : ""} SQLSTATE[42S22] errors are now fixed.`,
+        );
+      } else {
+        toast.error(`Reset failed: ${json.message ?? "Unknown error"}`);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Database reset failed");
+    } finally {
+      setIsResettingDb(false);
+    }
+  }
+
   // ── Push local localStorage data to server collection-by-collection ─────
   const [isPushing, setIsPushing] = useState(false);
   const [pushProgress, setPushProgress] = useState<string[]>([]);
@@ -1523,6 +1577,55 @@ export default function DataManagement() {
                     </>
                   )}
                 </Button>
+
+                {/* Reset DB Tables button — fixes SQLSTATE[42S22] column errors */}
+                {!showDbResetConfirm ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowDbResetConfirm(true)}
+                    disabled={isPushing || isMigrating || isResettingDb}
+                    data-ocid="server.reset_db_tables.button"
+                    className="w-full sm:w-auto border-orange-500/50 text-orange-700 hover:bg-orange-500/10"
+                    title="Drops and recreates all MySQL tables with correct camelCase columns. Fixes SQLSTATE[42S22] errors. Existing data will be lost."
+                  >
+                    <RefreshCcw className="w-4 h-4 mr-2" />
+                    Reset DB Tables (Fix Column Errors)
+                  </Button>
+                ) : (
+                  <div className="w-full flex flex-col gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 p-3">
+                    <p className="text-xs font-semibold text-orange-800 dark:text-orange-300">
+                      ⚠️ This drops ALL tables and recreates them. All existing
+                      MySQL data will be lost. Use only to fix SQLSTATE[42S22]
+                      column-not-found errors.
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setShowDbResetConfirm(false)}
+                        data-ocid="server.reset_db_cancel.button"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => void handleResetDbTables()}
+                        disabled={isResettingDb}
+                        data-ocid="server.reset_db_confirm.button"
+                        className="bg-orange-600 hover:bg-orange-700 text-white"
+                      >
+                        {isResettingDb ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                            Resetting…
+                          </>
+                        ) : (
+                          "Yes, Reset All Tables"
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
           )}

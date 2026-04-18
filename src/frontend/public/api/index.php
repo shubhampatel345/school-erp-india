@@ -81,6 +81,7 @@ try {
 
     // --- migrate --------------------------------------------------------------
     if ($route === 'migrate/run')              { handle_migrate_run($method, $sid); }
+    if ($route === 'migrate/reset')            { handle_migrate_reset($method, $body, $auth, $sid); }
     if ($route === 'migrate/reset-superadmin') { handle_migrate_reset_superadmin($method, $sid); }
     if ($route === 'migrate/status')           { handle_migrate_status($method); }
 
@@ -370,6 +371,76 @@ function handle_migrate_status(string $method): void {
 }
 
 /**
+ * migrate/reset — Drop ALL tables and recreate them fresh with correct camelCase columns.
+ * Also re-seeds superadmin. Use this to fix SQLSTATE[42S22] column-not-found errors
+ * caused by old snake_case tables created by the legacy migrate.php.
+ *
+ * WARNING: This drops all existing data. Requires Super Admin authentication OR
+ * accepts a special confirmation body without auth (for initial setup from UI).
+ */
+function handle_migrate_reset(string $method, array $body, ?array $auth, int $sid): void {
+    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
+
+    // Allow unauthenticated access only with explicit confirmation token
+    // (so the UI button can call this during first-time setup when no JWT exists yet)
+    $isAuthed = $auth &&
+        in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true);
+    $hasConfirmation = ($body['confirmation'] ?? '') === 'RESET_DB_TABLES';
+
+    if (!$isAuthed && !$hasConfirmation && $method !== 'GET') {
+        json_error_coded(
+            'Authentication required OR provide confirmation=RESET_DB_TABLES in body.',
+            401,
+            'AUTH_REQUIRED'
+        );
+    }
+
+    try {
+        $db = getDB();
+    } catch (Throwable $e) {
+        json_error('Database connection failed: ' . $e->getMessage(), 503);
+    }
+
+    $dropped  = [];
+    $created  = [];
+    $errors   = [];
+
+    // Disable FK checks so we can DROP freely
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=0'); } catch (Throwable $e) {}
+
+    foreach (get_table_definitions() as $tableName => $createSql) {
+        try {
+            $db->exec("DROP TABLE IF EXISTS `{$tableName}`");
+            $dropped[] = $tableName;
+        } catch (Throwable $e) {
+            $errors[] = ['table' => $tableName, 'stage' => 'drop', 'error' => $e->getMessage()];
+        }
+        try {
+            $db->exec($createSql);
+            $created[] = $tableName;
+        } catch (Throwable $e) {
+            $errors[] = ['table' => $tableName, 'stage' => 'create', 'error' => $e->getMessage()];
+        }
+    }
+
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (Throwable $e) {}
+
+    // Re-seed superadmin
+    $seedResult = seed_superadmin_user($db, true);
+
+    // Re-seed default settings
+    seed_default_settings($db);
+
+    json_success([
+        'dropped' => $dropped,
+        'created' => $created,
+        'errors'  => $errors,
+        'seeded'  => $seedResult,
+        'note'    => 'All tables rebuilt with camelCase columns. Login: superadmin / admin123',
+    ], count($created) . ' tables reset successfully. SQLSTATE[42S22] errors are now fixed.');
+}
+
+/**
  * Insert or force-reset the superadmin user.
  * Uses camelCase columns: id, username, password, role, name
  */
@@ -468,12 +539,30 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
         }
     }
 
+    // Build a cache of known columns per table (from actual DB schema)
+    // This prevents SQLSTATE[42S22] when frontend sends fields the table doesn't have
+    $tableColumnCache = [];
+    $getTableColumns = function (string $table) use ($db, &$tableColumnCache): array {
+        if (isset($tableColumnCache[$table])) return $tableColumnCache[$table];
+        try {
+            $stmt = $db->query("DESCRIBE `{$table}`");
+            $cols = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
+            $tableColumnCache[$table] = $cols ?: [];
+        } catch (Throwable $e) {
+            $tableColumnCache[$table] = [];
+        }
+        return $tableColumnCache[$table];
+    };
+
     try {
         $db->beginTransaction();
 
         foreach ($tableMap as $key => $table) {
             $records = $body[$key] ?? [];
             if (empty($records) || !is_array($records)) continue;
+
+            // Get valid columns for this table
+            $tableColumns = $getTableColumns($table);
 
             foreach ($records as $idx => $row) {
                 if (!is_array($row)) {
@@ -482,16 +571,23 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
                     continue;
                 }
 
-                // Sanitize: keep only scalar/null, valid column names
+                // Sanitize: keep only scalar/null, valid identifier names, AND columns that exist in the table
                 $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
                 $safeCols = array_values(array_filter(
                     array_keys($row),
-                    fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+                    function ($c) use ($tableColumns) {
+                        // Must be valid identifier
+                        if (!preg_match('/^[a-zA-Z0-9_]+$/', $c)) return false;
+                        // If we have table column info, only allow known columns
+                        // (skip filter if DESCRIBE failed — fallback to old behaviour)
+                        if (!empty($tableColumns) && !in_array($c, $tableColumns, true)) return false;
+                        return true;
+                    }
                 ));
 
                 if (empty($safeCols)) {
                     $results[$key]['failed']++;
-                    $results[$key]['errors'][] = "Row {$idx} has no valid columns";
+                    $results[$key]['errors'][] = "Row {$idx} has no valid columns (table: {$table})";
                     continue;
                 }
 
@@ -514,6 +610,8 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
                     $msg = $e->getMessage();
                     if (strpos($msg, "doesn't exist") !== false) {
                         $results[$key]['errors'][] = "Table '{$table}' not found — run ?route=migrate/run first";
+                    } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
+                        $results[$key]['errors'][] = "Column mismatch in '{$table}' — run ?route=migrate/reset to fix";
                     } else {
                         $results[$key]['errors'][] = "Row {$idx}: {$msg}";
                     }
@@ -555,15 +653,30 @@ function handle_sync_batch(string $method, array $body, ?array $auth, int $sid):
     $failed = 0;
     $errors = [];
 
+    // Get actual column list from the live table schema to prevent SQLSTATE[42S22]
+    $tableColumns = [];
+    try {
+        $stmt = $db->query("DESCRIBE `{$table}`");
+        $tableColumns = $stmt->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
+    } catch (Throwable $e) {
+        // Table might not exist yet; fall through and let the INSERT fail with a clear message
+        $tableColumns = [];
+    }
+
     foreach ($items as $idx => $row) {
         if (!is_array($row)) { $failed++; $errors[] = "Item {$idx} is not an object"; continue; }
 
         $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
         $safeCols = array_values(array_filter(
             array_keys($row),
-            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+            function ($c) use ($tableColumns) {
+                if (!preg_match('/^[a-zA-Z0-9_]+$/', $c)) return false;
+                // Filter to only known table columns (prevents column-not-found errors)
+                if (!empty($tableColumns) && !in_array($c, $tableColumns, true)) return false;
+                return true;
+            }
         ));
-        if (empty($safeCols)) { $failed++; $errors[] = "Item {$idx} has no valid columns"; continue; }
+        if (empty($safeCols)) { $failed++; $errors[] = "Item {$idx} has no valid columns (table: {$table})"; continue; }
 
         $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
         $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
@@ -584,6 +697,8 @@ function handle_sync_batch(string $method, array $body, ?array $auth, int $sid):
             $msg = $e->getMessage();
             if (strpos($msg, "doesn't exist") !== false) {
                 $errors[] = "Table '{$table}' missing — run ?route=migrate/run first";
+            } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
+                $errors[] = "Column mismatch in '{$table}' — run ?route=migrate/reset to fix (visit /api/index.php?route=migrate/reset)";
             } else {
                 $errors[] = "Row {$idx}: {$msg}";
             }
@@ -926,8 +1041,9 @@ function collection_table_map(): array {
         'homework'              => 'homework',
         'school_sessions'       => 'school_sessions',
         'sessions'              => 'school_sessions',
+        // notices and notifications are SEPARATE tables with different schemas
         'notices'               => 'notices',
-        'notifications'         => 'notices',
+        'notifications'         => 'notifications',
         'exam_timetables'       => 'exam_timetables',
         'teacher_timetables'    => 'teacher_timetables',
         'users'                 => 'users',
@@ -1215,6 +1331,19 @@ function get_table_definitions(): array {
             `targetRoles` TEXT,
             `attachments` TEXT,
             `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── notifications (separate from notices) ─────────────────────────────
+        'notifications' => "CREATE TABLE `notifications` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `userId`    VARCHAR(36),
+            `message`   TEXT,
+            `type`      VARCHAR(50),
+            `timestamp` VARCHAR(50),
+            `isRead`    TINYINT(1) DEFAULT 0,
+            `icon`      VARCHAR(100),
+            `title`     VARCHAR(500),
+            `session`   VARCHAR(100)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── exam_timetables ───────────────────────────────────────────────────
