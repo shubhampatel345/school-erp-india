@@ -180,6 +180,33 @@ export function isJwtExpired(): boolean {
   return payload.exp < Math.floor(Date.now() / 1000);
 }
 
+// ── Credential storage helpers ────────────────────────────
+
+export function storeServerCredentials(username: string, password: string) {
+  try {
+    localStorage.setItem("shubh_server_username", username);
+    localStorage.setItem("shubh_server_password", password);
+  } catch {
+    // ignore
+  }
+}
+
+export function getStoredServerPassword(): string {
+  try {
+    return localStorage.getItem("shubh_server_password") ?? "admin123";
+  } catch {
+    return "admin123";
+  }
+}
+
+export function getStoredServerUsername(): string {
+  try {
+    return localStorage.getItem("shubh_server_username") ?? "superadmin";
+  } catch {
+    return "superadmin";
+  }
+}
+
 // ── Backend login ─────────────────────────────────────────
 
 export interface BackendLoginResult {
@@ -275,7 +302,8 @@ export async function backendLogin(
           "shubh_erp_user_passwords",
           JSON.stringify(passwords),
         );
-        localStorage.setItem("shubh_server_password", password.trim());
+        // Persist credentials for auto-reauth
+        storeServerCredentials(username.trim(), password.trim());
       } catch {
         // ignore
       }
@@ -311,25 +339,34 @@ async function ensureAuthenticated(): Promise<void> {
   const jwt = getJwt();
   if (jwt && !isJwtExpired()) return;
 
-  const currentUserRaw = localStorage.getItem("shubh_erp_current_user");
-  if (!currentUserRaw) return;
-
-  let username = "";
-  try {
-    const user = JSON.parse(currentUserRaw) as {
-      username?: string;
-      role?: string;
-    };
-    if (user.role !== "superadmin") return;
-    username = user.username ?? "superadmin";
-  } catch {
-    return;
-  }
-
   if (_autoLoginInProgress) return;
   _autoLoginInProgress = true;
 
   try {
+    // Try stored credentials first (most reliable)
+    const storedUser = getStoredServerUsername();
+    const storedPass = getStoredServerPassword();
+    if (storedUser && storedPass) {
+      await backendLogin(storedUser, storedPass);
+      return;
+    }
+
+    // Fallback: check current user role
+    const currentUserRaw = localStorage.getItem("shubh_erp_current_user");
+    if (!currentUserRaw) return;
+
+    let username = "";
+    try {
+      const user = JSON.parse(currentUserRaw) as {
+        username?: string;
+        role?: string;
+      };
+      if (user.role !== "superadmin") return;
+      username = user.username ?? "superadmin";
+    } catch {
+      return;
+    }
+
     const passwords = (() => {
       try {
         return JSON.parse(
@@ -467,6 +504,16 @@ async function apiFetch<T>(
         clearTokens();
       }
     }
+    // Refresh failed — try re-login with stored credentials before giving up
+    const storedUser = getStoredServerUsername();
+    const storedPass = getStoredServerPassword();
+    if (storedUser && storedPass) {
+      const loginResult = await backendLogin(storedUser, storedPass);
+      if (loginResult.success) {
+        return apiFetch<T>(method, route, body, true);
+      }
+    }
+    // Fall back to ensureAuthenticated (role-based lookup)
     if (!retried) {
       await ensureAuthenticated();
       return apiFetch<T>(method, route, body, true);

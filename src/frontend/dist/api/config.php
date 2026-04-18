@@ -27,7 +27,7 @@ define('DB_CHARSET',  'utf8mb4');
 define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'shubh_erp_jwt_secret_2024_psmkgs');
 define('JWT_EXPIRY',  86400);     // 24 hours
 define('JWT_REFRESH', 604800);    // 7 days
-define('API_VERSION', '2.0');
+define('API_VERSION', '3.0');
 
 // ── PDO singleton ─────────────────────────────────────────────────────────────
 function getDB(): PDO {
@@ -73,11 +73,23 @@ function json_error(string $message, int $code = 400, $data = null): void {
     exit;
 }
 
+function json_error_coded(string $message, int $httpCode, string $errorCode, $data = null): void {
+    if (!headers_sent()) {
+        http_response_code($httpCode);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
+    }
+    echo json_encode(['status' => 'error', 'message' => $message, 'code' => $errorCode, 'data' => $data]);
+    exit;
+}
+
 // ── JWT ───────────────────────────────────────────────────────────────────────
 function jwt_encode(array $payload): string {
-    $header  = _b64u(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
-    $pay     = _b64u(json_encode($payload));
-    $sig     = _b64u(hash_hmac('sha256', "$header.$pay", JWT_SECRET, true));
+    $header = _b64u(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+    $pay    = _b64u(json_encode($payload));
+    $sig    = _b64u(hash_hmac('sha256', "$header.$pay", JWT_SECRET, true));
     return "$header.$pay.$sig";
 }
 
@@ -98,7 +110,7 @@ function _b64d(string $d): string { return base64_decode(strtr($d, '-_', '+/'));
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 function get_jwt_payload(): ?array {
     $h = '';
-    if (!empty($_SERVER['HTTP_AUTHORIZATION']))   $h = $_SERVER['HTTP_AUTHORIZATION'];
+    if (!empty($_SERVER['HTTP_AUTHORIZATION']))       $h = $_SERVER['HTTP_AUTHORIZATION'];
     elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) $h = $_SERVER['HTTP_X_AUTHORIZATION'];
     elseif (function_exists('apache_request_headers')) {
         $ah = apache_request_headers();
@@ -110,14 +122,14 @@ function get_jwt_payload(): ?array {
 
 function require_auth(): array {
     $p = get_jwt_payload();
-    if (!$p) json_error('Missing or expired token. Please login.', 401);
+    if (!$p) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
     return $p;
 }
 
 function require_superadmin(): array {
     $p = require_auth();
     if (!in_array($p['role'] ?? '', ['superadmin', 'super_admin'], true)) {
-        json_error('Super Admin only', 403);
+        json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
     }
     return $p;
 }

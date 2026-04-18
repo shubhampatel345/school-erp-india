@@ -45,9 +45,12 @@ import {
   getDefaultApiUrl,
   getJwt,
   getJwtRole,
+  getStoredServerPassword,
+  getStoredServerUsername,
   isJwtExpired,
   migrateLocalData,
   setApiUrl,
+  storeServerCredentials,
   testConnection,
 } from "../../utils/api";
 import { dataService } from "../../utils/dataService";
@@ -201,13 +204,9 @@ export default function DataManagement() {
 
   // ── Auth panel state ──────────────────────────────────
   // Pre-fill with stored server password (or default admin123)
-  const [authPassword, setAuthPassword] = useState(() => {
-    try {
-      return localStorage.getItem("shubh_server_password") ?? "admin123";
-    } catch {
-      return "admin123";
-    }
-  });
+  const [authPassword, setAuthPassword] = useState(() =>
+    getStoredServerPassword(),
+  );
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [isRunningSetup, setIsRunningSetup] = useState(false);
   const [authStatus, setAuthStatus] = useState<"idle" | "success" | "error">(
@@ -463,6 +462,8 @@ export default function DataManagement() {
     const result = await backendLogin("superadmin", authPassword);
     setIsAuthenticating(false);
     if (result.success) {
+      // Persist credentials for future auto-reauth
+      storeServerCredentials("superadmin", authPassword);
       setAuthStatus("success");
       toast.success("Authenticated as Super Admin on server.");
       // Dispatch storage event so useSync in other components can react
@@ -587,20 +588,46 @@ export default function DataManagement() {
   // ── Push local localStorage data to server collection-by-collection ─────
   const [isPushing, setIsPushing] = useState(false);
   const [pushProgress, setPushProgress] = useState<string[]>([]);
+  const [pushAuthFailed, setPushAuthFailed] = useState(false);
 
-  /** Ensure a valid, non-expired JWT exists. Returns false if auth fails. */
-  async function ensureFreshAuth(): Promise<boolean> {
+  /** Ensure a valid, non-expired JWT exists.
+   *  Logs steps into the provided log array (mutates in place).
+   *  Returns false if auth fails after all retries. */
+  async function ensureFreshAuth(log?: string[]): Promise<boolean> {
+    const addLog = (msg: string) => {
+      if (log) log.push(msg);
+    };
+
     const jwt = getJwt();
-    if (jwt && !isJwtExpired()) return true;
+    if (jwt && !isJwtExpired()) {
+      addLog("✅ Authenticated as superadmin");
+      return true;
+    }
 
-    // Try to re-authenticate using stored password
-    const storedPw =
-      localStorage.getItem("shubh_server_password") ?? "admin123";
-    const result = await backendLogin("superadmin", storedPw);
-    if (result.success) return true;
+    // Try to re-authenticate using stored credentials
+    const storedUser = getStoredServerUsername();
+    const storedPw = getStoredServerPassword();
 
-    toast.error(
-      `Server authentication expired. Re-authenticate in the Database Server tab. (${result.error ?? "Auth failed"})`,
+    addLog("🔑 Re-authenticating…");
+    const result = await backendLogin(storedUser, storedPw);
+    if (result.success) {
+      addLog("✅ Re-authenticated successfully as superadmin");
+      return true;
+    }
+
+    // Last-ditch attempt with default credentials if stored ones failed
+    if (storedPw !== "admin123") {
+      addLog("🔑 Trying default credentials…");
+      const defaultResult = await backendLogin("superadmin", "admin123");
+      if (defaultResult.success) {
+        storeServerCredentials("superadmin", "admin123");
+        addLog("✅ Re-authenticated with default credentials");
+        return true;
+      }
+    }
+
+    addLog(
+      "❌ Authentication failed. Please go to the Database Server tab, enter your Super Admin password, and click Authenticate Now.",
     );
     return false;
   }
@@ -611,12 +638,26 @@ export default function DataManagement() {
       return;
     }
 
-    // Ensure fresh JWT before starting
-    const authed = await ensureFreshAuth();
-    if (!authed) return;
-
+    setPushAuthFailed(false);
     setIsPushing(true);
-    setPushProgress(["🔍 Checking batch endpoint…"]);
+    const logLines: string[] = ["🔑 Checking authentication…"];
+    setPushProgress([...logLines]);
+
+    // Step 0: Ensure fresh JWT before starting
+    const authed = await ensureFreshAuth(logLines);
+    setPushProgress([...logLines]);
+
+    if (!authed) {
+      setPushAuthFailed(true);
+      setIsPushing(false);
+      toast.error(
+        "Authentication required. Enter your Super Admin password in the Database Server tab.",
+      );
+      return;
+    }
+
+    logLines.push("🔍 Checking batch endpoint…");
+    setPushProgress([...logLines]);
 
     // Collections to push: localStorage key → dataService collection name
     const collectionMap: Record<string, string> = {
@@ -657,7 +698,8 @@ export default function DataManagement() {
 
     try {
       await batchPushCollection(testCollection, testItems.slice(0, 1));
-      setPushProgress(["✅ Batch endpoint OK — starting full push…"]);
+      logLines.push("✅ Batch endpoint OK — starting full push…");
+      setPushProgress([...logLines]);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       const status =
@@ -671,7 +713,8 @@ export default function DataManagement() {
           "❌ Batch endpoint not found (404) — please re-upload the api/ folder to cPanel. Verify api/index.php exists.";
       } else if (status === 401 || status === 403) {
         diagnostic =
-          "❌ Authentication failed (401/403) — please re-authenticate in the Database Server tab.";
+          "❌ Authentication expired during push. Please go to the Database Server tab and click Authenticate Now, then try again.";
+        setPushAuthFailed(true);
       } else if (status >= 500) {
         diagnostic = `❌ Server error (${status}) — check PHP error logs on cPanel. Details: ${msg}`;
       } else if (msg.includes("HTML") || msg.includes("<!DOCTYPE")) {
@@ -679,7 +722,8 @@ export default function DataManagement() {
           "❌ Server returned HTML instead of JSON — api/index.php not uploaded or missing. Upload api/ to cPanel public_html/api/. No .htaccess needed.";
       }
 
-      setPushProgress([diagnostic]);
+      logLines.push(diagnostic);
+      setPushProgress([...logLines]);
       setIsPushing(false);
       toast.error("Push failed: batch endpoint not reachable. See log above.");
       return;
@@ -688,7 +732,6 @@ export default function DataManagement() {
     // Step 2: Push all collections using the batch endpoint
     let totalPushed = 0;
     let totalFailed = 0;
-    const finalLog: string[] = ["✅ Batch endpoint OK — starting full push…"];
 
     for (const [lsKey, collection] of Object.entries(collectionMap)) {
       const raw = localStorage.getItem(lsKey);
@@ -699,7 +742,7 @@ export default function DataManagement() {
         const parsed = JSON.parse(raw) as unknown;
         items = Array.isArray(parsed) ? parsed : [];
       } catch {
-        finalLog.push(
+        logLines.push(
           `⚠️ ${collection}: skipped (JSON parse error in localStorage)`,
         );
         continue;
@@ -710,12 +753,14 @@ export default function DataManagement() {
       try {
         // Refresh JWT mid-way if needed
         if (isJwtExpired()) {
-          const reauthed = await ensureFreshAuth();
+          const reauthed = await ensureFreshAuth(logLines);
+          setPushProgress([...logLines]);
           if (!reauthed) {
-            finalLog.push(
+            logLines.push(
               `❌ ${collection}: FAILED — token expired and re-auth failed`,
             );
             totalFailed++;
+            setPushProgress([...logLines]);
             continue;
           }
         }
@@ -737,38 +782,35 @@ export default function DataManagement() {
         let errorList: string[] = [];
 
         if (typeof rawResult.pushed === "number") {
-          // Direct shape: { pushed, errors }
           pushedCount = rawResult.pushed;
           errorList = rawResult.errors ?? [];
         } else if (rawResult.data?.results) {
-          // Nested shape: { data: { results: { [collection]: { pushed, errors } } } }
           const colResult = rawResult.data.results[collection];
           if (colResult) {
             pushedCount = colResult.pushed ?? 0;
             errorList = colResult.errors ?? [];
           }
         } else {
-          // Unknown shape — treat as failure
           totalFailed++;
-          finalLog.push(
+          logLines.push(
             `❌ ${collection}: FAILED — unexpected response from server (check PHP logs)`,
           );
-          setPushProgress([...finalLog]);
+          setPushProgress([...logLines]);
           continue;
         }
 
         totalPushed += pushedCount;
 
         if (pushedCount === items.length) {
-          finalLog.push(
+          logLines.push(
             `✅ ${collection}: ${pushedCount}/${items.length} records saved to server`,
           );
         } else if (pushedCount > 0) {
-          finalLog.push(
+          logLines.push(
             `⚠️ ${collection}: ${pushedCount}/${items.length} saved — ${errorList.length} error(s)`,
           );
           if (errorList.length > 0) {
-            finalLog.push(`   └ First error: ${errorList[0]}`);
+            logLines.push(`   └ First error: ${errorList[0]}`);
           }
         } else {
           totalFailed++;
@@ -776,7 +818,7 @@ export default function DataManagement() {
             errorList.length > 0
               ? errorList[0]
               : "All items rejected by server";
-          finalLog.push(`❌ ${collection}: FAILED — ${errDetail}`);
+          logLines.push(`❌ ${collection}: FAILED — ${errDetail}`);
         }
       } catch (err) {
         totalFailed++;
@@ -785,13 +827,21 @@ export default function DataManagement() {
           typeof err === "object" && err !== null && "status" in err
             ? (err as { status: number }).status
             : 0;
-        finalLog.push(
-          `❌ ${collection}: FAILED (${status || "network error"}) — ${msg}`,
-        );
+        // Translate 401/403 to human-readable message
+        if (status === 401 || status === 403) {
+          logLines.push(
+            `❌ ${collection}: FAILED — session expired. Re-authentication required.`,
+          );
+          setPushAuthFailed(true);
+        } else {
+          logLines.push(
+            `❌ ${collection}: FAILED (${status || "network error"}) — ${msg}`,
+          );
+        }
       }
 
       // Update progress log in real time
-      setPushProgress([...finalLog]);
+      setPushProgress([...logLines]);
     }
 
     // Final summary line
@@ -799,7 +849,9 @@ export default function DataManagement() {
       totalFailed === 0
         ? `🎉 Done! ${totalPushed} records successfully pushed to server.`
         : `⚠️ Done with issues: ${totalPushed} pushed, ${totalFailed} collection(s) failed. Check log above.`;
-    setPushProgress((prev) => [...prev, "", summaryLine]);
+    logLines.push("");
+    logLines.push(summaryLine);
+    setPushProgress([...logLines]);
 
     setIsPushing(false);
 
@@ -1400,6 +1452,37 @@ export default function DataManagement() {
                       </p>
                     );
                   })}
+                </div>
+              )}
+              {pushAuthFailed && (
+                <div className="flex items-start gap-3 rounded-lg border border-red-500/40 bg-red-500/10 px-4 py-3">
+                  <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                      Authentication Required
+                    </p>
+                    <p className="text-xs text-red-700 dark:text-red-400 mt-0.5">
+                      Your session expired or credentials are incorrect. Enter
+                      your Super Admin password in the Database Server tab and
+                      click <strong>Authenticate Now</strong>, then try pushing
+                      again.
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0 border-red-500/40 text-red-700 hover:bg-red-500/10"
+                    onClick={() => {
+                      setPushAuthFailed(false);
+                      // Scroll to auth section — implemented via tab + scroll
+                      document
+                        .getElementById("auth-password")
+                        ?.scrollIntoView({ behavior: "smooth" });
+                    }}
+                    data-ocid="server.push_auth_required.button"
+                  >
+                    Go to Auth
+                  </Button>
                 </div>
               )}
               <div className="flex gap-2 flex-wrap">

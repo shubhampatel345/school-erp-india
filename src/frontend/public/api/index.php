@@ -1,96 +1,105 @@
 <?php
 /**
- * SHUBH SCHOOL ERP — Complete PHP API Backend
- * Version 2.0 — NO .htaccess / mod_rewrite needed at all.
+ * SHUBH SCHOOL ERP — Complete PHP API Backend v3.0
+ * camelCase columns throughout — matches frontend JS object keys exactly.
  *
  * Usage: https://shubh.psmkgs.com/api/index.php?route=ROUTE_NAME
- * All routes work via query-string routing only.
  *
  * Upload ONLY these 2 files to cPanel public_html/api/:
- *   index.php   ← this file (all handlers inline)
+ *   index.php   ← this file
  *   config.php  ← DB connection + helpers
  *
  * Quick-start:
  *   1. Upload both files to public_html/api/
  *   2. Visit https://shubh.psmkgs.com/api/index.php?route=migrate/run
  *   3. Visit https://shubh.psmkgs.com/api/index.php?route=health  → {"status":"ok"}
- *   4. Login via POST ?route=auth/login with {"username":"superadmin","password":"admin123"}
+ *   4. POST ?route=auth/login  {"username":"superadmin","password":"admin123"}
  */
 
-// ── 1. Silence PHP output — JSON must NEVER be corrupted by notices/warnings ──
+ob_start();
+register_shutdown_function(function () {
+    $error = error_get_last();
+    if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        ob_clean();
+        if (!headers_sent()) {
+            http_response_code(500);
+            header('Content-Type: application/json; charset=utf-8');
+            header('Access-Control-Allow-Origin: *');
+            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
+            header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
+        }
+        echo json_encode(['status' => 'error', 'message' => 'Fatal: ' . $error['message'], 'data' => null]);
+    } else {
+        ob_end_flush();
+    }
+});
+
 @ini_set('display_errors', '0');
 @ini_set('log_errors',     '1');
 @error_reporting(0);
 
-// ── 2. CORS + JSON headers — MUST be on EVERY response ───────────────────────
 header('Content-Type: application/json; charset=utf-8');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
 header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
 
-// ── 3. Handle OPTIONS preflight — return immediately ─────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     echo json_encode(['status' => 'ok']);
     exit;
 }
 
-// ── 4. Load helpers ───────────────────────────────────────────────────────────
 require_once __DIR__ . '/config.php';
 
-// ── 5. Parse route + request context ─────────────────────────────────────────
 $route  = trim($_GET['route'] ?? '', '/');
 $method = $_SERVER['REQUEST_METHOD'];
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 $auth   = get_jwt_payload();
-$sid    = school_id_from_auth($auth);   // school_id (defaults to 1)
+$sid    = school_id_from_auth($auth);
 
-// ── 6. Route dispatcher ───────────────────────────────────────────────────────
 try {
-
-    // --- health / root -------------------------------------------------------
+    // --- health ---------------------------------------------------------------
     if ($route === '' || $route === 'health') {
         json_success([
             'status'      => 'ok',
             'version'     => API_VERSION,
-            'server'      => 'SHUBH SCHOOL ERP API',
+            'server'      => 'SHUBH SCHOOL ERP API v3.0',
             'server_time' => gmdate('c'),
             'routing'     => 'query-string (no .htaccess needed)',
+            'columns'     => 'camelCase throughout',
         ], 'API is running');
     }
 
-    // --- sync/status — ALWAYS returns JSON, NEVER crashes --------------------
-    if ($route === 'sync/status') {
-        handle_sync_status($sid);
-    }
+    // --- sync/status ----------------------------------------------------------
+    if ($route === 'sync/status') { handle_sync_status($sid); }
 
     // --- auth -----------------------------------------------------------------
     if ($route === 'auth/login')           { handle_auth_login($method, $body); }
     if ($route === 'auth/refresh')         { handle_auth_refresh($method, $body); }
+    if ($route === 'auth/verify')          { handle_auth_verify($auth); }
     if ($route === 'auth/change-password') { handle_change_password($method, $body, $auth); }
 
-    // --- migrate (all public — needed for initial setup) ---------------------
+    // --- migrate --------------------------------------------------------------
     if ($route === 'migrate/run')              { handle_migrate_run($method, $sid); }
-    if ($route === 'migrate/seed')             { handle_migrate_seed($method, $sid, $body); }
     if ($route === 'migrate/reset-superadmin') { handle_migrate_reset_superadmin($method, $sid); }
     if ($route === 'migrate/status')           { handle_migrate_status($method); }
 
-    // --- sync/push and sync/batch --------------------------------------------
+    // --- sync -----------------------------------------------------------------
     if ($route === 'sync/push')  { handle_sync_push($method, $body, $auth, $sid); }
     if ($route === 'sync/batch') { handle_sync_batch($method, $body, $auth, $sid); }
     if ($route === 'sync/pull')  { handle_sync_pull($method, $auth, $sid); }
 
-    // --- backup --------------------------------------------------------------
+    // --- backup ---------------------------------------------------------------
     if ($route === 'backup/export')        { handle_backup_export($method, $auth, $sid); }
     if ($route === 'backup/import')        { handle_backup_import($method, $body, $auth, $sid); }
     if ($route === 'backup/history')       { handle_backup_history($method, $auth, $sid); }
     if ($route === 'backup/factory-reset') { handle_factory_reset($method, $body, $auth, $sid); }
 
-    // --- settings ------------------------------------------------------------
+    // --- settings -------------------------------------------------------------
     if ($route === 'settings/school') { handle_settings_school($method, $body, $auth, $sid); }
     if ($route === 'settings/users')  { handle_settings_users($method, $body, $auth, $sid); }
 
-    // --- data/{collection} — generic CRUD -----------------------------------
+    // --- data/{collection} generic CRUD --------------------------------------
     if (preg_match('#^data/([a-z_]+)$#', $route, $m)) {
         handle_data_collection($method, $m[1], $body, $auth, $sid, null);
     }
@@ -98,7 +107,6 @@ try {
         handle_data_collection($method, $m[1], $body, $auth, $sid, $m[2]);
     }
 
-    // --- 404 -----------------------------------------------------------------
     json_error('Route not found: ' . $route, 404);
 
 } catch (PDOException $e) {
@@ -113,50 +121,48 @@ try {
 // =============================================================================
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SYNC / STATUS — health check, always returns JSON, never crashes
+// SYNC / STATUS
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_sync_status(int $sid): void {
-    $counts    = [];
     $connected = false;
     $dbVersion = null;
+    $counts    = [];
 
     $tables = [
-        'students', 'staff', 'fee_receipts', 'fees_plan', 'fee_heads',
-        'attendance', 'routes', 'pickup_points', 'student_transport',
-        'student_discounts', 'classes', 'sections', 'subjects',
-        'homework', 'expenses', 'expense_heads', 'inventory_items',
-        'payroll_setup', 'payslips', 'chat_messages', 'biometric_devices',
-        'alumni', 'sessions', 'schools', 'users',
+        'students','staff','fee_receipts','fees_plan','fee_headings',
+        'attendance','staff_attendance','routes','pickup_points',
+        'student_transport','student_discounts','inventory_items',
+        'inventory_transactions','expenses','expense_heads',
+        'homework','school_sessions','notices','exam_timetables',
+        'teacher_timetables','users','school_settings',
+        'chat_messages','chat_groups','call_logs','biometric_devices','payroll',
     ];
 
     try {
         $db        = getDB();
         $connected = true;
-
-        $verStmt   = $db->query('SELECT VERSION()');
-        $dbVersion = $verStmt ? $verStmt->fetchColumn() : null;
+        $ver       = $db->query('SELECT VERSION()');
+        $dbVersion = $ver ? $ver->fetchColumn() : null;
 
         foreach ($tables as $t) {
             try {
-                $s = $db->prepare("SELECT COUNT(*) FROM `{$t}` WHERE is_deleted=0");
+                $s = $db->prepare("SELECT COUNT(*) FROM `{$t}`");
                 $s->execute();
                 $counts[$t] = (int)$s->fetchColumn();
             } catch (Throwable $e) {
-                $counts[$t] = -1; // table not created yet
+                $counts[$t] = -1;
             }
         }
     } catch (Throwable $e) {
         $connected = false;
     }
 
-    // ALWAYS return 200 JSON — never error here
     http_response_code(200);
     echo json_encode([
         'status'      => 'ok',
         'version'     => API_VERSION,
         'db_version'  => $dbVersion,
         'server_time' => gmdate('c'),
-        'timestamp'   => gmdate('c'),
         'connected'   => $connected,
         'synced'      => $connected,
         'counts'      => $counts,
@@ -166,7 +172,7 @@ function handle_sync_status(int $sid): void {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUTH — login, refresh, change-password
+// AUTH
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_auth_login(string $method, array $body): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
@@ -178,126 +184,110 @@ function handle_auth_login(string $method, array $body): void {
     try {
         $db = getDB();
     } catch (Throwable $e) {
-        json_error('Database connection failed. Run ?route=migrate/run first.', 503);
+        json_error('Database not set up. Run ?route=migrate/run first. ' . $e->getMessage(), 503);
     }
 
-    $stmt = $db->prepare(
-        'SELECT u.*, s.name AS school_name
-         FROM users u
-         LEFT JOIN schools s ON s.id = u.school_id
-         WHERE u.username = :un AND u.is_deleted = 0
-         LIMIT 1'
-    );
-    $stmt->execute([':un' => $username]);
+    // Users table uses camelCase: username, password, role, name
+    $stmt = $db->prepare('SELECT * FROM `users` WHERE `username`=:u LIMIT 1');
+    $stmt->execute([':u' => $username]);
     $user = $stmt->fetch();
 
     if (!$user) {
-        json_error('User not found. Run ?route=migrate/run then ?route=migrate/seed to create the superadmin.', 401);
+        json_error('Invalid username or password', 401);
     }
 
-    $hash = $user['password_hash'] ?? '';
-    if (empty($hash)) json_error('Account has no password set. Run ?route=migrate/reset-superadmin to fix.', 401);
-
+    $storedPass = $user['password'] ?? '';
     $ok = false;
-    if (strpos($hash, '$2') === 0) {
-        $ok = password_verify($password, $hash);
+
+    // Support SHA2 hex (64 chars), bcrypt ($2...), and plain text for legacy
+    if (strlen($storedPass) === 64 && ctype_xdigit($storedPass)) {
+        $ok = (hash('sha256', $password) === $storedPass);
+    } elseif (strpos($storedPass, '$2') === 0) {
+        $ok = password_verify($password, $storedPass);
     } else {
-        // Legacy plaintext — compare then upgrade
-        $ok = ($password === $hash);
-        if ($ok) {
-            $newHash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
-            $db->prepare('UPDATE users SET password_hash=:h, updated_at=NOW() WHERE id=:id')
-               ->execute([':h' => $newHash, ':id' => $user['id']]);
-        }
+        $ok = ($password === $storedPass);
     }
 
     if (!$ok) json_error('Invalid username or password', 401);
-    if ((int)($user['is_active'] ?? 1) === 0) json_error('Account disabled — contact Super Admin', 403);
 
     $now = time();
     $payload = [
         'user_id'   => $user['id'],
-        'school_id' => $user['school_id'],
+        'school_id' => 1,
         'role'      => $user['role'],
-        'name'      => $user['full_name'],
+        'name'      => $user['name'] ?? $username,
         'iat'       => $now,
         'exp'       => $now + JWT_EXPIRY,
     ];
-    $token        = jwt_encode($payload);
-    $refreshPay   = array_merge($payload, ['exp' => $now + JWT_REFRESH, 'type' => 'refresh']);
-    $refreshToken = jwt_encode($refreshPay);
-
-    $db->prepare('UPDATE users SET refresh_token=:rt, last_login=NOW() WHERE id=:id')
-       ->execute([':rt' => hash('sha256', $refreshToken), ':id' => $user['id']]);
+    $token = jwt_encode($payload);
 
     json_success([
-        'token'         => $token,
-        'refresh_token' => $refreshToken,
-        'expires_in'    => JWT_EXPIRY,
-        'user' => [
-            'id'          => $user['id'],
-            'username'    => $user['username'],
-            'full_name'   => $user['full_name'],
-            'role'        => $user['role'],
-            'school_id'   => $user['school_id'],
-            'school_name' => $user['school_name'] ?? '',
+        'token'      => $token,
+        'expires_in' => JWT_EXPIRY,
+        'user'       => [
+            'id'       => $user['id'],
+            'username' => $user['username'],
+            'name'     => $user['name'] ?? $username,
+            'role'     => $user['role'],
         ],
     ], 'Login successful');
 }
 
 function handle_auth_refresh(string $method, array $body): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    $rt = $body['refresh_token'] ?? '';
-    if (!$rt) json_error('refresh_token is required', 400);
+    $rt = $body['refresh_token'] ?? $body['token'] ?? '';
+    if (!$rt) json_error('token is required', 400);
 
     $payload = jwt_verify($rt);
-    if (!$payload || ($payload['type'] ?? '') !== 'refresh') json_error('Invalid or expired refresh token', 401);
+    if (!$payload) json_error('Invalid or expired token', 401);
 
-    $db   = getDB();
-    $stmt = $db->prepare('SELECT id, role, school_id, full_name, is_active FROM users WHERE id=:id AND refresh_token=:rt AND is_deleted=0 LIMIT 1');
-    $stmt->execute([':id' => $payload['user_id'], ':rt' => hash('sha256', $rt)]);
-    $user = $stmt->fetch();
-
-    if (!$user || !(int)$user['is_active']) json_error('Token revoked', 401);
-
-    $now   = time();
-    $np    = ['user_id' => $user['id'], 'school_id' => $user['school_id'], 'role' => $user['role'], 'name' => $user['full_name'], 'iat' => $now, 'exp' => $now + JWT_EXPIRY];
+    $now = time();
+    $np  = array_merge($payload, ['iat' => $now, 'exp' => $now + JWT_EXPIRY]);
     json_success(['token' => jwt_encode($np), 'expires_in' => JWT_EXPIRY], 'Token refreshed');
+}
+
+function handle_auth_verify(?array $auth): void {
+    if (!$auth) json_error('Token invalid or expired', 401);
+
+    try {
+        $db   = getDB();
+        $stmt = $db->prepare('SELECT `id`,`username`,`role`,`name` FROM `users` WHERE `id`=:id LIMIT 1');
+        $stmt->execute([':id' => $auth['user_id'] ?? '']);
+        $user = $stmt->fetch();
+        if (!$user) json_error('User not found', 401);
+        json_success(['user' => $user]);
+    } catch (Throwable $e) {
+        json_success(['user' => ['id' => $auth['user_id'] ?? '', 'role' => $auth['role'] ?? '']]);
+    }
 }
 
 function handle_change_password(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
 
-    $currentUserId = (int)($auth['user_id'] ?? 0);
-    $targetId      = (int)($body['user_id'] ?? $currentUserId);
-    $newPassword   = $body['new_password'] ?? '';
-    $oldPassword   = $body['old_password'] ?? '';
-
+    $newPassword = $body['new_password'] ?? '';
     if (strlen($newPassword) < 6) json_error('New password must be at least 6 characters', 400);
 
-    $db   = getDB();
-    $stmt = $db->prepare('SELECT id, password_hash FROM users WHERE id=:id AND is_deleted=0 LIMIT 1');
-    $stmt->execute([':id' => $targetId]);
-    $user = $stmt->fetch();
-    if (!$user) json_error('User not found', 404);
+    $targetId = $body['user_id'] ?? ($auth['user_id'] ?? '');
+    $db       = getDB();
 
     $isSuperAdmin = in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true);
-    $isSelf       = ($currentUserId === $targetId);
+    $isSelf       = ($auth['user_id'] ?? '') == $targetId;
+    if (!$isSuperAdmin && !$isSelf) json_error('Forbidden', 403);
 
-    if (!$isSuperAdmin) {
-        if (!$isSelf) json_error('Forbidden', 403);
-        if (!password_verify($oldPassword, $user['password_hash'])) json_error('Current password is incorrect', 401);
+    $hash = hash('sha256', $newPassword);
+    try {
+        $db->prepare('UPDATE `users` SET `password`=:h WHERE `id`=:id')
+           ->execute([':h' => $hash, ':id' => $targetId]);
+    } catch (Throwable $e) {
+        json_error('Failed to update password: ' . $e->getMessage(), 500);
     }
-
-    $hash = password_hash($newPassword, PASSWORD_BCRYPT, ['cost' => 10]);
-    $db->prepare('UPDATE users SET password_hash=:h, updated_at=NOW() WHERE id=:id')->execute([':h' => $hash, ':id' => $targetId]);
     json_success(null, 'Password changed successfully');
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MIGRATE — create tables, seed, reset password
+// MIGRATE — DROP + RECREATE all tables with camelCase columns
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_migrate_run(string $method, int $sid): void {
     if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
@@ -305,68 +295,39 @@ function handle_migrate_run(string $method, int $sid): void {
     try {
         $db = getDB();
     } catch (Throwable $e) {
-        json_error('Database connection failed: ' . $e->getMessage() . '. Check DB credentials in config.php.', 503);
+        json_error('Database connection failed: ' . $e->getMessage() . '. Check config.php.', 503);
     }
 
     $applied = [];
     $errors  = [];
 
-    foreach (get_migrations() as $mig) {
+    // Disable FK checks so we can DROP tables freely
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=0'); } catch (Throwable $e) {}
+
+    foreach (get_table_definitions() as $tableName => $createSql) {
         try {
-            // Each migration may contain multiple CREATE TABLE statements — execute them all
-            foreach (array_filter(array_map('trim', explode(";\n", $mig['sql']))) as $stmt) {
-                if ($stmt !== '') $db->exec($stmt . ';');
-            }
-            $applied[] = $mig['name'];
+            $db->exec("DROP TABLE IF EXISTS `{$tableName}`");
+            $db->exec($createSql);
+            $applied[] = $tableName;
         } catch (Throwable $e) {
-            $errors[] = ['migration' => $mig['name'], 'error' => $e->getMessage()];
+            $errors[] = ['table' => $tableName, 'error' => $e->getMessage()];
         }
     }
 
-    // Seed superadmin after table creation
-    $seedResult = seed_superadmin($db, $sid);
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (Throwable $e) {}
+
+    // Seed superadmin
+    $seedResult = seed_superadmin_user($db);
+
+    // Seed default settings
+    seed_default_settings($db);
 
     json_success([
         'applied'  => $applied,
         'errors'   => $errors,
         'seeded'   => $seedResult,
-        'message'  => count($applied) . ' migration(s) applied. Login: superadmin / admin123',
-    ], 'Database setup complete. Login with superadmin / admin123');
-}
-
-function handle_migrate_seed(string $method, int $sid, array $body): void {
-    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
-
-    try {
-        $db = getDB();
-    } catch (Throwable $e) {
-        json_error('Run ?route=migrate/run first to create tables.', 503);
-    }
-
-    $seeded = [];
-
-    // Ensure school record exists
-    try {
-        $db->prepare('INSERT IGNORE INTO schools (id, name) VALUES (:id, :name)')
-           ->execute([':id' => $sid, ':name' => $body['school_name'] ?? 'SHUBH SCHOOL ERP']);
-        $seeded[] = 'school';
-    } catch (Throwable $e) { /* ignore */ }
-
-    // Seed superadmin
-    $seeded[] = seed_superadmin($db, $sid, $body['username'] ?? 'superadmin', $body['password'] ?? 'admin123');
-
-    // Seed default session if none
-    try {
-        $chk = $db->prepare('SELECT id FROM sessions WHERE school_id=:sid AND is_current=1 LIMIT 1');
-        $chk->execute([':sid' => $sid]);
-        if (!$chk->fetch()) {
-            $db->prepare('INSERT INTO sessions (school_id,name,start_date,end_date,is_current,is_archived,is_deleted) VALUES (:sid,:name,:start,:end,1,0,0)')
-               ->execute([':sid' => $sid, ':name' => date('Y').'-'.(date('y')+1), ':start' => date('Y').'-04-01', ':end' => (date('Y')+1).'-03-31']);
-            $seeded[] = 'default session';
-        }
-    } catch (Throwable $e) { /* ignore */ }
-
-    json_success(['seeded' => $seeded], 'Seed complete. Login: superadmin / admin123');
+        'message'  => count($applied) . ' tables created. Login: superadmin / admin123',
+    ], 'Migration complete. Login with superadmin / admin123');
 }
 
 function handle_migrate_reset_superadmin(string $method, int $sid): void {
@@ -378,146 +339,132 @@ function handle_migrate_reset_superadmin(string $method, int $sid): void {
         json_error('Run ?route=migrate/run first.', 503);
     }
 
-    $result = seed_superadmin($db, $sid, 'superadmin', 'admin123', true);
+    try {
+        $db->prepare("DELETE FROM `users` WHERE `role`='superadmin'")->execute();
+    } catch (Throwable $e) { /* table may not exist yet */ }
+
+    $result = seed_superadmin_user($db, true);
     json_success(['action' => $result, 'username' => 'superadmin', 'password' => 'admin123'],
-                 'Superadmin password reset to admin123. You can now login.');
+                 'Superadmin reset. Login: superadmin / admin123');
 }
 
 function handle_migrate_status(string $method): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
 
     try {
-        $db = getDB();
+        $db     = getDB();
+        $tables = array_keys(get_table_definitions());
+        $status = [];
+        foreach ($tables as $t) {
+            try {
+                $db->query("SELECT 1 FROM `{$t}` LIMIT 1");
+                $status[$t] = 'exists';
+            } catch (Throwable $e) {
+                $status[$t] = 'missing';
+            }
+        }
+        json_success(['tables' => $status]);
     } catch (Throwable $e) {
         json_error('Database connection failed', 503);
     }
-
-    $tableList = array_column(get_migrations(), 'name');
-    $existing  = [];
-    foreach ($tableList as $name) {
-        $existing[$name] = true; // migrations are idempotent (IF NOT EXISTS), so just report all as "available"
-    }
-    json_success(['migrations' => $tableList, 'note' => 'All migrations use CREATE TABLE IF NOT EXISTS'], 'OK');
 }
 
 /**
- * Seed or force-reset the superadmin user.
- * Returns a human-readable description of what was done.
+ * Insert or force-reset the superadmin user.
+ * Uses camelCase columns: id, username, password, role, name
  */
-function seed_superadmin(PDO $db, int $sid, string $username = 'superadmin', string $password = 'admin123', bool $force = false): string {
-    // Ensure tables exist minimally
-    try {
-        $db->exec('CREATE TABLE IF NOT EXISTS schools (
-            id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            name        VARCHAR(200) NOT NULL,
-            address     TEXT,
-            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
-
-        $db->exec('CREATE TABLE IF NOT EXISTS users (
-            id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-            school_id     INT UNSIGNED NOT NULL DEFAULT 1,
-            username      VARCHAR(100) NOT NULL,
-            password_hash VARCHAR(255) NOT NULL,
-            full_name     VARCHAR(200),
-            role          VARCHAR(50) NOT NULL DEFAULT \'teacher\',
-            is_active     TINYINT(1) DEFAULT 1,
-            refresh_token VARCHAR(500),
-            last_login    TIMESTAMP NULL,
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            is_deleted    TINYINT(1) DEFAULT 0,
-            UNIQUE KEY uq_school_username (school_id, username)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');
-    } catch (Throwable $e) { /* tables already exist */ }
+function seed_superadmin_user(PDO $db, bool $force = false): string {
+    $hash = hash('sha256', 'admin123');
 
     try {
-        $db->prepare('INSERT IGNORE INTO schools (id, name) VALUES (:id, :name)')
-           ->execute([':id' => $sid, ':name' => 'SHUBH SCHOOL ERP']);
-    } catch (Throwable $e) { /* ignore */ }
+        // Ensure users table exists minimally
+        $db->exec("CREATE TABLE IF NOT EXISTS `users` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `username`    VARCHAR(255),
+            `password`    VARCHAR(255),
+            `role`        VARCHAR(100),
+            `name`        VARCHAR(255),
+            `mobile`      VARCHAR(50),
+            `email`       VARCHAR(255),
+            `session`     VARCHAR(100),
+            `permissions` TEXT,
+            `linkedId`    VARCHAR(36)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (Throwable $e) { /* already exists */ }
 
-    $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
-
-    $stmt = $db->prepare('SELECT id, password_hash FROM users WHERE username=:u AND school_id=:sid AND is_deleted=0 LIMIT 1');
-    $stmt->execute([':u' => $username, ':sid' => $sid]);
+    $stmt = $db->prepare("SELECT `id` FROM `users` WHERE `username`='superadmin' LIMIT 1");
+    $stmt->execute();
     $existing = $stmt->fetch();
 
+    $id = 'superadmin-' . date('Y');
+
     if (!$existing) {
-        $db->prepare('INSERT INTO users (school_id,username,password_hash,full_name,role,is_active,created_at,updated_at) VALUES (:sid,:u,:h,"Super Admin","superadmin",1,NOW(),NOW())')
-           ->execute([':sid' => $sid, ':u' => $username, ':h' => $hash]);
-        return 'superadmin created';
+        try {
+            $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`name`) VALUES (:id,'superadmin',:pw,'superadmin','Super Admin')")
+               ->execute([':id' => $id, ':pw' => $hash]);
+            return 'superadmin created';
+        } catch (Throwable $e) {
+            return 'superadmin insert failed: ' . $e->getMessage();
+        }
     }
 
-    $existingHash = $existing['password_hash'] ?? '';
-    $needsUpdate  = $force || empty($existingHash) || strpos($existingHash, '$2') !== 0;
-    if ($needsUpdate) {
-        $db->prepare('UPDATE users SET password_hash=:h, is_active=1, is_deleted=0, role="superadmin", full_name="Super Admin", updated_at=NOW() WHERE id=:id')
-           ->execute([':h' => $hash, ':id' => $existing['id']]);
-        return 'superadmin updated (hash refreshed)';
+    if ($force) {
+        try {
+            $db->prepare("UPDATE `users` SET `password`=:pw, `role`='superadmin', `name`='Super Admin' WHERE `username`='superadmin'")
+               ->execute([':pw' => $hash]);
+            return 'superadmin password reset';
+        } catch (Throwable $e) {
+            return 'superadmin update failed: ' . $e->getMessage();
+        }
     }
 
     return 'superadmin already exists';
 }
 
+function seed_default_settings(PDO $db): void {
+    try {
+        $check = $db->query("SELECT COUNT(*) FROM `school_settings`");
+        if ($check && (int)$check->fetchColumn() === 0) {
+            $defaults = [
+                ['key' => 'school_name',  'value' => 'SHUBH SCHOOL ERP'],
+                ['key' => 'session',      'value' => date('Y') . '-' . (date('y') + 1)],
+                ['key' => 'currency',     'value' => 'INR'],
+                ['key' => 'whatsapp_enabled', 'value' => '0'],
+            ];
+            $ins = $db->prepare("INSERT IGNORE INTO `school_settings` (`id`,`key`,`value`) VALUES (UUID(),:k,:v)");
+            foreach ($defaults as $d) {
+                $ins->execute([':k' => $d['key'], ':v' => $d['value']]);
+            }
+        }
+    } catch (Throwable $e) { /* ignore */ }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SYNC / PUSH — bulk upsert all collections in one request
-// Frontend DataManagement.tsx reads: response.data.results[collection].pushed
-//
-// Accepts two body formats:
-//   Format A (multi-collection): { students: [...], staff: [...], ... }
-//   Format B (single-collection, from batchPushCollection): { collection: "students", items: [...] }
+// SYNC / PUSH — bulk upsert all collections
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_sync_push(string $method, array $body, ?array $auth, int $sid): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error('Authentication required', 401);
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
+    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) {
+        json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
+    }
 
-    // Format B: { collection: "students", items: [...] } — single collection
-    // Redirect to the batch handler which returns { pushed, total, errors }
+    // Single-collection batch format: { collection, items }
     if (isset($body['collection']) && isset($body['items'])) {
         handle_sync_batch($method, $body, $auth, $sid);
-        return; // handle_sync_batch calls json_success/json_error which exit
+        return;
     }
 
     $db = getDB();
 
-    // Map frontend collection names → actual MySQL table names
-    $tableMap = [
-        'students'           => 'students',
-        'staff'              => 'staff',
-        'sessions'           => 'sessions',
-        'classes'            => 'classes',
-        'sections'           => 'sections',
-        'subjects'           => 'subjects',
-        'routes'             => 'routes',
-        'pickup_points'      => 'pickup_points',
-        'fee_heads'          => 'fee_heads',
-        'fee_headings'       => 'fee_heads',
-        'fees_plan'          => 'fees_plan',
-        'fee_plans'          => 'fees_plan',
-        'fee_receipts'       => 'fee_receipts',
-        'attendance'         => 'attendance',
-        'inventory_items'    => 'inventory_items',
-        'expenses'           => 'expenses',
-        'expense_heads'      => 'expense_heads',
-        'homework'           => 'homework',
-        'alumni'             => 'alumni',
-        'notifications'      => 'notifications',
-        'payroll_setup'      => 'payroll_setup',
-        'payslips'           => 'payslips',
-        'biometric_devices'  => 'biometric_devices',
-        'student_transport'  => 'student_transport',
-        'student_discounts'  => 'student_discounts',
-    ];
+    // Canonical collection → table name map (camelCase columns in all tables)
+    $tableMap = collection_table_map();
 
     $results = [];
-
-    // Pre-initialize all keys to {pushed:0, errors:[]} so response is always complete
     foreach ($tableMap as $key => $table) {
-        if (!isset($results[$table])) {
-            $results[$table] = ['pushed' => 0, 'errors' => []];
+        if (!isset($results[$key])) {
+            $results[$key] = ['pushed' => 0, 'failed' => 0, 'errors' => []];
         }
     }
 
@@ -530,21 +477,23 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
 
             foreach ($records as $idx => $row) {
                 if (!is_array($row)) {
-                    $results[$table]['errors'][] = "Row $idx is not an object";
+                    $results[$key]['failed']++;
+                    $results[$key]['errors'][] = "Row {$idx} is not an object";
                     continue;
                 }
 
-                $row['school_id']  = $sid;
-                $row['is_deleted'] = isset($row['is_deleted']) ? (int)$row['is_deleted'] : 0;
-                if (empty($row['created_at'])) $row['created_at'] = now_str();
-                if (empty($row['updated_at'])) $row['updated_at'] = now_str();
-
-                // Keep only scalar/null and safe column names
+                // Sanitize: keep only scalar/null, valid column names
                 $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
-                $cols     = array_keys($row);
-                $safeCols = array_values(array_filter($cols, fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
+                $safeCols = array_values(array_filter(
+                    array_keys($row),
+                    fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+                ));
 
-                if (empty($safeCols)) continue;
+                if (empty($safeCols)) {
+                    $results[$key]['failed']++;
+                    $results[$key]['errors'][] = "Row {$idx} has no valid columns";
+                    continue;
+                }
 
                 $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
                 $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
@@ -559,13 +508,14 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
                     $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$valList})";
                     if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
                     $db->prepare($sql)->execute($params);
-                    $results[$table]['pushed']++;
+                    $results[$key]['pushed']++;
                 } catch (Throwable $e) {
-                    // Check if table exists — if not, set a clearer error
-                    if (strpos($e->getMessage(), "doesn't exist") !== false || strpos($e->getMessage(), "Table") !== false) {
-                        $results[$table]['errors'][] = "Table '{$table}' not found — run ?route=migrate/run first";
+                    $results[$key]['failed']++;
+                    $msg = $e->getMessage();
+                    if (strpos($msg, "doesn't exist") !== false) {
+                        $results[$key]['errors'][] = "Table '{$table}' not found — run ?route=migrate/run first";
                     } else {
-                        $results[$table]['errors'][] = "Row {$idx}: " . $e->getMessage();
+                        $results[$key]['errors'][] = "Row {$idx}: {$msg}";
                     }
                 }
             }
@@ -573,8 +523,8 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
 
         $db->commit();
     } catch (Throwable $e) {
-        try { $db->rollBack(); } catch (Throwable $re) { /* ignore */ }
-        json_error('Sync push failed: ' . $e->getMessage(), 500);
+        try { $db->rollBack(); } catch (Throwable $re) {}
+        json_error('Sync push transaction failed: ' . $e->getMessage(), 500);
     }
 
     json_success(['results' => $results], 'Push complete');
@@ -583,74 +533,45 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SYNC / BATCH — upsert a single named collection
-// Returns { pushed: N, total: N, errors: [], collection: string, table: string }
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_sync_batch(string $method, array $body, ?array $auth, int $sid): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error('Authentication required', 401);
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
+    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) {
+        json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
+    }
 
     $collection = trim($body['collection'] ?? '');
     $items      = $body['items'] ?? [];
     if ($collection === '') json_error('collection is required', 400);
     if (!is_array($items))  json_error('items must be an array', 400);
 
-    $tableMap = [
-        'students'             => 'students',
-        'staff'                => 'staff',
-        'sessions'             => 'sessions',
-        'academic_sessions'    => 'sessions',
-        'classes'              => 'classes',
-        'sections'             => 'sections',
-        'subjects'             => 'subjects',
-        'routes'               => 'routes',
-        'pickup_points'        => 'pickup_points',
-        'fee_heads'            => 'fee_heads',
-        'fee_headings'         => 'fee_heads',
-        'fees_plan'            => 'fees_plan',
-        'fee_plans'            => 'fees_plan',
-        'fee_receipts'         => 'fee_receipts',
-        'attendance'           => 'attendance',
-        'attendance_records'   => 'attendance',
-        'inventory_items'      => 'inventory_items',
-        'expenses'             => 'expenses',
-        'expense_heads'        => 'expense_heads',
-        'homework'             => 'homework',
-        'alumni'               => 'alumni',
-        'notifications'        => 'notifications',
-        'payroll_setup'        => 'payroll_setup',
-        'payslips'             => 'payslips',
-        'biometric_devices'    => 'biometric_devices',
-        'student_transport'    => 'student_transport',
-        'student_discounts'    => 'student_discounts',
-        'users'                => 'users',
-        'school_config'        => 'schools',
-    ];
-
+    $tableMap = collection_table_map();
     if (!isset($tableMap[$collection])) json_error("Unknown collection: {$collection}", 400);
 
     $table  = $tableMap[$collection];
     $db     = getDB();
     $pushed = 0;
+    $failed = 0;
     $errors = [];
 
     foreach ($items as $idx => $row) {
-        if (!is_array($row)) { $errors[] = "Item {$idx} is not an object"; continue; }
-
-        $row['school_id']  = $sid;
-        $row['is_deleted'] = isset($row['is_deleted']) ? (int)$row['is_deleted'] : 0;
-        if (empty($row['created_at'])) $row['created_at'] = now_str();
-        if (empty($row['updated_at'])) $row['updated_at'] = now_str();
+        if (!is_array($row)) { $failed++; $errors[] = "Item {$idx} is not an object"; continue; }
 
         $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
-        $cols     = array_keys($row);
-        $safeCols = array_values(array_filter($cols, fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
-        if (empty($safeCols)) { $errors[] = "Item {$idx} has no valid columns"; continue; }
+        $safeCols = array_values(array_filter(
+            array_keys($row),
+            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+        ));
+        if (empty($safeCols)) { $failed++; $errors[] = "Item {$idx} has no valid columns"; continue; }
 
         $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
         $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
-        $updateList = implode(',', array_map(fn($c) => "`{$c}`=:{$c}", array_filter($safeCols, fn($c) => $c !== 'id')));
-        $params     = [];
+        $updateList = implode(',', array_map(
+            fn($c) => "`{$c}`=:{$c}",
+            array_filter($safeCols, fn($c) => $c !== 'id')
+        ));
+        $params = [];
         foreach ($safeCols as $c) $params[":{$c}"] = $row[$c];
 
         try {
@@ -659,16 +580,19 @@ function handle_sync_batch(string $method, array $body, ?array $auth, int $sid):
             $db->prepare($sql)->execute($params);
             $pushed++;
         } catch (Throwable $e) {
-            if (strpos($e->getMessage(), "doesn't exist") !== false) {
-                $errors[] = "Table '{$table}' not found — run ?route=migrate/run first";
+            $failed++;
+            $msg = $e->getMessage();
+            if (strpos($msg, "doesn't exist") !== false) {
+                $errors[] = "Table '{$table}' missing — run ?route=migrate/run first";
             } else {
-                $errors[] = "Row {$idx}: " . $e->getMessage();
+                $errors[] = "Row {$idx}: {$msg}";
             }
         }
     }
 
     json_success([
         'pushed'     => $pushed,
+        'failed'     => $failed,
         'total'      => count($items),
         'errors'     => $errors,
         'collection' => $collection,
@@ -678,7 +602,7 @@ function handle_sync_batch(string $method, array $body, ?array $auth, int $sid):
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SYNC / PULL — pull all changed records since a timestamp
+// SYNC / PULL
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_sync_pull(string $method, ?array $auth, int $sid): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
@@ -686,27 +610,19 @@ function handle_sync_pull(string $method, ?array $auth, int $sid): void {
 
     $db    = getDB();
     $since = $_GET['since'] ?? null;
-    $tables = [
-        'sessions', 'classes', 'sections', 'subjects',
-        'students', 'staff',
-        'routes', 'pickup_points', 'student_transport',
-        'fee_heads', 'fees_plan', 'fee_receipts',
-        'attendance', 'inventory_items',
-        'expense_heads', 'expenses', 'homework', 'alumni',
-    ];
+
+    $tables = array_values(array_unique(array_values(collection_table_map())));
 
     $pull = [];
     foreach ($tables as $table) {
-        $where  = ['school_id=:sid'];
-        $params = [':sid' => $sid];
-        if ($since) {
-            $where[]          = 'updated_at > :since';
-            $params[':since'] = $since;
-        }
-        $wc = implode(' AND ', $where);
         try {
-            $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE {$wc} ORDER BY updated_at ASC LIMIT 500");
-            $stmt->execute($params);
+            if ($since) {
+                // Only tables that have a timestamp-ish column can filter by since
+                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 1000");
+            } else {
+                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 1000");
+            }
+            $stmt->execute();
             $rows = $stmt->fetchAll();
             if (!empty($rows)) $pull[$table] = $rows;
         } catch (Throwable $e) { /* skip missing tables */ }
@@ -717,48 +633,29 @@ function handle_sync_pull(string $method, ?array $auth, int $sid): void {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BACKUP — export, import, history, factory-reset
+// BACKUP
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_backup_export(string $method, ?array $auth, int $sid): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin', 'admin'], true)) json_error('Forbidden', 403);
 
-    $db = getDB();
-    $tables = [
-        'sessions', 'classes', 'sections', 'subjects', 'class_subject_mapping',
-        'students', 'student_transport', 'student_discounts',
-        'staff', 'teacher_subjects', 'payroll_setup', 'payslips',
-        'routes', 'pickup_points',
-        'fee_heads', 'fees_plan', 'fee_receipts', 'accounts',
-        'attendance', 'biometric_devices',
-        'inventory_items', 'inventory_purchases', 'inventory_sales',
-        'expense_heads', 'expenses', 'homework', 'alumni',
-        'notifications',
-    ];
-
+    $db     = getDB();
+    $tables = array_values(array_unique(array_values(collection_table_map())));
     $export = [
         'version'     => API_VERSION,
-        'school_id'   => $sid,
         'exported_at' => gmdate('c'),
         'tables'      => [],
     ];
 
     foreach ($tables as $table) {
         try {
-            $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE school_id=:sid AND is_deleted=0");
-            $stmt->execute([':sid' => $sid]);
+            $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 5000");
+            $stmt->execute();
             $export['tables'][$table] = $stmt->fetchAll();
         } catch (Throwable $e) {
             $export['tables'][$table] = [];
         }
     }
-
-    try {
-        $ss = $db->prepare('SELECT * FROM schools WHERE id=:id LIMIT 1');
-        $ss->execute([':id' => $sid]);
-        $export['school'] = $ss->fetch();
-    } catch (Throwable $e) { $export['school'] = null; }
 
     json_success($export, 'Backup ready');
 }
@@ -771,43 +668,26 @@ function handle_backup_import(string $method, array $body, ?array $auth, int $si
     $data = $body['data'] ?? null;
     if (!$data || !isset($data['tables'])) json_error('Invalid backup — missing tables key', 400);
 
-    $db = getDB();
-    $allowedTables = [
-        'sessions', 'classes', 'sections', 'subjects', 'class_subject_mapping',
-        'students', 'student_transport', 'student_discounts',
-        'staff', 'teacher_subjects', 'payroll_setup', 'payslips',
-        'routes', 'pickup_points',
-        'fee_heads', 'fees_plan', 'fee_receipts',
-        'attendance', 'biometric_devices',
-        'inventory_items', 'inventory_purchases', 'inventory_sales',
-        'expense_heads', 'expenses', 'homework', 'alumni', 'notifications',
-    ];
-
+    $db       = getDB();
     $imported = [];
+
     $db->beginTransaction();
     try {
         foreach ($data['tables'] as $table => $rows) {
-            if (!in_array($table, $allowedTables, true)) continue;
-            if (empty($rows)) { $imported[$table] = 0; continue; }
-
-            try {
-                $db->prepare("UPDATE `{$table}` SET is_deleted=1 WHERE school_id=:sid")->execute([':sid' => $sid]);
-            } catch (Throwable $e) { /* ignore */ }
-
+            if (!is_array($rows) || empty($rows)) { $imported[$table] = 0; continue; }
             $count = 0;
             foreach ($rows as $row) {
-                $row['school_id'] = $sid;
-                unset($row['id']);
-
-                $cols     = array_keys($row);
-                $safeCols = array_filter($cols, fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c));
-                if (count($safeCols) !== count($cols)) continue;
-
+                if (!is_array($row)) continue;
+                $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
+                $safeCols = array_values(array_filter(
+                    array_keys($row),
+                    fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+                ));
+                if (empty($safeCols)) continue;
                 $colList = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
                 $valList = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
                 $params  = [];
                 foreach ($safeCols as $c) $params[":{$c}"] = $row[$c];
-
                 try {
                     $db->prepare("INSERT IGNORE INTO `{$table}` ({$colList}) VALUES ({$valList})")->execute($params);
                     $count++;
@@ -826,47 +706,26 @@ function handle_backup_import(string $method, array $body, ?array $auth, int $si
 function handle_backup_history(string $method, ?array $auth, int $sid): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
-
-    try {
-        $db   = getDB();
-        $stmt = $db->prepare('SELECT * FROM backup_history WHERE school_id=:sid ORDER BY created_at DESC LIMIT 50');
-        $stmt->execute([':sid' => $sid]);
-        json_success($stmt->fetchAll());
-    } catch (Throwable $e) {
-        json_success([], 'No backup history yet');
-    }
+    json_success([], 'No backup history tracked server-side');
 }
 
 function handle_factory_reset(string $method, array $body, ?array $auth, int $sid): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
     if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
-
     if (($body['confirmation'] ?? '') !== 'DELETE_ALL_DATA') {
-        json_error('Factory reset requires confirmation = "DELETE_ALL_DATA"', 400);
+        json_error('confirmation must equal "DELETE_ALL_DATA"', 400);
     }
 
-    $db = getDB();
-    $tables = [
-        'students', 'student_transport', 'student_discounts',
-        'fee_receipts', 'fee_heads', 'fees_plan', 'accounts',
-        'staff', 'teacher_subjects', 'payroll_setup', 'payslips',
-        'routes', 'pickup_points',
-        'sessions', 'classes', 'sections', 'subjects', 'class_subject_mapping',
-        'attendance', 'biometric_devices',
-        'inventory_items', 'inventory_purchases', 'inventory_sales',
-        'expense_heads', 'expenses', 'homework', 'alumni',
-        'notifications', 'backup_history',
-    ];
-
+    $db     = getDB();
+    $tables = array_values(array_unique(array_values(collection_table_map())));
     $db->beginTransaction();
     try {
         foreach ($tables as $table) {
-            try {
-                $db->prepare("DELETE FROM `{$table}` WHERE school_id=:sid")->execute([':sid' => $sid]);
-            } catch (Throwable $e) { /* skip missing */ }
+            try { $db->exec("DELETE FROM `{$table}`"); } catch (Throwable $e) {}
         }
-        $db->prepare("DELETE FROM users WHERE school_id=:sid AND role NOT IN ('super_admin','superadmin')")->execute([':sid' => $sid]);
+        // Keep superadmin
+        seed_superadmin_user($db, false);
         $db->commit();
         json_success(null, 'Factory reset complete. All data wiped.');
     } catch (Throwable $e) {
@@ -877,50 +736,37 @@ function handle_factory_reset(string $method, array $body, ?array $auth, int $si
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SETTINGS — school profile, user management
+// SETTINGS
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_settings_school(string $method, array $body, ?array $auth, int $sid): void {
     if (!$auth) json_error('Authentication required', 401);
     $db = getDB();
 
     if ($method === 'GET') {
-        $stmt = $db->prepare('SELECT * FROM schools WHERE id=:id LIMIT 1');
-        $stmt->execute([':id' => $sid]);
-        $school = $stmt->fetch();
-        json_success($school ?: new stdClass());
+        try {
+            $stmt = $db->query("SELECT * FROM `school_settings`");
+            $rows = $stmt->fetchAll();
+            $settings = [];
+            foreach ($rows as $r) $settings[$r['key']] = $r['value'];
+            json_success($settings);
+        } catch (Throwable $e) {
+            json_success([]);
+        }
     }
 
     if ($method === 'POST' || $method === 'PUT') {
         if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
-
-        // Build dynamic SET clause from allowed fields
-        $allowed = ['name','address','phone','email','logo_url','background_url','whatsapp_app_key',
-                    'whatsapp_auth_key','whatsapp_enabled','rcs_enabled','gpay_enabled',
-                    'razorpay_enabled','payu_enabled'];
-        $set = [];
-        $params = [];
-        foreach ($allowed as $field) {
-            if (array_key_exists($field, $body)) {
-                $set[] = "`{$field}`=:{$field}";
-                $params[":{$field}"] = $body[$field];
-            }
-        }
-        if (empty($set)) json_error('No valid fields provided', 400);
-
-        $params[':id'] = $sid;
         try {
-            $upd = $db->prepare('UPDATE schools SET ' . implode(',', $set) . ', updated_at=NOW() WHERE id=:id');
-            $upd->execute($params);
-            if ($upd->rowCount() === 0) {
-                // School doesn't exist yet — insert
-                $params[':name'] = $body['name'] ?? 'SHUBH SCHOOL ERP';
-                $db->prepare('INSERT INTO schools (id,name) VALUES (:id,:name)')->execute([':id' => $sid, ':name' => $params[':name']]);
+            $ins = $db->prepare("INSERT INTO `school_settings` (`id`,`key`,`value`) VALUES (UUID(),:k,:v) ON DUPLICATE KEY UPDATE `value`=:v2");
+            foreach ($body as $key => $value) {
+                if (is_scalar($value) && preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
+                    $ins->execute([':k' => $key, ':v' => (string)$value, ':v2' => (string)$value]);
+                }
             }
-        } catch (Throwable $e) { json_error('Failed to update school: ' . $e->getMessage(), 500); }
-
-        $stmt = $db->prepare('SELECT * FROM schools WHERE id=:id LIMIT 1');
-        $stmt->execute([':id' => $sid]);
-        json_success($stmt->fetch(), 'School settings saved');
+            json_success(null, 'Settings saved');
+        } catch (Throwable $e) {
+            json_error('Failed to save settings: ' . $e->getMessage(), 500);
+        }
     }
 
     json_error('Method not allowed', 405);
@@ -931,9 +777,12 @@ function handle_settings_users(string $method, array $body, ?array $auth, int $s
     $db = getDB();
 
     if ($method === 'GET') {
-        $stmt = $db->prepare('SELECT id,username,full_name,role,is_active,created_at FROM users WHERE school_id=:sid AND is_deleted=0 ORDER BY role,full_name');
-        $stmt->execute([':sid' => $sid]);
-        json_success($stmt->fetchAll());
+        try {
+            $stmt = $db->query("SELECT `id`,`username`,`role`,`name`,`mobile`,`email` FROM `users`");
+            json_success($stmt->fetchAll());
+        } catch (Throwable $e) {
+            json_success([]);
+        }
     }
 
     if ($method === 'POST') {
@@ -941,13 +790,13 @@ function handle_settings_users(string $method, array $body, ?array $auth, int $s
         $username = trim($body['username'] ?? '');
         $password = trim($body['password'] ?? 'admin123');
         $role     = $body['role'] ?? 'teacher';
-        $name     = $body['full_name'] ?? $username;
+        $name     = $body['name'] ?? $username;
         if (!$username) json_error('username is required', 400);
 
-        $hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
+        $hash = hash('sha256', $password);
         try {
-            $db->prepare('INSERT INTO users (school_id,username,password_hash,full_name,role,is_active,created_at,updated_at) VALUES (:sid,:u,:h,:n,:r,1,NOW(),NOW())')
-               ->execute([':sid' => $sid, ':u' => $username, ':h' => $hash, ':n' => $name, ':r' => $role]);
+            $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`name`) VALUES (UUID(),:u,:h,:r,:n)")
+               ->execute([':u' => $username, ':h' => $hash, ':r' => $role, ':n' => $name]);
         } catch (Throwable $e) {
             if (strpos($e->getMessage(), 'Duplicate') !== false) json_error("Username '{$username}' already exists", 409);
             json_error('Failed to create user: ' . $e->getMessage(), 500);
@@ -960,58 +809,44 @@ function handle_settings_users(string $method, array $body, ?array $auth, int $s
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DATA / {collection} — generic CRUD handler
+// DATA / {collection} — generic CRUD
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_data_collection(string $method, string $collection, array $body, ?array $auth, int $sid, ?string $id): void {
     if (!$auth) json_error('Authentication required', 401);
 
-    // Whitelist to prevent SQL injection via collection name
-    $allowedTables = [
-        'students', 'staff', 'fee_receipts', 'fees_plan', 'fee_heads',
-        'attendance', 'routes', 'pickup_points', 'student_transport',
-        'student_discounts', 'classes', 'sections', 'subjects',
-        'homework', 'expenses', 'expense_heads', 'inventory_items',
-        'inventory_purchases', 'inventory_sales', 'payroll_setup',
-        'payslips', 'biometric_devices', 'alumni', 'sessions',
-        'accounts', 'notifications', 'users', 'schools',
-        'teacher_subjects', 'class_subject_mapping', 'timetables',
-        'chat_messages', 'chat_conversations',
-    ];
+    $tableMap = collection_table_map();
+    if (!isset($tableMap[$collection])) json_error("Unknown collection: {$collection}", 404);
+    $table = $tableMap[$collection];
+    $db    = getDB();
 
-    if (!in_array($collection, $allowedTables, true)) {
-        json_error("Unknown collection: {$collection}", 404);
-    }
-
-    $db = getDB();
-
-    // GET list or single record
     if ($method === 'GET') {
         if ($id !== null) {
-            $stmt = $db->prepare("SELECT * FROM `{$collection}` WHERE id=:id AND school_id=:sid AND is_deleted=0 LIMIT 1");
-            $stmt->execute([':id' => $id, ':sid' => $sid]);
+            $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE `id`=:id LIMIT 1");
+            $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
             if (!$row) json_error('Record not found', 404);
             json_success($row);
         } else {
-            $limit  = min((int)($_GET['limit'] ?? 500), 2000);
+            $limit  = min((int)($_GET['limit'] ?? 1000), 5000);
             $offset = max((int)($_GET['offset'] ?? 0), 0);
-            $stmt   = $db->prepare("SELECT * FROM `{$collection}` WHERE school_id=:sid AND is_deleted=0 ORDER BY updated_at DESC LIMIT {$limit} OFFSET {$offset}");
-            $stmt->execute([':sid' => $sid]);
-            json_success($stmt->fetchAll());
+            try {
+                $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
+                $stmt->execute();
+                json_success($stmt->fetchAll());
+            } catch (Throwable $e) {
+                json_success([]);
+            }
         }
     }
 
-    // POST — create or upsert
     if ($method === 'POST') {
-        $body['school_id']  = $sid;
-        $body['is_deleted'] = 0;
-        if (empty($body['created_at'])) $body['created_at'] = now_str();
-        $body['updated_at'] = now_str();
-
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
-        $cols     = array_keys($body);
-        $safeCols = array_values(array_filter($cols, fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
+        $safeCols = array_values(array_filter(
+            array_keys($body),
+            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+        ));
         if (empty($safeCols)) json_error('No valid fields provided', 400);
+        if (empty($body['id'])) { $body['id'] = gen_uuid(); $safeCols[] = 'id'; }
 
         $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
         $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
@@ -1019,54 +854,43 @@ function handle_data_collection(string $method, string $collection, array $body,
         $params     = [];
         foreach ($safeCols as $c) $params[":{$c}"] = $body[$c];
 
-        $sql = "INSERT INTO `{$collection}` ({$colList}) VALUES ({$valList})";
-        if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
-
         try {
+            $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$valList})";
+            if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
             $db->prepare($sql)->execute($params);
-            $newId = $body['id'] ?? $db->lastInsertId();
-            $stmt  = $db->prepare("SELECT * FROM `{$collection}` WHERE id=:id LIMIT 1");
-            $stmt->execute([':id' => $newId]);
-            json_success($stmt->fetch(), 'Saved', 201);
+            json_success(['id' => $body['id']], 'Saved', 201);
         } catch (Throwable $e) {
             json_error('Failed to save: ' . $e->getMessage(), 500);
         }
     }
 
-    // PUT — update specific record
     if ($method === 'PUT') {
         if (!$id) json_error('Record ID required', 400);
-
-        $body['updated_at'] = now_str();
-        unset($body['id'], $body['school_id'], $body['created_at']);
-
+        unset($body['id']);
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
-        $cols     = array_keys($body);
-        $safeCols = array_values(array_filter($cols, fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
+        $safeCols = array_values(array_filter(
+            array_keys($body),
+            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
+        ));
         if (empty($safeCols)) json_error('No valid fields provided', 400);
 
         $setList = implode(',', array_map(fn($c) => "`{$c}`=:{$c}", $safeCols));
         $params  = [];
         foreach ($safeCols as $c) $params[":{$c}"] = $body[$c];
-        $params[':id']  = $id;
-        $params[':sid'] = $sid;
+        $params[':id'] = $id;
 
         try {
-            $db->prepare("UPDATE `{$collection}` SET {$setList} WHERE id=:id AND school_id=:sid")->execute($params);
-            $stmt = $db->prepare("SELECT * FROM `{$collection}` WHERE id=:id LIMIT 1");
-            $stmt->execute([':id' => $id]);
-            json_success($stmt->fetch(), 'Updated');
+            $db->prepare("UPDATE `{$table}` SET {$setList} WHERE `id`=:id")->execute($params);
+            json_success(['id' => $id], 'Updated');
         } catch (Throwable $e) {
             json_error('Failed to update: ' . $e->getMessage(), 500);
         }
     }
 
-    // DELETE — soft delete
     if ($method === 'DELETE') {
         if (!$id) json_error('Record ID required', 400);
         try {
-            $db->prepare("UPDATE `{$collection}` SET is_deleted=1, updated_at=NOW() WHERE id=:id AND school_id=:sid")
-               ->execute([':id' => $id, ':sid' => $sid]);
+            $db->prepare("DELETE FROM `{$table}` WHERE `id`=:id")->execute([':id' => $id]);
             json_success(null, 'Deleted');
         } catch (Throwable $e) {
             json_error('Failed to delete: ' . $e->getMessage(), 500);
@@ -1078,608 +902,429 @@ function handle_data_collection(string $method, string $collection, array $body,
 
 
 // =============================================================================
-// MIGRATIONS — ALL 28 TABLES, idempotent (CREATE TABLE IF NOT EXISTS)
+// COLLECTION → TABLE MAP
 // =============================================================================
-function get_migrations(): array {
+function collection_table_map(): array {
     return [
-        [
-            'name' => 'core_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS schools (
-  id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  name              VARCHAR(200) NOT NULL,
-  address           TEXT,
-  phone             VARCHAR(20),
-  email             VARCHAR(100),
-  logo_url          TEXT,
-  background_url    TEXT,
-  whatsapp_app_key  VARCHAR(200),
-  whatsapp_auth_key VARCHAR(200),
-  whatsapp_enabled  TINYINT(1) DEFAULT 0,
-  rcs_enabled       TINYINT(1) DEFAULT 0,
-  gpay_enabled      TINYINT(1) DEFAULT 0,
-  razorpay_enabled  TINYINT(1) DEFAULT 0,
-  payu_enabled      TINYINT(1) DEFAULT 0,
-  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        'students'              => 'students',
+        'staff'                 => 'staff',
+        'fees_plan'             => 'fees_plan',
+        'fee_plans'             => 'fees_plan',
+        'fee_headings'          => 'fee_headings',
+        'fee_heads'             => 'fee_headings',
+        'fee_receipts'          => 'fee_receipts',
+        'attendance'            => 'attendance',
+        'staff_attendance'      => 'staff_attendance',
+        'routes'                => 'routes',
+        'pickup_points'         => 'pickup_points',
+        'student_transport'     => 'student_transport',
+        'student_discounts'     => 'student_discounts',
+        'inventory_items'       => 'inventory_items',
+        'inventory_transactions'=> 'inventory_transactions',
+        'expenses'              => 'expenses',
+        'expense_heads'         => 'expense_heads',
+        'homework'              => 'homework',
+        'school_sessions'       => 'school_sessions',
+        'sessions'              => 'school_sessions',
+        'notices'               => 'notices',
+        'notifications'         => 'notices',
+        'exam_timetables'       => 'exam_timetables',
+        'teacher_timetables'    => 'teacher_timetables',
+        'users'                 => 'users',
+        'school_settings'       => 'school_settings',
+        'settings'              => 'school_settings',
+        'chat_messages'         => 'chat_messages',
+        'chat_groups'           => 'chat_groups',
+        'call_logs'             => 'call_logs',
+        'biometric_devices'     => 'biometric_devices',
+        'payroll'               => 'payroll',
+    ];
+}
 
-CREATE TABLE IF NOT EXISTS users (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL DEFAULT 1,
-  username        VARCHAR(100) NOT NULL,
-  password_hash   VARCHAR(255) NOT NULL,
-  full_name       VARCHAR(200),
-  role            VARCHAR(50) NOT NULL DEFAULT 'teacher',
-  reference_id    INT UNSIGNED,
-  refresh_token   VARCHAR(500),
-  is_active       TINYINT(1) DEFAULT 1,
-  last_login      TIMESTAMP NULL,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by      INT UNSIGNED,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  UNIQUE KEY uq_school_username (school_id, username),
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+function gen_uuid(): string {
+    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+    );
+}
 
-CREATE TABLE IF NOT EXISTS sessions (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  name        VARCHAR(50) NOT NULL,
-  start_date  DATE,
-  end_date    DATE,
-  is_current  TINYINT(1) DEFAULT 0,
-  is_archived TINYINT(1) DEFAULT 0,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'student_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS classes (
-  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id  INT UNSIGNED NOT NULL,
-  name       VARCHAR(50) NOT NULL,
-  order_num  INT DEFAULT 0,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by INT UNSIGNED,
-  is_deleted TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS sections (
-  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id  INT UNSIGNED NOT NULL,
-  class_id   INT UNSIGNED NOT NULL,
-  name       VARCHAR(10) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by INT UNSIGNED,
-  is_deleted TINYINT(1) DEFAULT 0,
-  INDEX idx_school_class (school_id, class_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+// =============================================================================
+// TABLE DEFINITIONS — ALL camelCase columns matching frontend JS object keys
+// Using DROP TABLE IF EXISTS + CREATE TABLE for clean migration every time
+// =============================================================================
+function get_table_definitions(): array {
+    return [
 
-CREATE TABLE IF NOT EXISTS students (
-  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id        INT UNSIGNED NOT NULL,
-  session_id       INT UNSIGNED,
-  admission_no     VARCHAR(50) NOT NULL,
-  full_name        VARCHAR(200) NOT NULL,
-  dob              DATE,
-  gender           ENUM('Male','Female','Other'),
-  category         VARCHAR(50),
-  religion         VARCHAR(50),
-  blood_group      VARCHAR(10),
-  photo_url        TEXT,
-  father_name      VARCHAR(200),
-  mother_name      VARCHAR(200),
-  guardian_name    VARCHAR(200),
-  primary_mobile   VARCHAR(20),
-  secondary_mobile VARCHAR(20),
-  email            VARCHAR(100),
-  address          TEXT,
-  village          VARCHAR(100),
-  district         VARCHAR(100),
-  state            VARCHAR(100),
-  pincode          VARCHAR(10),
-  aadhaar_no       VARCHAR(20),
-  sr_no            VARCHAR(50),
-  pen_no           VARCHAR(50),
-  apaar_no         VARCHAR(50),
-  previous_school  VARCHAR(200),
-  admission_date   DATE,
-  class_id         INT UNSIGNED,
-  section_id       INT UNSIGNED,
-  roll_no          VARCHAR(20),
-  rfid_tag         VARCHAR(100),
-  caste            VARCHAR(50),
-  status           ENUM('Active','Inactive','Discontinued','Passed Out') DEFAULT 'Active',
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by       INT UNSIGNED,
-  is_deleted       TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id),
-  INDEX idx_primary_mobile (primary_mobile)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── students ──────────────────────────────────────────────────────────
+        'students' => "CREATE TABLE `students` (
+            `id`              VARCHAR(36) PRIMARY KEY,
+            `admNo`           VARCHAR(100),
+            `name`            VARCHAR(255),
+            `dob`             VARCHAR(50),
+            `gender`          VARCHAR(20),
+            `class`           VARCHAR(100),
+            `section`         VARCHAR(50),
+            `fatherName`      VARCHAR(255),
+            `motherName`      VARCHAR(255),
+            `fatherMobile`    VARCHAR(50),
+            `motherMobile`    VARCHAR(50),
+            `address`         TEXT,
+            `village`         VARCHAR(255),
+            `category`        VARCHAR(100),
+            `aadhaar`         VARCHAR(50),
+            `srNo`            VARCHAR(100),
+            `penNo`           VARCHAR(100),
+            `apaarNo`         VARCHAR(100),
+            `previousSchool`  VARCHAR(255),
+            `admissionDate`   VARCHAR(50),
+            `status`          VARCHAR(50) DEFAULT 'Active',
+            `photo`           TEXT,
+            `routeId`         VARCHAR(36),
+            `pickupPoint`     VARCHAR(255),
+            `session`         VARCHAR(100),
+            `bloodGroup`      VARCHAR(20),
+            `religion`        VARCHAR(100),
+            `caste`           VARCHAR(100),
+            `nationality`     VARCHAR(100),
+            `annualIncome`    VARCHAR(100),
+            `busNo`           VARCHAR(50),
+            `email`           VARCHAR(255),
+            `alternatePhone`  VARCHAR(50),
+            `emergencyContact` VARCHAR(50)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS student_transport (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL,
-  session_id      INT UNSIGNED,
-  student_id      INT UNSIGNED NOT NULL,
-  route_id        INT UNSIGNED,
-  pickup_point_id INT UNSIGNED,
-  bus_no          VARCHAR(50),
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── staff ─────────────────────────────────────────────────────────────
+        'staff' => "CREATE TABLE `staff` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `empId`       VARCHAR(100),
+            `name`        VARCHAR(255),
+            `designation` VARCHAR(255),
+            `department`  VARCHAR(255),
+            `mobile`      VARCHAR(50),
+            `email`       VARCHAR(255),
+            `address`     TEXT,
+            `joinDate`    VARCHAR(50),
+            `salary`      DECIMAL(12,2) DEFAULT 0,
+            `status`      VARCHAR(50) DEFAULT 'Active',
+            `photo`       TEXT,
+            `gender`      VARCHAR(20),
+            `dob`         VARCHAR(50),
+            `aadhaar`     VARCHAR(50),
+            `bankAccount` VARCHAR(100),
+            `ifsc`        VARCHAR(50),
+            `bankName`    VARCHAR(255),
+            `panNo`       VARCHAR(50),
+            `qualification` VARCHAR(255),
+            `experience`  VARCHAR(255),
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS student_discounts (
-  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id      INT UNSIGNED NOT NULL,
-  session_id     INT UNSIGNED,
-  student_id     INT UNSIGNED NOT NULL,
-  monthly_amount DECIMAL(10,2) DEFAULT 0,
-  applies_to     TEXT,
-  created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted     TINYINT(1) DEFAULT 0,
-  INDEX idx_student (student_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'fee_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS fee_heads (
-  id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id         INT UNSIGNED NOT NULL,
-  session_id        INT UNSIGNED,
-  name              VARCHAR(200) NOT NULL,
-  applicable_months TEXT,
-  sort_order        INT DEFAULT 0,
-  created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by        INT UNSIGNED,
-  is_deleted        TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── fees_plan ─────────────────────────────────────────────────────────
+        'fees_plan' => "CREATE TABLE `fees_plan` (
+            `id`         VARCHAR(36) PRIMARY KEY,
+            `classId`    VARCHAR(100),
+            `section`    VARCHAR(50),
+            `headingId`  VARCHAR(36),
+            `amount`     DECIMAL(12,2) DEFAULT 0,
+            `months`     TEXT,
+            `session`    VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS fees_plan (
-  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id      INT UNSIGNED NOT NULL,
-  session_id     INT UNSIGNED,
-  class_id       INT UNSIGNED NOT NULL,
-  section_id     INT UNSIGNED,
-  fee_head_id    INT UNSIGNED NOT NULL,
-  monthly_amount DECIMAL(10,2) DEFAULT 0,
-  created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by     INT UNSIGNED,
-  is_deleted     TINYINT(1) DEFAULT 0,
-  INDEX idx_class_section (class_id, section_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── fee_headings ──────────────────────────────────────────────────────
+        'fee_headings' => "CREATE TABLE `fee_headings` (
+            `id`                VARCHAR(36) PRIMARY KEY,
+            `name`              VARCHAR(255),
+            `amount`            DECIMAL(12,2) DEFAULT 0,
+            `months`            TEXT,
+            `applicableClasses` TEXT,
+            `session`           VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS accounts (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  name        VARCHAR(200) NOT NULL,
-  description TEXT,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── fee_receipts ──────────────────────────────────────────────────────
+        'fee_receipts' => "CREATE TABLE `fee_receipts` (
+            `id`               VARCHAR(36) PRIMARY KEY,
+            `studentId`        VARCHAR(36),
+            `admNo`            VARCHAR(100),
+            `studentName`      VARCHAR(255),
+            `class`            VARCHAR(100),
+            `section`          VARCHAR(50),
+            `months`           TEXT,
+            `amounts`          TEXT,
+            `otherCharges`     DECIMAL(12,2) DEFAULT 0,
+            `otherDescription` VARCHAR(255),
+            `totalAmount`      DECIMAL(12,2) DEFAULT 0,
+            `paidAmount`       DECIMAL(12,2) DEFAULT 0,
+            `balance`          DECIMAL(12,2) DEFAULT 0,
+            `paymentMode`      VARCHAR(50) DEFAULT 'Cash',
+            `receiptNo`        VARCHAR(100),
+            `date`             VARCHAR(50),
+            `session`          VARCHAR(100),
+            `headingAmounts`   TEXT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS fee_receipts (
-  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id        INT UNSIGNED NOT NULL,
-  session_id       INT UNSIGNED,
-  student_id       INT UNSIGNED NOT NULL,
-  receipt_no       VARCHAR(50) NOT NULL,
-  payment_date     DATE NOT NULL,
-  months_paid      TEXT,
-  net_fee          DECIMAL(10,2) DEFAULT 0,
-  paid_amount      DECIMAL(10,2) DEFAULT 0,
-  old_balance      DECIMAL(10,2) DEFAULT 0,
-  balance_after    DECIMAL(10,2) DEFAULT 0,
-  payment_mode     VARCHAR(50) DEFAULT 'Cash',
-  account_id       INT UNSIGNED,
-  other_fee_amount DECIMAL(10,2) DEFAULT 0,
-  other_fee_desc   VARCHAR(200),
-  received_by      INT UNSIGNED,
-  received_by_name VARCHAR(200),
-  received_by_role VARCHAR(50),
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted       TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id),
-  INDEX idx_student (student_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'hr_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS staff (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL,
-  employee_id     VARCHAR(50),
-  full_name       VARCHAR(200) NOT NULL,
-  designation     VARCHAR(100),
-  department      VARCHAR(100),
-  dob             DATE,
-  gender          ENUM('Male','Female','Other'),
-  mobile          VARCHAR(20),
-  email           VARCHAR(100),
-  address         TEXT,
-  qualification   VARCHAR(200),
-  date_of_joining DATE,
-  gross_salary    DECIMAL(10,2) DEFAULT 0,
-  photo_url       TEXT,
-  rfid_tag        VARCHAR(100),
-  aadhaar_no      VARCHAR(20),
-  pan_no          VARCHAR(20),
-  bank_account    VARCHAR(30),
-  bank_name       VARCHAR(100),
-  ifsc            VARCHAR(20),
-  is_active       TINYINT(1) DEFAULT 1,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by      INT UNSIGNED,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── attendance ────────────────────────────────────────────────────────
+        'attendance' => "CREATE TABLE `attendance` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `studentId` VARCHAR(36),
+            `admNo`     VARCHAR(100),
+            `name`      VARCHAR(255),
+            `class`     VARCHAR(100),
+            `section`   VARCHAR(50),
+            `date`      VARCHAR(50),
+            `status`    VARCHAR(20) DEFAULT 'Present',
+            `inTime`    VARCHAR(50),
+            `outTime`   VARCHAR(50),
+            `method`    VARCHAR(50),
+            `session`   VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS teacher_subjects (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  staff_id    INT UNSIGNED NOT NULL,
-  subject_id  INT UNSIGNED NOT NULL,
-  class_from  INT DEFAULT 1,
-  class_to    INT DEFAULT 1,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_staff (staff_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── staff_attendance ──────────────────────────────────────────────────
+        'staff_attendance' => "CREATE TABLE `staff_attendance` (
+            `id`      VARCHAR(36) PRIMARY KEY,
+            `staffId` VARCHAR(36),
+            `empId`   VARCHAR(100),
+            `name`    VARCHAR(255),
+            `date`    VARCHAR(50),
+            `status`  VARCHAR(20) DEFAULT 'Present',
+            `inTime`  VARCHAR(50),
+            `outTime` VARCHAR(50),
+            `session` VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS payroll_setup (
-  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id        INT UNSIGNED NOT NULL,
-  session_id       INT UNSIGNED,
-  staff_id         INT UNSIGNED NOT NULL,
-  basic_salary     DECIMAL(10,2) DEFAULT 0,
-  hra              DECIMAL(10,2) DEFAULT 0,
-  da               DECIMAL(10,2) DEFAULT 0,
-  ta               DECIMAL(10,2) DEFAULT 0,
-  other_allowances DECIMAL(10,2) DEFAULT 0,
-  pf_deduction     DECIMAL(10,2) DEFAULT 0,
-  esi_deduction    DECIMAL(10,2) DEFAULT 0,
-  tds_deduction    DECIMAL(10,2) DEFAULT 0,
-  other_deductions DECIMAL(10,2) DEFAULT 0,
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by       INT UNSIGNED,
-  is_deleted       TINYINT(1) DEFAULT 0,
-  INDEX idx_staff (staff_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── routes ────────────────────────────────────────────────────────────
+        'routes' => "CREATE TABLE `routes` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `name`        VARCHAR(255),
+            `description` TEXT,
+            `stops`       TEXT,
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS payslips (
-  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id        INT UNSIGNED NOT NULL,
-  session_id       INT UNSIGNED,
-  staff_id         INT UNSIGNED NOT NULL,
-  pay_month        VARCHAR(10),
-  pay_year         SMALLINT UNSIGNED,
-  gross_salary     DECIMAL(10,2) DEFAULT 0,
-  net_salary       DECIMAL(10,2) DEFAULT 0,
-  total_deductions DECIMAL(10,2) DEFAULT 0,
-  net_pay          DECIMAL(10,2) DEFAULT 0,
-  working_days     TINYINT UNSIGNED DEFAULT 26,
-  present_days     TINYINT UNSIGNED DEFAULT 26,
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by       INT UNSIGNED,
-  is_deleted       TINYINT(1) DEFAULT 0,
-  INDEX idx_staff (staff_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'academics_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS subjects (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  name        VARCHAR(100) NOT NULL,
-  code        VARCHAR(20),
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── pickup_points ─────────────────────────────────────────────────────
+        'pickup_points' => "CREATE TABLE `pickup_points` (
+            `id`      VARCHAR(36) PRIMARY KEY,
+            `routeId` VARCHAR(36),
+            `name`    VARCHAR(255),
+            `fare`    DECIMAL(12,2) DEFAULT 0,
+            `order`   INT DEFAULT 0,
+            `session` VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS class_subject_mapping (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  class_id    INT UNSIGNED NOT NULL,
-  subject_id  INT UNSIGNED NOT NULL,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── student_transport ─────────────────────────────────────────────────
+        'student_transport' => "CREATE TABLE `student_transport` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `studentId`   VARCHAR(36),
+            `admNo`       VARCHAR(100),
+            `routeId`     VARCHAR(36),
+            `pickupPoint` VARCHAR(255),
+            `months`      TEXT,
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS timetables (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  type        ENUM('exam','teacher') NOT NULL DEFAULT 'exam',
-  class_id    INT UNSIGNED,
-  section_id  INT UNSIGNED,
-  staff_id    INT UNSIGNED,
-  data_json   LONGTEXT,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'transport_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS routes (
-  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id     INT UNSIGNED NOT NULL,
-  session_id    INT UNSIGNED,
-  name          VARCHAR(200) NOT NULL,
-  bus_no        VARCHAR(50),
-  driver_name   VARCHAR(200),
-  driver_mobile VARCHAR(20),
-  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by    INT UNSIGNED,
-  is_deleted    TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── student_discounts ─────────────────────────────────────────────────
+        'student_discounts' => "CREATE TABLE `student_discounts` (
+            `id`                  VARCHAR(36) PRIMARY KEY,
+            `studentId`           VARCHAR(36),
+            `admNo`               VARCHAR(100),
+            `discountAmount`      DECIMAL(12,2) DEFAULT 0,
+            `applicableHeadings`  TEXT,
+            `months`              TEXT,
+            `session`             VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS pickup_points (
-  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id    INT UNSIGNED NOT NULL,
-  route_id     INT UNSIGNED NOT NULL,
-  name         VARCHAR(200) NOT NULL,
-  monthly_fare DECIMAL(10,2) DEFAULT 0,
-  order_num    INT DEFAULT 0,
-  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by   INT UNSIGNED,
-  is_deleted   TINYINT(1) DEFAULT 0,
-  INDEX idx_school_route (school_id, route_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'attendance_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS attendance (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL,
-  entity_type     ENUM('student','staff') NOT NULL,
-  entity_id       INT UNSIGNED NOT NULL,
-  attendance_date DATE NOT NULL,
-  check_in_time   TIME,
-  check_out_time  TIME,
-  mark_type       VARCHAR(50) DEFAULT 'manual',
-  device_id       INT UNSIGNED,
-  marked_by       INT UNSIGNED,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  INDEX idx_school_date (school_id, attendance_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── inventory_items ───────────────────────────────────────────────────
+        'inventory_items' => "CREATE TABLE `inventory_items` (
+            `id`            VARCHAR(36) PRIMARY KEY,
+            `name`          VARCHAR(255),
+            `category`      VARCHAR(255),
+            `quantity`      INT DEFAULT 0,
+            `unit`          VARCHAR(50),
+            `purchasePrice` DECIMAL(12,2) DEFAULT 0,
+            `sellPrice`     DECIMAL(12,2) DEFAULT 0,
+            `description`   TEXT,
+            `session`       VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS biometric_devices (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  name        VARCHAR(100) NOT NULL,
-  device_type VARCHAR(50),
-  ip_address  VARCHAR(50),
-  port        SMALLINT UNSIGNED DEFAULT 4370,
-  is_active   TINYINT(1) DEFAULT 1,
-  last_sync   TIMESTAMP NULL,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'inventory_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS inventory_items (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL,
-  session_id      INT UNSIGNED,
-  name            VARCHAR(200) NOT NULL,
-  category        VARCHAR(100),
-  unit            VARCHAR(50),
-  sell_price      DECIMAL(10,2) DEFAULT 0,
-  current_stock   INT DEFAULT 0,
-  low_stock_alert INT DEFAULT 5,
-  created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by      INT UNSIGNED,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── inventory_transactions ────────────────────────────────────────────
+        'inventory_transactions' => "CREATE TABLE `inventory_transactions` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `itemId`      VARCHAR(36),
+            `type`        VARCHAR(50),
+            `quantity`    INT DEFAULT 0,
+            `price`       DECIMAL(12,2) DEFAULT 0,
+            `date`        VARCHAR(50),
+            `description` TEXT,
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS inventory_purchases (
-  id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id      INT UNSIGNED NOT NULL,
-  session_id     INT UNSIGNED,
-  item_id        INT UNSIGNED NOT NULL,
-  quantity       INT NOT NULL,
-  purchase_price DECIMAL(10,2),
-  vendor         VARCHAR(200),
-  purchase_date  DATE,
-  notes          TEXT,
-  created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by     INT UNSIGNED,
-  is_deleted     TINYINT(1) DEFAULT 0,
-  INDEX idx_item (item_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── expenses ──────────────────────────────────────────────────────────
+        'expenses' => "CREATE TABLE `expenses` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `type`        VARCHAR(50),
+            `headId`      VARCHAR(36),
+            `amount`      DECIMAL(12,2) DEFAULT 0,
+            `date`        VARCHAR(50),
+            `description` TEXT,
+            `paymentMode` VARCHAR(50),
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS inventory_sales (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  item_id     INT UNSIGNED NOT NULL,
-  student_id  INT UNSIGNED,
-  quantity    INT NOT NULL,
-  sell_price  DECIMAL(10,2),
-  sale_date   DATE,
-  notes       TEXT,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_item (item_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'misc_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS expense_heads (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  name        VARCHAR(200) NOT NULL,
-  type        ENUM('Income','Expense') DEFAULT 'Expense',
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── expense_heads ─────────────────────────────────────────────────────
+        'expense_heads' => "CREATE TABLE `expense_heads` (
+            `id`      VARCHAR(36) PRIMARY KEY,
+            `name`    VARCHAR(255),
+            `type`    VARCHAR(50),
+            `budget`  DECIMAL(12,2) DEFAULT 0,
+            `session` VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS expenses (
-  id           INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id    INT UNSIGNED NOT NULL,
-  session_id   INT UNSIGNED,
-  head_id      INT UNSIGNED,
-  amount       DECIMAL(10,2) NOT NULL,
-  description  TEXT,
-  expense_date DATE,
-  created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by   INT UNSIGNED,
-  is_deleted   TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── homework ──────────────────────────────────────────────────────────
+        'homework' => "CREATE TABLE `homework` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `class`       VARCHAR(100),
+            `section`     VARCHAR(50),
+            `subject`     VARCHAR(255),
+            `title`       VARCHAR(500),
+            `description` TEXT,
+            `dueDate`     VARCHAR(50),
+            `assignedBy`  VARCHAR(255),
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS homework (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  session_id  INT UNSIGNED,
-  class_id    INT UNSIGNED NOT NULL,
-  section_id  INT UNSIGNED,
-  subject_id  INT UNSIGNED,
-  title       VARCHAR(500) NOT NULL,
-  description TEXT,
-  due_date    DATE,
-  staff_id    INT UNSIGNED,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_session (school_id, session_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── school_sessions ───────────────────────────────────────────────────
+        'school_sessions' => "CREATE TABLE `school_sessions` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `name`      VARCHAR(100),
+            `startDate` VARCHAR(50),
+            `endDate`   VARCHAR(50),
+            `isCurrent` TINYINT(1) DEFAULT 0,
+            `archived`  TINYINT(1) DEFAULT 0
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS alumni (
-  id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id     INT UNSIGNED NOT NULL,
-  student_id    INT UNSIGNED,
-  name          VARCHAR(200) NOT NULL,
-  pass_out_year YEAR,
-  mobile        VARCHAR(20),
-  email         VARCHAR(100),
-  occupation    VARCHAR(200),
-  address       TEXT,
-  created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by    INT UNSIGNED,
-  is_deleted    TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── notices ───────────────────────────────────────────────────────────
+        'notices' => "CREATE TABLE `notices` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `title`       VARCHAR(500),
+            `content`     TEXT,
+            `date`        VARCHAR(50),
+            `author`      VARCHAR(255),
+            `targetRoles` TEXT,
+            `attachments` TEXT,
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS notifications (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  user_id     INT UNSIGNED,
-  type        VARCHAR(100),
-  title       VARCHAR(500),
-  message     TEXT,
-  is_read     TINYINT(1) DEFAULT 0,
-  channel     VARCHAR(50) DEFAULT 'App',
-  entity_type VARCHAR(50),
-  entity_id   INT UNSIGNED,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  created_by  INT UNSIGNED,
-  is_deleted  TINYINT(1) DEFAULT 0,
-  INDEX idx_school_user (school_id, user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── exam_timetables ───────────────────────────────────────────────────
+        'exam_timetables' => "CREATE TABLE `exam_timetables` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `examName`    VARCHAR(255),
+            `class`       VARCHAR(100),
+            `entries`     TEXT,
+            `publishDate` VARCHAR(50),
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS backup_history (
-  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id   INT UNSIGNED NOT NULL,
-  filename    VARCHAR(500) NOT NULL,
-  size_bytes  BIGINT UNSIGNED,
-  created_by  INT UNSIGNED,
-  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
-        [
-            'name' => 'chat_tables',
-            'sql'  => "
-CREATE TABLE IF NOT EXISTS chat_conversations (
-  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id  INT UNSIGNED NOT NULL,
-  type       ENUM('direct','class_group','route_group') NOT NULL DEFAULT 'direct',
-  name       VARCHAR(255) NULL,
-  class_id   INT UNSIGNED NULL,
-  section_id INT UNSIGNED NULL,
-  route_id   INT UNSIGNED NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted TINYINT(1) DEFAULT 0,
-  INDEX idx_school_id (school_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+        // ── teacher_timetables ────────────────────────────────────────────────
+        'teacher_timetables' => "CREATE TABLE `teacher_timetables` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `teacherId` VARCHAR(36),
+            `entries`   TEXT,
+            `session`   VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-CREATE TABLE IF NOT EXISTS chat_messages (
-  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-  school_id       INT UNSIGNED NOT NULL DEFAULT 1,
-  conversation_id INT UNSIGNED NOT NULL,
-  sender_user_id  INT UNSIGNED NOT NULL,
-  content         TEXT NOT NULL,
-  sent_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  is_deleted      TINYINT(1) DEFAULT 0,
-  INDEX idx_conversation (conversation_id),
-  INDEX idx_sender (sender_user_id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-        ],
+        // ── users ─────────────────────────────────────────────────────────────
+        'users' => "CREATE TABLE `users` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `username`    VARCHAR(255) UNIQUE,
+            `password`    VARCHAR(255),
+            `role`        VARCHAR(100),
+            `name`        VARCHAR(255),
+            `mobile`      VARCHAR(50),
+            `email`       VARCHAR(255),
+            `session`     VARCHAR(100),
+            `permissions` TEXT,
+            `linkedId`    VARCHAR(36)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── school_settings ───────────────────────────────────────────────────
+        'school_settings' => "CREATE TABLE `school_settings` (
+            `id`    VARCHAR(36) PRIMARY KEY,
+            `key`   VARCHAR(255) UNIQUE,
+            `value` TEXT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── chat_messages ─────────────────────────────────────────────────────
+        'chat_messages' => "CREATE TABLE `chat_messages` (
+            `id`         VARCHAR(36) PRIMARY KEY,
+            `senderId`   VARCHAR(36),
+            `senderName` VARCHAR(255),
+            `senderRole` VARCHAR(100),
+            `receiverId` VARCHAR(36),
+            `groupId`    VARCHAR(36),
+            `message`    TEXT,
+            `fileUrl`    TEXT,
+            `fileName`   VARCHAR(500),
+            `timestamp`  VARCHAR(50),
+            `readBy`     TEXT,
+            `session`    VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── chat_groups ───────────────────────────────────────────────────────
+        'chat_groups' => "CREATE TABLE `chat_groups` (
+            `id`      VARCHAR(36) PRIMARY KEY,
+            `name`    VARCHAR(255),
+            `type`    VARCHAR(50),
+            `members` TEXT,
+            `session` VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── call_logs ─────────────────────────────────────────────────────────
+        'call_logs' => "CREATE TABLE `call_logs` (
+            `id`           VARCHAR(36) PRIMARY KEY,
+            `callerId`     VARCHAR(36),
+            `callerName`   VARCHAR(255),
+            `receiverId`   VARCHAR(36),
+            `receiverName` VARCHAR(255),
+            `duration`     INT DEFAULT 0,
+            `startTime`    VARCHAR(50),
+            `endTime`      VARCHAR(50),
+            `status`       VARCHAR(50),
+            `session`      VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── biometric_devices ─────────────────────────────────────────────────
+        'biometric_devices' => "CREATE TABLE `biometric_devices` (
+            `id`         VARCHAR(36) PRIMARY KEY,
+            `name`       VARCHAR(255),
+            `ipAddress`  VARCHAR(100),
+            `port`       INT DEFAULT 4370,
+            `deviceType` VARCHAR(100),
+            `location`   VARCHAR(255),
+            `status`     VARCHAR(50) DEFAULT 'Active',
+            `session`    VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── payroll ───────────────────────────────────────────────────────────
+        'payroll' => "CREATE TABLE `payroll` (
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `staffId`     VARCHAR(36),
+            `empId`       VARCHAR(100),
+            `name`        VARCHAR(255),
+            `month`       VARCHAR(20),
+            `year`        VARCHAR(10),
+            `basicSalary` DECIMAL(12,2) DEFAULT 0,
+            `presentDays` INT DEFAULT 0,
+            `totalDays`   INT DEFAULT 26,
+            `netSalary`   DECIMAL(12,2) DEFAULT 0,
+            `deductions`  DECIMAL(12,2) DEFAULT 0,
+            `additions`   DECIMAL(12,2) DEFAULT 0,
+            `payslipNo`   VARCHAR(100),
+            `paymentDate` VARCHAR(50),
+            `status`      VARCHAR(50) DEFAULT 'Pending',
+            `session`     VARCHAR(100)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
 }
