@@ -155,20 +155,30 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com'); // Your domain
 Open your browser and navigate to:
 
 ```
-https://yourdomain.com/api/migrate.php?action=run
+https://yourdomain.com/api/index.php?route=migrate/run
 ```
 
 You should see a response like:
 
 ```json
 {
-  "success": true,
+  "status": "ok",
   "message": "Migration complete",
-  "tables_created": ["students", "staff", "fee_receipts", "attendance", ...]
+  "data": {
+    "applied": ["students", "staff", "fee_receipts", "attendance", ...]
+  }
 }
 ```
 
-> This creates all required MySQL tables. Run this only once. If you run it again, it safely skips already-created tables.
+> ✅ **Safe to re-run**: `migrate/run` uses `CREATE TABLE IF NOT EXISTS` — existing data is always preserved.
+
+> ⚠️ **Column mismatch fix**: If you previously had `SQLSTATE[42S22]` or `SQLSTATE[HY093]` errors, run this URL instead (⚠️ drops and recreates all tables — erases existing MySQL data):
+> ```
+> https://yourdomain.com/api/index.php?route=migrate/reset-db
+> ```
+> Then push your browser data again from Settings → Data → Push Local Data to Server.
+
+> **Reset Super Admin password**: `https://yourdomain.com/api/index.php?route=migrate/reset-superadmin`
 
 ### Step 11 — Configure API URL in ERP
 
@@ -241,9 +251,13 @@ DNS changes take 15 minutes to 24 hours to propagate.
 | Migration fails with table errors | PHP version too old | Check cPanel → MultiPHP Manager — set PHP 7.4 or 8.x for your domain |
 | "CORS error" in browser | `ALLOWED_ORIGIN` mismatch | In `config.php`, set `ALLOWED_ORIGIN` to your exact domain including `https://` |
 | Sync not working | API URL not saved | Settings → Data → Database Server → verify URL is saved and Test shows green |
-| "Unexpected token < ... is not valid JSON" | API returning HTML error page | The `api/` folder may not be uploaded. Open `https://yourdomain.com/api/health` — if you see HTML, upload the PHP API files and re-run migration |
-| "Invalid username or password" on auth | Users table is empty | Run `https://yourdomain.com/api/migrate.php?action=run` to seed default superadmin. Or visit `/api/migrate/reset-superadmin` |
+| "Unexpected token < ... is not valid JSON" | API returning HTML error page | The `api/` folder may not be uploaded. Open `https://yourdomain.com/api/index.php?route=health` — if you see HTML, upload the PHP API files and re-run migration |
+| "Invalid username or password" on auth | Users table is empty | Run `https://yourdomain.com/api/index.php?route=migrate/run` to seed default superadmin. Or visit `?route=migrate/reset-superadmin` |
 | "Super Admin only" error on sync | Not authenticated with server | Go to Settings → Data → Database Server → Authenticate Now → enter Super Admin password |
+| **SQLSTATE[HY093] Invalid parameter number** | Old api/index.php with named PDO param bug | Upload latest `api/index.php`, run `?route=migrate/reset-db`, then push data again |
+| **SQLSTATE[42S22] Unknown column** | Tables have old snake_case columns | Run `https://yourdomain.com/api/index.php?route=migrate/reset-db` to rebuild all tables with correct camelCase columns |
+| **Push shows 0 records saved** | Column mismatch or auth expired | Re-authenticate, or run `?route=migrate/reset-db` if column errors appear in push log |
+| **Duplicate entry on push** | Primary key already exists | Not an error — `ON DUPLICATE KEY UPDATE` safely updates existing rows on re-push |
 | Can't install PWA | Not HTTPS or wrong browser | Ensure SSL is active. Use Chrome on Android. iOS requires Safari |
 | QR scanner blocked | Camera permission denied | Chrome Settings → Site Settings → Camera → find your domain → Allow |
 | WhatsApp CORS error | Localhost restriction | Deploy to real domain — CORS only occurs in preview/localhost |

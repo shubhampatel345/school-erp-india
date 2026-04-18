@@ -585,7 +585,7 @@ export default function DataManagement() {
     }
   }
 
-  // ── Reset Database Tables (fix SQLSTATE[42S22] column errors) ───────────
+  // ── Reset Database Tables (fix SQLSTATE[HY093] and SQLSTATE[42S22] column errors) ───────────
   const [isResettingDb, setIsResettingDb] = useState(false);
   const [showDbResetConfirm, setShowDbResetConfirm] = useState(false);
 
@@ -627,7 +627,7 @@ export default function DataManagement() {
         const created = json.data?.created?.length ?? 0;
         const errs = json.data?.errors?.length ?? 0;
         toast.success(
-          `Database reset! ${created} tables rebuilt.${errs > 0 ? ` ${errs} error(s) — check server logs.` : ""} SQLSTATE[42S22] errors are now fixed.`,
+          `Database reset! ${created} tables rebuilt.${errs > 0 ? ` ${errs} error(s) — check server logs.` : ""} SQLSTATE[HY093] and SQLSTATE[42S22] errors are now fixed. Push your browser data again.`,
         );
       } else {
         toast.error(`Reset failed: ${json.message ?? "Unknown error"}`);
@@ -1578,7 +1578,7 @@ export default function DataManagement() {
                   )}
                 </Button>
 
-                {/* Reset DB Tables button — fixes SQLSTATE[42S22] column errors */}
+                {/* Reset DB Tables button — fixes SQLSTATE[HY093] and SQLSTATE[42S22] column errors */}
                 {!showDbResetConfirm ? (
                   <Button
                     variant="outline"
@@ -1586,17 +1586,19 @@ export default function DataManagement() {
                     disabled={isPushing || isMigrating || isResettingDb}
                     data-ocid="server.reset_db_tables.button"
                     className="w-full sm:w-auto border-orange-500/50 text-orange-700 hover:bg-orange-500/10"
-                    title="Drops and recreates all MySQL tables with correct camelCase columns. Fixes SQLSTATE[42S22] errors. Existing data will be lost."
+                    title="Drops and recreates all MySQL tables with correct camelCase columns. Fixes SQLSTATE[HY093] and SQLSTATE[42S22] errors. Existing MySQL data will be lost."
                   >
                     <RefreshCcw className="w-4 h-4 mr-2" />
-                    Reset DB Tables (Fix Column Errors)
+                    Reset DB Tables (Fix Column / Push Errors)
                   </Button>
                 ) : (
                   <div className="w-full flex flex-col gap-2 rounded-lg border border-orange-500/40 bg-orange-500/10 p-3">
                     <p className="text-xs font-semibold text-orange-800 dark:text-orange-300">
-                      ⚠️ This drops ALL tables and recreates them. All existing
-                      MySQL data will be lost. Use only to fix SQLSTATE[42S22]
-                      column-not-found errors.
+                      ⚠️ This drops ALL tables and recreates them with correct
+                      camelCase columns. All existing MySQL data will be lost.
+                      Use to fix SQLSTATE[HY093] (invalid parameter number),
+                      SQLSTATE[42S22] (unknown column), or push showing 0
+                      records saved. After reset, push your browser data again.
                     </p>
                     <div className="flex gap-2">
                       <Button

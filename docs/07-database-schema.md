@@ -1,6 +1,216 @@
 # Database Schema — SHUBH SCHOOL ERP (MySQL)
 
-Complete reference for the MySQL database structure used in MySQL Mode. All tables are created automatically by the migration script (`/api/migrate.php?action=run`).
+Complete reference for the MySQL database structure. All tables are created automatically by the migration endpoint.
+
+**To create tables:** `https://yourdomain.com/api/index.php?route=migrate/run`  
+**To rebuild all tables (fix column errors):** `https://yourdomain.com/api/index.php?route=migrate/reset-db`
+
+> ⚠️ All column names use **camelCase** (e.g. `admNo`, `fatherName`, `pickupPoint`) to match the JavaScript object keys sent by the frontend. This is intentional — do not rename columns to snake_case.
+
+---
+
+## Table Overview
+
+| Table | Description |
+|-------|-------------|
+| `students` | Core student profiles with all admission data |
+| `staff` | Teacher and non-teaching staff profiles |
+| `users` | Login credentials for all user types |
+| `school_sessions` | Academic session archive |
+| `fee_headings` | Fee heading definitions with applicable months |
+| `fees_plan` | Fee amounts per class/section/heading |
+| `fee_receipts` | Individual fee payment records |
+| `attendance` | Daily student attendance records |
+| `staff_attendance` | Daily staff attendance records |
+| `routes` | Bus route definitions |
+| `pickup_points` | Pickup stops with monthly fare per stop |
+| `student_transport` | Student-route assignment and months |
+| `student_discounts` | Per-student discount amounts and scope |
+| `inventory_items` | Stock items with price and quantity |
+| `inventory_transactions` | Stock movements (purchase, sale) |
+| `expenses` | Income and expense ledger entries |
+| `expense_heads` | Expense head/category definitions |
+| `homework` | Homework assignments |
+| `notices` | School notices/announcements |
+| `notifications` | ERP event notification log |
+| `exam_timetables` | Exam timetable records |
+| `teacher_timetables` | Teacher timetable records |
+| `payroll` | Staff payroll records |
+| `biometric_devices` | ESSL/ZKTeco device registrations |
+| `chat_messages` | Chat messages between users |
+| `chat_groups` | Auto-generated class/route group chats |
+| `call_logs` | WebRTC/Heyophone call records |
+| `school_settings` | Key-value school configuration |
+
+---
+
+## Important: Fixing Push Errors
+
+### SQLSTATE[HY093]: Invalid parameter number
+
+This error occurred in older versions of `api/index.php` where named PDO parameters (`:colName`) appeared twice in the same SQL statement — once in `VALUES(:col)` and again in `ON DUPLICATE KEY UPDATE col=:col`. PDO with `ATTR_EMULATE_PREPARES=false` rejects this.
+
+**Fix (already applied in v3.0+):** The API now uses positional `?` parameters with `VALUES(col)` in the update clause — this completely eliminates the parameter count mismatch.
+
+### SQLSTATE[42S22]: Unknown column / Column mismatch
+
+This occurs when tables were created by an older migration script that used snake_case column names (`adm_no`, `father_name`) but the frontend sends camelCase (`admNo`, `fatherName`).
+
+**Fix:** Run `https://yourdomain.com/api/index.php?route=migrate/reset-db` to drop and recreate all tables with the correct camelCase column names, then push your data again.
+
+### Re-push is always safe
+
+The push endpoint uses `INSERT ... ON DUPLICATE KEY UPDATE` for all tables. Re-pushing the same data never creates duplicate rows — it just updates existing ones.
+
+---
+
+## Table Definitions (camelCase columns)
+
+### `students`
+
+```sql
+CREATE TABLE `students` (
+  `id`              VARCHAR(36) PRIMARY KEY,
+  `admNo`           VARCHAR(100),
+  `name`            VARCHAR(255),
+  `dob`             VARCHAR(50),
+  `gender`          VARCHAR(20),
+  `class`           VARCHAR(100),
+  `section`         VARCHAR(50),
+  `fatherName`      VARCHAR(255),
+  `motherName`      VARCHAR(255),
+  `fatherMobile`    VARCHAR(50),
+  `motherMobile`    VARCHAR(50),
+  `address`         TEXT,
+  `village`         VARCHAR(255),
+  `category`        VARCHAR(100),
+  `aadhaar`         VARCHAR(50),
+  `srNo`            VARCHAR(100),
+  `penNo`           VARCHAR(100),
+  `apaarNo`         VARCHAR(100),
+  `previousSchool`  VARCHAR(255),
+  `admissionDate`   VARCHAR(50),
+  `status`          VARCHAR(50) DEFAULT 'Active',
+  `photo`           TEXT,
+  `routeId`         VARCHAR(36),
+  `pickupPoint`     VARCHAR(255),
+  `session`         VARCHAR(100),
+  `bloodGroup`      VARCHAR(20),
+  `religion`        VARCHAR(100),
+  `caste`           VARCHAR(100),
+  `nationality`     VARCHAR(100),
+  `annualIncome`    VARCHAR(100),
+  `busNo`           VARCHAR(50),
+  `email`           VARCHAR(255),
+  `alternatePhone`  VARCHAR(50),
+  `emergencyContact` VARCHAR(50)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+### `staff`
+
+```sql
+CREATE TABLE `staff` (
+  `id`          VARCHAR(36) PRIMARY KEY,
+  `empId`       VARCHAR(100),
+  `name`        VARCHAR(255),
+  `designation` VARCHAR(255),
+  `department`  VARCHAR(255),
+  `mobile`      VARCHAR(50),
+  `email`       VARCHAR(255),
+  `address`     TEXT,
+  `joinDate`    VARCHAR(50),
+  `salary`      DECIMAL(12,2) DEFAULT 0,
+  `status`      VARCHAR(50) DEFAULT 'Active',
+  `photo`       TEXT,
+  `gender`      VARCHAR(20),
+  `dob`         VARCHAR(50),
+  `aadhaar`     VARCHAR(50),
+  `bankAccount` VARCHAR(100),
+  `ifsc`        VARCHAR(50),
+  `bankName`    VARCHAR(255),
+  `panNo`       VARCHAR(50),
+  `qualification` VARCHAR(255),
+  `experience`  VARCHAR(255),
+  `session`     VARCHAR(100)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+### `fees_plan`
+
+```sql
+CREATE TABLE `fees_plan` (
+  `id`        VARCHAR(36) PRIMARY KEY,
+  `classId`   VARCHAR(100),
+  `section`   VARCHAR(50),
+  `headingId` VARCHAR(36),
+  `amount`    DECIMAL(12,2) DEFAULT 0,
+  `months`    TEXT,
+  `session`   VARCHAR(100)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+### `fee_headings`
+
+```sql
+CREATE TABLE `fee_headings` (
+  `id`                VARCHAR(36) PRIMARY KEY,
+  `name`              VARCHAR(255),
+  `amount`            DECIMAL(12,2) DEFAULT 0,
+  `months`            TEXT,
+  `applicableClasses` TEXT,
+  `session`           VARCHAR(100)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+### `fee_receipts`
+
+```sql
+CREATE TABLE `fee_receipts` (
+  `id`               VARCHAR(36) PRIMARY KEY,
+  `studentId`        VARCHAR(36),
+  `admNo`            VARCHAR(100),
+  `studentName`      VARCHAR(255),
+  `class`            VARCHAR(100),
+  `section`          VARCHAR(50),
+  `months`           TEXT,
+  `amounts`          TEXT,
+  `otherCharges`     DECIMAL(12,2) DEFAULT 0,
+  `otherDescription` VARCHAR(255),
+  `totalAmount`      DECIMAL(12,2) DEFAULT 0,
+  `paidAmount`       DECIMAL(12,2) DEFAULT 0,
+  `balance`          DECIMAL(12,2) DEFAULT 0,
+  `paymentMode`      VARCHAR(50) DEFAULT 'Cash',
+  `receiptNo`        VARCHAR(100),
+  `date`             VARCHAR(50),
+  `session`          VARCHAR(100),
+  `headingAmounts`   TEXT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+```
+
+---
+
+## API Endpoints Reference
+
+| Route | Method | Description |
+|-------|--------|-------------|
+| `migrate/run` | GET | Create all tables (IF NOT EXISTS — safe to re-run, preserves data) |
+| `migrate/reset-db` | GET/POST | Drop + recreate all tables (fixes column errors, erases data) |
+| `migrate/reset` | GET/POST | Same as reset-db (alias) |
+| `migrate/reset-superadmin` | GET | Reset superadmin password to admin123 |
+| `migrate/status` | GET | Check which tables exist |
+| `auth/login` | POST | Login: `{username, password}` |
+| `auth/verify` | GET | Verify current JWT token |
+| `sync/push` | POST | Bulk upsert all collections from browser |
+| `sync/batch` | POST | Bulk upsert single collection: `{collection, items}` |
+| `sync/pull` | GET | Pull all records from server |
+| `sync/status` | GET | Server health + row counts per table |
+| `data/{collection}` | GET/POST/PUT/DELETE | CRUD per collection |
+| `backup/export` | GET | Export full database as JSON |
+| `backup/import` | POST | Restore from JSON backup |
+| `backup/factory-reset` | POST | Wipe all data (requires confirmation) |
+| `settings/school` | GET/POST | School profile settings |
+| `settings/users` | GET/POST | User management |
 
 ---
 

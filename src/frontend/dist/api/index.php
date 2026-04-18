@@ -82,6 +82,7 @@ try {
     // --- migrate --------------------------------------------------------------
     if ($route === 'migrate/run')              { handle_migrate_run($method, $sid); }
     if ($route === 'migrate/reset')            { handle_migrate_reset($method, $body, $auth, $sid); }
+    if ($route === 'migrate/reset-db')         { handle_migrate_reset($method, $body, $auth, $sid); } // alias
     if ($route === 'migrate/reset-superadmin') { handle_migrate_reset_superadmin($method, $sid); }
     if ($route === 'migrate/status')           { handle_migrate_status($method); }
 
@@ -288,7 +289,8 @@ function handle_change_password(string $method, array $body, ?array $auth): void
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MIGRATE — DROP + RECREATE all tables with camelCase columns
+// MIGRATE — CREATE IF NOT EXISTS (safe to re-run; preserves existing data)
+// Use migrate/reset or migrate/reset-db to drop+recreate (fixes column issues)
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_migrate_run(string $method, int $sid): void {
     if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
@@ -300,34 +302,37 @@ function handle_migrate_run(string $method, int $sid): void {
     }
 
     $applied = [];
+    $skipped = [];
     $errors  = [];
 
-    // Disable FK checks so we can DROP tables freely
-    try { $db->exec('SET FOREIGN_KEY_CHECKS=0'); } catch (Throwable $e) {}
-
     foreach (get_table_definitions() as $tableName => $createSql) {
+        // Replace CREATE TABLE with CREATE TABLE IF NOT EXISTS so existing data is preserved
+        $safeSql = preg_replace(
+            '/^CREATE TABLE\s+`?' . preg_quote($tableName, '/') . '`?/i',
+            "CREATE TABLE IF NOT EXISTS `{$tableName}`",
+            $createSql
+        );
         try {
-            $db->exec("DROP TABLE IF EXISTS `{$tableName}`");
-            $db->exec($createSql);
+            $db->exec($safeSql);
             $applied[] = $tableName;
         } catch (Throwable $e) {
             $errors[] = ['table' => $tableName, 'error' => $e->getMessage()];
         }
     }
 
-    try { $db->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (Throwable $e) {}
-
-    // Seed superadmin
+    // Seed superadmin (only if not already present)
     $seedResult = seed_superadmin_user($db);
 
-    // Seed default settings
+    // Seed default settings (only if empty)
     seed_default_settings($db);
 
     json_success([
         'applied'  => $applied,
+        'skipped'  => $skipped,
         'errors'   => $errors,
         'seeded'   => $seedResult,
-        'message'  => count($applied) . ' tables created. Login: superadmin / admin123',
+        'message'  => count($applied) . ' tables ensured. Existing data preserved. Login: superadmin / admin123',
+        'note'     => 'migrate/run uses CREATE TABLE IF NOT EXISTS — safe to re-run. To fix column mismatch errors, call migrate/reset or migrate/reset-db instead.',
     ], 'Migration complete. Login with superadmin / admin123');
 }
 
@@ -513,7 +518,86 @@ function seed_default_settings(PDO $db): void {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SYNC / PUSH — bulk upsert all collections
+// Uses positional ? parameters to avoid SQLSTATE[HY093] (named param collision
+// between VALUES(:x) and ON DUPLICATE KEY UPDATE col=:x).
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Upsert a batch of rows into a table using positional ? parameters.
+ * Returns ['pushed' => int, 'failed' => int, 'errors' => string[]]
+ */
+function batchUpsert(PDO $pdo, string $table, array $rows): array {
+    if (empty($rows)) return ['pushed' => 0, 'failed' => 0, 'errors' => []];
+
+    $pushed = 0;
+    $failed = 0;
+    $errors = [];
+
+    // Cache known columns from live DB schema to prevent SQLSTATE[42S22]
+    $tableColumns = [];
+    try {
+        $stmt = $pdo->query("DESCRIBE `{$table}`");
+        $tableColumns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN, 0) : [];
+    } catch (Throwable $e) {
+        // DESCRIBE failed (table missing) — let INSERT report the error naturally
+        $tableColumns = [];
+    }
+
+    foreach ($rows as $idx => $row) {
+        if (!is_array($row)) {
+            $failed++;
+            $errors[] = "Row {$idx}: not an object";
+            continue;
+        }
+
+        // Keep only scalar/null values and valid identifier column names
+        $filteredRow = [];
+        foreach ($row as $k => $v) {
+            if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
+            if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
+            if (!is_scalar($v) && !is_null($v)) continue;
+            $filteredRow[$k] = $v;
+        }
+
+        if (empty($filteredRow)) {
+            $failed++;
+            $errors[] = "Row {$idx}: no valid columns after filtering (table: {$table})";
+            continue;
+        }
+
+        $columns = array_keys($filteredRow);
+        $values  = array_values($filteredRow);
+
+        // Build with positional ? placeholders — eliminates HY093 entirely
+        $colList      = implode(', ', array_map(fn($c) => "`{$c}`", $columns));
+        $placeholders = implode(', ', array_fill(0, count($columns), '?'));
+
+        // ON DUPLICATE KEY UPDATE — use VALUES(col) so no extra params needed
+        $updateParts = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $columns);
+        $updateClause = implode(', ', $updateParts);
+
+        $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}";
+
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($values);
+            $pushed++;
+        } catch (PDOException $e) {
+            $failed++;
+            $msg = $e->getMessage();
+            if (strpos($msg, "doesn't exist") !== false) {
+                $errors[] = "Row {$idx}: Table '{$table}' not found — run ?route=migrate/run first";
+            } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
+                $errors[] = "Row {$idx}: Column mismatch in '{$table}' — run ?route=migrate/reset-db to fix";
+            } else {
+                $errors[] = "Row {$idx}: {$msg}";
+            }
+        }
+    }
+
+    return ['pushed' => $pushed, 'failed' => $failed, 'errors' => $errors];
+}
+
 function handle_sync_push(string $method, array $body, ?array $auth, int $sid): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
     if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
@@ -529,7 +613,6 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
 
     $db = getDB();
 
-    // Canonical collection → table name map (camelCase columns in all tables)
     $tableMap = collection_table_map();
 
     $results = [];
@@ -539,90 +622,14 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
         }
     }
 
-    // Build a cache of known columns per table (from actual DB schema)
-    // This prevents SQLSTATE[42S22] when frontend sends fields the table doesn't have
-    $tableColumnCache = [];
-    $getTableColumns = function (string $table) use ($db, &$tableColumnCache): array {
-        if (isset($tableColumnCache[$table])) return $tableColumnCache[$table];
-        try {
-            $stmt = $db->query("DESCRIBE `{$table}`");
-            $cols = $stmt->fetchAll(PDO::FETCH_COLUMN, 0);
-            $tableColumnCache[$table] = $cols ?: [];
-        } catch (Throwable $e) {
-            $tableColumnCache[$table] = [];
-        }
-        return $tableColumnCache[$table];
-    };
+    foreach ($tableMap as $key => $table) {
+        $records = $body[$key] ?? [];
+        if (empty($records) || !is_array($records)) continue;
 
-    try {
-        $db->beginTransaction();
-
-        foreach ($tableMap as $key => $table) {
-            $records = $body[$key] ?? [];
-            if (empty($records) || !is_array($records)) continue;
-
-            // Get valid columns for this table
-            $tableColumns = $getTableColumns($table);
-
-            foreach ($records as $idx => $row) {
-                if (!is_array($row)) {
-                    $results[$key]['failed']++;
-                    $results[$key]['errors'][] = "Row {$idx} is not an object";
-                    continue;
-                }
-
-                // Sanitize: keep only scalar/null, valid identifier names, AND columns that exist in the table
-                $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
-                $safeCols = array_values(array_filter(
-                    array_keys($row),
-                    function ($c) use ($tableColumns) {
-                        // Must be valid identifier
-                        if (!preg_match('/^[a-zA-Z0-9_]+$/', $c)) return false;
-                        // If we have table column info, only allow known columns
-                        // (skip filter if DESCRIBE failed — fallback to old behaviour)
-                        if (!empty($tableColumns) && !in_array($c, $tableColumns, true)) return false;
-                        return true;
-                    }
-                ));
-
-                if (empty($safeCols)) {
-                    $results[$key]['failed']++;
-                    $results[$key]['errors'][] = "Row {$idx} has no valid columns (table: {$table})";
-                    continue;
-                }
-
-                $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
-                $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
-                $updateList = implode(',', array_map(
-                    fn($c) => "`{$c}`=:{$c}",
-                    array_filter($safeCols, fn($c) => $c !== 'id')
-                ));
-                $params = [];
-                foreach ($safeCols as $c) $params[":{$c}"] = $row[$c];
-
-                try {
-                    $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$valList})";
-                    if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
-                    $db->prepare($sql)->execute($params);
-                    $results[$key]['pushed']++;
-                } catch (Throwable $e) {
-                    $results[$key]['failed']++;
-                    $msg = $e->getMessage();
-                    if (strpos($msg, "doesn't exist") !== false) {
-                        $results[$key]['errors'][] = "Table '{$table}' not found — run ?route=migrate/run first";
-                    } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
-                        $results[$key]['errors'][] = "Column mismatch in '{$table}' — run ?route=migrate/reset to fix";
-                    } else {
-                        $results[$key]['errors'][] = "Row {$idx}: {$msg}";
-                    }
-                }
-            }
-        }
-
-        $db->commit();
-    } catch (Throwable $e) {
-        try { $db->rollBack(); } catch (Throwable $re) {}
-        json_error('Sync push transaction failed: ' . $e->getMessage(), 500);
+        $result = batchUpsert($db, $table, $records);
+        $results[$key]['pushed'] += $result['pushed'];
+        $results[$key]['failed'] += $result['failed'];
+        $results[$key]['errors'] = array_merge($results[$key]['errors'], $result['errors']);
     }
 
     json_success(['results' => $results], 'Push complete');
@@ -631,6 +638,7 @@ function handle_sync_push(string $method, array $body, ?array $auth, int $sid): 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SYNC / BATCH — upsert a single named collection
+// Uses batchUpsert() with positional ? parameters (no HY093 possible).
 // ─────────────────────────────────────────────────────────────────────────────
 function handle_sync_batch(string $method, array $body, ?array $auth, int $sid): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
@@ -649,70 +657,17 @@ function handle_sync_batch(string $method, array $body, ?array $auth, int $sid):
 
     $table  = $tableMap[$collection];
     $db     = getDB();
-    $pushed = 0;
-    $failed = 0;
-    $errors = [];
 
-    // Get actual column list from the live table schema to prevent SQLSTATE[42S22]
-    $tableColumns = [];
-    try {
-        $stmt = $db->query("DESCRIBE `{$table}`");
-        $tableColumns = $stmt->fetchAll(PDO::FETCH_COLUMN, 0) ?: [];
-    } catch (Throwable $e) {
-        // Table might not exist yet; fall through and let the INSERT fail with a clear message
-        $tableColumns = [];
-    }
-
-    foreach ($items as $idx => $row) {
-        if (!is_array($row)) { $failed++; $errors[] = "Item {$idx} is not an object"; continue; }
-
-        $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
-        $safeCols = array_values(array_filter(
-            array_keys($row),
-            function ($c) use ($tableColumns) {
-                if (!preg_match('/^[a-zA-Z0-9_]+$/', $c)) return false;
-                // Filter to only known table columns (prevents column-not-found errors)
-                if (!empty($tableColumns) && !in_array($c, $tableColumns, true)) return false;
-                return true;
-            }
-        ));
-        if (empty($safeCols)) { $failed++; $errors[] = "Item {$idx} has no valid columns (table: {$table})"; continue; }
-
-        $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
-        $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
-        $updateList = implode(',', array_map(
-            fn($c) => "`{$c}`=:{$c}",
-            array_filter($safeCols, fn($c) => $c !== 'id')
-        ));
-        $params = [];
-        foreach ($safeCols as $c) $params[":{$c}"] = $row[$c];
-
-        try {
-            $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$valList})";
-            if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
-            $db->prepare($sql)->execute($params);
-            $pushed++;
-        } catch (Throwable $e) {
-            $failed++;
-            $msg = $e->getMessage();
-            if (strpos($msg, "doesn't exist") !== false) {
-                $errors[] = "Table '{$table}' missing — run ?route=migrate/run first";
-            } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
-                $errors[] = "Column mismatch in '{$table}' — run ?route=migrate/reset to fix (visit /api/index.php?route=migrate/reset)";
-            } else {
-                $errors[] = "Row {$idx}: {$msg}";
-            }
-        }
-    }
+    $result = batchUpsert($db, $table, $items);
 
     json_success([
-        'pushed'     => $pushed,
-        'failed'     => $failed,
+        'pushed'     => $result['pushed'],
+        'failed'     => $result['failed'],
         'total'      => count($items),
-        'errors'     => $errors,
+        'errors'     => $result['errors'],
         'collection' => $collection,
         'table'      => $table,
-    ], "{$pushed} of " . count($items) . " records saved");
+    ], "{$result['pushed']} of " . count($items) . " records saved");
 }
 
 
@@ -790,25 +745,8 @@ function handle_backup_import(string $method, array $body, ?array $auth, int $si
     try {
         foreach ($data['tables'] as $table => $rows) {
             if (!is_array($rows) || empty($rows)) { $imported[$table] = 0; continue; }
-            $count = 0;
-            foreach ($rows as $row) {
-                if (!is_array($row)) continue;
-                $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
-                $safeCols = array_values(array_filter(
-                    array_keys($row),
-                    fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
-                ));
-                if (empty($safeCols)) continue;
-                $colList = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
-                $valList = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
-                $params  = [];
-                foreach ($safeCols as $c) $params[":{$c}"] = $row[$c];
-                try {
-                    $db->prepare("INSERT IGNORE INTO `{$table}` ({$colList}) VALUES ({$valList})")->execute($params);
-                    $count++;
-                } catch (Throwable $e) { /* skip row */ }
-            }
-            $imported[$table] = $count;
+            $result = batchUpsert($db, $table, $rows);
+            $imported[$table] = $result['pushed'];
         }
         $db->commit();
         json_success(['imported' => $imported], 'Backup restored');
@@ -961,18 +899,18 @@ function handle_data_collection(string $method, string $collection, array $body,
             fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
         ));
         if (empty($safeCols)) json_error('No valid fields provided', 400);
-        if (empty($body['id'])) { $body['id'] = gen_uuid(); $safeCols[] = 'id'; }
+        if (empty($body['id'])) { $body['id'] = gen_uuid(); $safeCols[] = 'id'; $safeCols = array_unique($safeCols); }
 
-        $colList    = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
-        $valList    = implode(',', array_map(fn($c) => ":{$c}", $safeCols));
-        $updateList = implode(',', array_map(fn($c) => "`{$c}`=:{$c}", array_filter($safeCols, fn($c) => $c !== 'id')));
-        $params     = [];
-        foreach ($safeCols as $c) $params[":{$c}"] = $body[$c];
+        // Use positional ? to avoid HY093 when same column appears in VALUES and UPDATE
+        $colList      = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
+        $placeholders = implode(',', array_fill(0, count($safeCols), '?'));
+        $updateParts  = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $safeCols);
+        $updateClause = implode(',', $updateParts);
+        $values = array_map(fn($c) => $body[$c], $safeCols);
 
         try {
-            $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$valList})";
-            if ($updateList) $sql .= " ON DUPLICATE KEY UPDATE {$updateList}";
-            $db->prepare($sql)->execute($params);
+            $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}";
+            $db->prepare($sql)->execute($values);
             json_success(['id' => $body['id']], 'Saved', 201);
         } catch (Throwable $e) {
             json_error('Failed to save: ' . $e->getMessage(), 500);

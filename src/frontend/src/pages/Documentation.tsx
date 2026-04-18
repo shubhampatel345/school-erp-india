@@ -500,7 +500,15 @@ const FAQS = [
   },
   {
     q: "Server shows 'Connected' green but my data is empty in MySQL. How to fix?",
-    a: "The green Connected status only confirms the server is reachable. It doesn't mean your data has been synced. Go to Settings → Data → Database Server → click 'Push Local Data to Server'. This uploads all 27 data collections from your browser to MySQL in one batch.",
+    a: "The green Connected status only confirms the server is reachable. It doesn't mean your data has been synced. Go to Settings → Data → Database Server → click 'Push Local Data to Server'. This uploads all data collections from your browser to MySQL in one batch. Re-pushing is always safe — duplicate entries are automatically updated, not duplicated.",
+  },
+  {
+    q: "Push shows SQLSTATE[HY093] or 0 records saved.",
+    a: "This was a bug in older API versions where named PDO parameters (`:colName`) appeared twice in the SQL (once in VALUES and again in ON DUPLICATE KEY UPDATE), causing a parameter count mismatch. Fixed in API v3.0+: upload the latest api/index.php to your cPanel, then run https://shubh.psmkgs.com/api/index.php?route=migrate/reset-db to rebuild all tables, then push again.",
+  },
+  {
+    q: "Push shows SQLSTATE[42S22] Unknown column or column mismatch errors.",
+    a: "Your database tables were created with old column names (snake_case like adm_no) but the app sends camelCase (admNo). Run https://shubh.psmkgs.com/api/index.php?route=migrate/reset-db — this drops and recreates all tables with the correct camelCase column names. Warning: this erases existing MySQL data. Then push your browser data again.",
   },
   {
     q: "I get 'Unexpected token < ... is not valid JSON' error when syncing.",
@@ -2814,11 +2822,27 @@ define('ALLOWED_ORIGIN', 'https://shubh.psmkgs.com');
   "tables_created": ["students", "staff", "fee_receipts", "attendance", ...]
 }`}</Code>
         <Alert type="info">
-          ℹ️ Run migration once. If run again, it safely skips tables that
-          already exist. To reset Super Admin password:{" "}
+          ℹ️ <strong>migrate/run is safe to re-run</strong> — it uses{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            CREATE TABLE IF NOT EXISTS
+          </code>{" "}
+          so existing data is preserved. To reset Super Admin password:{" "}
           <code className="text-xs bg-muted px-1 rounded">
             /api/index.php?route=migrate/reset-superadmin
           </code>
+        </Alert>
+        <Alert type="warn">
+          ⚠️ <strong>Column mismatch errors?</strong> If you get{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            SQLSTATE[42S22] Unknown column
+          </code>{" "}
+          or push shows 0 records, run this URL once to rebuild all tables fresh
+          (⚠️ erases existing data):
+          <br />
+          <code className="text-xs bg-muted px-1 rounded mt-1 block">
+            /api/index.php?route=migrate/reset-db
+          </code>
+          Then push again — all data will save correctly.
         </Alert>
       </Card>
 
@@ -2934,12 +2958,15 @@ define('ALLOWED_ORIGIN', 'https://shubh.psmkgs.com');
 https://yourdomain.com/api/index.php?route=ROUTE_NAME
 
 # Examples:
-GET  /api/index.php?route=sync/status    → Health check
-POST /api/index.php?route=auth/login     → Login
-GET  /api/index.php?route=data/students  → List students
-POST /api/index.php?route=data/students  → Save student
-POST /api/index.php?route=sync/push      → Bulk push
-GET  /api/index.php?route=migrate/run    → Create tables`}</Code>
+GET  /api/index.php?route=sync/status      → Health check
+POST /api/index.php?route=auth/login       → Login
+GET  /api/index.php?route=data/students    → List students
+POST /api/index.php?route=data/students    → Save student
+POST /api/index.php?route=sync/push        → Bulk push (all collections)
+POST /api/index.php?route=sync/batch       → Push single collection
+GET  /api/index.php?route=migrate/run      → Create tables (safe, IF NOT EXISTS)
+GET  /api/index.php?route=migrate/reset-db → Drop + recreate tables (fixes column errors)
+GET  /api/index.php?route=migrate/reset-superadmin → Reset superadmin password`}</Code>
       </Card>
 
       <Card className="p-5">
@@ -2970,6 +2997,18 @@ GET  /api/index.php?route=migrate/run    → Create tables`}</Code>
             [
               '"Access denied for user"',
               "In cPanel → MySQL Databases → verify user has ALL PRIVILEGES",
+            ],
+            [
+              "Push shows 0 records / SQLSTATE[HY093]",
+              "Upload new api/index.php (v3.0+), then run /api/index.php?route=migrate/reset-db to rebuild tables, then push again",
+            ],
+            [
+              "SQLSTATE[42S22] Unknown column",
+              "Column names mismatch. Run ?route=migrate/reset-db to recreate all tables with correct camelCase columns",
+            ],
+            [
+              "Duplicate entry error on push",
+              "Safe to ignore — ON DUPLICATE KEY UPDATE is used so re-pushing the same data just updates existing rows",
             ],
             [
               "Push shows 0 records saved",
