@@ -138,6 +138,7 @@ $handlers = [
     'sync'       => 'sync.php',
     'migrate'    => 'migrate.php',
     'data'       => 'data.php',   // generic CRUD for collections
+    'chat'       => 'chat.php',   // chat messaging (DMs + group chat)
 ];
 
 if ($resource === '' || $resource === 'health') {

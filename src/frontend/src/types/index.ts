@@ -527,3 +527,35 @@ export interface Permission {
   canEdit: boolean;
   canDelete: boolean;
 }
+
+// ──────────────────────────────────────────────────────────
+// Chat
+// ──────────────────────────────────────────────────────────
+export interface ChatConversation {
+  id: number;
+  type: "direct" | "class_group" | "route_group";
+  name: string;
+  last_message?: string;
+  last_message_at?: string;
+  unread_count: number;
+  member_count: number;
+  other_user_name?: string;
+}
+
+export interface ChatMessage {
+  id: number;
+  conversation_id: number;
+  sender_user_id: number;
+  sender_name: string;
+  sender_role: string;
+  content: string;
+  sent_at: string;
+  is_mine: boolean;
+}
+
+export interface ChatUser {
+  id: number;
+  name: string;
+  role: string;
+  mobile?: string;
+}

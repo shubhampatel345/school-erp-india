@@ -1,23 +1,31 @@
 /**
  * SHUBH SCHOOL ERP — API Sync Status Hook
  *
- * Polls /api/sync/status every 5 s when an API URL is configured.
+ * Polls /api/sync/status every 30 s when an API URL is configured.
+ * Also exposes syncedCounts from the DataService for the dashboard display.
  * Returns live connection state consumed by Dashboard and other components.
  *
  * Special handling: if the server returns "Super Admin only" the hook
- * sets needsAuth=true and backs off for 30 s instead of retrying every 5 s.
+ * sets needsAuth=true and backs off for 30 s instead of retrying every 30 s.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   type SyncStatusResponse,
   fetchSyncStatus,
   isApiConfigured,
 } from "../utils/api";
+import { dataService } from "../utils/dataService";
 
 export type SyncMode =
   | "local" // no API URL set — purely localStorage
-  | "connected" // API reachable
+  | "connected" // API reachable + data loaded
   | "syncing" // in-flight request
   | "offline" // API configured but unreachable
   | "auth_error"; // API reachable but auth rejected (Super Admin only)
@@ -34,11 +42,13 @@ export interface SyncState {
     db_version?: string;
     last_backup?: string;
   } | null;
-  /** Manually trigger an immediate sync check */
+  /** Counts of synced records per collection e.g. {students: 142, fee_receipts: 890} */
+  syncedCounts: Record<string, number>;
+  /** Manually trigger an immediate sync + data refresh */
   triggerSync: () => Promise<void>;
 }
 
-const POLL_INTERVAL_MS = 5_000;
+const POLL_INTERVAL_MS = 30_000;
 const AUTH_BACKOFF_MS = 30_000;
 const LS_LAST_SYNC_KEY = "shubh_erp_last_sync_time";
 
@@ -85,6 +95,13 @@ export function useSync(): SyncState {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(true);
 
+  // Subscribe to DataService for live counts
+  const dsMode = useSyncExternalStore(
+    dataService.subscribe.bind(dataService),
+    () => dataService.getMode(),
+  );
+  const syncedCounts = dataService.getCounts();
+
   // Stable ref to restart polling at a given interval
   const restartPoll = useCallback(
     (intervalMs: number, checkFn: () => Promise<void>) => {
@@ -124,6 +141,8 @@ export function useSync(): SyncState {
         });
         // Restore normal poll interval after auth recovery
         restartPoll(POLL_INTERVAL_MS, runCheck);
+        // Trigger DataService to load/refresh all collections when connected
+        void dataService.init();
       } else {
         const msg = result.message ?? "Server returned an error";
         if (isSuperAdminOnlyError(msg)) {
@@ -209,14 +228,19 @@ export function useSync(): SyncState {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [runCheck, restartPoll]);
 
+  // Merge DataService loading state into the effective mode
+  const effectiveMode: SyncMode =
+    dsMode === "loading" ? "syncing" : dsMode === "ready" ? "connected" : mode;
+
   return {
-    mode,
+    mode: effectiveMode,
     lastSyncTime,
     lastSyncError,
-    isSynced: mode === "connected",
-    isPolling: mode === "syncing",
+    isSynced: effectiveMode === "connected",
+    isPolling: effectiveMode === "syncing",
     needsAuth,
     serverInfo,
+    syncedCounts,
     triggerSync: runCheck,
   };
 }

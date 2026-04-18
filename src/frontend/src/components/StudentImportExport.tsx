@@ -3,6 +3,7 @@ import { Download, FileSpreadsheet, Upload, X } from "lucide-react";
 import { useRef } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
+import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
 
 /**
@@ -317,6 +318,13 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
       }
 
       ls.set("students", existing);
+      // Sync all imported students to server
+      for (const s of existing) {
+        void dataService.save(
+          "students",
+          s as unknown as Record<string, unknown>,
+        );
+      }
       addNotification(`Imported ${count} students`, "success", "📤");
       onImported();
       onClose();

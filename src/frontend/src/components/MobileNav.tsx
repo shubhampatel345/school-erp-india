@@ -1,26 +1,36 @@
 import {
+  AlertCircle,
   ArrowUpCircle,
   Award,
+  Banknote,
   BarChart3,
   BellRing,
   BookMarked,
   BookOpen,
   Bus,
   CalendarCheck,
+  ClipboardList,
+  CreditCard,
   FileText,
   GraduationCap,
   HelpCircle,
   IndianRupee,
+  Layers,
   LayoutDashboard,
+  MessageCircle,
   MessageSquare,
   MoreHorizontal,
   Package,
+  Phone,
   QrCode,
+  Receipt,
+  School,
   Settings,
   TrendingUp,
   UserCheck,
   Users,
   Users2,
+  Wallet,
   X,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
@@ -36,52 +46,189 @@ const BOTTOM_TABS = [
   { id: "dashboard", label: "Home", icon: LayoutDashboard },
   { id: "students", label: "Students", icon: Users },
   { id: "fees/collect", label: "Fees", icon: IndianRupee },
-  { id: "attendance", label: "Attend.", icon: CalendarCheck },
+  { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "__menu__", label: "Menu", icon: MoreHorizontal },
 ];
 
 const DRAWER_ITEMS = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "students", label: "Students", icon: Users },
-  { id: "fees/collect", label: "Collect Fees", icon: IndianRupee },
-  { id: "fees/heading", label: "Fee Heading", icon: IndianRupee },
-  { id: "fees/plan", label: "Fees Plan", icon: IndianRupee },
-  { id: "fees/due", label: "Due Fees", icon: IndianRupee },
-  { id: "fees/register", label: "Fee Register", icon: BookMarked },
-  { id: "fees/accounts", label: "Accounts", icon: IndianRupee },
-  { id: "fees/online", label: "Online Fees", icon: IndianRupee },
-  { id: "attendance", label: "Attendance", icon: CalendarCheck },
-  { id: "examinations/timetable", label: "Exam Timetable", icon: FileText },
-  { id: "examinations/results", label: "Results", icon: BarChart3 },
-  { id: "academics/classes", label: "Classes", icon: GraduationCap },
-  { id: "academics/subjects", label: "Subjects", icon: BookOpen },
+  // Main
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    section: "Main",
+  },
+  { id: "students", label: "Students", icon: Users, section: "Main" },
+  // Fees
+  { id: "fees/collect", label: "Collect Fees", icon: Receipt, section: "Fees" },
+  { id: "fees/heading", label: "Fee Heading", icon: Layers, section: "Fees" },
+  { id: "fees/plan", label: "Fees Plan", icon: ClipboardList, section: "Fees" },
+  { id: "fees/due", label: "Due Fees", icon: AlertCircle, section: "Fees" },
+  {
+    id: "fees/register",
+    label: "Fee Register",
+    icon: BookMarked,
+    section: "Fees",
+  },
+  { id: "fees/accounts", label: "Accounts", icon: Banknote, section: "Fees" },
+  { id: "fees/online", label: "Online Fees", icon: Wallet, section: "Fees" },
+  // Academics
+  {
+    id: "attendance",
+    label: "Attendance",
+    icon: CalendarCheck,
+    section: "Academics",
+  },
+  {
+    id: "examinations/timetable",
+    label: "Exam Timetable",
+    icon: FileText,
+    section: "Academics",
+  },
+  {
+    id: "examinations/results",
+    label: "Results",
+    icon: BarChart3,
+    section: "Academics",
+  },
+  {
+    id: "academics/classes",
+    label: "Classes & Sections",
+    icon: School,
+    section: "Academics",
+  },
+  {
+    id: "academics/subjects",
+    label: "Subjects",
+    icon: BookOpen,
+    section: "Academics",
+  },
   {
     id: "academics/timetable",
     label: "Teacher Timetable",
     icon: CalendarCheck,
+    section: "Academics",
   },
-  { id: "academics/syllabus", label: "Syllabus", icon: BookMarked },
   {
-    id: "academics/classteachers",
-    label: "Class Teachers",
-    icon: GraduationCap,
+    id: "academics/syllabus",
+    label: "Syllabus",
+    icon: BookMarked,
+    section: "Academics",
   },
-  { id: "hr/staff", label: "Staff Directory", icon: Users2 },
-  { id: "hr/payroll", label: "Payroll", icon: IndianRupee },
-  { id: "transport", label: "Transport", icon: Bus },
-  { id: "inventory", label: "Inventory", icon: Package },
-  { id: "communication/whatsapp", label: "WhatsApp", icon: MessageSquare },
-  { id: "communication/rcs", label: "RCS Messages", icon: BellRing },
-  { id: "communication/scheduler", label: "Scheduler", icon: BellRing },
-  { id: "certificates", label: "Template Studio", icon: Award },
-  { id: "alumni", label: "Alumni", icon: UserCheck },
-  { id: "expenses", label: "Expenses", icon: TrendingUp },
-  { id: "homework", label: "Homework", icon: BookMarked },
-  { id: "reports", label: "Reports", icon: BarChart3 },
-  { id: "qr-attendance", label: "QR Attendance", icon: QrCode },
-  { id: "promote", label: "Promote Students", icon: ArrowUpCircle },
-  { id: "documentation", label: "Documentation", icon: HelpCircle },
-  { id: "settings/profile", label: "Settings", icon: Settings },
+  // HR
+  {
+    id: "hr/staff",
+    label: "Staff Directory",
+    icon: Users2,
+    section: "HR / Staff",
+  },
+  {
+    id: "hr/payroll",
+    label: "Payroll",
+    icon: CreditCard,
+    section: "HR / Staff",
+  },
+  {
+    id: "hr/leave",
+    label: "Leave",
+    icon: CalendarCheck,
+    section: "HR / Staff",
+  },
+  // Operations
+  { id: "transport", label: "Transport", icon: Bus, section: "Operations" },
+  { id: "inventory", label: "Inventory", icon: Package, section: "Operations" },
+  {
+    id: "calling",
+    label: "Calling (Heyophone)",
+    icon: Phone,
+    section: "Operations",
+  },
+  // Communication
+  { id: "chat", label: "Chat", icon: MessageCircle, section: "Communication" },
+  {
+    id: "communication/whatsapp",
+    label: "WhatsApp",
+    icon: MessageSquare,
+    section: "Communication",
+  },
+  {
+    id: "communication/rcs",
+    label: "RCS Messages",
+    icon: MessageSquare,
+    section: "Communication",
+  },
+  {
+    id: "communication/scheduler",
+    label: "Notif. Scheduler",
+    icon: BellRing,
+    section: "Communication",
+  },
+  // Other
+  {
+    id: "certificates",
+    label: "Template Studio",
+    icon: Award,
+    section: "Other",
+  },
+  { id: "alumni", label: "Alumni", icon: UserCheck, section: "Other" },
+  { id: "expenses", label: "Expenses", icon: TrendingUp, section: "Other" },
+  { id: "homework", label: "Homework", icon: BookMarked, section: "Other" },
+  { id: "reports", label: "Reports", icon: BarChart3, section: "Other" },
+  {
+    id: "qr-attendance",
+    label: "QR Attendance",
+    icon: QrCode,
+    section: "Other",
+  },
+  {
+    id: "promote",
+    label: "Promote Students",
+    icon: ArrowUpCircle,
+    section: "Other",
+  },
+  // Settings
+  {
+    id: "settings/profile",
+    label: "School Profile",
+    icon: Settings,
+    section: "Settings",
+  },
+  {
+    id: "settings/sessions",
+    label: "Sessions",
+    icon: CalendarCheck,
+    section: "Settings",
+  },
+  {
+    id: "settings/whatsapp",
+    label: "WhatsApp API",
+    icon: MessageSquare,
+    section: "Settings",
+  },
+  {
+    id: "settings/users",
+    label: "User Management",
+    icon: Users,
+    section: "Settings",
+  },
+  {
+    id: "settings/online-payment",
+    label: "Online Payment",
+    icon: CreditCard,
+    section: "Settings",
+  },
+  {
+    id: "settings/notifications",
+    label: "Notifications",
+    icon: BellRing,
+    section: "Settings",
+  },
+  {
+    id: "documentation",
+    label: "Documentation",
+    icon: HelpCircle,
+    section: "Help",
+  },
 ];
 
 export default function MobileNav({
@@ -105,6 +252,7 @@ export default function MobileNav({
     tabs = [
       BOTTOM_TABS[0],
       { id: "qr-attendance", label: "QR Scan", icon: QrCode },
+      { id: "chat", label: "Chat", icon: MessageCircle },
       BOTTOM_TABS[4],
     ];
   } else if (isStudent || isParent) {
@@ -112,9 +260,20 @@ export default function MobileNav({
       BOTTOM_TABS[0],
       { id: "fees/collect", label: "Fees", icon: IndianRupee },
       { id: "attendance", label: "Attend.", icon: CalendarCheck },
+      { id: "chat", label: "Chat", icon: MessageCircle },
       BOTTOM_TABS[4],
     ];
   }
+
+  // Group drawer items by section
+  const sections = DRAWER_ITEMS.reduce<Record<string, typeof DRAWER_ITEMS>>(
+    (acc, item) => {
+      if (!acc[item.section]) acc[item.section] = [];
+      acc[item.section].push(item);
+      return acc;
+    },
+    {},
+  );
 
   return (
     <>
@@ -188,31 +347,42 @@ export default function MobileNav({
               </button>
             </div>
 
-            {/* Drawer nav */}
-            <nav className="p-3 space-y-1 pb-24 flex-1">
-              {DRAWER_ITEMS.map((item) => {
-                const Icon = item.icon;
-                const active =
-                  activePage === item.id ||
-                  activePage.startsWith(`${item.id}/`);
-                return (
-                  <button
-                    type="button"
-                    key={item.id}
-                    data-ocid={`drawer-nav-${item.id.replace(/\//g, "-")}`}
-                    onClick={() => handleNav(item.id)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-smooth
-                      ${
-                        active
-                          ? "bg-primary text-primary-foreground font-semibold"
-                          : "hover:bg-muted text-foreground"
-                      }`}
-                  >
-                    <Icon className="w-4 h-4 flex-shrink-0" />
-                    <span className="text-left">{item.label}</span>
-                  </button>
-                );
-              })}
+            {/* Drawer nav — grouped by section */}
+            <nav className="p-3 pb-24 flex-1">
+              {Object.entries(sections).map(([sectionName, items]) => (
+                <div key={sectionName} className="mb-3">
+                  {sectionName !== "Main" && (
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2 pt-2 pb-1">
+                      {sectionName}
+                    </p>
+                  )}
+                  <div className="space-y-0.5">
+                    {items.map((item) => {
+                      const Icon = item.icon;
+                      const active =
+                        activePage === item.id ||
+                        activePage.startsWith(`${item.id}/`);
+                      return (
+                        <button
+                          type="button"
+                          key={item.id}
+                          data-ocid={`drawer-nav-${item.id.replace(/\//g, "-")}`}
+                          onClick={() => handleNav(item.id)}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-smooth
+                            ${
+                              active
+                                ? "bg-primary text-primary-foreground font-semibold"
+                                : "hover:bg-muted text-foreground"
+                            }`}
+                        >
+                          <Icon className="w-4 h-4 flex-shrink-0" />
+                          <span className="text-left">{item.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
             </nav>
           </div>
         </aside>

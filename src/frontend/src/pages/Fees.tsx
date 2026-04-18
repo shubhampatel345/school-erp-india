@@ -26,8 +26,14 @@ const TABS: { id: FeeTab; label: string }[] = [
   { id: "online", label: "Online Fees" },
 ];
 
-export default function Fees() {
-  const [activeTab, setActiveTab] = useState<FeeTab>("collect");
+interface FeesProps {
+  initialTab?: string;
+}
+
+export default function Fees({ initialTab }: FeesProps) {
+  const [activeTab, setActiveTab] = useState<FeeTab>(
+    (initialTab as FeeTab) ?? "collect",
+  );
 
   return (
     <div className="space-y-4">

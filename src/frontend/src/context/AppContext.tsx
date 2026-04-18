@@ -5,9 +5,11 @@ import {
   useContext,
   useEffect,
   useState,
+  useSyncExternalStore,
 } from "react";
 import type { AppUser, Notification, Session, UserRole } from "../types";
 import { backendLogin, clearTokens, isApiConfigured } from "../utils/api";
+import { dataService } from "../utils/dataService";
 import { generateId, ls } from "../utils/localStorage";
 
 interface AppContextValue {
@@ -19,6 +21,10 @@ interface AppContextValue {
   isReadOnly: boolean;
   /** Super Admin can always write, even in archived sessions */
   canWrite: boolean;
+  /** Whether data is loading from server on initial sync */
+  isSyncLoading: boolean;
+  /** Counts from last server sync e.g. {students: 142, fee_receipts: 890} */
+  syncCounts: Record<string, number>;
   login: (username: string, password: string) => boolean;
   logout: () => void;
   changePassword: (userId: string, newPassword: string) => boolean;
@@ -31,6 +37,23 @@ interface AppContextValue {
   markAllRead: () => void;
   clearNotifications: () => void;
   createSession: (label: string) => Session;
+  /** Get all records from a collection (server-synced) */
+  getData: (collection: string) => unknown[];
+  /** Save a record to a collection (API + cache) */
+  saveData: (
+    collection: string,
+    item: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  /** Update a record in a collection (API + cache) */
+  updateData: (
+    collection: string,
+    id: string,
+    changes: Record<string, unknown>,
+  ) => Promise<void>;
+  /** Delete a record from a collection (API + cache) */
+  deleteData: (collection: string, id: string) => Promise<void>;
+  /** Force refresh a single collection from the server */
+  refreshCollection: (collection: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -64,12 +87,9 @@ function initDefaultSession(): Session {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Ensure the app is marked as initialized — prevents any future seed/demo
-  // data logic from running on a fresh install.
+  // Ensure the app is marked as initialized
   if (!ls.get<string>("initialized", "")) {
     ls.set("initialized", "true");
-    // Do NOT add any demo/seed data here. App starts empty except for
-    // the default session and superadmin credentials.
   }
 
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() =>
@@ -85,6 +105,59 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState<Notification[]>(() =>
     ls.get<Notification[]>("notifications", []),
   );
+
+  // ── DataService state ────────────────────────────────────────────────────
+  // Subscribe to DataService so components re-render on cache changes
+  const dsVersion = useSyncExternalStore(
+    dataService.subscribe.bind(dataService),
+    () => dataService.getMode(),
+  );
+  const isSyncLoading = dsVersion === "loading";
+  const syncCounts = dataService.getCounts();
+
+  // Initialize DataService when user is logged in and API is configured
+  useEffect(() => {
+    if (currentUser && isApiConfigured()) {
+      void dataService.init();
+    }
+  }, [currentUser]);
+
+  // ── Data access helpers ────────────────────────────────────────────────
+  // getData re-runs on dsVersion change (triggered by DataService.notify())
+  // so consumers always get fresh data after any server write.
+  const getData = (collection: string) => dataService.get<unknown>(collection);
+
+  const saveData = useCallback(
+    (
+      collection: string,
+      item: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> => {
+      return dataService.save(collection, item);
+    },
+    [],
+  );
+
+  const updateData = useCallback(
+    (
+      collection: string,
+      id: string,
+      changes: Record<string, unknown>,
+    ): Promise<void> => {
+      return dataService.update(collection, id, changes);
+    },
+    [],
+  );
+
+  const deleteData = useCallback(
+    (collection: string, id: string): Promise<void> => {
+      return dataService.delete(collection, id);
+    },
+    [],
+  );
+
+  const refreshCollection = useCallback((collection: string): Promise<void> => {
+    return dataService.refresh(collection);
+  }, []);
 
   const currentSession =
     sessions.find((s) => s.id === currentSessionId) ?? sessions[0] ?? null;
@@ -366,6 +439,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         unreadCount,
         isReadOnly,
         canWrite,
+        isSyncLoading,
+        syncCounts,
         login,
         logout,
         changePassword,
@@ -374,6 +449,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         markAllRead,
         clearNotifications,
         createSession,
+        getData,
+        saveData,
+        updateData,
+        deleteData,
+        refreshCollection,
       }}
     >
       {children}

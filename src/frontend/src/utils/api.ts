@@ -509,6 +509,76 @@ export async function apiDelete<T>(path: string): Promise<T> {
   return apiFetch<T>("DELETE", path);
 }
 
+// ── Generic collection CRUD ───────────────────────────────
+// Maps to PHP /api/data/{collection} endpoints
+
+export interface CollectionListResult<T> {
+  rows: T[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Fetch all records for a collection from the server */
+export async function fetchCollection<T>(
+  collection: string,
+  filters?: Record<string, string | number>,
+): Promise<T[]> {
+  const params = new URLSearchParams({
+    limit: "500",
+    ...Object.fromEntries(
+      Object.entries(filters ?? {}).map(([k, v]) => [k, String(v)]),
+    ),
+  });
+  const res = await apiGet<{ status: string; data: CollectionListResult<T> }>(
+    `/data/${collection}?${params.toString()}`,
+  );
+  return (res as unknown as CollectionListResult<T>).rows ?? [];
+}
+
+/** Save (upsert) a single item to a collection */
+export async function saveCollectionItem<T extends Record<string, unknown>>(
+  collection: string,
+  item: T,
+): Promise<{ id: number }> {
+  return apiFetch<{ id: number }>("POST", `/data/${collection}`, item);
+}
+
+/** Update an existing item in a collection by server ID */
+export async function updateCollectionItem<T extends Record<string, unknown>>(
+  collection: string,
+  id: number,
+  item: T,
+): Promise<void> {
+  await apiFetch<void>("PUT", `/data/${collection}/${id}`, item);
+}
+
+/** Soft-delete an item from a collection by server ID */
+export async function deleteCollectionItem(
+  collection: string,
+  id: number,
+): Promise<void> {
+  await apiFetch<void>("DELETE", `/data/${collection}/${id}`);
+}
+
+/** Bulk-fetch multiple collections in parallel */
+export async function syncAllCollections(
+  collectionNames: string[],
+): Promise<Record<string, unknown[]>> {
+  const results = await Promise.allSettled(
+    collectionNames.map((name) =>
+      fetchCollection<unknown>(name).then((rows) => ({ name, rows })),
+    ),
+  );
+  const out: Record<string, unknown[]> = {};
+  for (const result of results) {
+    if (result.status === "fulfilled") {
+      out[result.value.name] = result.value.rows;
+    }
+  }
+  return out;
+}
+
 // ── Sync status endpoint ──────────────────────────────────
 
 export interface SyncStatusResponse {

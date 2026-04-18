@@ -14,10 +14,13 @@ type TabId = (typeof TABS)[number]["id"];
 
 interface HRProps {
   onNavigate?: (page: string) => void;
+  initialTab?: string;
 }
 
-export default function HR({ onNavigate }: HRProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("staff");
+export default function HR({ onNavigate, initialTab }: HRProps) {
+  const [activeTab, setActiveTab] = useState<TabId>(
+    (initialTab as TabId) ?? "staff",
+  );
 
   return (
     <div className="flex flex-col h-full">

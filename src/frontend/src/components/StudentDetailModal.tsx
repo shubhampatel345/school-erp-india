@@ -19,6 +19,7 @@ import {
   CreditCard,
   FileText,
   Lock,
+  MessageCircle,
   Pencil,
   Plus,
   Trash2,
@@ -51,6 +52,7 @@ interface Props {
   student: Student;
   onClose: () => void;
   onUpdate: (s: Student) => void;
+  onNavigate?: (page: string) => void;
 }
 
 function parseDobToParts(dob: string): [string, string, string] {
@@ -67,10 +69,15 @@ export default function StudentDetailModal({
   student,
   onClose,
   onUpdate,
+  onNavigate,
 }: Props) {
   const { currentUser, currentSession } = useApp();
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
+  const canChat =
+    currentUser?.role === "superadmin" ||
+    currentUser?.role === "admin" ||
+    currentUser?.role === "teacher";
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...student });
@@ -446,6 +453,47 @@ export default function StudentDetailModal({
   function printAdmForm(template: PrintTemplate) {
     setPrintTemplate(template);
     setTimeout(() => window.print(), 300);
+  }
+
+  async function handleSendMessage() {
+    if (!onNavigate) return;
+    const apiBase =
+      localStorage.getItem("shubh_erp_api_url") ??
+      "https://shubh.psmkgs.com/api";
+    const token = localStorage.getItem("shubh_erp_auth_token") ?? "";
+    try {
+      const res = await fetch(`${apiBase}/chat/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("API error");
+      const data = (await res.json()) as {
+        data: { id: number; name: string; role: string; entity_id?: string }[];
+      };
+      const users = data.data ?? [];
+      // Match by entity_id = student.id or by name match
+      const match = users.find(
+        (u) =>
+          (u.entity_id && u.entity_id === student.id) ||
+          u.name.toLowerCase() === student.fullName.toLowerCase(),
+      );
+      if (!match) {
+        toast.info("Student does not have a chat account yet");
+        return;
+      }
+      // Start DM then navigate
+      await fetch(`${apiBase}/chat/conversations/start`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ recipient_user_id: match.id }),
+      });
+      onClose();
+      onNavigate("chat");
+    } catch {
+      toast.info("Student does not have a chat account yet");
+    }
   }
 
   // ── Net Payable calculation (fix3) ──────────────────────────────────────
@@ -1016,6 +1064,16 @@ export default function StudentDetailModal({
                 >
                   <FileText className="w-3 h-3 mr-1" /> Adm. Form (Official)
                 </Button>
+                {canChat && onNavigate && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSendMessage}
+                    data-ocid="student-detail.send_message_button"
+                  >
+                    <MessageCircle className="w-3 h-3 mr-1" /> Send Message
+                  </Button>
+                )}
                 {student.status === "active" ? (
                   <Button
                     size="sm"

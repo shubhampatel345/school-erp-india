@@ -25,8 +25,24 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export default function Academics() {
-  const [activeTab, setActiveTab] = useState<TabId>("classes");
+interface AcademicsProps {
+  initialTab?: string;
+}
+
+// Map sidebar route segments to internal tab IDs
+const TAB_MAP: Record<string, TabId> = {
+  classes: "classes",
+  subjects: "subjects",
+  timetable: "teacher-timetable",
+  syllabus: "syllabus",
+  classteachers: "class-teachers",
+};
+
+export default function Academics({ initialTab }: AcademicsProps) {
+  const resolvedTab = initialTab
+    ? (TAB_MAP[initialTab] ?? (initialTab as TabId))
+    : "classes";
+  const [activeTab, setActiveTab] = useState<TabId>(resolvedTab);
 
   return (
     <div className="flex flex-col h-full">

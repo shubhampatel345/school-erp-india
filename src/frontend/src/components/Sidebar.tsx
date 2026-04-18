@@ -7,11 +7,8 @@ import {
   BellRing,
   BookMarked,
   BookOpen,
-  Building2,
   Bus,
   CalendarCheck,
-  ChevronDown,
-  ChevronRight,
   ClipboardList,
   CreditCard,
   FileText,
@@ -20,8 +17,10 @@ import {
   IndianRupee,
   Layers,
   LayoutDashboard,
+  MessageCircle,
   MessageSquare,
   Package,
+  Phone,
   QrCode,
   Receipt,
   School,
@@ -32,7 +31,7 @@ import {
   Users2,
   Wallet,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { UserRole } from "../types";
 
@@ -40,184 +39,310 @@ interface NavItem {
   id: string;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  children?: NavItem[];
   roles?: UserRole[];
   badge?: string;
+  section?: string;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    icon: LayoutDashboard,
+    section: "main",
+  },
   {
     id: "students",
     label: "Student Information",
     icon: Users,
     roles: ["superadmin", "admin", "teacher", "receptionist"],
+    section: "main",
+  },
+  // Fees section
+  {
+    id: "fees/collect",
+    label: "Collect Fees",
+    icon: Receipt,
+    roles: ["superadmin", "admin", "accountant", "receptionist"],
+    section: "fees",
   },
   {
-    id: "fees",
-    label: "Fees",
-    icon: IndianRupee,
-    roles: ["superadmin", "admin", "accountant", "receptionist"],
-    children: [
-      { id: "fees/collect", label: "Collect Fees", icon: Receipt },
-      { id: "fees/heading", label: "Fee Heading Design", icon: Layers },
-      { id: "fees/plan", label: "Fees Plan", icon: ClipboardList },
-      { id: "fees/due", label: "Due Fees", icon: AlertCircle },
-      { id: "fees/register", label: "Fee Register", icon: BookMarked },
-      { id: "fees/accounts", label: "Accounts", icon: Banknote },
-      { id: "fees/online", label: "Online Fees", icon: Wallet },
-    ],
+    id: "fees/heading",
+    label: "Fee Heading",
+    icon: Layers,
+    roles: ["superadmin", "admin", "accountant"],
+    section: "fees",
   },
+  {
+    id: "fees/plan",
+    label: "Fees Plan",
+    icon: ClipboardList,
+    roles: ["superadmin", "admin", "accountant"],
+    section: "fees",
+  },
+  {
+    id: "fees/due",
+    label: "Due Fees",
+    icon: AlertCircle,
+    roles: ["superadmin", "admin", "accountant"],
+    section: "fees",
+  },
+  {
+    id: "fees/register",
+    label: "Fee Register",
+    icon: BookMarked,
+    roles: ["superadmin", "admin", "accountant"],
+    section: "fees",
+  },
+  {
+    id: "fees/accounts",
+    label: "Accounts",
+    icon: Banknote,
+    roles: ["superadmin", "admin", "accountant"],
+    section: "fees",
+  },
+  {
+    id: "fees/online",
+    label: "Online Fees",
+    icon: Wallet,
+    roles: ["superadmin", "admin"],
+    section: "fees",
+  },
+  // Academics section
   {
     id: "attendance",
     label: "Attendance",
     icon: CalendarCheck,
     roles: ["superadmin", "admin", "teacher", "driver"],
+    section: "academic",
   },
   {
-    id: "examinations",
-    label: "Examinations",
+    id: "examinations/timetable",
+    label: "Exam Timetable",
     icon: FileText,
     roles: ["superadmin", "admin", "teacher"],
-    children: [
-      {
-        id: "examinations/timetable",
-        label: "Timetable Maker",
-        icon: CalendarCheck,
-      },
-      { id: "examinations/results", label: "Results", icon: BarChart3 },
-    ],
+    section: "academic",
   },
   {
-    id: "academics",
-    label: "Academics",
+    id: "examinations/results",
+    label: "Results",
+    icon: BarChart3,
+    roles: ["superadmin", "admin", "teacher"],
+    section: "academic",
+  },
+  {
+    id: "academics/classes",
+    label: "Classes & Sections",
+    icon: School,
+    roles: ["superadmin", "admin", "teacher"],
+    section: "academic",
+  },
+  {
+    id: "academics/subjects",
+    label: "Subjects",
     icon: BookOpen,
     roles: ["superadmin", "admin", "teacher"],
-    children: [
-      { id: "academics/classes", label: "Classes & Sections", icon: School },
-      { id: "academics/subjects", label: "Subjects", icon: BookOpen },
-      {
-        id: "academics/timetable",
-        label: "Teachers Timetable",
-        icon: CalendarCheck,
-      },
-      { id: "academics/syllabus", label: "Syllabus", icon: BookMarked },
-      {
-        id: "academics/classteachers",
-        label: "Class Teachers",
-        icon: GraduationCap,
-      },
-    ],
+    section: "academic",
   },
   {
-    id: "hr",
-    label: "HR / Staff",
+    id: "academics/timetable",
+    label: "Teacher Timetable",
+    icon: CalendarCheck,
+    roles: ["superadmin", "admin", "teacher"],
+    section: "academic",
+  },
+  {
+    id: "academics/syllabus",
+    label: "Syllabus",
+    icon: BookMarked,
+    roles: ["superadmin", "admin", "teacher"],
+    section: "academic",
+  },
+  // HR section
+  {
+    id: "hr/staff",
+    label: "Staff Directory",
     icon: Users2,
     roles: ["superadmin", "admin"],
-    children: [
-      { id: "hr/staff", label: "Staff Directory", icon: Users2 },
-      { id: "hr/payroll", label: "Payroll", icon: CreditCard },
-      { id: "hr/leave", label: "Leave", icon: CalendarCheck },
-    ],
+    section: "hr",
   },
+  {
+    id: "hr/payroll",
+    label: "Payroll",
+    icon: CreditCard,
+    roles: ["superadmin", "admin"],
+    section: "hr",
+  },
+  {
+    id: "hr/leave",
+    label: "Leave Management",
+    icon: CalendarCheck,
+    roles: ["superadmin", "admin"],
+    section: "hr",
+  },
+  // Operations section
   {
     id: "transport",
     label: "Transport",
     icon: Bus,
     roles: ["superadmin", "admin", "driver"],
+    section: "ops",
   },
   {
     id: "inventory",
     label: "Inventory",
     icon: Package,
     roles: ["superadmin", "admin", "librarian"],
+    section: "ops",
   },
   {
-    id: "communication",
-    label: "Communication",
+    id: "calling",
+    label: "Calling (Heyophone)",
+    icon: Phone,
+    roles: ["superadmin", "admin"],
+    section: "ops",
+  },
+  // Communication section
+  {
+    id: "chat",
+    label: "Chat",
+    icon: MessageCircle,
+    section: "comms",
+  },
+  {
+    id: "communication/whatsapp",
+    label: "WhatsApp",
     icon: MessageSquare,
     roles: ["superadmin", "admin"],
-    children: [
-      { id: "communication/whatsapp", label: "WhatsApp", icon: MessageSquare },
-      { id: "communication/rcs", label: "RCS Messages", icon: BellRing },
-      {
-        id: "communication/scheduler",
-        label: "Notification Scheduler",
-        icon: BellRing,
-      },
-    ],
+    section: "comms",
   },
+  {
+    id: "communication/rcs",
+    label: "RCS Messages",
+    icon: BellRing,
+    roles: ["superadmin", "admin"],
+    section: "comms",
+  },
+  {
+    id: "communication/scheduler",
+    label: "Notif. Scheduler",
+    icon: BellRing,
+    roles: ["superadmin", "admin"],
+    section: "comms",
+  },
+  // Other
   {
     id: "certificates",
     label: "Template Studio",
     icon: Award,
     roles: ["superadmin", "admin"],
+    section: "other",
   },
   {
     id: "alumni",
     label: "Alumni",
     icon: UserCheck,
     roles: ["superadmin", "admin"],
+    section: "other",
   },
   {
     id: "expenses",
     label: "Expenses",
     icon: TrendingUp,
     roles: ["superadmin", "admin", "accountant"],
+    section: "other",
   },
   {
     id: "homework",
     label: "Homework",
     icon: BookMarked,
     roles: ["superadmin", "admin", "teacher"],
+    section: "other",
   },
   {
     id: "reports",
     label: "Reports",
     icon: BarChart3,
     roles: ["superadmin", "admin"],
+    section: "other",
   },
   {
     id: "qr-attendance",
     label: "QR Attendance",
     icon: QrCode,
     roles: ["superadmin", "admin", "teacher", "driver"],
+    section: "other",
   },
   {
     id: "promote",
     label: "Promote Students",
     icon: ArrowUpCircle,
     roles: ["superadmin"],
+    section: "other",
+  },
+  // Settings
+  {
+    id: "settings/profile",
+    label: "School Profile",
+    icon: Settings,
+    roles: ["superadmin", "admin"],
+    section: "settings",
+  },
+  {
+    id: "settings/sessions",
+    label: "Sessions",
+    icon: CalendarCheck,
+    roles: ["superadmin", "admin"],
+    section: "settings",
+  },
+  {
+    id: "settings/whatsapp",
+    label: "WhatsApp API",
+    icon: MessageSquare,
+    roles: ["superadmin", "admin"],
+    section: "settings",
+  },
+  {
+    id: "settings/users",
+    label: "User Management",
+    icon: Users,
+    roles: ["superadmin"],
+    section: "settings",
+  },
+  {
+    id: "settings/online-payment",
+    label: "Online Payment",
+    icon: CreditCard,
+    roles: ["superadmin", "admin"],
+    section: "settings",
+  },
+  {
+    id: "settings/notifications",
+    label: "Notifications",
+    icon: BellRing,
+    roles: ["superadmin", "admin"],
+    section: "settings",
   },
   {
     id: "documentation",
     label: "Documentation",
     icon: HelpCircle,
     badge: "HELP",
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    icon: Settings,
-    roles: ["superadmin", "admin"],
-    children: [
-      { id: "settings/profile", label: "School Profile", icon: Building2 },
-      { id: "settings/sessions", label: "Sessions", icon: CalendarCheck },
-      { id: "settings/whatsapp", label: "WhatsApp API", icon: MessageSquare },
-      {
-        id: "settings/online-payment",
-        label: "Online Payment",
-        icon: CreditCard,
-      },
-      {
-        id: "settings/notifications",
-        label: "Notification Scheduler",
-        icon: BellRing,
-      },
-      { id: "settings/users", label: "User Management", icon: Users },
-    ],
+    section: "bottom",
   },
 ];
+
+const SECTION_LABELS: Record<string, string> = {
+  main: "",
+  fees: "Fees",
+  academic: "Academics",
+  hr: "HR / Staff",
+  ops: "Operations",
+  comms: "Communication",
+  other: "Other Modules",
+  settings: "Settings",
+  bottom: "",
+};
 
 interface SidebarProps {
   activePage: string;
@@ -231,16 +356,21 @@ export default function Sidebar({
   collapsed = false,
 }: SidebarProps) {
   const { currentUser } = useApp();
-  const [expandedItems, setExpandedItems] = useState<string[]>(() => {
-    const active = activePage.split("/")[0];
-    return [active];
-  });
+  const [chatUnread, setChatUnread] = useState(0);
 
-  const toggleExpand = (id: string) => {
-    setExpandedItems((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    );
-  };
+  // Poll unread count from localStorage key written by Chat page
+  useEffect(() => {
+    const read = () => {
+      const v = Number.parseInt(
+        localStorage.getItem("shubh_chat_unread") ?? "0",
+        10,
+      );
+      setChatUnread(Number.isNaN(v) ? 0 : v);
+    };
+    read();
+    const interval = setInterval(read, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const canAccess = (item: NavItem): boolean => {
     if (!item.roles) return true;
@@ -251,62 +381,77 @@ export default function Sidebar({
   const isActive = (id: string) =>
     activePage === id || activePage.startsWith(`${id}/`);
 
-  const renderItem = (item: NavItem, depth = 0) => {
+  // Group items by section
+  const sections = NAV_ITEMS.reduce<Record<string, NavItem[]>>((acc, item) => {
+    const sec = item.section ?? "other";
+    if (!acc[sec]) acc[sec] = [];
+    acc[sec].push(item);
+    return acc;
+  }, {});
+
+  const sectionOrder = [
+    "main",
+    "fees",
+    "academic",
+    "hr",
+    "ops",
+    "comms",
+    "other",
+    "settings",
+    "bottom",
+  ];
+
+  const renderItem = (item: NavItem) => {
     if (!canAccess(item)) return null;
     const Icon = item.icon;
-    const hasChildren = (item.children?.length ?? 0) > 0;
-    const expanded = expandedItems.includes(item.id);
     const active = isActive(item.id);
+    const isChatItem = item.id === "chat";
+    const showUnreadBadge = isChatItem && chatUnread > 0;
 
     return (
-      <div key={item.id}>
-        <button
-          type="button"
-          data-ocid={`nav-${item.id.replace(/\//g, "-")}`}
-          onClick={() => {
-            if (hasChildren) toggleExpand(item.id);
-            else onNavigate(item.id);
-          }}
-          className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-smooth group
-            ${depth > 0 ? "ml-3 pl-2.5" : ""}
-            ${
-              active && !hasChildren
-                ? "bg-white/15 text-white font-semibold"
-                : "text-white/70 hover:bg-white/10 hover:text-white"
-            }`}
-        >
+      <button
+        key={item.id}
+        type="button"
+        data-ocid={`nav-${item.id.replace(/\//g, "-")}`}
+        onClick={() => onNavigate(item.id)}
+        title={collapsed ? item.label : undefined}
+        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-smooth group
+          ${
+            active
+              ? "bg-white/15 text-white font-semibold"
+              : "text-white/70 hover:bg-white/10 hover:text-white"
+          }`}
+      >
+        <div className="relative flex-shrink-0">
           <Icon
-            className={`w-4 h-4 flex-shrink-0 ${
-              active && !hasChildren
-                ? "text-white"
-                : "text-white/50 group-hover:text-white/80"
+            className={`w-4 h-4 ${
+              active ? "text-white" : "text-white/50 group-hover:text-white/80"
             }`}
           />
-          {!collapsed && (
-            <>
-              <span className="flex-1 text-left truncate text-[13px]">
-                {item.label}
-              </span>
-              {item.badge && (
-                <span className="text-[9px] font-bold bg-accent/30 text-accent px-1.5 py-0.5 rounded">
-                  {item.badge}
-                </span>
-              )}
-              {hasChildren &&
-                (expanded ? (
-                  <ChevronDown className="w-3.5 h-3.5 opacity-50 flex-shrink-0" />
-                ) : (
-                  <ChevronRight className="w-3.5 h-3.5 opacity-50 flex-shrink-0" />
-                ))}
-            </>
+          {collapsed && showUnreadBadge && (
+            <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center">
+              {chatUnread > 9 ? "9+" : chatUnread}
+            </span>
           )}
-        </button>
-        {!collapsed && hasChildren && expanded && (
-          <div className="mt-0.5 space-y-0.5">
-            {item.children!.map((child) => renderItem(child, depth + 1))}
-          </div>
+        </div>
+        {!collapsed && (
+          <>
+            <span className="flex-1 text-left truncate text-[13px]">
+              {item.label}
+            </span>
+            {showUnreadBadge && (
+              <span className="min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] text-white font-bold flex items-center justify-center px-1">
+                {chatUnread > 99 ? "99+" : chatUnread}
+              </span>
+            )}
+            {item.badge && !showUnreadBadge && (
+              <span className="text-[9px] font-bold bg-accent/30 text-accent px-1.5 py-0.5 rounded">
+                {item.badge}
+              </span>
+            )}
+          </>
         )}
-      </div>
+      </button>
     );
   };
 
@@ -336,8 +481,30 @@ export default function Sidebar({
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5 scrollbar-thin">
-        {NAV_ITEMS.map((item) => renderItem(item))}
+      <nav className="flex-1 overflow-y-auto p-2 scrollbar-thin">
+        {sectionOrder.map((sec) => {
+          const items = sections[sec];
+          if (!items) return null;
+          const accessibleItems = items.filter(canAccess);
+          if (accessibleItems.length === 0) return null;
+          const label = SECTION_LABELS[sec];
+
+          return (
+            <div key={sec} className="mb-2">
+              {!collapsed && label && (
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 px-3 pt-3 pb-1">
+                  {label}
+                </p>
+              )}
+              {collapsed && label && (
+                <div className="border-t border-white/10 my-2" />
+              )}
+              <div className="space-y-0.5">
+                {accessibleItems.map(renderItem)}
+              </div>
+            </div>
+          );
+        })}
       </nav>
 
       {/* Footer */}

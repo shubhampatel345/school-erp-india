@@ -10,8 +10,14 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export default function Examinations() {
-  const [activeTab, setActiveTab] = useState<TabId>("timetable");
+interface ExaminationsProps {
+  initialTab?: string;
+}
+
+export default function Examinations({ initialTab }: ExaminationsProps) {
+  const [activeTab, setActiveTab] = useState<TabId>(
+    (initialTab as TabId) ?? "timetable",
+  );
 
   return (
     <div className="p-4 lg:p-6 space-y-5">

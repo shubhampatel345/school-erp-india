@@ -765,6 +765,56 @@ CREATE TABLE IF NOT EXISTS inventory_sales (
 SQL,
         ],
         [
+            'name' => '010_create_chat_tables',
+            'sql'  => <<<SQL
+CREATE TABLE IF NOT EXISTS chat_conversations (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  school_id   INT UNSIGNED NOT NULL,
+  type        ENUM('direct','class_group','route_group') NOT NULL DEFAULT 'direct',
+  name        VARCHAR(255) NULL,
+  class_id    INT UNSIGNED NULL,
+  section_id  INT UNSIGNED NULL,
+  route_id    INT UNSIGNED NULL,
+  created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  is_deleted  TINYINT(1) DEFAULT 0,
+  INDEX idx_school_id (school_id),
+  INDEX idx_class_section (school_id, class_id, section_id),
+  INDEX idx_route (school_id, route_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  conversation_id  INT UNSIGNED NOT NULL,
+  sender_user_id   INT UNSIGNED NOT NULL,
+  content          TEXT NOT NULL,
+  sent_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  is_deleted       TINYINT(1) DEFAULT 0,
+  INDEX idx_conversation (conversation_id),
+  INDEX idx_sender (sender_user_id),
+  INDEX idx_sent_at (conversation_id, sent_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_conversation_members (
+  id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  conversation_id  INT UNSIGNED NOT NULL,
+  user_id          INT UNSIGNED NOT NULL,
+  last_read_at     TIMESTAMP NULL,
+  joined_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_conv_user (conversation_id, user_id),
+  INDEX idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS chat_message_reads (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  message_id INT UNSIGNED NOT NULL,
+  user_id    INT UNSIGNED NOT NULL,
+  read_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_msg_user (message_id, user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+SQL,
+        ],
+        [
             'name' => '009_create_misc_tables',
             'sql'  => <<<SQL
 CREATE TABLE IF NOT EXISTS expense_heads (

@@ -24,6 +24,7 @@ import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { useSync } from "../hooks/useSync";
 import type { AttendanceRecord, FeeReceipt, Staff, Student } from "../types";
+import { dataService } from "../utils/dataService";
 import { MONTHS, formatCurrency, ls } from "../utils/localStorage";
 
 // ── Stat card ──────────────────────────────────────────────
@@ -92,8 +93,19 @@ function SyncBar() {
     isPolling,
     serverInfo,
     needsAuth,
+    syncedCounts,
   } = useSync();
   const [showTooltip, setShowTooltip] = useState(false);
+
+  // Build a human-readable count summary
+  const countSummary = (() => {
+    const parts: string[] = [];
+    if (syncedCounts.students) parts.push(`${syncedCounts.students} students`);
+    if (syncedCounts.fee_receipts)
+      parts.push(`${syncedCounts.fee_receipts} receipts`);
+    if (syncedCounts.staff) parts.push(`${syncedCounts.staff} staff`);
+    return parts.join(", ");
+  })();
 
   const barConfig = {
     local: {
@@ -107,17 +119,19 @@ function SyncBar() {
     connected: {
       bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
       icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
-      label: "Server Connected — syncing across all devices",
+      label: countSummary
+        ? `Server Synced — ${countSummary}`
+        : "Server Connected — syncing across all devices",
       labelClass: "text-xs font-medium text-emerald-700",
       badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
-      badgeText: "Connected",
+      badgeText: "Synced",
     },
     syncing: {
       bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200/60",
       icon: (
         <Loader2 className="w-4 h-4 text-amber-600 animate-spin flex-shrink-0" />
       ),
-      label: "Syncing with server…",
+      label: "Loading data from server…",
       labelClass: "text-xs font-medium text-amber-700",
       badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
       badgeText: "Syncing",
@@ -232,12 +246,12 @@ function SyncBar() {
       >
         <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
         {showTooltip && (
-          <div className="absolute left-0 top-6 z-50 w-72 bg-card border border-border rounded-lg shadow-elevated p-3 text-xs text-foreground">
+          <div className="absolute left-0 top-6 z-50 w-80 bg-card border border-border rounded-lg shadow-elevated p-3 text-xs text-foreground">
             <p className="font-semibold mb-1 flex items-center gap-1.5">
               {mode === "connected" ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
-                  MySQL Server
+                  MySQL Server (All devices share this data)
                 </>
               ) : mode === "local" ? (
                 <>
@@ -256,20 +270,34 @@ function SyncBar() {
                 </>
               ) : (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Connecting…
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading data…
                 </>
               )}
             </p>
-            {mode === "connected" && serverInfo ? (
+            {mode === "connected" ? (
               <div className="space-y-0.5 text-muted-foreground">
-                {serverInfo.db_version && <p>MySQL {serverInfo.db_version}</p>}
-                {serverInfo.version && <p>API v{serverInfo.version}</p>}
-                {serverInfo.last_backup && (
+                {serverInfo?.db_version && <p>MySQL {serverInfo.db_version}</p>}
+                {serverInfo?.version && <p>API v{serverInfo.version}</p>}
+                {serverInfo?.last_backup && (
                   <p>Last backup: {serverInfo.last_backup}</p>
                 )}
-                <p className="mt-1">
-                  All changes sync across every device logged into this server.
-                </p>
+                <div className="mt-1 pt-1 border-t border-border/50">
+                  <p className="font-medium text-foreground mb-0.5">
+                    Records synced from server:
+                  </p>
+                  {Object.entries(syncedCounts)
+                    .filter(([, count]) => count > 0)
+                    .map(([col, count]) => (
+                      <p key={col} className="flex justify-between">
+                        <span className="capitalize">
+                          {col.replace(/_/g, " ")}
+                        </span>
+                        <span className="font-medium text-foreground">
+                          {count}
+                        </span>
+                      </p>
+                    ))}
+                </div>
               </div>
             ) : mode === "local" ? (
               <p className="text-muted-foreground leading-relaxed">
@@ -329,13 +357,23 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   );
 
   const stats = useMemo(() => {
-    const allStudents = ls.get<Student[]>("students", []);
+    // Use DataService cache (server data) when available, fall back to ls
+    const allStudents =
+      dataService.get<Student>("students").length > 0
+        ? dataService.get<Student>("students")
+        : ls.get<Student[]>("students", []);
     const students = allStudents.filter(
       (s) => s.sessionId === sessionId && s.status === "active",
     );
-    const staff = ls.get<Staff[]>("staff", []);
+    const staff =
+      dataService.get<Staff>("staff").length > 0
+        ? dataService.get<Staff>("staff")
+        : ls.get<Staff[]>("staff", []);
     const today = new Date().toISOString().split("T")[0];
-    const allAttendance = ls.get<AttendanceRecord[]>("attendance", []);
+    const allAttendance =
+      dataService.get<AttendanceRecord>("attendance").length > 0
+        ? dataService.get<AttendanceRecord>("attendance")
+        : ls.get<AttendanceRecord[]>("attendance", []);
     const todayAttendance = allAttendance.filter(
       (a) => a.date === today && a.type === "student",
     );
@@ -343,9 +381,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       (a) => a.status === "Present",
     ).length;
 
-    const receipts = ls
-      .get<FeeReceipt[]>("fee_receipts", [])
-      .filter((r) => r.sessionId === sessionId && !r.isDeleted);
+    const receipts = (
+      dataService.get<FeeReceipt>("fee_receipts").length > 0
+        ? dataService.get<FeeReceipt>("fee_receipts")
+        : ls.get<FeeReceipt[]>("fee_receipts", [])
+    ).filter((r) => r.sessionId === sessionId && !r.isDeleted);
     const todayReceipts = receipts.filter((r) => r.date === today);
     const collectedToday = todayReceipts.reduce(
       (sum, r) => sum + r.totalAmount,
@@ -523,8 +563,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   }, [sessionId]);
 
   const recentReceipts = useMemo(() => {
-    return ls
-      .get<FeeReceipt[]>("fee_receipts", [])
+    const allReceipts =
+      dataService.get<FeeReceipt>("fee_receipts").length > 0
+        ? dataService.get<FeeReceipt>("fee_receipts")
+        : ls.get<FeeReceipt[]>("fee_receipts", []);
+    return allReceipts
       .filter((r) => r.sessionId === sessionId && !r.isDeleted)
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 5);

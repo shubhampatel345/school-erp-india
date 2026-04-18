@@ -30,12 +30,20 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
+import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
 
 // ── Column definitions ────────────────────────────────────────────────────────
@@ -153,13 +161,23 @@ function getCellValue(student: Student, key: string): string {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function Students() {
+interface StudentsProps {
+  onNavigate?: (page: string) => void;
+}
+
+export default function Students({ onNavigate }: StudentsProps) {
   const { currentSession, canWrite, currentUser } = useApp();
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [students, setStudents] = useState<Student[]>(() =>
-    ls.get<Student[]>("students", []),
+  // Subscribe to DataService so the grid re-renders after any server write
+  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
+    dataService.getMode(),
   );
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const [students, setStudents] = useState<Student[]>(() => {
+    const ds = dataService.get<Student>("students");
+    return ds.length > 0 ? ds : ls.get<Student[]>("students", []);
+  });
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
@@ -201,7 +219,8 @@ export default function Students() {
 
   // ── Reload ─────────────────────────────────────────────────────────────────
   const reload = useCallback(() => {
-    setStudents(ls.get<Student[]>("students", []));
+    const ds = dataService.get<Student>("students");
+    setStudents(ds.length > 0 ? ds : ls.get<Student[]>("students", []));
   }, []);
 
   // ── Save column prefs ──────────────────────────────────────────────────────
@@ -340,10 +359,13 @@ export default function Students() {
   }
 
   function handleDelete(student: Student) {
+    // Remove from local state immediately for snappy UX
     const all = ls
       .get<Student[]>("students", [])
       .filter((s) => s.id !== student.id);
     ls.set("students", all);
+    // Also delete from DataService (API + cache)
+    void dataService.delete("students", student.id);
     setDeleteConfirm(null);
     reload();
   }
@@ -353,6 +375,10 @@ export default function Students() {
       .get<Student[]>("students", [])
       .filter((s) => !selectedIds.has(s.id));
     ls.set("students", all);
+    // Delete each from server
+    for (const id of selectedIds) {
+      void dataService.delete("students", id);
+    }
     setSelectedIds(new Set());
     setBulkDeleteConfirm(false);
     reload();
@@ -1191,6 +1217,7 @@ export default function Students() {
             reload();
             setSelectedStudent(updated);
           }}
+          onNavigate={onNavigate}
         />
       )}
     </div>

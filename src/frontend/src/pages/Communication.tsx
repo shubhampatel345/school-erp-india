@@ -18,12 +18,14 @@ import {
   CheckCircle,
   Clock,
   MessageSquare,
+  RefreshCw,
   Save,
   Send,
   Smartphone,
+  Users,
   XCircle,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Staff, Student } from "../types";
 import { LS_KEYS, generateId, ls } from "../utils/localStorage";
@@ -913,8 +915,232 @@ function SchedulerTab() {
   );
 }
 
+// ─── Chat Groups Tab ──────────────────────────────────────
+interface ChatGroup {
+  id: number;
+  name: string;
+  type: "class_group" | "route_group";
+  member_count: number;
+  created_at?: string;
+}
+
+function GroupsTab() {
+  const { currentUser, addNotification } = useApp();
+  const [groups, setGroups] = useState<ChatGroup[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+
+  const apiBase =
+    localStorage.getItem("shubh_erp_api_url") ?? "https://shubh.psmkgs.com/api";
+  const token = localStorage.getItem("shubh_erp_auth_token") ?? "";
+
+  const fetchGroups = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/chat/groups`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { data: ChatGroup[] };
+      setGroups(data.data ?? []);
+    } catch {
+      setGroups([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [apiBase, token]);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetch(`${apiBase}/chat/groups/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      addNotification("Chat groups generated successfully", "success", "💬");
+      await fetchGroups();
+    } catch {
+      addNotification(
+        "Failed to generate groups. Check server connection.",
+        "error",
+        "❌",
+      );
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const classGroups = groups.filter((g) => g.type === "class_group");
+  const routeGroups = groups.filter((g) => g.type === "route_group");
+
+  const canManage =
+    currentUser?.role === "superadmin" || currentUser?.role === "admin";
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <CardTitle className="text-base">Chat Groups</CardTitle>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Auto-generated groups for class/section and transport routes
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchGroups}
+              disabled={loading}
+              data-ocid="groups-refresh-btn"
+            >
+              <RefreshCw
+                className={`w-3.5 h-3.5 mr-1.5 ${loading ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+            {canManage && (
+              <Button
+                size="sm"
+                onClick={handleGenerate}
+                disabled={generating}
+                data-ocid="groups-generate-btn"
+              >
+                <Users className="w-3.5 h-3.5 mr-1.5" />
+                {generating ? "Generating…" : "Generate All Groups"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        {loading ? (
+          <div className="space-y-2">
+            {[...Array(4)].map((_, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: skeleton
+              <div key={i} className="h-12 bg-muted animate-pulse rounded-lg" />
+            ))}
+          </div>
+        ) : groups.length === 0 ? (
+          <div
+            className="flex flex-col items-center justify-center py-14 gap-3 text-muted-foreground"
+            data-ocid="groups.empty_state"
+          >
+            <Users className="w-10 h-10 opacity-20" />
+            <p className="text-sm">No chat groups yet.</p>
+            {canManage && (
+              <p className="text-xs">
+                Click "Generate All Groups" to create class and route groups
+                automatically.
+              </p>
+            )}
+          </div>
+        ) : (
+          <>
+            {classGroups.length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">
+                  Class Groups ({classGroups.length})
+                </p>
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-semibold">
+                          Group Name
+                        </th>
+                        <th className="text-left p-3 font-semibold">Type</th>
+                        <th className="text-right p-3 font-semibold">
+                          Members
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {classGroups.map((g, i) => (
+                        <tr
+                          key={g.id}
+                          className="border-t border-border hover:bg-muted/20"
+                          data-ocid={`class-group.item.${i + 1}`}
+                        >
+                          <td className="p-3 font-medium">{g.name}</td>
+                          <td className="p-3">
+                            <Badge className="bg-teal-100 text-teal-700 border-0 text-xs">
+                              Class Group
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-right font-mono text-sm">
+                            {g.member_count}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {routeGroups.length > 0 && (
+              <div>
+                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground mb-2">
+                  Route Groups ({routeGroups.length})
+                </p>
+                <div className="rounded-lg border border-border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-3 font-semibold">
+                          Group Name
+                        </th>
+                        <th className="text-left p-3 font-semibold">Type</th>
+                        <th className="text-right p-3 font-semibold">
+                          Members
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {routeGroups.map((g, i) => (
+                        <tr
+                          key={g.id}
+                          className="border-t border-border hover:bg-muted/20"
+                          data-ocid={`route-group.item.${i + 1}`}
+                        >
+                          <td className="p-3 font-medium">{g.name}</td>
+                          <td className="p-3">
+                            <Badge className="bg-orange-100 text-orange-700 border-0 text-xs">
+                              Route Group
+                            </Badge>
+                          </td>
+                          <td className="p-3 text-right font-mono text-sm">
+                            {g.member_count}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────
-export default function Communication() {
+interface CommunicationProps {
+  initialTab?: string;
+}
+
+export default function Communication({ initialTab }: CommunicationProps) {
   // Expose imported utilities to prevent lint removal
   void buildFeesDueMessage;
   void buildAbsentMessage;
@@ -934,9 +1160,9 @@ export default function Communication() {
         </div>
       </div>
 
-      <Tabs defaultValue="whatsapp" className="w-full">
+      <Tabs defaultValue={initialTab ?? "whatsapp"} className="w-full">
         <TabsList
-          className="grid grid-cols-3 w-full max-w-lg"
+          className="grid grid-cols-4 w-full max-w-xl"
           data-ocid="comm-tabs"
         >
           <TabsTrigger value="whatsapp" data-ocid="tab-whatsapp">
@@ -947,6 +1173,9 @@ export default function Communication() {
           </TabsTrigger>
           <TabsTrigger value="scheduler" data-ocid="tab-scheduler">
             <Bell className="w-4 h-4 mr-1.5" /> Scheduler
+          </TabsTrigger>
+          <TabsTrigger value="groups" data-ocid="tab-groups">
+            <Users className="w-4 h-4 mr-1.5" /> Groups
           </TabsTrigger>
         </TabsList>
 
@@ -960,6 +1189,10 @@ export default function Communication() {
 
         <TabsContent value="scheduler" className="mt-4">
           <SchedulerTab />
+        </TabsContent>
+
+        <TabsContent value="groups" className="mt-4">
+          <GroupsTab />
         </TabsContent>
       </Tabs>
     </div>

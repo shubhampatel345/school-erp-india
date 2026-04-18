@@ -12,6 +12,7 @@ import { Camera, ChevronDown, ChevronUp, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { AppUser, Student } from "../types";
+import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
 
 interface StudentFormProps {
@@ -178,6 +179,11 @@ export default function StudentForm({
       addNotification(`New student added: ${saved.fullName}`, "success", "👤");
     }
     ls.set("students", all);
+    // Sync to server (DataService handles API + cache update)
+    void dataService.save(
+      "students",
+      saved as unknown as Record<string, unknown>,
+    );
 
     // Auto-create AppUser credentials only when adding (not editing)
     if (isNew) {

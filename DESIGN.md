@@ -57,6 +57,145 @@ Unlike generic admin dashboards (grey-blue-white), SHUBH uses a bold navy primar
 - **Accessibility:** WCAG AA+ contrast on all text; minimum 44px touch targets; focus rings visible on keyboard navigation.
 - **PWA ready:** System fonts fall back gracefully; all bundled fonts load via font-display: swap.
 
+## Chat System (WhatsApp-style)
+
+### Overview
+The chat system enables real-time messaging between users (teachers, students, parents, admins) with auto-generated group chats for class sections and transport routes. Mobile UI mirrors WhatsApp UX: full-screen conversations, bottom input bar, left/right message bubbles, and unread badges.
+
+### Key Components
+
+#### 1. **Chat Data Models**
+- `Message`: { id, chatId, senderId, senderName, senderRole, content, timestamp, read }
+- `Chat`: { id, type, name, participants[], lastMessage, unreadCount, metadata }
+- `ChatType`: 'direct' | 'class_group' | 'route_group'
+
+#### 2. **Chat List View (Desktop & Mobile)**
+- Lists all chats sorted by most recent message
+- Unread badge (red pill) on chat avatar
+- Last message preview text
+- Participant count or recipient name
+- Click to open conversation
+- Mobile: Full-width list; Desktop: 320px sidebar on left
+
+#### 3. **Conversation View (Full-screen Mobile)**
+- **Header:** Back arrow (mobile), chat name, participant count, mute toggle
+- **Message Bubbles:**
+  - Sent (right-aligned, primary blue): `--primary` background, white text
+  - Received (left-aligned, muted gray): `--muted` background, `--foreground` text
+  - Timestamps show on hover/tap
+- **Input Bar (Fixed Bottom):**
+  - Text input field (multiline support, 200px min mobile)
+  - Send button (paper plane icon, primary color)
+  - Padding: 16px from bottom navigation on mobile
+  - Z-index: 40 (above message list)
+
+#### 4. **Auto-Generated Groups**
+- **Class Groups:** Auto-created for each class/section combo (e.g., "Class 2-A Group")
+  - Members: teachers, students in that class, admins
+  - Auto-populated on first sync
+- **Route Groups:** Auto-created for each transport route (e.g., "Route Metro Group")
+  - Members: drivers, parents, admins
+  - Auto-populated when routes created/updated
+
+#### 5. **Direct Messages**
+- One-to-one chats initiated by clicking on any user profile
+- Auto-create on first message
+- Shows user role badge (Teacher, Parent, Student, etc.)
+
+#### 6. **Mobile Navigation**
+- New "Chat" tab in bottom navigation (5th icon after Menu)
+- Unread count badge on Chat icon (red pill with white number)
+- Tapping Chat opens full-screen chat list
+- Tapping a chat opens full-screen conversation
+
+### UI/UX Rules
+
+#### **Spacing & Sizing**
+- Message bubbles: 12px padding, 8px gap between messages
+- Chat list items: 16px padding, 12px gap
+- Input bar: 16px gutter on mobile, 24px on desktop
+- Mobile bottom nav padding: pb-20 for input bar clearance
+
+#### **Colors**
+- **Sent messages:** `bg-primary text-primary-foreground` (Navy/Light-Navy)
+- **Received messages:** `bg-muted text-foreground` (Light-gray/Dark-gray)
+- **Unread badge:** `bg-destructive text-white` (Red)
+- **Timestamps:** `text-muted-foreground text-xs` (Subtle gray)
+- **Active chat highlight:** `bg-secondary` light background, `border-l-4 border-primary`
+
+#### **Typography**
+- **Message text:** 14px / body font (Plus Jakarta Sans)
+- **Chat name:** 16px bold / display font
+- **Participant info:** 12px / muted foreground
+- **Timestamp:** 12px / muted foreground
+
+#### **Animations**
+- Message slide-in: 200ms fade + 50px translate
+- Chat list reorder on new message: instant reorder, smooth scroll
+- Send button pulse on click: 100ms scale feedback
+- Unread badge pulse: soft opacity animation
+
+#### **Mobile-Specific**
+- Full-screen on mobile (no sidebar, 100vw)
+- Conversation header sticky at top (z-40)
+- Input bar sticky at bottom (z-40)
+- Messages scroll area: `calc(100vh - header - input - nav)` height
+- Swipe-to-dismiss on chat bubbles (optional enhancement)
+
+### Storage & Persistence
+- **LocalStorage keys:**
+  - `chats`: Array of Chat objects
+  - `messages`: Record<chatId, Message[]>
+  - `chat_unread_{userId}`: Track per-user unread state
+- **No backend sync required initially** (can be added later via Motoko)
+- Auto-persist on every message send/read
+
+### Integration Points
+
+#### **In App.tsx**
+```tsx
+const [activePage, setActivePage] = useState("dashboard");
+
+// Add to renderPage():
+if (activePage === "chat") return <Chat />;
+```
+
+#### **In Layout.tsx / MobileNav.tsx**
+- Add 5th tab: "Chat" with unread badge
+- Route to activePage="chat" on tap
+
+#### **In Dashboard.tsx**
+- Add "Recent Chats" card widget (optional)
+- Show unread count in header
+
+#### **Data Sync with Students/Transport**
+- On mount: Check if class/section groups exist → auto-create missing ones
+- When new student added: Add to relevant class group
+- When new route added: Auto-create route group
+
 ---
 
 **Files:** `src/frontend/src/index.css` (tokens, fonts), `src/frontend/tailwind.config.js` (Tailwind integration), `.platform/design/preview-*.jpg` (visual reference)
+
+### Chat System Implementation Files to Create
+
+**Core Chat Logic:**
+- `src/frontend/src/utils/chatService.ts` — Chat data management (CRUD, search, unread tracking)
+- `src/frontend/src/context/ChatContext.tsx` — Chat state + actions (useChat hook)
+
+**Components:**
+- `src/frontend/src/components/chat/ChatList.tsx` — List of all chats (desktop sidebar + mobile full-screen)
+- `src/frontend/src/components/chat/ChatConversation.tsx` — Message bubbles + input bar (full-screen on mobile)
+- `src/frontend/src/components/chat/MessageBubble.tsx` — Single message bubble (sent/received styling)
+- `src/frontend/src/components/chat/ChatInputBar.tsx` — Text input + send button (fixed bottom on mobile)
+- `src/frontend/src/components/chat/ChatHeader.tsx` — Conversation header (name + participant count + back arrow)
+
+**Pages:**
+- `src/frontend/src/pages/Chat.tsx` — Main chat page (dispatches to list or conversation view)
+
+**Mobile Navigation:**
+- Update `src/frontend/src/components/MobileNav.tsx` — Add Chat tab (5th position) with unread badge
+
+**Integration:**
+- Update `src/frontend/src/App.tsx` — Add chat route
+- Update `src/frontend/src/pages/Dashboard.tsx` — Add chat widgets/unread count

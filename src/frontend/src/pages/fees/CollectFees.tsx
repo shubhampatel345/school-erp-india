@@ -16,6 +16,7 @@ import type {
   SchoolProfile,
   Student,
 } from "../../types";
+import { dataService } from "../../utils/dataService";
 import {
   MONTHS,
   MONTH_SHORT,
@@ -67,8 +68,15 @@ interface EditReceiptState {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Get all fee receipts — prefer DataService (server) over localStorage */
+function getAllReceipts(): FeeReceipt[] {
+  const ds = dataService.get<FeeReceipt>("fee_receipts");
+  return ds.length > 0 ? ds : ls.get<FeeReceipt[]>("fee_receipts", []);
+}
+
 function getNextReceiptNo(): string {
-  const receipts = ls.get<FeeReceipt[]>("fee_receipts", []);
+  const receipts = getAllReceipts();
   const d = new Date();
   const yy = String(d.getFullYear()).slice(-2);
   const seq = (receipts.filter((r) => !r.isDeleted).length + 1)
@@ -82,7 +90,7 @@ function getPaidMonths(
   headingId: string,
   sessionId: string,
 ): string[] {
-  const receipts = ls.get<FeeReceipt[]>("fee_receipts", []);
+  const receipts = getAllReceipts();
   const paid: string[] = [];
   for (const r of receipts) {
     if (
@@ -101,7 +109,7 @@ function getPaidMonths(
 }
 
 function getAllPaidMonths(studentId: string, sessionId: string): string[] {
-  const receipts = ls.get<FeeReceipt[]>("fee_receipts", []);
+  const receipts = getAllReceipts();
   const paid: string[] = [];
   for (const r of receipts) {
     if (
@@ -132,6 +140,17 @@ function setOldBalanceStore(studentId: string, balance: number) {
   if (balance === 0) delete balances[studentId];
   else balances[studentId] = balance;
   ls.set("old_balances", balances);
+  // Also save to server via dataService as a synthetic record
+  void dataService
+    .save("fee_receipts", {
+      id: `balance_${studentId}`,
+      studentId,
+      _isBalance: true,
+      balance,
+    } as Record<string, unknown>)
+    .catch(() => {
+      /* best-effort */
+    });
 }
 
 function buildQRData(r: FeeReceipt): string {
@@ -171,8 +190,7 @@ function printReceiptHTML(receipt: FeeReceipt) {
     grouped[item.headingId].months.push(item.month);
   }
 
-  const historyRows = ls
-    .get<FeeReceipt[]>("fee_receipts", [])
+  const historyRows = getAllReceipts()
     .filter((r) => r.studentId === receipt.studentId && !r.isDeleted)
     .sort((a, b) => a.date.localeCompare(b.date));
 
@@ -794,8 +812,13 @@ export default function CollectFees() {
       template: 4,
     };
 
-    const all = ls.get<FeeReceipt[]>("fee_receipts", []);
+    const all = getAllReceipts();
     ls.set("fee_receipts", [...all, receipt]);
+    // Sync new receipt to server
+    void dataService.save(
+      "fee_receipts",
+      receipt as unknown as Record<string, unknown>,
+    );
     // Store balance: negative = credit, positive = dues
     setOldBalanceStore(selectedStudent.id, newBalance);
 
@@ -845,10 +868,12 @@ export default function CollectFees() {
   function handleDeleteReceipt(receiptId: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-    const all = ls
-      .get<FeeReceipt[]>("fee_receipts", [])
-      .map((r) => (r.id === receiptId ? { ...r, isDeleted: true } : r));
+    const all = getAllReceipts().map((r) =>
+      r.id === receiptId ? { ...r, isDeleted: true } : r,
+    );
     ls.set("fee_receipts", all);
+    // Soft-delete on server
+    void dataService.delete("fee_receipts", receiptId);
 
     // Recalculate running balance from all remaining non-deleted receipts
     if (selectedStudent) {
@@ -935,7 +960,7 @@ export default function CollectFees() {
 
   function saveEditReceipt() {
     if (!editState || !selectedStudent) return;
-    const all = ls.get<FeeReceipt[]>("fee_receipts", []);
+    const all = getAllReceipts();
     const idx = all.findIndex((r) => r.id === editState.receiptId);
     if (idx < 0) return;
 
@@ -985,6 +1010,12 @@ export default function CollectFees() {
 
     all[idx] = updated;
     ls.set("fee_receipts", all);
+    // Update on server
+    void dataService.update(
+      "fee_receipts",
+      updated.id,
+      updated as unknown as Record<string, unknown>,
+    );
 
     // Recalculate student balance from all non-deleted receipts
     const studentReceipts = all.filter(

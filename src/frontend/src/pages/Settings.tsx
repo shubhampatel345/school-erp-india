@@ -59,11 +59,28 @@ const TABS = [
 
 interface SettingsProps {
   onNavigate?: (page: string) => void;
+  initialTab?: string;
 }
 
-export default function Settings({ onNavigate: _onNavigate }: SettingsProps) {
+// Map sidebar route segments to internal tab IDs
+const SETTINGS_TAB_MAP: Record<string, string> = {
+  profile: "profile",
+  sessions: "sessions",
+  whatsapp: "whatsapp",
+  "online-payment": "payment",
+  notifications: "notifications",
+  users: "users",
+};
+
+export default function Settings({
+  onNavigate: _onNavigate,
+  initialTab,
+}: SettingsProps) {
   const { currentUser } = useApp();
-  const [activeTab, setActiveTab] = useState("profile");
+  const resolvedTab = initialTab
+    ? (SETTINGS_TAB_MAP[initialTab] ?? initialTab)
+    : "profile";
+  const [activeTab, setActiveTab] = useState(resolvedTab);
   const isSuperAdmin = currentUser?.role === "superadmin";
 
   const visibleTabs = TABS.filter((t) => {
