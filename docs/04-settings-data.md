@@ -9,7 +9,25 @@ SHUBH SCHOOL ERP supports two data storage modes:
 | **Local Mode** | Browser localStorage (default) | ❌ Single device only | None |
 | **MySQL Mode** | MySQL database on cPanel server | ✅ Real-time sync | See `02-deploy-cpanel.md` |
 
-In **MySQL Mode**, all data is stored in your cPanel MySQL database. The ERP uses a 5-second polling sync — any change made on one device appears on all other devices within 5 seconds. localStorage is used only as a local cache.
+In **MySQL Mode**, all data is stored in your cPanel MySQL database via the DataService layer. All module pages (Students, Fees, Attendance, HR, Inventory, Expenses, Homework, etc.) read from the server cache and write to MySQL first, then update the local cache. localStorage is used only as a fallback when the server is unreachable.
+
+### DataService Architecture
+
+Every module uses `dataService` (not direct `localStorage`) for reads and writes:
+
+```typescript
+import { dataService } from '../utils/dataService';
+
+// Read (from cache or localStorage)
+const students = dataService.get<Student[]>('students');
+
+// Write (MySQL first → cache → localStorage)
+const saved = await dataService.save('fee_receipts', newReceipt);
+await dataService.update('students', id, changes);
+await dataService.delete('inventory_items', itemId);
+```
+
+There are 27 synced collections: `students`, `staff`, `attendance`, `fee_receipts`, `fees_plan`, `fee_heads`, `fee_headings`, `fee_balances`, `transport_routes`, `pickup_points`, `inventory_items`, `expenses`, `expense_heads`, `homework`, `alumni`, `sessions`, `classes`, `sections`, `subjects`, `notifications`, `biometric_devices`, `payroll_setup`, `payslips`, `whatsapp_logs`, `old_fee_entries`, `student_transport`, `student_discounts`.
 
 ### Sync Status Indicator (Dashboard)
 
@@ -72,31 +90,39 @@ This tab is the control center for MySQL mode. Available to Super Admin only.
 
 1. Enter your API URL: `https://yourdomain.com/api`
 2. Click **Test Connection** — a green ✅ "Connected" message confirms the database is reachable
-3. Click **Save API URL** to persist the setting
+3. Click **Authenticate Now** and enter your Super Admin password (default: `admin123`) — gets a JWT token for all server write calls
+4. Click **Save API URL** to persist the setting
 
-### Migrate Data to Server
+> ⚠️ If you get "Invalid username or password", run the migration first: `https://yourdomain.com/api/migrate.php?action=run` — this creates all tables AND seeds the default superadmin. To reset: `https://yourdomain.com/api/migrate/reset-superadmin`
 
-If you have existing data in localStorage (from before setting up MySQL):
+### Push Local Data to Server
 
-1. Click **Migrate Data to Server**
-2. All localStorage data is uploaded to MySQL in one batch
-3. The sync indicator on the dashboard turns green
-4. From this point, all new data writes to MySQL first
+Click **Push Local Data to Server** to upload all 27 data collections from your browser localStorage to MySQL in one batch. Use this:
+- After first connecting to MySQL (to migrate existing data)
+- After making data changes while offline
+- If server data appears empty after connecting
 
 ### What Data Is Stored Where
 
 | Data | MySQL Mode | Local Mode |
 |------|-----------|------------|
-| Students | MySQL `students` table | localStorage `shubh_erp_students` |
-| Staff | MySQL `staff` table | localStorage `shubh_erp_staff` |
-| Fee Receipts | MySQL `fee_receipts` table | localStorage `shubh_erp_fee_receipts` |
-| Fee Plan | MySQL `fee_plan` table | localStorage `shubh_erp_fee_plan` |
-| Attendance | MySQL `attendance` table | localStorage `shubh_erp_attendance` |
-| Transport | MySQL `transport` table | localStorage `shubh_erp_transport` |
-| Sessions | MySQL `sessions` table | localStorage `shubh_erp_sessions` |
-| School Profile | MySQL `settings` table | localStorage `shubh_erp_school_profile` |
-| User Passwords | MySQL `users` table | localStorage `shubh_erp_user_passwords` |
-| WhatsApp Keys | MySQL `settings` table | localStorage `shubh_erp_settings` |
+| Students | MySQL `students` table | localStorage |
+| Staff | MySQL `staff` table | localStorage |
+| Fee Receipts | MySQL `fee_receipts` table | localStorage |
+| Fee Balances | MySQL `fee_balances` table | localStorage `old_balances` |
+| Fee Plan | MySQL `fees_plan` table | localStorage |
+| Attendance | MySQL `attendance` table | localStorage |
+| Transport | MySQL `transport_routes` table | localStorage |
+| Inventory | MySQL `inventory_items` table | localStorage |
+| Expenses | MySQL `expenses` table | localStorage |
+| Expense Heads | MySQL `expense_heads` table | localStorage |
+| Homework | MySQL `homework` table | localStorage |
+| Payroll Setup | MySQL `payroll_setup` table | localStorage |
+| Student Discounts | MySQL `student_discounts` table | localStorage |
+| Sessions | MySQL `sessions` table | localStorage |
+| School Profile | MySQL `settings` table | localStorage |
+| User Passwords | MySQL `users` table | localStorage |
+| WhatsApp Keys | MySQL `settings` table | localStorage |
 
 ---
 
@@ -153,6 +179,14 @@ When enabled, students/parents can pay fees online. Payments auto-update the Fee
 
 ---
 
+## System Update
+
+`Settings → System Update` (Super Admin only)
+
+Check for new feature releases pushed from the server. The updater shows a changelog and instructions for applying the update. Only Super Admin can trigger updates.
+
+---
+
 ## Themes
 
 `Settings → Themes`
@@ -177,26 +211,41 @@ In MySQL Mode, imported data is written to both localStorage (cache) and the MyS
 
 > ⚠️ Import replaces ALL current data. Export a fresh backup first if needed.
 
+### Push Local Data to Server
+Uploads all 27 localStorage collections to MySQL in one batch. Use this when you've added data offline or when the server shows empty tables.
+
 ### Factory Reset
 3-step confirmation required. Clears ALL school data. Super Admin login is the only credential preserved.
 
 In MySQL Mode, Factory Reset also sends a clear request to the server — all MySQL tables are emptied (not dropped). The tables remain for future use.
 
-### Data Storage Keys (Local Mode Reference)
+### Data Collections Reference (DataService)
 
 ```
-shubh_erp_students          — All student records
-shubh_erp_staff             — All staff records
-shubh_erp_fee_receipts      — All fee payment receipts
-shubh_erp_fee_plan          — Fee structure per class/section
-shubh_erp_fee_headings      — Fee heading definitions
-shubh_erp_sessions          — Session archive
-shubh_erp_attendance        — Daily attendance records
-shubh_erp_transport         — Routes, buses, pickup points
-shubh_erp_inventory         — Stock, purchases, sales
-shubh_erp_expenses          — Income & expense ledger
-shubh_erp_school_profile    — School name, logo, address
-shubh_erp_user_passwords    — Hashed user credentials
-shubh_erp_settings          — App preferences, WhatsApp keys
-shubh_erp_api_url           — Configured MySQL API URL
+students              — All student profiles
+staff                 — All staff and teachers
+attendance            — Daily attendance records
+fee_receipts          — Fee payment receipts
+fees_plan             — Fee amounts per class/section/heading
+fee_heads / fee_headings — Fee heading definitions
+fee_balances          — Running balance per student (carry-forward + credit)
+transport_routes      — Bus routes
+pickup_points         — Pickup stops with monthly fares
+inventory_items       — Stock items, purchases, sales
+expenses              — Income/expense ledger entries
+expense_heads         — Expense categories
+homework              — Homework assignments
+alumni                — Alumni directory
+sessions              — Academic session archive
+classes / sections    — Class structure
+subjects              — Subject definitions
+notifications         — ERP event log
+biometric_devices     — ESSL/ZKTeco device configurations
+payroll_setup         — Staff salary settings
+payslips              — Generated payslips
+whatsapp_logs         — WhatsApp send history
+old_fee_entries       — Manually entered old dues
+student_transport     — Student transport assignments
+student_discounts     — Per-student discount settings
 ```
+

@@ -73,7 +73,7 @@ if ($rawBody) {
 // migrate endpoints are public to allow initial database setup
 $publicRoutes = [
     'auth'    => ['login', 'refresh'],
-    'sync'    => ['status'],          // ← health check must be public
+    'sync'    => ['status'],          // ← health check must be public; push/batch/pull require JWT
     'migrate' => ['run', 'seed', 'status', 'reset-superadmin', ''],  // ← setup/recovery endpoints
 ];
 

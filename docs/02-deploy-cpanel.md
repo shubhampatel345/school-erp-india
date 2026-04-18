@@ -177,18 +177,21 @@ You should see a response like:
 3. Go to **Settings → Data → Database Server** tab
 4. Enter your API URL: `https://yourdomain.com/api`
 5. Click **Test Connection** — you should see a green ✅ "Connected" message
-6. Click **Save API URL**
+6. Click **Authenticate Now** and enter your Super Admin password (admin123) — gets a JWT token
+7. Click **Save API URL**
 
-### Step 12 — Migrate Existing Data (if any)
+> ⚠️ If you get "Invalid username or password" during authentication, first run the migration at `https://yourdomain.com/api/migrate.php?action=run` — this seeds the default superadmin account. If still locked, visit `https://yourdomain.com/api/migrate/reset-superadmin` to reset it.
+
+### Step 12 — Push Existing Data to Server
 
 If you have data in localStorage from before setting up MySQL:
 
 1. Go to **Settings → Data → Database Server** tab
-2. Click **Migrate Data to Server**
-3. All localStorage data is uploaded to MySQL
+2. Click **Push Local Data to Server** (or **Migrate Data to Server**)
+3. All 27 localStorage collections are uploaded to MySQL
 4. Confirm the sync status indicator turns green
 
-After migration, all new data writes to MySQL. localStorage is used only as a local cache.
+After this, all new data writes to MySQL first. localStorage is used only as a local cache.
 
 ### Step 13 — Test Multi-Device Sync
 
@@ -238,6 +241,9 @@ DNS changes take 15 minutes to 24 hours to propagate.
 | Migration fails with table errors | PHP version too old | Check cPanel → MultiPHP Manager — set PHP 7.4 or 8.x for your domain |
 | "CORS error" in browser | `ALLOWED_ORIGIN` mismatch | In `config.php`, set `ALLOWED_ORIGIN` to your exact domain including `https://` |
 | Sync not working | API URL not saved | Settings → Data → Database Server → verify URL is saved and Test shows green |
+| "Unexpected token < ... is not valid JSON" | API returning HTML error page | The `api/` folder may not be uploaded. Open `https://yourdomain.com/api/health` — if you see HTML, upload the PHP API files and re-run migration |
+| "Invalid username or password" on auth | Users table is empty | Run `https://yourdomain.com/api/migrate.php?action=run` to seed default superadmin. Or visit `/api/migrate/reset-superadmin` |
+| "Super Admin only" error on sync | Not authenticated with server | Go to Settings → Data → Database Server → Authenticate Now → enter Super Admin password |
 | Can't install PWA | Not HTTPS or wrong browser | Ensure SSL is active. Use Chrome on Android. iOS requires Safari |
 | QR scanner blocked | Camera permission denied | Chrome Settings → Site Settings → Camera → find your domain → Allow |
 | WhatsApp CORS error | Localhost restriction | Deploy to real domain — CORS only occurs in preview/localhost |

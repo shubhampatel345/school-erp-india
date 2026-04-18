@@ -173,6 +173,14 @@ export default function Students({ onNavigate }: StudentsProps) {
     dataService.getMode(),
   );
 
+  // Reload from DataService/server when the component mounts or DataService updates
+  useEffect(() => {
+    reload();
+    // Trigger a server refresh in the background so fresh data always loads
+    void dataService.refresh("students").catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── State ──────────────────────────────────────────────────────────────────
   const [students, setStudents] = useState<Student[]>(() => {
     const ds = dataService.get<Student>("students");

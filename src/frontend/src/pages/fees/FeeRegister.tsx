@@ -153,11 +153,52 @@ function printReceipt(receipt: FeeReceipt) {
     }
   </body></html>`;
 
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 500);
+  // Primary: hidden iframe — avoids popup blockers completely
+  const existingFrame = document.getElementById(
+    "shubh-print-frame",
+  ) as HTMLIFrameElement | null;
+  if (existingFrame) existingFrame.remove();
+
+  const frame = document.createElement("iframe");
+  frame.id = "shubh-print-frame";
+  frame.style.cssText =
+    "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
+  document.body.appendChild(frame);
+
+  const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
+  if (!frameDoc) {
+    console.error(
+      "shubh-print: iframe contentDocument unavailable, falling back to window.open",
+    );
+    // Fallback: window.open if iframe unavailable
+    const win = window.open("", "_blank");
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 500);
+    }
+    return;
+  }
+
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+
+  setTimeout(() => {
+    try {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    } catch {
+      // Final fallback
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        setTimeout(() => win.print(), 300);
+      }
+    }
+    setTimeout(() => frame.remove(), 3000);
+  }, 400);
 }
 
 export default function FeeRegister() {

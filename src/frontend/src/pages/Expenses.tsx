@@ -31,6 +31,7 @@ import {
 import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Expense, ExpenseHead } from "../types";
+import { dataService } from "../utils/dataService";
 import {
   LS_KEYS,
   MONTHS,
@@ -67,11 +68,16 @@ function exportCsv(data: (Expense & { balance: number })[]) {
 // ─── Ledger Tab ──────────────────────────────────────────
 function LedgerTab() {
   const { currentSession, addNotification } = useApp();
-  const heads = ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []);
+  const headsDs = dataService.get<ExpenseHead>("expense_heads");
+  const heads =
+    headsDs.length > 0
+      ? headsDs
+      : ls.get<ExpenseHead[]>(LS_KEYS.expenseHeads, []);
 
-  const [entries, setEntries] = useState<Expense[]>(() =>
-    ls.get<Expense[]>(LS_KEYS.expenses, []),
-  );
+  const [entries, setEntries] = useState<Expense[]>(() => {
+    const ds = dataService.get<Expense>("expenses");
+    return ds.length > 0 ? ds : ls.get<Expense[]>(LS_KEYS.expenses, []);
+  });
   const [filterType, setFilterType] = useState("all");
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
@@ -132,6 +138,11 @@ function LedgerTab() {
       );
       setEntries(updated);
       ls.set(LS_KEYS.expenses, updated);
+      // Sync update via DataService
+      void dataService.update("expenses", editing.id, {
+        ...form,
+        amount: amt,
+      } as Record<string, unknown>);
     } else {
       const entry: Expense = {
         id: generateId(),
@@ -145,6 +156,11 @@ function LedgerTab() {
       const updated = [...entries, entry];
       setEntries(updated);
       ls.set(LS_KEYS.expenses, updated);
+      // Save via DataService (server-first)
+      void dataService.save(
+        "expenses",
+        entry as unknown as Record<string, unknown>,
+      );
     }
 
     addNotification(
@@ -179,6 +195,8 @@ function LedgerTab() {
     const updated = entries.filter((e) => e.id !== id);
     setEntries(updated);
     ls.set(LS_KEYS.expenses, updated);
+    // Delete via DataService
+    void dataService.delete("expenses", id);
   };
 
   // Running balance

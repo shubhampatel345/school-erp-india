@@ -1280,9 +1280,7 @@ export default function Certificates() {
 
   function handlePrint() {
     if (!canvasRef.current) return;
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(`<html><head><title>Print — ${selectedTemplate?.label}</title>
+    const html = `<html><head><title>Print — ${selectedTemplate?.label}</title>
       <style>
         @page { margin: 0; size: ${canvasW}px ${canvasH}px; }
         body { margin: 0; padding: 0; }
@@ -1294,12 +1292,55 @@ export default function Certificates() {
           (el) =>
             `<div class="el" style="left:${el.x}px;top:${el.y}px;width:${el.width}px;height:${el.height}px;font-family:${el.fontFamily};font-size:${el.fontSize}px;color:${el.fontColor};font-weight:${el.bold ? "bold" : "normal"};font-style:${el.italic ? "italic" : "normal"};text-decoration:${el.underline ? "underline" : "none"};text-align:${el.align};line-height:1.3;">${el.content}</div>`,
         )
-        .join("")}</div></body></html>`);
-    w.document.close();
+        .join("")}</div></body></html>`;
+
+    // Primary: hidden iframe — avoids popup blockers completely
+    const existingFrame = document.getElementById(
+      "shubh-print-frame",
+    ) as HTMLIFrameElement | null;
+    if (existingFrame) existingFrame.remove();
+    const frame = document.createElement("iframe");
+    frame.id = "shubh-print-frame";
+    frame.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
+    document.body.appendChild(frame);
+    const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
+    if (!frameDoc) {
+      console.error(
+        "shubh-print: iframe contentDocument unavailable, falling back to window.open",
+      );
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(html);
+        w.document.close();
+        setTimeout(() => {
+          w.focus();
+          w.print();
+          w.close();
+        }, 400);
+      }
+      return;
+    }
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
     setTimeout(() => {
-      w.focus();
-      w.print();
-      w.close();
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        const w = window.open("", "_blank");
+        if (w) {
+          w.document.write(html);
+          w.document.close();
+          setTimeout(() => {
+            w.focus();
+            w.print();
+            w.close();
+          }, 300);
+        }
+      }
+      setTimeout(() => frame.remove(), 5000);
     }, 400);
   }
 

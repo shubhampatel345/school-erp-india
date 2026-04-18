@@ -3,6 +3,7 @@
  * SHUBH SCHOOL ERP — Sync / Status API
  * GET  /sync/status    Health check + version + DB stats (PUBLIC — no JWT required)
  * POST /sync/push      Bulk upsert from localStorage migration (super_admin only)
+ * POST /sync/batch     Bulk upsert a single named collection (super_admin only)
  * GET  /sync/pull      Pull all changed records since a timestamp
  */
 
@@ -22,6 +23,7 @@ $action   = $segments[1] ?? 'status';
 match ($action) {
     'status' => sync_status($method, $schoolId),
     'push'   => sync_push($method, $schoolId, $body, $route),
+    'batch'  => sync_batch($method, $schoolId, $body, $route),
     'pull'   => sync_pull($method, $schoolId),
     default  => json_error("Unknown sync action: $action", 404),
 };
@@ -149,6 +151,110 @@ function sync_push(string $method, int $schoolId, array $body, array $route): vo
         $db->rollBack();
         json_error('Sync push failed: ' . $e->getMessage(), 500);
     }
+}
+
+// ── Batch Upsert: single named collection ─────────────────────────────────────
+// POST /sync/batch  { collection: string, items: object[] }
+// Returns { pushed: number, errors: string[] }
+function sync_batch(string $method, int $schoolId, array $body, array $route): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!in_array($route['role'], ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+
+    $collection = trim($body['collection'] ?? '');
+    $items      = $body['items'] ?? [];
+
+    if ($collection === '') json_error('collection is required', 400);
+    if (!is_array($items))  json_error('items must be an array', 400);
+
+    // Map client-side collection name → actual MySQL table name
+    $tableMap = [
+        'students'         => 'students',
+        'staff'            => 'staff',
+        'sessions'         => 'sessions',
+        'classes'          => 'classes',
+        'sections'         => 'sections',
+        'subjects'         => 'subjects',
+        'routes'           => 'routes',
+        'route_stops'      => 'route_stops',
+        'pickup_points'    => 'pickup_points',
+        'fee_heads'        => 'fee_heads',
+        'fee_headings'     => 'fee_heads',      // alias used by frontend
+        'fees_plan'        => 'fees_plan',
+        'fee_plans'        => 'fees_plan',
+        'fee_receipts'     => 'fee_receipts',
+        'fee_receipt_items'=> 'fee_receipt_items',
+        'attendance_records'=> 'attendance',
+        'attendance'       => 'attendance',
+        'exam_timetable'   => 'exam_timetable',
+        'teacher_timetable'=> 'teacher_timetable',
+        'inventory_items'  => 'inventory_items',
+        'homework'         => 'homework',
+        'expenses'         => 'expenses',
+        'income'           => 'income',
+        'staff_payroll'    => 'staff_payroll',
+        'transport_months' => 'transport_months',
+        'users'            => 'users',
+        'school_config'    => 'school_config',
+        'academic_sessions'=> 'sessions',
+        'notifications'    => 'notifications',
+        'alumni'           => 'alumni',
+    ];
+
+    if (!isset($tableMap[$collection])) {
+        json_error("Unknown collection: $collection", 400);
+    }
+
+    $table  = $tableMap[$collection];
+    $db     = DB::get();
+    $pushed = 0;
+    $errors = [];
+
+    foreach ($items as $idx => $row) {
+        if (!is_array($row)) {
+            $errors[] = "Item $idx is not an object";
+            continue;
+        }
+
+        $row['school_id'] = $schoolId;
+        $row['is_deleted'] = $row['is_deleted'] ?? 0;
+        if (!isset($row['created_at'])) $row['created_at'] = now();
+        if (!isset($row['updated_at'])) $row['updated_at'] = now();
+
+        // Keep only scalar/null values and safe column names
+        $row      = array_filter($row, fn($v) => is_scalar($v) || is_null($v));
+        $cols     = array_keys($row);
+        $safeCols = array_values(array_filter($cols, fn($c) => preg_match('/^[a-zA-Z0-9_]+$/', $c)));
+
+        if (count($safeCols) !== count($cols) || empty($safeCols)) {
+            $errors[] = "Item $idx has invalid column names";
+            continue;
+        }
+
+        $colList    = implode(',', array_map(fn($c) => "`$c`", $safeCols));
+        $valList    = implode(',', array_map(fn($c) => ":$c", $safeCols));
+        $updateList = implode(',', array_map(
+            fn($c) => "`$c`=:$c",
+            array_filter($safeCols, fn($c) => $c !== 'id')
+        ));
+        $ps = [];
+        foreach ($safeCols as $c) $ps[":$c"] = $row[$c];
+
+        try {
+            $db->prepare("INSERT INTO `$table` ($colList) VALUES ($valList) ON DUPLICATE KEY UPDATE $updateList")
+               ->execute($ps);
+            $pushed++;
+        } catch (PDOException $e) {
+            $errors[] = "Row $idx: " . $e->getMessage();
+        }
+    }
+
+    json_success([
+        'pushed'     => $pushed,
+        'total'      => count($items),
+        'errors'     => $errors,
+        'collection' => $collection,
+        'table'      => $table,
+    ], "$pushed of " . count($items) . " records saved");
 }
 
 // ── Pull Changed Records ──────────────────────────────────────────────────────

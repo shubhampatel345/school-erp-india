@@ -668,6 +668,28 @@ export async function migrateLocalData(
   }
 }
 
+// ── Batch push for a single named collection ─────────────────────────────────
+// POST /sync/batch  { collection, items }
+// Used by the "Push Local Data to Server" feature in DataManagement.
+
+export interface BatchPushResult {
+  pushed: number;
+  total: number;
+  errors: string[];
+  collection: string;
+  table?: string;
+}
+
+export async function batchPushCollection(
+  collection: string,
+  items: unknown[],
+): Promise<BatchPushResult> {
+  return apiFetch<BatchPushResult>("POST", "/sync/batch", {
+    collection,
+    items,
+  });
+}
+
 // ── Connection test ───────────────────────────────────────
 
 export interface ConnectionTestResult {

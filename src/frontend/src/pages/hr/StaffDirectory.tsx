@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useRef, useState } from "react";
 import type { Staff } from "../../types";
+import { dataService } from "../../utils/dataService";
 import { generateId, ls } from "../../utils/localStorage";
 import StaffForm from "./StaffForm";
 
@@ -106,6 +107,8 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       ls.set("staff", updated);
       return updated;
     });
+    // Sync to server via DataService
+    void dataService.save("staff", s as unknown as Record<string, unknown>);
     setShowForm(false);
     setEditStaff(undefined);
   }
@@ -117,6 +120,8 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       ls.set("staff", updated);
       return updated;
     });
+    // Sync delete to server
+    void dataService.delete("staff", id);
     setViewStaff(null);
   }
 
@@ -266,6 +271,13 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         setStaff((prev) => {
           const updated = [...prev, ...imported];
           ls.set("staff", updated);
+          // Sync all imported staff to server
+          for (const s of imported) {
+            void dataService.save(
+              "staff",
+              s as unknown as Record<string, unknown>,
+            );
+          }
           return updated;
         });
 

@@ -37,6 +37,7 @@ import type {
   Student,
   Subject,
 } from "../types";
+import { dataService } from "../utils/dataService";
 import {
   CLASSES,
   LS_KEYS,
@@ -57,9 +58,10 @@ function HomeworkListTab() {
   const { currentSession, currentUser, addNotification } = useApp();
   const subjects = ls.get<Subject[]>(LS_KEYS.subjects, []);
 
-  const [items, setItems] = useState<HomeworkType[]>(() =>
-    ls.get<HomeworkType[]>(LS_KEYS.homework, []),
-  );
+  const [items, setItems] = useState<HomeworkType[]>(() => {
+    const ds = dataService.get<HomeworkType>("homework");
+    return ds.length > 0 ? ds : ls.get<HomeworkType[]>(LS_KEYS.homework, []);
+  });
   const [filterClass, setFilterClass] = useState("all");
   const [filterSubject, setFilterSubject] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -107,6 +109,11 @@ function HomeworkListTab() {
       );
       setItems(updated);
       ls.set(LS_KEYS.homework, updated);
+      // Update via DataService
+      void dataService.update("homework", editing.id, {
+        ...form,
+        assignedBy: currentUser?.name ?? "Teacher",
+      } as Record<string, unknown>);
     } else {
       const hw: HomeworkType = {
         id: generateId(),
@@ -123,6 +130,11 @@ function HomeworkListTab() {
       const updated = [hw, ...items];
       setItems(updated);
       ls.set(LS_KEYS.homework, updated);
+      // Save via DataService (server-first)
+      void dataService.save(
+        "homework",
+        hw as unknown as Record<string, unknown>,
+      );
     }
 
     addNotification(
@@ -159,6 +171,7 @@ function HomeworkListTab() {
     const updated = items.filter((hw) => hw.id !== id);
     setItems(updated);
     ls.set(LS_KEYS.homework, updated);
+    void dataService.delete("homework", id);
   };
 
   const overdueCount = sessionItems.filter(

@@ -1,14 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
+import { dataService } from "../../utils/dataService";
 import { CLASSES, generateId, ls } from "../../utils/localStorage";
 
 export default function FeesPlanPage() {
   const { currentUser, isReadOnly } = useApp();
-  const [headings, setHeadings] = useState<FeeHeading[]>([]);
-  const [plans, setPlans] = useState<FeesPlan[]>([]);
   const [classSections, setClassSections] = useState<ClassSection[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [editValues, setEditValues] = useState<
@@ -19,9 +18,20 @@ export default function FeesPlanPage() {
 
   const isSuperAdmin = currentUser?.role === "superadmin";
 
+  // Subscribe to DataService for live updates
+  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
+    dataService.getMode(),
+  );
+  const headings =
+    dataService.get<FeeHeading>("fee_headings").length > 0
+      ? dataService.get<FeeHeading>("fee_headings")
+      : ls.get<FeeHeading[]>("fee_headings", []);
+  const plans =
+    dataService.get<FeesPlan>("fees_plan").length > 0
+      ? dataService.get<FeesPlan>("fees_plan")
+      : ls.get<FeesPlan[]>("fees_plan", []);
+
   useEffect(() => {
-    setHeadings(ls.get<FeeHeading[]>("fee_headings", []));
-    setPlans(ls.get<FeesPlan[]>("fees_plan", []));
     const cs = ls.get<ClassSection[]>("class_sections", []);
     if (cs.length > 0) {
       setClassSections(cs);
@@ -33,6 +43,9 @@ export default function FeesPlanPage() {
       }));
       setClassSections(built);
     }
+    // Refresh from server
+    void dataService.refresh("fee_headings").catch(() => {});
+    void dataService.refresh("fees_plan").catch(() => {});
   }, []);
 
   // When class changes, initialize edit values from plans
@@ -78,11 +91,14 @@ export default function FeesPlanPage() {
     }));
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!selectedClass || !isSuperAdmin) return;
     setSaving(true);
     const cs = classSections.find((c) => c.className === selectedClass);
-    if (!cs) return;
+    if (!cs) {
+      setSaving(false);
+      return;
+    }
 
     const applicableHeadings = headings.filter(
       (h) =>
@@ -105,25 +121,39 @@ export default function FeesPlanPage() {
         );
         if (existingIdx >= 0) {
           if (amount > 0) {
-            allPlans[existingIdx] = { ...allPlans[existingIdx], amount };
+            const updated = { ...allPlans[existingIdx], amount };
+            allPlans[existingIdx] = updated;
+            // Sync update to server
+            void dataService.update(
+              "fees_plan",
+              updated.id,
+              updated as unknown as Record<string, unknown>,
+            );
           } else {
+            const id = allPlans[existingIdx].id;
             allPlans.splice(existingIdx, 1);
+            void dataService.delete("fees_plan", id);
           }
         } else if (amount > 0) {
-          allPlans.push({
+          const newPlan: FeesPlan = {
             id: generateId(),
             classId: selectedClass,
             sectionId: section,
             headingId: heading.id,
             headingName: heading.name,
             amount,
-          });
+          };
+          allPlans.push(newPlan);
+          // Sync new plan to server
+          void dataService.save(
+            "fees_plan",
+            newPlan as unknown as Record<string, unknown>,
+          );
         }
       }
     }
 
     ls.set("fees_plan", allPlans);
-    setPlans(allPlans);
     setSaving(false);
     setSaved(true);
     setTimeout(() => setSaved(false), 2500);

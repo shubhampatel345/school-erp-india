@@ -38,6 +38,7 @@ import { useApp } from "../../context/AppContext";
 import {
   type ConnectionTestResult,
   backendLogin,
+  batchPushCollection,
   clearTokens,
   getApiUrl,
   getDefaultApiUrl,
@@ -48,6 +49,7 @@ import {
   setApiUrl,
   testConnection,
 } from "../../utils/api";
+import { dataService } from "../../utils/dataService";
 import { generateId } from "../../utils/localStorage";
 
 const PREFIX = "shubh_erp_";
@@ -572,6 +574,201 @@ export default function DataManagement() {
     } finally {
       setIsMigrating(false);
     }
+  }
+
+  // ── Push local localStorage data to server collection-by-collection ─────
+  const [isPushing, setIsPushing] = useState(false);
+  const [pushProgress, setPushProgress] = useState<string[]>([]);
+
+  /** Ensure a valid, non-expired JWT exists. Returns false if auth fails. */
+  async function ensureFreshAuth(): Promise<boolean> {
+    const jwt = getJwt();
+    if (jwt && !isJwtExpired()) return true;
+
+    // Try to re-authenticate using stored password
+    const storedPw =
+      localStorage.getItem("shubh_server_password") ?? "admin123";
+    const result = await backendLogin("superadmin", storedPw);
+    if (result.success) return true;
+
+    toast.error(
+      `Server authentication expired. Re-authenticate in the Database Server tab. (${result.error ?? "Auth failed"})`,
+    );
+    return false;
+  }
+
+  async function handlePushLocalToServer() {
+    if (!savedApiUrl) {
+      toast.error("Save and test the API URL first.");
+      return;
+    }
+
+    // Ensure fresh JWT before starting
+    const authed = await ensureFreshAuth();
+    if (!authed) return;
+
+    setIsPushing(true);
+    setPushProgress(["🔍 Checking batch endpoint…"]);
+
+    // Collections to push: localStorage key → dataService collection name
+    const collectionMap: Record<string, string> = {
+      shubh_erp_students: "students",
+      shubh_erp_staff: "staff",
+      shubh_erp_fees_plan: "fees_plan",
+      shubh_erp_fee_headings: "fee_headings",
+      shubh_erp_sessions: "sessions",
+      shubh_erp_routes: "routes",
+      shubh_erp_route_stops: "route_stops",
+      shubh_erp_fee_receipts: "fee_receipts",
+      shubh_erp_attendance: "attendance_records",
+      shubh_erp_inventory_items: "inventory_items",
+      shubh_erp_homework: "homework",
+      shubh_erp_expenses: "expenses",
+      shubh_erp_income: "income",
+      shubh_erp_payroll: "staff_payroll",
+      shubh_erp_subjects: "subjects",
+      shubh_erp_classes: "classes",
+      shubh_erp_sections: "sections",
+      shubh_erp_notifications: "notifications",
+    };
+
+    // Step 1: Test with a small collection first (sessions)
+    const testKey = "shubh_erp_sessions";
+    const testCollection = "sessions";
+    const testRaw = localStorage.getItem(testKey);
+    const testItems = testRaw
+      ? (() => {
+          try {
+            const p = JSON.parse(testRaw) as unknown;
+            return Array.isArray(p) ? p : [];
+          } catch {
+            return [];
+          }
+        })()
+      : [{ id: "__probe__", name: "test", school_id: 1 }];
+
+    try {
+      await batchPushCollection(testCollection, testItems.slice(0, 1));
+      setPushProgress(["✅ Batch endpoint OK — starting full push…"]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const status =
+        typeof err === "object" && err !== null && "status" in err
+          ? (err as { status: number }).status
+          : 0;
+
+      let diagnostic = `❌ Batch endpoint test failed: ${msg}`;
+      if (status === 404) {
+        diagnostic =
+          "❌ Batch endpoint not found (404) — please re-upload the api/ folder to cPanel. The sync.php file needs to be the latest version.";
+      } else if (status === 401 || status === 403) {
+        diagnostic =
+          "❌ Authentication failed (401/403) — please re-authenticate in the Database Server tab.";
+      } else if (status >= 500) {
+        diagnostic = `❌ Server error (${status}) — check PHP error logs on cPanel. Details: ${msg}`;
+      } else if (msg.includes("HTML") || msg.includes("<!DOCTYPE")) {
+        diagnostic =
+          "❌ Server returned HTML instead of JSON — api/ folder not uploaded or .htaccess not working. Upload api/ to cPanel public_html/.";
+      }
+
+      setPushProgress([diagnostic]);
+      setIsPushing(false);
+      toast.error("Push failed: batch endpoint not reachable. See log above.");
+      return;
+    }
+
+    // Step 2: Push all collections using the batch endpoint
+    let totalPushed = 0;
+    let totalFailed = 0;
+    const finalLog: string[] = ["✅ Batch endpoint OK — starting full push…"];
+
+    for (const [lsKey, collection] of Object.entries(collectionMap)) {
+      const raw = localStorage.getItem(lsKey);
+      if (!raw) continue;
+
+      let items: unknown[];
+      try {
+        const parsed = JSON.parse(raw) as unknown;
+        items = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        finalLog.push(
+          `⚠️ ${collection}: skipped (JSON parse error in localStorage)`,
+        );
+        continue;
+      }
+
+      if (items.length === 0) continue;
+
+      try {
+        // Refresh JWT mid-way if needed
+        if (isJwtExpired()) {
+          const reauthed = await ensureFreshAuth();
+          if (!reauthed) {
+            finalLog.push(
+              `❌ ${collection}: FAILED — token expired and re-auth failed`,
+            );
+            totalFailed++;
+            continue;
+          }
+        }
+
+        const result = await batchPushCollection(collection, items);
+        totalPushed += result.pushed;
+
+        if (result.pushed === items.length) {
+          finalLog.push(
+            `✅ ${collection}: ${result.pushed}/${items.length} records saved to server`,
+          );
+        } else if (result.pushed > 0) {
+          finalLog.push(
+            `⚠️ ${collection}: ${result.pushed}/${items.length} saved — ${result.errors.length} error(s)`,
+          );
+          if (result.errors.length > 0) {
+            finalLog.push(`   └ First error: ${result.errors[0]}`);
+          }
+        } else {
+          totalFailed++;
+          const errDetail =
+            result.errors.length > 0
+              ? result.errors[0]
+              : "All items rejected by server";
+          finalLog.push(`❌ ${collection}: FAILED — ${errDetail}`);
+        }
+      } catch (err) {
+        totalFailed++;
+        const msg = err instanceof Error ? err.message : String(err);
+        const status =
+          typeof err === "object" && err !== null && "status" in err
+            ? (err as { status: number }).status
+            : 0;
+        finalLog.push(
+          `❌ ${collection}: FAILED (${status || "network error"}) — ${msg}`,
+        );
+      }
+
+      // Update progress log in real time
+      setPushProgress([...finalLog]);
+    }
+
+    // Final summary line
+    const summaryLine =
+      totalFailed === 0
+        ? `🎉 Done! ${totalPushed} records successfully pushed to server.`
+        : `⚠️ Done with issues: ${totalPushed} pushed, ${totalFailed} collection(s) failed. Check log above.`;
+    setPushProgress((prev) => [...prev, "", summaryLine]);
+
+    setIsPushing(false);
+
+    if (totalFailed === 0) {
+      toast.success(`Push complete! ${totalPushed} records sent to MySQL.`);
+    } else {
+      toast.warning(
+        `Push finished with ${totalFailed} failures. ${totalPushed} records saved. Check the log for details.`,
+      );
+    }
+
+    // Trigger DataService refresh
+    void dataService.init(true);
   }
 
   // ─────────────────────────────────────────────────────
@@ -1112,33 +1309,81 @@ export default function DataManagement() {
                 </div>
                 <div className="flex-1">
                   <p className="font-semibold text-foreground">
-                    Migrate Local Data to Server
+                    Push Local Data to Server
                   </p>
                   <p className="text-sm text-muted-foreground mt-0.5">
-                    One-time operation to upload all current localStorage data
-                    to your MySQL server. Run this once after connecting to the
-                    server.
+                    Uploads all data currently stored in this browser (students,
+                    fees, attendance, etc.) to your MySQL database. Run this
+                    once after connecting to migrate existing data. After this,
+                    all new data will automatically sync to the server.
                   </p>
                 </div>
               </div>
-              <Button
-                onClick={handleMigrateData}
-                disabled={isMigrating}
-                data-ocid="server.migrate.button"
-                className="w-full sm:w-auto"
-              >
-                {isMigrating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Migrating…
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" />
-                    Migrate Data to Server
-                  </>
-                )}
-              </Button>
+              {pushProgress.length > 0 && (
+                <div className="rounded-lg bg-muted/40 p-3 space-y-0.5 max-h-52 overflow-y-auto text-xs font-mono">
+                  {pushProgress.map((line, i) => {
+                    const isError = line.startsWith("❌");
+                    const isWarn = line.startsWith("⚠️");
+                    const isOk = line.startsWith("✅") || line.startsWith("🎉");
+                    // eslint-disable-next-line react/no-array-index-key
+                    return (
+                      <p
+                        key={`push-${i}-${line.slice(0, 20)}`}
+                        className={
+                          isError
+                            ? "text-red-600 dark:text-red-400"
+                            : isWarn
+                              ? "text-yellow-700 dark:text-yellow-400"
+                              : isOk
+                                ? "text-emerald-700 dark:text-emerald-400"
+                                : "text-foreground"
+                        }
+                      >
+                        {line || "\u00A0"}
+                      </p>
+                    );
+                  })}
+                </div>
+              )}
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  onClick={() => void handlePushLocalToServer()}
+                  disabled={isPushing || isMigrating}
+                  data-ocid="server.push_local.button"
+                  className="w-full sm:w-auto"
+                >
+                  {isPushing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Pushing data…
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-4 h-4 mr-2" />
+                      Push Local Data to Server
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={handleMigrateData}
+                  disabled={isMigrating || isPushing}
+                  data-ocid="server.migrate.button"
+                  className="w-full sm:w-auto"
+                >
+                  {isMigrating ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Migrating…
+                    </>
+                  ) : (
+                    <>
+                      <Database className="w-4 h-4 mr-2" />
+                      Run Full Migration
+                    </>
+                  )}
+                </Button>
+              </div>
             </Card>
           )}
         </TabsContent>

@@ -22,6 +22,7 @@ import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Student, TransportRoute } from "../../types";
+import { dataService } from "../../utils/dataService";
 import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
 import { buildAbsentMessage, sendWhatsApp } from "../../utils/whatsapp";
 
@@ -78,16 +79,14 @@ export default function ManualAttendance({
   const [saving, setSaving] = useState(false);
   const [showRouteBreakdown, setShowRouteBreakdown] = useState(false);
 
-  const allStudents = useMemo(
-    () =>
-      ls
-        .get<Student[]>("students", [])
-        .filter(
-          (s) =>
-            s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-        ),
-    [currentSession],
-  );
+  const allStudents = useMemo(() => {
+    const ds = dataService.get<Student>("students");
+    const list = ds.length > 0 ? ds : ls.get<Student[]>("students", []);
+    return list.filter(
+      (s) =>
+        s.sessionId === (currentSession?.id ?? "") && s.status === "active",
+    );
+  }, [currentSession]);
 
   const routes = useMemo(
     () => ls.get<TransportRoute[]>("transport_routes", []),
@@ -99,13 +98,12 @@ export default function ManualAttendance({
   }).name;
 
   // Summary stats (from all records today)
-  const todayRecords = useMemo(
-    () =>
-      ls
-        .get<AttendanceRecord[]>("attendance", [])
-        .filter((r) => r.date === date && r.type === "student"),
-    [date],
-  );
+  const todayRecords = useMemo(() => {
+    const ds = dataService.get<AttendanceRecord>("attendance");
+    const all =
+      ds.length > 0 ? ds : ls.get<AttendanceRecord[]>("attendance", []);
+    return all.filter((r) => r.date === date && r.type === "student");
+  }, [date]);
 
   const presentTodayIds = useMemo(
     () =>
@@ -136,8 +134,10 @@ export default function ManualAttendance({
       toast.info("No students found for selected class/section");
       return;
     }
-    // Load existing attendance for this date/class
-    const existing = ls.get<AttendanceRecord[]>("attendance", []);
+    // Load existing attendance for this date/class (prefer DataService cache)
+    const ds = dataService.get<AttendanceRecord>("attendance");
+    const existing =
+      ds.length > 0 ? ds : ls.get<AttendanceRecord[]>("attendance", []);
     const loadedRows: StudentRow[] = matching.map((student) => {
       const rec = existing.find(
         (r) => r.date === date && r.studentId === student.id,
@@ -164,7 +164,6 @@ export default function ManualAttendance({
   const handleSave = useCallback(async () => {
     if (rows.length === 0) return;
     setSaving(true);
-    const all = ls.get<AttendanceRecord[]>("attendance", []);
     const now = new Date();
     const timeIn = now.toLocaleTimeString("en-IN", {
       hour: "2-digit",
@@ -172,18 +171,38 @@ export default function ManualAttendance({
     });
 
     const absentStudents: Student[] = [];
+
+    // Get existing attendance (prefer DataService cache)
+    const dsRecords = dataService.get<AttendanceRecord>("attendance");
+    const all =
+      dsRecords.length > 0
+        ? [...dsRecords]
+        : [...ls.get<AttendanceRecord[]>("attendance", [])];
     const updated = [...all];
+
+    const savePromises: Promise<unknown>[] = [];
 
     for (const row of rows) {
       const idx = updated.findIndex(
         (r) => r.date === date && r.studentId === row.student.id,
       );
       if (idx !== -1) {
-        updated[idx].status = row.status as AttendanceRecord["status"];
-        updated[idx].timeIn = timeIn;
-        updated[idx].markedBy = currentUser?.name ?? "System";
+        updated[idx] = {
+          ...updated[idx],
+          status: row.status as AttendanceRecord["status"],
+          timeIn,
+          markedBy: currentUser?.name ?? "System",
+        };
+        // Update via DataService
+        savePromises.push(
+          dataService.update(
+            "attendance",
+            updated[idx].id,
+            updated[idx] as unknown as Record<string, unknown>,
+          ),
+        );
       } else {
-        updated.push({
+        const newRecord: AttendanceRecord = {
           id: generateId(),
           studentId: row.student.id,
           date,
@@ -195,14 +214,25 @@ export default function ManualAttendance({
           section: row.student.section,
           sessionId: currentSession?.id,
           method: "manual",
-        });
+        };
+        updated.push(newRecord);
+        // Save via DataService (server-first)
+        savePromises.push(
+          dataService.save(
+            "attendance",
+            newRecord as unknown as Record<string, unknown>,
+          ),
+        );
       }
       if (row.status === "Absent") {
         absentStudents.push(row.student);
       }
     }
 
+    // Fire all saves in parallel, update localStorage fallback
+    await Promise.allSettled(savePromises);
     ls.set("attendance", updated);
+
     const presentCount_ = rows.filter((r) => r.status === "Present").length;
     const absentCount = rows.filter((r) => r.status === "Absent").length;
     const leaveCount = rows.filter((r) => r.status === "Leave").length;

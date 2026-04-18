@@ -179,7 +179,7 @@ export default function StudentForm({
       addNotification(`New student added: ${saved.fullName}`, "success", "👤");
     }
     ls.set("students", all);
-    // Sync to server (DataService handles API + cache update)
+    // Sync to server via DataService (server-first, cache-backed)
     void dataService.save(
       "students",
       saved as unknown as Record<string, unknown>,

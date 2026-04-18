@@ -111,9 +111,7 @@ export default function DueFees() {
       name: "SHUBH SCHOOL ERP",
       address: "",
     });
-    const win = window.open("", "_blank");
-    if (!win) return;
-    win.document.write(`<!DOCTYPE html><html><head><title>Dues Report</title>
+    const html = `<!DOCTYPE html><html><head><title>Dues Report</title>
     <style>
       body { font-family: Arial, sans-serif; font-size: 12px; padding: 20px; }
       h2 { text-align: center; margin-bottom: 4px; }
@@ -137,9 +135,48 @@ export default function DueFees() {
         <tr class="total"><td colspan="5">Grand Total</td><td>₹${dueRows.reduce((s, r) => s + r.dueAmount, 0)}</td></tr>
       </tbody>
     </table>
-    </body></html>`);
-    win.document.close();
-    win.print();
+    </body></html>`;
+
+    // Primary: hidden iframe — avoids popup blockers completely
+    const existingFrame = document.getElementById(
+      "shubh-print-frame",
+    ) as HTMLIFrameElement | null;
+    if (existingFrame) existingFrame.remove();
+    const frame = document.createElement("iframe");
+    frame.id = "shubh-print-frame";
+    frame.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
+    document.body.appendChild(frame);
+    const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
+    if (!frameDoc) {
+      console.error(
+        "shubh-print: iframe contentDocument unavailable, falling back to window.open",
+      );
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        win.print();
+      }
+      return;
+    }
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
+    setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        const win = window.open("", "_blank");
+        if (win) {
+          win.document.write(html);
+          win.document.close();
+          setTimeout(() => win.print(), 300);
+        }
+      }
+      setTimeout(() => frame.remove(), 5000);
+    }, 400);
   }
 
   function handleExcel() {
@@ -179,8 +216,6 @@ export default function DueFees() {
       principalName: "Principal",
     });
     const today = new Date().toLocaleDateString("en-IN");
-    const win = window.open("", "_blank");
-    if (!win) return;
     const pages = dueRows
       .map(
         (r) => `
@@ -206,11 +241,48 @@ export default function DueFees() {
       </div>`,
       )
       .join("");
-    win.document.write(
-      `<!DOCTYPE html><html><head><title>Fee Reminder Letters</title></head><body>${pages}</body></html>`,
-    );
-    win.document.close();
-    win.print();
+    const html = `<!DOCTYPE html><html><head><title>Fee Reminder Letters</title></head><body>${pages}</body></html>`;
+
+    // Primary: hidden iframe — avoids popup blockers completely
+    const existingFrame = document.getElementById(
+      "shubh-print-frame",
+    ) as HTMLIFrameElement | null;
+    if (existingFrame) existingFrame.remove();
+    const frame = document.createElement("iframe");
+    frame.id = "shubh-print-frame";
+    frame.style.cssText =
+      "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
+    document.body.appendChild(frame);
+    const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
+    if (!frameDoc) {
+      console.error(
+        "shubh-print: iframe contentDocument unavailable, falling back to window.open",
+      );
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        win.print();
+      }
+      return;
+    }
+    frameDoc.open();
+    frameDoc.write(html);
+    frameDoc.close();
+    setTimeout(() => {
+      try {
+        frame.contentWindow?.focus();
+        frame.contentWindow?.print();
+      } catch {
+        const win = window.open("", "_blank");
+        if (win) {
+          win.document.write(html);
+          win.document.close();
+          setTimeout(() => win.print(), 300);
+        }
+      }
+      setTimeout(() => frame.remove(), 5000);
+    }, 400);
   }
 
   async function handleWhatsAppReminder() {

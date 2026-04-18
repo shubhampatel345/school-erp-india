@@ -384,7 +384,22 @@ const MODULES = [
       "Online Payment: toggle GPay / Razorpay / PayU gateways on/off.",
       "Notification Scheduler: configure all 7 auto-notification events.",
       "Themes: select and save preferred color theme (multiple themes available).",
-      "Data Management: Export JSON Backup, Import JSON Backup, Factory Reset (3-step confirmation), backup history log.",
+      "Data Management: Export JSON Backup, Import JSON Backup, Push Local Data to Server (uploads browser data to MySQL), Factory Reset (3-step confirmation), backup history log.",
+      "Database Server tab (Super Admin): enter API URL, Test Connection, Authenticate with server, Migrate Data to Server, Run Setup (first time), Push Local Data to Server.",
+      "System Update: Super Admin can check for new feature releases pushed from the server and apply them.",
+    ],
+  },
+  {
+    name: "Data Sync (MySQL Mode)",
+    icon: "🔄",
+    desc: [
+      "All data operations go through the DataService layer — reads from server cache, writes to MySQL first, then updates local cache.",
+      "Modules that write to MySQL: Students, Fees (Collect, Headings, Plan), Attendance, HR (Staff, Payroll), Transport, Inventory, Expenses, Homework, Alumni, Sessions.",
+      "Sync status on dashboard: 🟢 Connected = server live; 🔴 Offline = server unreachable; 🔄 Syncing = transfer in progress; 🟡 Local = no server configured.",
+      "Push Local Data to Server: Settings → Data → Database Server → Push Local Data. Uploads all browser data (27 collections) to MySQL in one batch. Useful after adding data offline.",
+      "Collections synced: students, staff, attendance, fee_receipts, fees_plan, fee_heads, fee_headings, fee_balances, transport_routes, pickup_points, inventory_items, expenses, expense_heads, homework, alumni, sessions, classes, sections, subjects, notifications, biometric_devices, payroll_setup, payslips, whatsapp_logs, old_fee_entries, student_transport, student_discounts.",
+      "fee_balances collection: stores running balance per student (old balance carry-forward from previous payments and month-wise dues).",
+      "student_discounts collection: per-student fixed monthly discount with applicable heading IDs.",
     ],
   },
 ];
@@ -477,7 +492,23 @@ const FAQS = [
   },
   {
     q: "Can the ERP work on multiple devices / computers simultaneously?",
-    a: "In Local Mode (default), data is stored in browser localStorage per device — different devices have separate data. To enable real-time multi-device sync, set up MySQL Mode: go to Settings → Data → Database Server, configure your cPanel API URL, and click Migrate Data to Server. After that, all staff, admins, and parents share the same live data from any device. See the cPanel + MySQL Setup section for the complete guide.",
+    a: "In Local Mode (default), data is stored in browser localStorage per device — different devices have separate data. To enable real-time multi-device sync, set up MySQL Mode: go to Settings → Data → Database Server, enter your cPanel API URL (https://yourschool.com/api), click Test Connection, authenticate with Super Admin password, then click Migrate Data to Server. After that, all staff, admins, and parents share the same live data from any device. See the cPanel + MySQL Setup section for the complete guide.",
+  },
+  {
+    q: "I added students but they don't appear on another device. Why?",
+    a: "The ERP is in Local Mode — data is stored only in this browser. To sync across devices, you must configure MySQL Mode in Settings → Data → Database Server. Once set up, use 'Push Local Data to Server' to upload existing data, then all future writes go to the server automatically.",
+  },
+  {
+    q: "Server shows 'Connected' green but my data is empty in MySQL. How to fix?",
+    a: "The green Connected status only confirms the server is reachable. It doesn't mean your data has been synced. Go to Settings → Data → Database Server → click 'Push Local Data to Server'. This uploads all 27 data collections from your browser to MySQL in one batch.",
+  },
+  {
+    q: "I get 'Unexpected token < ... is not valid JSON' error when syncing.",
+    a: "This means the server is returning an HTML error page instead of JSON — usually because the PHP API files are not uploaded, the config.php credentials are wrong, or the API URL is incorrect. Check: 1) Open https://yourschool.com/api/health in browser — if you see HTML instead of JSON, the API is missing. 2) Verify config.php has correct DB_NAME and DB_USER (with cPanel prefix). 3) Ensure API URL in Settings ends with /api not /api/.",
+  },
+  {
+    q: "I get 'Invalid username or password' when authenticating with server.",
+    a: "The server authentication requires a superadmin account in the MySQL users table. If you just ran the migration, the users table may be empty. Open https://yourschool.com/api/migrate.php?action=run in your browser — this creates tables AND seeds the default superadmin (username: superadmin, password: admin123). Then try authenticating again with those credentials.",
   },
 ];
 
@@ -1970,20 +2001,32 @@ function BackupRestore() {
         <h3 className="font-semibold text-foreground">
           Data Storage Keys Reference
         </h3>
-        <Code>{`shubh_erp_students          — All student records
-shubh_erp_staff             — All staff records
-shubh_erp_fee_receipts      — All fee payment receipts
-shubh_erp_fee_plan          — Fee structure per class/section
-shubh_erp_fee_headings      — Fee heading definitions
-shubh_erp_sessions          — Session archive
-shubh_erp_attendance        — Daily attendance records
-shubh_erp_transport         — Routes, buses, pickup points
-shubh_erp_inventory         — Stock, purchases, sales
-shubh_erp_expenses          — Income & expense ledger
-shubh_erp_school_profile    — School name, logo, address
-shubh_erp_user_passwords    — Hashed user credentials
-shubh_erp_settings          — App preferences, WhatsApp keys
-shubh_erp_api_url            — Configured MySQL API URL`}</Code>
+        <Code>{`// DataService collections (27 total) — all synced to MySQL when server is configured
+students              — All student profiles
+staff                 — All staff and teachers
+attendance            — Daily attendance records
+fee_receipts          — Fee payment receipts
+fees_plan             — Fee amounts per class/section/heading
+fee_heads / fee_headings — Fee heading definitions
+fee_balances          — Running balance per student (carry-forward)
+transport_routes      — Bus routes
+pickup_points         — Pickup stops with monthly fares
+inventory_items       — Stock items, purchases, sales
+expenses              — Income/expense ledger entries
+expense_heads         — Expense categories
+homework              — Homework assignments
+alumni                — Alumni directory
+sessions              — Academic session archive
+classes / sections    — Class structure
+subjects              — Subject definitions
+notifications         — ERP event log
+biometric_devices     — ESSL/ZKTeco device configurations
+payroll_setup         — Staff salary settings
+payslips              — Generated payslips
+whatsapp_logs         — WhatsApp send history
+old_fee_entries       — Manually entered old dues
+student_transport     — Student transport assignments
+student_discounts     — Per-student discount settings`}</Code>
       </Card>
     </div>
   );
@@ -2534,20 +2577,29 @@ pnpm build
 ├── hooks/
 │   └── useQueries.ts    # React Query data hooks
 ├── pages/               # One file per module
-│   ├── settings/        # Settings sub-tabs
-│   ├── fees/            # Fees sub-tabs (Collect, Plan, Headings...)
-│   ├── hr/              # HR sub-tabs (Staff, Payroll, Leave)
-│   └── academics/       # Academics sub-tabs
+│   ├── settings/        # Settings sub-tabs (DataManagement.tsx, etc.)
+│   ├── fees/            # Fees sub-tabs (CollectFees, FeeHeading, FeePlan...)
+│   ├── attendance/      # ManualAttendance, QrScanner, BiometricDevices
+│   ├── hr/              # Staff, Payroll, Leave
+│   └── academics/       # Classes, Subjects, Timetables
 ├── types/
 │   └── index.ts         # All TypeScript interfaces
 └── utils/
     ├── localStorage.ts  # ls() helper, MONTHS, CLASSES, generateId
+    ├── dataService.ts   # Server-first data layer (27 collections, MySQL sync)
+    ├── api.ts           # PHP API fetch helpers (fetchCollection, saveCollectionItem...)
     └── whatsapp.ts      # wacoder.in API integration
 
 docs/                    # Markdown documentation (this content)
 public/
 ├── manifest.json        # PWA manifest
 ├── sw.js                # Service worker (offline cache)
+├── api/                 # PHP REST API — upload to public_html/api/ on cPanel
+│   ├── config.php       # Database credentials (edit this)
+│   ├── index.php        # API router
+│   ├── data.php         # Generic collection CRUD endpoint
+│   ├── migrate.php      # Creates all MySQL tables on first run
+│   └── endpoints/       # Per-module endpoints
 └── assets/
     ├── fonts/           # SpaceGrotesk, PlusJakartaSans, JetBrainsMono
     └── icons/           # App icons (192×192, 512×512)`}</Code>
@@ -2560,31 +2612,51 @@ public/
           rows={[
             ["Frontend", "React 19 + TypeScript"],
             ["Styling", "Tailwind CSS + shadcn/ui"],
-            ["State / Data", "localStorage (browser-side storage)"],
+            ["State / Data (local)", "localStorage via DataService cache"],
+            [
+              "State / Data (server)",
+              "MySQL on cPanel via PHP REST API + DataService",
+            ],
             ["Build tool", "Vite"],
             ["Icons", "Lucide React"],
             ["Animations", "motion/react"],
             ["Fonts", "Space Grotesk, Plus Jakarta Sans, JetBrains Mono"],
             ["WhatsApp", "wacoder.in REST API"],
+            ["Calling", "Heyophone WebRTC (browser-based VoIP)"],
           ]}
         />
       </Card>
 
       <Card className="p-5 space-y-3">
         <h3 className="font-semibold text-foreground">Key Utilities</h3>
-        <Code>{`// Read from localStorage
-ls.get('students', [])
+        <Code>{`// === dataService (server-first, all modules should use this) ===
+import { dataService } from '../utils/dataService';
 
-// Write to localStorage
-ls.set('students', studentArray)
+// Read all records from a collection (from cache or localStorage)
+const students = dataService.get<Student[]>('students');
 
-// Generate unique ID
-generateId()
+// Save a new record (writes to MySQL API first, then updates cache)
+const saved = await dataService.save('fee_receipts', newReceipt);
 
-// Indian academic year months (April → March)
-MONTHS = ['April', 'May', 'June', ..., 'March']
+// Update an existing record by local id
+await dataService.update('students', studentId, { class: 'Class 6' });
 
-// All class names
+// Delete a record
+await dataService.delete('inventory_items', itemId);
+
+// Re-fetch a single collection from server
+await dataService.refresh('attendance');
+
+// === localStorage helpers (legacy / direct access) ===
+ls.get('students', [])   // Read from localStorage
+ls.set('students', arr)  // Write to localStorage
+
+// === Shared utilities ===
+generateId()             // Generate a UUID-style unique ID
+
+MONTHS = ['April', 'May', 'June', 'July', 'August', 'September',
+          'October', 'November', 'December', 'January', 'February', 'March']
+
 CLASSES = ['Nursery', 'LKG', 'UKG', 'Class 1', ..., 'Class 12']
 
 // Send WhatsApp message via wacoder.in
@@ -2755,9 +2827,25 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
             5. Click <strong>Test Connection</strong> — green ✅ = success
           </li>
           <li>
-            6. Click <strong>Save API URL</strong>
+            6. Click <strong>Authenticate Now</strong> and enter your Super
+            Admin password (default: admin123) to get a server JWT token
+          </li>
+          <li>
+            7. Click <strong>Save API URL</strong>
           </li>
         </ol>
+        <Alert type="warn">
+          ⚠️ If you get "Invalid username or password", run the migration first:{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            https://yourdomain.com/api/migrate.php?action=run
+          </code>{" "}
+          — this seeds the default superadmin account. If you need to reset it:
+          visit{" "}
+          <code className="text-xs bg-muted px-1 rounded">
+            https://yourdomain.com/api/migrate/reset-superadmin
+          </code>
+          .
+        </Alert>
       </Card>
 
       <Card className="p-5 space-y-4">
@@ -2775,14 +2863,20 @@ define('ALLOWED_ORIGIN', 'https://yourdomain.com');
             </strong>
           </li>
           <li>
-            2. Click <strong>Migrate Data to Server</strong>
+            2. Click{" "}
+            <strong className="text-foreground">
+              Push Local Data to Server
+            </strong>{" "}
+            (or <strong>Migrate Data to Server</strong>)
           </li>
-          <li>3. All localStorage data uploads to MySQL</li>
+          <li>3. All 27 localStorage collections upload to MySQL</li>
           <li>4. Sync indicator on dashboard turns green ✅</li>
         </ol>
         <Alert type="info">
           ℹ️ After migration, all new writes go to MySQL first. localStorage is
-          used as a local cache only.
+          used as a local cache only. You can use "Push Local Data to Server"
+          again any time you have made changes offline and want to force-upload
+          them.
         </Alert>
       </Card>
 
@@ -2876,15 +2970,30 @@ function DbSchema() {
             ["fee_headings", "Fee heading definitions with applicable months"],
             ["fee_plan", "Fee amounts per class, section, and heading"],
             ["fee_receipts", "Individual fee payment records and receipts"],
+            [
+              "fee_balances",
+              "Running balance per student (carry-forward + credit)",
+            ],
             ["attendance", "Daily attendance records per student"],
             ["transport", "Bus routes, pickup points, and monthly fares"],
             ["inventory", "Stock items, purchases, and sales records"],
             ["expenses", "Income and expense ledger entries"],
+            ["expense_heads", "Expense category/head definitions"],
             ["homework", "Homework assignments with due dates"],
             ["alumni", "Alumni directory records"],
             ["settings", "Key-value store for app preferences and API keys"],
             ["school_profile", "School name, address, logo, theme settings"],
             ["notifications", "ERP event notification log"],
+            ["payroll_setup", "Staff salary and payroll configuration"],
+            ["payslips", "Generated payslip records"],
+            [
+              "student_discounts",
+              "Per-student monthly discount with applicable headings",
+            ],
+            [
+              "biometric_devices",
+              "ESSL/ZKTeco device IP and sync configuration",
+            ],
           ]}
         />
       </Card>
@@ -3189,41 +3298,58 @@ POST /auth/login
         />
       </Accordion>
 
-      <Accordion title="Backup & Sync Endpoints (/backup, /sync)">
-        <DocTable
-          headers={["Method", "Endpoint", "Description", "Auth"]}
-          rows={[
-            ["GET", "/backup/export", "Export full DB as JSON", "Super Admin"],
-            ["POST", "/backup/import", "Import JSON to DB", "Super Admin"],
-            [
-              "POST",
-              "/backup/reset",
-              "Factory reset all tables",
-              "Super Admin",
-            ],
-            ["GET", "/sync/status", "Check server status", "Yes"],
-            ["POST", "/sync/push", "Push localStorage to server", "Admin+"],
-            [
-              "GET",
-              "/sync/pull?since={timestamp}",
-              "Pull changes since timestamp",
-              "Yes",
-            ],
-          ]}
-        />
-        <Code>{`// Pull example (used by 5-second polling)
-GET /sync/pull?since=2025-10-15T08:30:00Z
+      <Accordion title="Backup & Sync Endpoints (/backup, /sync, /data.php)">
+        <div className="space-y-3">
+          <DocTable
+            headers={["Method", "Endpoint", "Description", "Auth"]}
+            rows={[
+              [
+                "GET",
+                "/backup/export",
+                "Export full DB as JSON",
+                "Super Admin",
+              ],
+              ["POST", "/backup/import", "Import JSON to DB", "Super Admin"],
+              [
+                "POST",
+                "/backup/reset",
+                "Factory reset all tables",
+                "Super Admin",
+              ],
+              ["GET", "/sync/status", "Check server status", "Yes"],
+              ["POST", "/sync/push", "Push localStorage to server", "Admin+"],
+              [
+                "GET",
+                "/sync/pull?since={timestamp}",
+                "Pull changes since timestamp",
+                "Yes",
+              ],
+            ]}
+          />
+          <p className="text-sm text-muted-foreground font-medium">
+            data.php — Generic collection CRUD (used by DataService):
+          </p>
+          <Code>{`// GET all items in a collection
+GET /data.php?collection=students
 
-// Response
-{
-  "success": true,
-  "data": {
-    "students": [...],      // Changed records since timestamp
-    "fee_receipts": [...],
-    "attendance": [...]
-  },
-  "server_time": "2025-10-15T08:35:00Z"
-}`}</Code>
+// POST — save a new item
+POST /data.php?collection=fee_receipts
+{"id": "uuid", "student_id": "...", ...}
+
+// PUT — update existing item
+PUT /data.php?collection=attendance&id=123
+
+// DELETE — remove item
+DELETE /data.php?collection=inventory_items&id=123
+
+// Whitelisted collections in data.php:
+// students, staff, attendance, fee_receipts, fees_plan,
+// fee_heads, fee_headings, fee_balances, transport_routes,
+// pickup_points, inventory_items, expenses, expense_heads,
+// homework, alumni, sessions, classes, sections, subjects,
+// notifications, biometric_devices, payroll_setup, payslips,
+// whatsapp_logs, old_fee_entries, student_transport, student_discounts`}</Code>
+        </div>
       </Accordion>
 
       <Accordion title="Migration Endpoint (/migrate.php)">

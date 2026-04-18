@@ -34,10 +34,13 @@ export const COLLECTIONS = [
   "fee_receipts",
   "fees_plan",
   "fee_heads",
+  "fee_headings",
+  "fee_balances",
   "transport_routes",
   "pickup_points",
   "inventory_items",
   "expenses",
+  "expense_heads",
   "homework",
   "alumni",
   "sessions",
@@ -46,6 +49,12 @@ export const COLLECTIONS = [
   "subjects",
   "notifications",
   "biometric_devices",
+  "payroll_setup",
+  "payslips",
+  "whatsapp_logs",
+  "old_fee_entries",
+  "student_transport",
+  "student_discounts",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
@@ -280,13 +289,35 @@ class DataService {
     this.notify();
   }
 
+  /**
+   * Wait for DataService initialization to complete.
+   * Returns immediately if already ready or offline.
+   */
+  waitForInit(): Promise<void> {
+    if (this.mode === "ready" || this.mode === "offline")
+      return Promise.resolve();
+    if (this.initPromise) return this.initPromise;
+    return Promise.resolve();
+  }
+
+  /** True only when data has been loaded from the server */
+  isReady(): boolean {
+    return this.mode === "ready";
+  }
+
   private lsKey(collection: string): string {
     // Map collection names to their localStorage keys used by legacy code
     const legacy: Record<string, string> = {
       fee_heads: "fee_headings",
+      fee_headings: "fee_headings",
       transport_routes: "transport_routes_v2",
       pickup_points: "transport_routes_v2", // stored inside routes
       sections: "class_sections",
+      expense_heads: "expense_heads",
+      fee_balances: "old_balances",
+      student_transport: "student_transport_v2",
+      student_discounts: "student_discounts",
+      old_fee_entries: "old_fee_entries",
     };
     return legacy[collection] ?? collection;
   }

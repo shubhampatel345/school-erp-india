@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -10,16 +10,28 @@ import {
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { FeeHeading } from "../../types";
+import { dataService } from "../../utils/dataService";
 import { CLASSES, MONTHS, generateId, ls } from "../../utils/localStorage";
 
 export default function FeeHeadingPage() {
   const { isReadOnly, currentUser } = useApp();
-  const [headings, setHeadings] = useState<FeeHeading[]>([]);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
+
+  // Subscribe to DataService so the list re-renders after server writes
+  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
+    dataService.getMode(),
+  );
+  const headingsDs = dataService.get<FeeHeading>("fee_heads");
+  const headingsDs2 = dataService.get<FeeHeading>("fee_headings");
+  const dsHeadings = headingsDs.length > 0 ? headingsDs : headingsDs2;
+  const headings =
+    dsHeadings.length > 0
+      ? dsHeadings
+      : ls.get<FeeHeading[]>("fee_headings", []);
 
   const canEdit =
     currentUser?.role === "superadmin" ||
@@ -27,26 +39,30 @@ export default function FeeHeadingPage() {
     currentUser?.role === "accountant";
 
   useEffect(() => {
-    setHeadings(ls.get<FeeHeading[]>("fee_headings", []));
+    // Warm up cache from localStorage on first render if dataService not ready
+    void dataService.refresh("fee_headings").catch(() => {
+      /* best-effort */
+    });
   }, []);
 
-  function save() {
+  async function save() {
     if (!name.trim() || selectedMonths.length === 0) return;
-    const all = ls.get<FeeHeading[]>("fee_headings", []);
     if (editId) {
-      const updated = all.map((h) =>
-        h.id === editId
-          ? {
-              ...h,
-              name: name.trim(),
-              months: selectedMonths,
-              applicableClasses:
-                selectedClasses.length > 0 ? selectedClasses : undefined,
-            }
-          : h,
+      const existing = headings.find((h) => h.id === editId);
+      if (!existing) return;
+      const updated: FeeHeading = {
+        ...existing,
+        name: name.trim(),
+        months: selectedMonths,
+        applicableClasses:
+          selectedClasses.length > 0 ? selectedClasses : undefined,
+      };
+      // Save via DataService FIRST (server-first write, updates cache + ls)
+      await dataService.update(
+        "fee_headings",
+        editId,
+        updated as unknown as Record<string, unknown>,
       );
-      ls.set("fee_headings", updated);
-      setHeadings(updated);
     } else {
       const h: FeeHeading = {
         id: generateId(),
@@ -56,25 +72,24 @@ export default function FeeHeadingPage() {
           selectedClasses.length > 0 ? selectedClasses : undefined,
         amount: 0,
       };
-      const updated = [...all, h];
-      ls.set("fee_headings", updated);
-      setHeadings(updated);
+      // Save via DataService FIRST (server-first write, updates cache + ls)
+      await dataService.save(
+        "fee_headings",
+        h as unknown as Record<string, unknown>,
+      );
     }
     resetForm();
   }
 
-  function deleteHeading(id: string) {
+  async function deleteHeading(id: string) {
     if (
       !confirm(
         "Delete this fee heading? This will also remove it from all fee plans.",
       )
     )
       return;
-    const updated = ls
-      .get<FeeHeading[]>("fee_headings", [])
-      .filter((h) => h.id !== id);
-    ls.set("fee_headings", updated);
-    setHeadings(updated);
+    // Delete via DataService (server-first)
+    await dataService.delete("fee_headings", id);
   }
 
   function openEdit(h: FeeHeading) {

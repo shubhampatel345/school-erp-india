@@ -69,10 +69,12 @@ interface EditReceiptState {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Get all fee receipts — prefer DataService (server) over localStorage */
+/** Get all fee receipts — always prefer DataService cache (server-synced) */
 function getAllReceipts(): FeeReceipt[] {
   const ds = dataService.get<FeeReceipt>("fee_receipts");
-  return ds.length > 0 ? ds : ls.get<FeeReceipt[]>("fee_receipts", []);
+  if (ds.length > 0) return ds;
+  // Fallback to localStorage when DataService cache is empty (offline mode)
+  return ls.get<FeeReceipt[]>("fee_receipts", []);
 }
 
 function getNextReceiptNo(): string {
@@ -125,32 +127,62 @@ function getAllPaidMonths(studentId: string, sessionId: string): string[] {
   return paid;
 }
 
+/** Get old balance — prefer DataService fee_balances, fallback to localStorage */
 function getOldBalance(studentId: string): number {
+  // Try DataService fee_balances collection first (server-synced)
+  const balRecords = dataService.get<{ studentId: string; balance: number }>(
+    "fee_balances",
+  );
+  const found = balRecords.find((b) => b.studentId === studentId);
+  if (found !== undefined) return found.balance ?? 0;
+  // Fallback to legacy localStorage key
   const balances = ls.get<Record<string, number>>("old_balances", {});
   return balances[studentId] ?? 0;
 }
 
 /**
- * Stores old balance. Positive = student owes (shown red).
+ * Stores old balance via DataService (server-first).
+ * Positive = student owes (shown red).
  * Negative = student has credit (shown green, reduces next payment).
  * Zero = clear.
  */
-function setOldBalanceStore(studentId: string, balance: number) {
+async function setOldBalanceStore(
+  studentId: string,
+  balance: number,
+): Promise<void> {
+  // Update legacy localStorage for fallback
   const balances = ls.get<Record<string, number>>("old_balances", {});
   if (balance === 0) delete balances[studentId];
   else balances[studentId] = balance;
   ls.set("old_balances", balances);
-  // Also save to server via dataService as a synthetic record
-  void dataService
-    .save("fee_receipts", {
-      id: `balance_${studentId}`,
-      studentId,
-      _isBalance: true,
-      balance,
-    } as Record<string, unknown>)
-    .catch(() => {
-      /* best-effort */
-    });
+
+  // Save to server via DataService under fee_balances collection
+  const existingBalances = dataService.get<{
+    id: string;
+    studentId: string;
+    balance: number;
+  }>("fee_balances");
+  const existing = existingBalances.find((b) => b.studentId === studentId);
+  if (existing) {
+    await dataService
+      .update("fee_balances", existing.id, { balance } as Record<
+        string,
+        unknown
+      >)
+      .catch(() => {
+        /* best-effort */
+      });
+  } else {
+    await dataService
+      .save("fee_balances", {
+        id: `bal_${studentId}`,
+        studentId,
+        balance,
+      } as Record<string, unknown>)
+      .catch(() => {
+        /* best-effort */
+      });
+  }
 }
 
 function buildQRData(r: FeeReceipt): string {
@@ -313,11 +345,54 @@ function printReceiptHTML(receipt: FeeReceipt) {
     }
   </body></html>`;
 
-  const win = window.open("", "_blank");
-  if (!win) return;
-  win.document.write(html);
-  win.document.close();
-  setTimeout(() => win.print(), 500);
+  // Use a hidden iframe to print — avoids popup blockers completely
+  const existingFrame = document.getElementById(
+    "shubh-print-frame",
+  ) as HTMLIFrameElement | null;
+  if (existingFrame) existingFrame.remove();
+
+  const frame = document.createElement("iframe");
+  frame.id = "shubh-print-frame";
+  frame.style.cssText =
+    "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
+  document.body.appendChild(frame);
+
+  const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
+  if (!frameDoc) {
+    // Fallback: try window.open if iframe approach fails
+    const win = window.open("", "_blank");
+    if (!win) {
+      alert(
+        "⚠️ Print blocked. Please allow popups for this site in your browser settings, then try again.",
+      );
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    setTimeout(() => win.print(), 500);
+    return;
+  }
+
+  frameDoc.open();
+  frameDoc.write(html);
+  frameDoc.close();
+
+  setTimeout(() => {
+    try {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    } catch {
+      // Final fallback
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        setTimeout(() => win.print(), 300);
+      }
+    }
+    // Clean up frame after print dialog closes
+    setTimeout(() => frame.remove(), 3000);
+  }, 400);
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -425,9 +500,11 @@ export default function CollectFees() {
 
   // ── Load students + handle preload from global search ─────────────────────
   useEffect(() => {
-    const loaded = ls
-      .get<Student[]>("students", [])
-      .filter((s) => s.status === "active");
+    // Prefer DataService (server-synced) for students
+    const dsStudents = dataService.get<Student>("students");
+    const loaded = (
+      dsStudents.length > 0 ? dsStudents : ls.get<Student[]>("students", [])
+    ).filter((s) => s.status === "active");
     setAllStudents(loaded);
 
     // Check if navigated here from global search with a pre-selected student
@@ -536,8 +613,15 @@ export default function CollectFees() {
   // ── Load fees for selected student ────────────────────────────────────────
   function loadStudentFees(student: Student) {
     if (!currentSession) return;
-    const headings = ls.get<FeeHeading[]>("fee_headings", []);
-    const plans = ls.get<FeesPlan[]>("fees_plan", []);
+    // Prefer DataService (server-synced) for fee headings and plans
+    const headingsDs = dataService.get<FeeHeading>("fee_heads");
+    const headings =
+      headingsDs.length > 0
+        ? headingsDs
+        : ls.get<FeeHeading[]>("fee_headings", []);
+    const plansDs = dataService.get<FeesPlan>("fees_plan");
+    const plans =
+      plansDs.length > 0 ? plansDs : ls.get<FeesPlan[]>("fees_plan", []);
 
     const applicablePlans = plans.filter(
       (p) => p.classId === student.class && p.sectionId === student.section,
@@ -613,8 +697,7 @@ export default function CollectFees() {
     setConcessionAmt(0);
     setRemarks("");
 
-    const history = ls
-      .get<FeeReceipt[]>("fee_receipts", [])
+    const history = getAllReceipts()
       .filter(
         (r) =>
           r.studentId === student.id &&
@@ -741,7 +824,7 @@ export default function CollectFees() {
   }
 
   // ── Save ───────────────────────────────────────────────────────────────────
-  function handleSave() {
+  async function handleSave() {
     if (!selectedStudent || !currentSession || isReadOnly) return;
     setErrorMsg("");
 
@@ -812,15 +895,13 @@ export default function CollectFees() {
       template: 4,
     };
 
-    const all = getAllReceipts();
-    ls.set("fee_receipts", [...all, receipt]);
-    // Sync new receipt to server
-    void dataService.save(
+    // Save receipt via DataService FIRST (server-first write, then updates cache + localStorage)
+    await dataService.save(
       "fee_receipts",
       receipt as unknown as Record<string, unknown>,
     );
-    // Store balance: negative = credit, positive = dues
-    setOldBalanceStore(selectedStudent.id, newBalance);
+    // Store balance via DataService (server-first)
+    await setOldBalanceStore(selectedStudent.id, newBalance);
 
     addNotification(
       `💰 Fee receipt saved: ${formatCurrency(receiptAmt)} for ${selectedStudent.fullName}`,
@@ -868,12 +949,15 @@ export default function CollectFees() {
   function handleDeleteReceipt(receiptId: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
+
+    // Soft-delete on server via DataService (also updates local cache)
+    void dataService.delete("fee_receipts", receiptId);
+
+    // Also update localStorage fallback
     const all = getAllReceipts().map((r) =>
       r.id === receiptId ? { ...r, isDeleted: true } : r,
     );
     ls.set("fee_receipts", all);
-    // Soft-delete on server
-    void dataService.delete("fee_receipts", receiptId);
 
     // Recalculate running balance from all remaining non-deleted receipts
     if (selectedStudent) {
@@ -893,7 +977,7 @@ export default function CollectFees() {
         runningBalance +=
           (r.totalAmount ?? 0) - (r.paidAmount ?? r.totalAmount ?? 0);
       }
-      setOldBalanceStore(selectedStudent.id, runningBalance);
+      void setOldBalanceStore(selectedStudent.id, runningBalance);
       loadStudentFees(selectedStudent);
     }
   }
@@ -1008,14 +1092,16 @@ export default function CollectFees() {
       balance: newBalance,
     };
 
-    all[idx] = updated;
-    ls.set("fee_receipts", all);
-    // Update on server
+    // Update via DataService FIRST (server-first, then updates local cache)
     void dataService.update(
       "fee_receipts",
       updated.id,
       updated as unknown as Record<string, unknown>,
     );
+
+    // Also update localStorage fallback
+    all[idx] = updated;
+    ls.set("fee_receipts", all);
 
     // Recalculate student balance from all non-deleted receipts
     const studentReceipts = all.filter(
@@ -1025,7 +1111,7 @@ export default function CollectFees() {
       b.date.localeCompare(a.date),
     )[0];
     if (lastReceipt) {
-      setOldBalanceStore(selectedStudent.id, lastReceipt.balance ?? 0);
+      void setOldBalanceStore(selectedStudent.id, lastReceipt.balance ?? 0);
     }
 
     setEditOpen(false);

@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useApp } from "../context/AppContext";
 import type { InventoryPurchase, InventorySale } from "../types";
+import { dataService } from "../utils/dataService";
 import { formatCurrency, generateId, ls } from "../utils/localStorage";
 
 // ─────────────────────────────────────────────────────────────
@@ -59,9 +60,10 @@ export default function Inventory() {
   const [tab, setTab] = useState<Tab>("stock");
 
   // ── Data ──────────────────────────────────────────────────
-  const [items, setItems] = useState<InvItem[]>(() =>
-    ls.get<InvItem[]>(iKey, []),
-  );
+  const [items, setItems] = useState<InvItem[]>(() => {
+    const ds = dataService.get<InvItem>("inventory_items");
+    return ds.length > 0 ? ds : ls.get<InvItem[]>(iKey, []);
+  });
   const [purchases, setPurchases] = useState<InventoryPurchase[]>(() =>
     ls.get<InventoryPurchase[]>(pKey, []),
   );
@@ -119,9 +121,31 @@ export default function Inventory() {
   const [catFilter, setCatFilter] = useState("");
 
   const saveItems = useCallback(
-    (data: InvItem[]) => {
+    (
+      data: InvItem[],
+      changed?: {
+        op: "save" | "update" | "delete";
+        item?: InvItem;
+        id?: string;
+      },
+    ) => {
       setItems(data);
       ls.set(iKey, data);
+      // Sync to server via DataService
+      if (changed?.op === "save" && changed.item) {
+        void dataService.save(
+          "inventory_items",
+          changed.item as unknown as Record<string, unknown>,
+        );
+      } else if (changed?.op === "update" && changed.item) {
+        void dataService.update(
+          "inventory_items",
+          changed.item.id,
+          changed.item as unknown as Record<string, unknown>,
+        );
+      } else if (changed?.op === "delete" && changed.id) {
+        void dataService.delete("inventory_items", changed.id);
+      }
     },
     [iKey],
   );
@@ -155,14 +179,14 @@ export default function Inventory() {
   const handleSaveItem = useCallback(() => {
     if (!itemForm.name.trim()) return;
     if (editItemId) {
+      const updated = { ...itemForm, id: editItemId, sessionId };
       saveItems(
-        items.map((i) =>
-          i.id === editItemId ? { ...itemForm, id: editItemId, sessionId } : i,
-        ),
+        items.map((i) => (i.id === editItemId ? updated : i)),
+        { op: "update", item: updated },
       );
     } else {
       const newItem: InvItem = { ...itemForm, id: generateId(), sessionId };
-      saveItems([...items, newItem]);
+      saveItems([...items, newItem], { op: "save", item: newItem });
       addNotification(
         `Item "${itemForm.name}" added to inventory`,
         "success",
@@ -174,7 +198,11 @@ export default function Inventory() {
   }, [itemForm, editItemId, items, saveItems, addNotification, sessionId]);
 
   const handleDeleteItem = useCallback(
-    (id: string) => saveItems(items.filter((i) => i.id !== id)),
+    (id: string) =>
+      saveItems(
+        items.filter((i) => i.id !== id),
+        { op: "delete", id },
+      ),
     [items, saveItems],
   );
 

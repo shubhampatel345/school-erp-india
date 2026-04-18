@@ -31,6 +31,8 @@ export default defineConfig({
   },
   server: {
     host: "0.0.0.0",
+    port: 3000,
+    strictPort: true,
     allowedHosts: "all",
     cors: true,
     hmr: {
@@ -41,11 +43,16 @@ export default defineConfig({
       "X-Frame-Options": "ALLOWALL",
       "Access-Control-Allow-Origin": "*",
     },
-    proxy: {
-      "/api": {
-        target: "http://127.0.0.1:4943",
-        changeOrigin: true,
-      },
+    // No /api proxy — all API calls go directly to https://shubh.psmkgs.com/api
+  },
+  preview: {
+    host: "0.0.0.0",
+    port: 3000,
+    strictPort: true,
+    allowedHosts: ["all"],
+    headers: {
+      "X-Frame-Options": "ALLOWALL",
+      "Access-Control-Allow-Origin": "*",
     },
   },
   plugins: [
