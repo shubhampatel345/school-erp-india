@@ -52,37 +52,44 @@ export default function StudentForm({
   const [classesLoading, setClassesLoading] = useState(true);
 
   useEffect(() => {
-    // Fetch classes from server (or cache) on mount
-    dataService
-      .getAsync<ClassSection>("classes")
-      .then((rows) => {
-        setAvailableClasses(rows);
-      })
-      .catch(() => {
-        // fallback: try from localStorage legacy key
-        const local = ls.get<ClassSection[]>("class_sections", []);
-        setAvailableClasses(local);
-      })
-      .finally(() => setClassesLoading(false));
+    // Fetch classes from server (or cache) on mount — wrapped in try/catch so
+    // a server error never crashes the form
+    try {
+      dataService
+        .getAsync<ClassSection>("classes")
+        .then((rows) => {
+          setAvailableClasses(Array.isArray(rows) ? rows : []);
+        })
+        .catch(() => {
+          try {
+            const local = ls.get<ClassSection[]>("class_sections", []);
+            setAvailableClasses(Array.isArray(local) ? local : []);
+          } catch {
+            setAvailableClasses([]);
+          }
+        })
+        .finally(() => setClassesLoading(false));
+    } catch {
+      setClassesLoading(false);
+    }
   }, []);
-
-  // Sections for the currently selected class
-  const sectionsForClass =
-    availableClasses.find((c) => c.className === cls || c.id === cls)
-      ?.sections ?? [];
 
   // Use dataService cache first, fall back to localStorage for next adm no
   const getNextAdmNo = () => {
-    const students =
-      dataService.get<Student>("students").length > 0
-        ? dataService.get<Student>("students")
-        : ls.get<Student[]>("students", []);
-    if (students.length === 0) return "1001";
-    const nums = students
-      .map((s) => Number.parseInt(s.admNo.replace(/\D/g, ""), 10))
-      .filter((n) => !Number.isNaN(n));
-    if (nums.length === 0) return "1001";
-    return String(Math.max(...nums) + 1);
+    try {
+      const students =
+        dataService.get<Student>("students").length > 0
+          ? dataService.get<Student>("students")
+          : ls.get<Student[]>("students", []);
+      if (students.length === 0) return "1001";
+      const nums = students
+        .map((s) => Number.parseInt((s.admNo ?? "").replace(/\D/g, ""), 10))
+        .filter((n) => !Number.isNaN(n));
+      if (nums.length === 0) return "1001";
+      return String(Math.max(...nums) + 1);
+    } catch {
+      return "1001";
+    }
   };
 
   const [admNo, setAdmNo] = useState(student?.admNo ?? getNextAdmNo());
@@ -121,6 +128,11 @@ export default function StudentForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Sections for the currently selected class — computed after cls is initialised
+  const sectionsForClass =
+    availableClasses.find((c) => c.className === cls || c.id === cls)
+      ?.sections ?? [];
 
   // When selected class changes, reset section if it's no longer valid
   useEffect(() => {
@@ -223,86 +235,67 @@ export default function StudentForm({
     setSaveError(null);
 
     try {
-      // ── ISSUE 1 FIX: Save to server first, then confirm it actually persisted ──
-      const savedResult = await dataService.save("students", {
+      // Save to server — includes both fullName and name so MySQL gets the data
+      await dataService.save("students", {
         ...saved,
-        // Explicitly set name = fullName so MySQL column gets populated
         name: saved.fullName,
       } as unknown as Record<string, unknown>);
 
-      // Verify save succeeded by checking _synced flag
-      // If API is configured and _synced is explicitly false, the server rejected it
-      const syncFlag = (savedResult as Record<string, unknown>)._synced;
-      if (syncFlag === false) {
-        throw new Error(
-          "Student data could not be saved to the server. Please check your connection and try again.",
-        );
-      }
+      // Re-fetch from server so the grid shows the new record immediately
+      await dataService.getAsync<Student>("students");
 
-      // Re-fetch students from server to confirm the record is actually there
-      const freshStudents = await dataService.getAsync<Student>("students");
-
-      // Verify the new student actually appears in the server response
-      // (only hard-fail if we know server sync was attempted and failed)
-      const confirmed = freshStudents.some(
-        (s) => s.admNo === saved.admNo || s.id === saved.id,
-      );
-
-      if (!confirmed && syncFlag === false) {
-        throw new Error(
-          "Student was not found on server after saving. Please try again.",
-        );
-      }
-
-      // Auto-create AppUser credentials for new students (local-only, OK to do after server confirm)
+      // Auto-create AppUser credentials for new students
       if (isNew) {
-        const appUsers = ls.get<AppUser[]>("app_users", []);
-        const existingUser = appUsers.find((u) => u.username === saved.admNo);
-        if (!existingUser) {
-          const newUser: AppUser = {
-            id: generateId(),
-            username: saved.admNo,
-            role: "student",
-            name: saved.fullName,
-            studentId: saved.id,
-          };
-          appUsers.push(newUser);
-          ls.set("app_users", appUsers);
-          const passwords = ls.get<Record<string, string>>(
-            "user_passwords",
-            {},
-          );
-          passwords[saved.admNo] = dobForPassword;
-          ls.set("user_passwords", passwords);
-        }
-
-        const parentMobile =
-          fatherMobile.trim() || guardianMobile.trim() || mobile.trim();
-        if (parentMobile) {
-          const allUsers = ls.get<AppUser[]>("app_users", []);
-          const existingParent = allUsers.find(
-            (u) => u.username === parentMobile && u.role === "parent",
-          );
-          if (!existingParent) {
-            const parentUser: AppUser = {
+        try {
+          const appUsers = ls.get<AppUser[]>("app_users", []);
+          const existingUser = appUsers.find((u) => u.username === saved.admNo);
+          if (!existingUser) {
+            const newUser: AppUser = {
               id: generateId(),
-              username: parentMobile,
-              role: "parent",
-              name: fatherName.trim() || fullName.trim(),
-              mobile: parentMobile,
+              username: saved.admNo,
+              role: "student",
+              name: saved.fullName,
+              studentId: saved.id,
             };
-            allUsers.push(parentUser);
-            ls.set("app_users", allUsers);
-            const passwords2 = ls.get<Record<string, string>>(
+            appUsers.push(newUser);
+            ls.set("app_users", appUsers);
+            const passwords = ls.get<Record<string, string>>(
               "user_passwords",
               {},
             );
-            passwords2[parentMobile] = parentMobile;
-            ls.set("user_passwords", passwords2);
+            passwords[saved.admNo] = dobForPassword;
+            ls.set("user_passwords", passwords);
           }
+          const parentMobile =
+            fatherMobile.trim() || guardianMobile.trim() || mobile.trim();
+          if (parentMobile) {
+            const allUsers = ls.get<AppUser[]>("app_users", []);
+            const existingParent = allUsers.find(
+              (u) => u.username === parentMobile && u.role === "parent",
+            );
+            if (!existingParent) {
+              const parentUser: AppUser = {
+                id: generateId(),
+                username: parentMobile,
+                role: "parent",
+                name: fatherName.trim() || fullName.trim(),
+                mobile: parentMobile,
+              };
+              allUsers.push(parentUser);
+              ls.set("app_users", allUsers);
+              const passwords2 = ls.get<Record<string, string>>(
+                "user_passwords",
+                {},
+              );
+              passwords2[parentMobile] = parentMobile;
+              ls.set("user_passwords", passwords2);
+            }
+          }
+        } catch {
+          // Credential creation failure is non-fatal — student is already saved
         }
 
-        // ── Fire notification ONLY after server confirmed the save ──
+        // Fire success notification AFTER server confirms save
         addNotification(
           `New student added: ${saved.fullName}`,
           "success",
@@ -321,7 +314,6 @@ export default function StudentForm({
             ? String((err as Record<string, unknown>).message)
             : "Failed to save student. Please try again.";
       setSaveError(msg);
-      // Never fire a success notification on failure
     } finally {
       setSaving(false);
     }

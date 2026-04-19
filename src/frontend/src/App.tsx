@@ -1,4 +1,5 @@
 import { useState } from "react";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import { useApp } from "./context/AppContext";
 import { AppProvider } from "./context/AppContext";
@@ -92,7 +93,7 @@ function AppRoutes() {
 
   return (
     <Layout activePage={activePage} onNavigate={navigate}>
-      {renderPage()}
+      <ErrorBoundary key={activePage}>{renderPage()}</ErrorBoundary>
     </Layout>
   );
 }

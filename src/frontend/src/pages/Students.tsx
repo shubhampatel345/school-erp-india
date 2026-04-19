@@ -173,7 +173,7 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [students, setStudents] = useState<Student[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
 
-  // ── ISSUE 2 FIX: Reload ALWAYS fetches fresh data from server ─────────────
+  // ── Reload: fetch fresh data from server ──────────────────────────────────
   const reload = useCallback(() => {
     dataService
       .getAsync<Student>("students")
@@ -181,9 +181,7 @@ export default function Students({ onNavigate }: StudentsProps) {
       .catch(() => setStudents(dataService.get<Student>("students")));
   }, []);
 
-  // ── Fetch fresh data from MySQL on every mount ─────────────────────────────
-  // Server is the ONLY source of truth. Never initialize from localStorage.
-  // Every device worldwide always sees the real MySQL data on mount.
+  // ── Fetch fresh data from MySQL on mount ───────────────────────────────────
   useEffect(() => {
     setLoadingStudents(true);
     dataService
@@ -192,24 +190,17 @@ export default function Students({ onNavigate }: StudentsProps) {
         setStudents(rows);
       })
       .catch(() => {
-        // Last resort: use whatever is in cache
         setStudents(dataService.get<Student>("students"));
       })
       .finally(() => setLoadingStudents(false));
-  }, []); // runs once on mount
+  }, []); // runs once on mount — reload() is called explicitly after saves
 
-  // Re-render when DataService notifies (e.g. after a save/delete/sync)
+  // Subscribe to DataService notifications (after a save/delete from any component)
+  // but DO NOT automatically re-fetch on every notify — that causes an infinite loop.
+  // Instead, each write operation calls reload() explicitly after completing.
   useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
     dataService.getMode(),
   );
-  // When DS notifies, sync local state from cache (avoids stale display after writes)
-  useEffect(() => {
-    if (!loadingStudents) {
-      reload();
-    }
-    // subscribe snapshot changes are not in deps by design; reload + loadingStudents are stable
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reload, loadingStudents]);
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
@@ -478,6 +469,9 @@ export default function Students({ onNavigate }: StudentsProps) {
 
   function renderCell(student: Student, colKey: string) {
     const isDiscontinued = student.status === "discontinued";
+    // Safe accessors — guard against undefined/null from MySQL rows
+    const safeName = student.fullName ?? student.admNo ?? "–";
+    const safeAdmNo = student.admNo ?? "–";
 
     if (colKey === "photo") {
       return (
@@ -485,12 +479,12 @@ export default function Students({ onNavigate }: StudentsProps) {
           {student.photo ? (
             <img
               src={student.photo}
-              alt={student.fullName}
+              alt={safeName}
               className="w-full h-full object-cover"
             />
           ) : (
             <span className="text-[9px] font-bold text-primary">
-              {student.fullName.charAt(0)}
+              {safeName.charAt(0).toUpperCase()}
             </span>
           )}
         </div>
@@ -502,7 +496,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         <span
           className={`text-xs font-mono font-semibold ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
         >
-          {student.admNo}
+          {safeAdmNo}
         </span>
       );
     }
@@ -512,7 +506,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         <span
           className={`font-medium text-xs ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
         >
-          {student.fullName}
+          {safeName}
         </span>
       );
     }
@@ -520,13 +514,17 @@ export default function Students({ onNavigate }: StudentsProps) {
     if (colKey === "class") {
       return (
         <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded font-medium">
-          {student.class}
+          {student.class ?? "–"}
         </span>
       );
     }
 
     if (colKey === "section") {
-      return <span className="text-xs text-foreground">{student.section}</span>;
+      return (
+        <span className="text-xs text-foreground">
+          {student.section ?? "–"}
+        </span>
+      );
     }
 
     if (colKey === "status") {
@@ -956,7 +954,23 @@ export default function Students({ onNavigate }: StudentsProps) {
           </thead>
 
           <tbody>
-            {filtered.length === 0 && (
+            {/* Loading skeleton */}
+            {loadingStudents && students.length === 0 && (
+              <tr>
+                <td
+                  colSpan={activeVisibleCols.length + 2}
+                  className="py-16 text-center text-muted-foreground"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm">
+                      Loading students from server…
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            )}
+            {!loadingStudents && filtered.length === 0 && (
               <tr>
                 <td
                   colSpan={activeVisibleCols.length + 2}
