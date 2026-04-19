@@ -1,11 +1,16 @@
+/**
+ * TeacherTimetable — rebuild using useApp() context
+ * Reads staff from getData("staff") — saves via saveData
+ */
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge } from "../../components/ui/badge";
-import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
-import { Label } from "../../components/ui/label";
+import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { Staff } from "../../types";
-import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
+import { CLASSES, SECTIONS, generateId } from "../../utils/localStorage";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface TeacherAssignment {
@@ -14,7 +19,7 @@ interface TeacherAssignment {
   subject: string;
   classFrom: string;
   classTo: string;
-  expandedSections: string[]; // e.g. ["1A","1B","2A"]
+  expandedSections: string[];
 }
 
 interface SplitPair {
@@ -42,7 +47,6 @@ interface CellValue {
 interface SectionGrid {
   class_: string;
   section: string;
-  // [dayIndex][periodIndex] => CellValue | null
   cells: (CellValue | null)[][];
 }
 
@@ -82,12 +86,12 @@ function buildPeriods(
   durations: number[],
   intervalMin: number,
 ): PeriodDef[] {
-  const periods: PeriodDef[] = [];
+  const result: PeriodDef[] = [];
   let cursor = startTime;
   for (let i = 0; i < count; i++) {
     const dur = durations[i] ?? 45;
     const end = addMinutes(cursor, dur);
-    periods.push({
+    result.push({
       index: i,
       label: `P${i + 1}`,
       startTime: cursor,
@@ -96,7 +100,7 @@ function buildPeriods(
     });
     cursor = addMinutes(end, intervalMin);
   }
-  return periods;
+  return result;
 }
 
 function expandSections(classFrom: string, classTo: string): string[] {
@@ -113,11 +117,10 @@ function expandSections(classFrom: string, classTo: string): string[] {
 }
 
 function isMWF(dayIndex: number): boolean {
-  // 0=Mon,1=Tue,2=Wed,3=Thu,4=Fri,5=Sat
   return dayIndex === 0 || dayIndex === 2 || dayIndex === 4;
 }
 
-// ── Sub-component: SectionCard ─────────────────────────────────────────────────
+// ── SectionCard ────────────────────────────────────────────────────────────────
 function SectionCard({
   grid,
   days,
@@ -139,32 +142,14 @@ function SectionCard({
 }) {
   const dragSrc = useRef<{ day: number; period: number } | null>(null);
 
-  const handleDragStart = (day: number, period: number) => {
-    if (saved) return;
-    dragSrc.current = { day, period };
-  };
-
-  const handleDrop = (day: number, period: number) => {
-    if (saved || !dragSrc.current) return;
-    const src = dragSrc.current;
-    if (src.day === day && src.period === period) return;
-    const srcVal = grid.cells[src.day]?.[src.period] ?? null;
-    const dstVal = grid.cells[day]?.[period] ?? null;
-    onCellChange(grid.class_, grid.section, src.day, src.period, dstVal);
-    onCellChange(grid.class_, grid.section, day, period, srcVal);
-    dragSrc.current = null;
-  };
-
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-card">
+    <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
       <div className="bg-primary/10 px-4 py-2.5 border-b border-border flex items-center justify-between">
         <span className="font-semibold text-foreground font-display">
           Class {grid.class_} — Section {grid.section}
         </span>
         {!saved && (
-          <span className="text-xs text-muted-foreground">
-            ↔ Drag to swap periods
-          </span>
+          <span className="text-xs text-muted-foreground">↔ Drag to swap</span>
         )}
       </div>
       <div className="overflow-x-auto">
@@ -201,12 +186,35 @@ function SectionCard({
                     <td
                       key={p.index}
                       draggable={!saved && !!cell}
-                      onDragStart={() => handleDragStart(di, p.index)}
+                      onDragStart={() => {
+                        if (!saved)
+                          dragSrc.current = { day: di, period: p.index };
+                      }}
                       onDragOver={(e) => e.preventDefault()}
-                      onDrop={() => handleDrop(di, p.index)}
-                      className={`px-2 py-1.5 text-center relative group ${
-                        cell ? "bg-primary/5 cursor-grab" : "bg-background"
-                      } border-l border-border/30`}
+                      onDrop={() => {
+                        if (saved || !dragSrc.current) return;
+                        const src = dragSrc.current;
+                        if (src.day === di && src.period === p.index) return;
+                        const srcVal =
+                          grid.cells[src.day]?.[src.period] ?? null;
+                        const dstVal = grid.cells[di]?.[p.index] ?? null;
+                        onCellChange(
+                          grid.class_,
+                          grid.section,
+                          src.day,
+                          src.period,
+                          dstVal,
+                        );
+                        onCellChange(
+                          grid.class_,
+                          grid.section,
+                          di,
+                          p.index,
+                          srcVal,
+                        );
+                        dragSrc.current = null;
+                      }}
+                      className={`px-2 py-1.5 text-center relative group ${cell ? "bg-primary/5 cursor-grab" : "bg-background"} border-l border-border/30`}
                       data-ocid={`tt-cell-${grid.class_}-${grid.section}-${di}-${p.index}`}
                     >
                       {cell ? (
@@ -253,7 +261,7 @@ function SectionCard({
   );
 }
 
-// ── Combined Excel View ────────────────────────────────────────────────────────
+// ── CombinedView ───────────────────────────────────────────────────────────────
 function CombinedView({
   sections,
   days,
@@ -266,20 +274,18 @@ function CombinedView({
   sessionLabel: string;
 }) {
   if (sections.length === 0) return null;
-
   const exportCSV = () => {
-    const sectionKeys = sections.map((s) => `${s.class_}${s.section}`);
-    const headers = ["Day", "Period", ...sectionKeys];
+    const keys = sections.map((s) => `${s.class_}${s.section}`);
+    const headers = ["Day", "Period", ...keys];
     const rows: string[][] = [];
     for (const day of days) {
       const di = ALL_DAYS.indexOf(day);
-      for (const period of periods) {
-        const row = [
+      for (const p of periods) {
+        rows.push([
           day.slice(0, 3),
-          period.label,
-          ...sections.map((s) => s.cells[di]?.[period.index]?.subject ?? ""),
-        ];
-        rows.push(row);
+          p.label,
+          ...sections.map((s) => s.cells[di]?.[p.index]?.subject ?? ""),
+        ]);
       }
     }
     const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
@@ -295,9 +301,7 @@ function CombinedView({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-foreground">
-          Combined Timetable — All Sections
-        </h3>
+        <h3 className="font-semibold text-foreground">Combined Timetable</h3>
         <div className="flex gap-2">
           <Button
             size="sm"
@@ -349,7 +353,7 @@ function CombinedView({
                     {pi === 0 ? day.slice(0, 3) : ""}
                   </td>
                   <td className="px-3 py-1.5 font-medium text-foreground border-r border-border">
-                    {period.label}
+                    {period.label}{" "}
                     <span className="text-muted-foreground text-[10px] ml-1">
                       {period.startTime}
                     </span>
@@ -386,7 +390,7 @@ function CombinedView({
   );
 }
 
-// ── Teacher-wise View ──────────────────────────────────────────────────────────
+// ── TeacherWiseView ────────────────────────────────────────────────────────────
 function TeacherWiseView({
   sections,
   days,
@@ -401,23 +405,22 @@ function TeacherWiseView({
   const [selectedTeacher, setSelectedTeacher] = useState("");
   const uniqueTeachers = [...new Set(assignments.map((a) => a.teacherName))];
 
-  const teacherSchedule: {
+  const schedule: {
     day: string;
     period: PeriodDef;
     class_: string;
     section: string;
     subject: string;
   }[] = [];
-
   if (selectedTeacher) {
     for (const sec of sections) {
       for (let di = 0; di < days.length; di++) {
-        for (const period of periods) {
-          const cell = sec.cells[di]?.[period.index];
+        for (const p of periods) {
+          const cell = sec.cells[di]?.[p.index];
           if (cell?.teacherName === selectedTeacher) {
-            teacherSchedule.push({
+            schedule.push({
               day: days[di],
-              period,
+              period: p,
               class_: sec.class_,
               section: sec.section,
               subject: cell.subject,
@@ -446,14 +449,12 @@ function TeacherWiseView({
           ))}
         </select>
       </div>
-
-      {selectedTeacher && teacherSchedule.length === 0 && (
+      {selectedTeacher && schedule.length === 0 && (
         <div className="text-center py-10 text-muted-foreground text-sm">
           No periods assigned to {selectedTeacher} yet.
         </div>
       )}
-
-      {teacherSchedule.length > 0 && (
+      {schedule.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-border bg-card">
           <table className="w-full text-sm">
             <thead>
@@ -476,10 +477,9 @@ function TeacherWiseView({
               </tr>
             </thead>
             <tbody>
-              {teacherSchedule.map((row, i) => (
+              {schedule.map((row, i) => (
                 <tr
-                  // biome-ignore lint/suspicious/noArrayIndexKey: stable index for read-only schedule rows
-                  key={`row-${i}`}
+                  key={`schedule-row-${row.day ?? i}-${row.subject ?? "empty"}`}
                   className="border-t border-border/50 hover:bg-muted/20"
                 >
                   <td className="px-4 py-2.5 font-medium text-foreground">
@@ -509,14 +509,21 @@ function TeacherWiseView({
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function TeacherTimetable() {
-  const { currentSession, addNotification } = useApp();
+  const { currentSession, addNotification, getData, saveData, deleteData } =
+    useApp();
 
-  // ── Step 1 state ─────────────────────────────────────────────────────────────
+  const staffData = getData("staff") as Staff[];
+  const savedList = getData("teacher_timetables") as SavedTimetable[];
+  const classesData = getData("classes") as Array<{
+    id: string;
+    name?: string;
+    className?: string;
+    sections: string[];
+  }>;
+
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
   const [assignments, setAssignments] = useState<TeacherAssignment[]>([]);
   const [splitPairs, setSplitPairs] = useState<SplitPair[]>([]);
-
-  // ── Step 2 state ─────────────────────────────────────────────────────────────
   const [selectedDays, setSelectedDays] = useState<string[]>([
     "Monday",
     "Tuesday",
@@ -530,13 +537,8 @@ export default function TeacherTimetable() {
   const [periodDurations, setPeriodDurations] = useState<number[]>(
     Array(8).fill(45),
   );
-
-  // ── Generated state ───────────────────────────────────────────────────────────
   const [grids, setGrids] = useState<SectionGrid[]>([]);
   const [isSaved, setIsSaved] = useState(false);
-  const [savedList, setSavedList] = useState<SavedTimetable[]>(() =>
-    ls.get<SavedTimetable[]>("teacher_timetables", []),
-  );
   const [viewTab, setViewTab] = useState<"grids" | "combined" | "teacher">(
     "grids",
   );
@@ -544,26 +546,34 @@ export default function TeacherTimetable() {
 
   const sessionLabel = currentSession?.label ?? "2025-26";
 
-  // ── Load assignments from HR staff ────────────────────────────────────────────
+  // Build section keys from context classes
+  const allSectionKeys: string[] =
+    classesData.length > 0
+      ? classesData.flatMap((c) =>
+          (Array.isArray(c.sections) ? c.sections : []).map(
+            (sec) => `${c.name ?? c.className ?? ""}${sec}`,
+          ),
+        )
+      : CLASSES.flatMap((c) => SECTIONS.slice(0, 3).map((s) => `${c}${s}`));
+
+  // Load teacher assignments from staff
   useEffect(() => {
-    const staffList = ls.get<Staff[]>("staff", []);
     const rows: TeacherAssignment[] = [];
-    for (const staff of staffList) {
+    for (const staff of staffData) {
       if (!staff.subjects?.length) continue;
       for (const sa of staff.subjects) {
-        const sections = expandSections(sa.classFrom, sa.classTo);
         rows.push({
           staffId: staff.id,
           teacherName: staff.name,
           subject: sa.subject,
           classFrom: sa.classFrom,
           classTo: sa.classTo,
-          expandedSections: sections,
+          expandedSections: expandSections(sa.classFrom, sa.classTo),
         });
       }
     }
     setAssignments(rows);
-  }, []);
+  }, [staffData]);
 
   const activePeriods = buildPeriods(
     periodsCount,
@@ -572,7 +582,6 @@ export default function TeacherTimetable() {
     intervalMin,
   );
 
-  // ── Section toggle ────────────────────────────────────────────────────────────
   const toggleSection = (key: string) => {
     setSelectedSections((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
@@ -581,140 +590,98 @@ export default function TeacherTimetable() {
     setIsSaved(false);
   };
 
-  // ── Split pair management ─────────────────────────────────────────────────────
-  const addSplitPair = () => {
+  const addSplitPair = () =>
     setSplitPairs((prev) => [
       ...prev,
       { id: generateId(), subjectA: "", subjectB: "", class_: "", section: "" },
     ]);
-  };
-
   const updateSplitPair = (
     id: string,
     field: keyof Omit<SplitPair, "id">,
     value: string,
-  ) => {
+  ) =>
     setSplitPairs((prev) =>
       prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)),
     );
-  };
-
-  const removeSplitPair = (id: string) => {
+  const removeSplitPair = (id: string) =>
     setSplitPairs((prev) => prev.filter((p) => p.id !== id));
-  };
-
-  // ── Period duration ───────────────────────────────────────────────────────────
-  const updateDuration = (idx: number, val: number) => {
+  const updateDuration = (idx: number, val: number) =>
     setPeriodDurations((prev) => {
       const next = [...prev];
       next[idx] = val;
       return next;
     });
-  };
 
-  // ── Auto-generate timetable ───────────────────────────────────────────────────
   const generate = useCallback(() => {
     if (selectedSections.length === 0 || assignments.length === 0) return;
-
-    // Build section grids
-    const newGrids: SectionGrid[] = selectedSections.map((sectionKey) => {
-      const classNum = sectionKey.slice(0, -1);
-      const sec = sectionKey.slice(-1);
-      const cells: (CellValue | null)[][] = selectedDays.map(() =>
-        Array(periodsCount).fill(null),
-      );
-      return { class_: classNum, section: sec, cells };
+    const newGrids: SectionGrid[] = selectedSections.map((key) => {
+      const classNum = key.slice(0, -1);
+      const sec = key.slice(-1);
+      return {
+        class_: classNum,
+        section: sec,
+        cells: selectedDays.map(() => Array(periodsCount).fill(null)),
+      };
     });
-
-    // Track per-teacher per-day-period occupation: key = "staffId|dayIdx|periodIdx"
     const occupied = new Set<string>();
 
-    // Helper: find next available assignment for a section on a given period
-    // that doesn't conflict with occupied slots
     function findTeacher(
       classNum: string,
       sec: string,
       dayIdx: number,
       periodIdx: number,
-      usedThisRow: Set<string>, // subjects already placed this row (day)
+      usedThisDay: Set<string>,
     ): CellValue | null {
-      // Get applicable assignments for this class
-      const sectionKey = `${classNum}${sec}`;
+      const key = `${classNum}${sec}`;
       const applicable = assignments.filter((a) =>
-        a.expandedSections.includes(sectionKey),
+        a.expandedSections.includes(key),
       );
-      if (applicable.length === 0) return null;
-
-      // Check split pair logic
+      if (!applicable.length) return null;
       const relevantPair = splitPairs.find(
         (p) => p.class_ === classNum && p.section === sec,
       );
-
-      // Try each assignment in shuffled order
       const shuffled = [...applicable].sort(() => Math.random() - 0.5);
       for (const a of shuffled) {
-        const conflictKey = `${a.staffId}|${dayIdx}|${periodIdx}`;
-        if (occupied.has(conflictKey)) continue;
-
-        // Apply split pair subject selection
+        if (occupied.has(`${a.staffId}|${dayIdx}|${periodIdx}`)) continue;
         let subject = a.subject;
-        if (relevantPair) {
+        if (
+          relevantPair &&
+          (relevantPair.subjectA === a.subject ||
+            relevantPair.subjectB === a.subject)
+        ) {
+          subject = isMWF(dayIdx)
+            ? relevantPair.subjectA
+            : relevantPair.subjectB;
+          const paired = applicable.find(
+            (x) => x.subject === subject && x.staffId !== a.staffId,
+          );
           if (
-            relevantPair.subjectA === a.subject ||
-            relevantPair.subjectB === a.subject
+            paired &&
+            !occupied.has(`${paired.staffId}|${dayIdx}|${periodIdx}`) &&
+            !usedThisDay.has(subject)
           ) {
-            subject = isMWF(dayIdx)
-              ? relevantPair.subjectA
-              : relevantPair.subjectB;
-            // Check if another assignment teaches split subject
-            const pairedSubject = isMWF(dayIdx)
-              ? relevantPair.subjectA
-              : relevantPair.subjectB;
-            const pairedAssignment = applicable.find(
-              (x) => x.subject === pairedSubject && x.staffId !== a.staffId,
-            );
-            if (pairedAssignment) {
-              const pairedConflict = `${pairedAssignment.staffId}|${dayIdx}|${periodIdx}`;
-              if (!occupied.has(pairedConflict) && !usedThisRow.has(subject)) {
-                return {
-                  teacherName: pairedAssignment.teacherName,
-                  subject,
-                  staffId: pairedAssignment.staffId,
-                };
-              }
-              continue;
-            }
+            return {
+              teacherName: paired.teacherName,
+              subject,
+              staffId: paired.staffId,
+            };
           }
+          continue;
         }
-
-        if (!usedThisRow.has(subject)) {
-          return {
-            teacherName: a.teacherName,
-            subject,
-            staffId: a.staffId,
-          };
-        }
+        if (!usedThisDay.has(subject))
+          return { teacherName: a.teacherName, subject, staffId: a.staffId };
       }
       return null;
     }
 
-    // Fill grids: iterate day × period, fill each section
     for (let di = 0; di < selectedDays.length; di++) {
       for (let pi = 0; pi < periodsCount; pi++) {
-        // Collect which teachers are globally assigned this slot (from already-filled grids)
-        const slotOccupied = new Set<string>();
-        for (const grid of newGrids) {
-          const cell = grid.cells[di][pi];
-          if (cell) slotOccupied.add(cell.staffId);
-        }
-
         for (const grid of newGrids) {
           const usedThisDay = new Set<string>();
           for (let pj = 0; pj < pi; pj++) {
             const c = grid.cells[di][pj];
             if (c) usedThisDay.add(c.subject);
           }
-
           const cell = findTeacher(
             grid.class_,
             grid.section,
@@ -725,18 +692,15 @@ export default function TeacherTimetable() {
           if (cell) {
             grid.cells[di][pi] = cell;
             occupied.add(`${cell.staffId}|${di}|${pi}`);
-            slotOccupied.add(cell.staffId);
           }
         }
       }
     }
-
     setGrids(newGrids);
     setIsSaved(false);
     setViewTab("grids");
   }, [selectedSections, assignments, selectedDays, periodsCount, splitPairs]);
 
-  // ── Cell change handler ───────────────────────────────────────────────────────
   const handleCellChange = useCallback(
     (
       class_: string,
@@ -758,10 +722,9 @@ export default function TeacherTimetable() {
     [],
   );
 
-  // ── Save ──────────────────────────────────────────────────────────────────────
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (grids.length === 0) return;
-    const entry: SavedTimetable = {
+    const entry: Record<string, unknown> = {
       id: generateId(),
       sessionLabel,
       days: selectedDays,
@@ -771,15 +734,18 @@ export default function TeacherTimetable() {
       splitPairs,
       savedAt: new Date().toISOString(),
     };
-    const updated = [entry, ...savedList];
-    ls.set("teacher_timetables", updated);
-    setSavedList(updated);
-    setIsSaved(true);
-    addNotification(
-      `Teacher timetable saved for ${sessionLabel}`,
-      "success",
-      "📆",
-    );
+    try {
+      await saveData("teacher_timetables", entry);
+      setIsSaved(true);
+      addNotification(
+        `Teacher timetable saved for ${sessionLabel}`,
+        "success",
+        "📆",
+      );
+      toast.success("Timetable saved");
+    } catch {
+      toast.error("Failed to save timetable");
+    }
   }, [
     grids,
     sessionLabel,
@@ -787,33 +753,20 @@ export default function TeacherTimetable() {
     activePeriods,
     intervalMin,
     splitPairs,
-    savedList,
+    saveData,
     addNotification,
   ]);
 
-  // Ctrl+S shortcut
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        handleSave();
+        void handleSave();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [handleSave]);
-
-  // ── Build class-section keys from stored data ─────────────────────────────────
-  const classSectionData = ls.get<{ className: string; sections: string[] }[]>(
-    "class_sections",
-    [],
-  );
-  const allSectionKeys: string[] =
-    classSectionData.length > 0
-      ? classSectionData.flatMap((cs) =>
-          cs.sections.map((sec) => `${cs.className}${sec}`),
-        )
-      : CLASSES.flatMap((c) => SECTIONS.slice(0, 3).map((s) => `${c}${s}`));
 
   const canGenerate =
     selectedSections.length > 0 &&
@@ -822,8 +775,8 @@ export default function TeacherTimetable() {
     periodsCount > 0;
 
   return (
-    <div className="space-y-6">
-      {/* ── Step 1: Setup ─────────────────────────────────────────────── */}
+    <div className="space-y-6 p-4 lg:p-6">
+      {/* Step 1: Class-Section Setup */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-5">
         <div className="flex items-center gap-2">
           <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center">
@@ -832,18 +785,13 @@ export default function TeacherTimetable() {
           <h2 className="font-semibold text-foreground">Class-Section Setup</h2>
         </div>
 
-        {/* Section selector */}
         <div className="space-y-2">
           <Label>Select Class-Sections</Label>
           <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-8 lg:grid-cols-10 gap-1.5 max-h-40 overflow-y-auto pr-1">
             {allSectionKeys.map((key) => (
               <label
                 key={key}
-                className={`flex items-center justify-center p-2 rounded-lg border cursor-pointer text-xs transition-smooth select-none ${
-                  selectedSections.includes(key)
-                    ? "border-primary bg-primary/10 text-primary font-semibold"
-                    : "border-border bg-background text-muted-foreground hover:border-primary/40"
-                }`}
+                className={`flex items-center justify-center p-2 rounded-lg border cursor-pointer text-xs transition-colors select-none ${selectedSections.includes(key) ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border bg-background text-muted-foreground hover:border-primary/40"}`}
               >
                 <input
                   type="checkbox"
@@ -858,7 +806,6 @@ export default function TeacherTimetable() {
           </div>
         </div>
 
-        {/* Teacher Assignments (loaded from HR) */}
         <div className="space-y-2">
           <Label>Teacher Assignments (from HR Staff records)</Label>
           {assignments.length === 0 ? (
@@ -888,8 +835,7 @@ export default function TeacherTimetable() {
                 <tbody>
                   {assignments.map((a, i) => (
                     <tr
-                      // biome-ignore lint/suspicious/noArrayIndexKey: stable index for read-only assignment display
-                      key={i}
+                      key={`assignment-${a.teacherName ?? a.subject ?? i}-${a.classFrom ?? ""}`}
                       className="border-t border-border/50 hover:bg-muted/10"
                     >
                       <td className="px-3 py-2 font-medium text-foreground">
@@ -928,7 +874,7 @@ export default function TeacherTimetable() {
           )}
         </div>
 
-        {/* Split Subject Pairs */}
+        {/* Split pairs */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label>Split-Subject Pairs (optional)</Label>
@@ -942,8 +888,7 @@ export default function TeacherTimetable() {
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Subject A on Mon/Wed/Fri, Subject B on Tue/Thu/Sat for a specific
-            section
+            Subject A on Mon/Wed/Fri, Subject B on Tue/Thu/Sat
           </p>
           {splitPairs.map((pair) => (
             <div
@@ -1009,7 +954,7 @@ export default function TeacherTimetable() {
               <button
                 type="button"
                 onClick={() => removeSplitPair(pair.id)}
-                className="h-8 px-3 rounded-md bg-destructive/10 text-destructive text-xs hover:bg-destructive/20 transition-smooth"
+                className="h-8 px-3 rounded-md bg-destructive/10 text-destructive text-xs hover:bg-destructive/20 transition-colors"
               >
                 Remove
               </button>
@@ -1018,7 +963,7 @@ export default function TeacherTimetable() {
         </div>
       </div>
 
-      {/* ── Step 2: Period Configuration ──────────────────────────────── */}
+      {/* Step 2: Period Config */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-5">
         <div className="flex items-center gap-2">
           <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center">
@@ -1030,18 +975,13 @@ export default function TeacherTimetable() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {/* Days */}
           <div className="col-span-2 md:col-span-4 space-y-2">
             <Label>Days of Week</Label>
             <div className="flex gap-2 flex-wrap">
               {ALL_DAYS.map((day) => (
                 <label
                   key={day}
-                  className={`px-3 py-1.5 rounded-lg border cursor-pointer text-sm transition-smooth select-none ${
-                    selectedDays.includes(day)
-                      ? "border-primary bg-primary/10 text-primary font-medium"
-                      : "border-border bg-background text-muted-foreground hover:border-primary/40"
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg border cursor-pointer text-sm transition-colors select-none ${selectedDays.includes(day) ? "border-primary bg-primary/10 text-primary font-medium" : "border-border bg-background text-muted-foreground hover:border-primary/40"}`}
                 >
                   <input
                     type="checkbox"
@@ -1060,7 +1000,6 @@ export default function TeacherTimetable() {
               ))}
             </div>
           </div>
-
           <div className="space-y-1.5">
             <Label>Periods per Day</Label>
             <Input
@@ -1068,14 +1007,14 @@ export default function TeacherTimetable() {
               min={1}
               max={12}
               value={periodsCount}
-              onChange={(e) => {
-                const v = Math.max(1, Math.min(12, Number(e.target.value)));
-                setPeriodsCount(v);
-              }}
+              onChange={(e) =>
+                setPeriodsCount(
+                  Math.max(1, Math.min(12, Number(e.target.value))),
+                )
+              }
               data-ocid="tt-periods-count"
             />
           </div>
-
           <div className="space-y-1.5">
             <Label>Start Time</Label>
             <Input
@@ -1085,7 +1024,6 @@ export default function TeacherTimetable() {
               data-ocid="tt-start-time"
             />
           </div>
-
           <div className="space-y-1.5">
             <Label>Interval (min)</Label>
             <Input
@@ -1101,7 +1039,6 @@ export default function TeacherTimetable() {
           </div>
         </div>
 
-        {/* Per-period duration */}
         <div className="space-y-2">
           <Label>Duration per Period (minutes)</Label>
           <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
@@ -1125,7 +1062,6 @@ export default function TeacherTimetable() {
           </div>
         </div>
 
-        {/* Period timing preview */}
         <div className="space-y-2">
           <Label>Period Timing Preview</Label>
           <div className="flex flex-wrap gap-2">
@@ -1145,7 +1081,7 @@ export default function TeacherTimetable() {
         </div>
       </div>
 
-      {/* ── Step 3: Generate & Edit ───────────────────────────────────── */}
+      {/* Step 3: Generate */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-2">
@@ -1191,18 +1127,13 @@ export default function TeacherTimetable() {
 
         {grids.length > 0 && (
           <>
-            {/* View tabs */}
             <div className="flex gap-1 bg-muted/40 rounded-lg p-1 w-fit">
               {(["grids", "combined", "teacher"] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
                   onClick={() => setViewTab(tab)}
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-smooth ${
-                    viewTab === tab
-                      ? "bg-card text-foreground shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
+                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${viewTab === tab ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
                 >
                   {tab === "grids"
                     ? "Per Section"
@@ -1212,7 +1143,6 @@ export default function TeacherTimetable() {
                 </button>
               ))}
             </div>
-
             {viewTab === "grids" && (
               <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
                 {grids.map((grid) => (
@@ -1227,7 +1157,6 @@ export default function TeacherTimetable() {
                 ))}
               </div>
             )}
-
             {viewTab === "combined" && (
               <CombinedView
                 sections={grids}
@@ -1236,7 +1165,6 @@ export default function TeacherTimetable() {
                 sessionLabel={sessionLabel}
               />
             )}
-
             {viewTab === "teacher" && (
               <TeacherWiseView
                 sections={grids}
@@ -1249,7 +1177,7 @@ export default function TeacherTimetable() {
         )}
       </div>
 
-      {/* ── Saved Timetables ─────────────────────────────────────────── */}
+      {/* Saved Timetables */}
       {savedList.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
           <h2 className="font-semibold text-foreground">Saved Timetables</h2>
@@ -1257,7 +1185,7 @@ export default function TeacherTimetable() {
             {savedList.map((entry) => (
               <div
                 key={entry.id}
-                className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/30 transition-smooth"
+                className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/30 transition-colors"
               >
                 <div>
                   <p className="font-medium text-foreground">
@@ -1265,7 +1193,7 @@ export default function TeacherTimetable() {
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {entry.days.length} days · {entry.periods.length} periods ·{" "}
-                    {entry.sections.length} sections · Saved{" "}
+                    {entry.sections.length} sections ·{" "}
                     {new Date(entry.savedAt).toLocaleDateString("en-IN")}
                   </p>
                 </div>
@@ -1284,12 +1212,8 @@ export default function TeacherTimetable() {
                     size="sm"
                     variant="ghost"
                     className="text-destructive hover:text-destructive"
-                    onClick={() => {
-                      const updated = savedList.filter(
-                        (e) => e.id !== entry.id,
-                      );
-                      ls.set("teacher_timetables", updated);
-                      setSavedList(updated);
+                    onClick={async () => {
+                      await deleteData("teacher_timetables", entry.id);
                       if (viewSaved?.id === entry.id) setViewSaved(null);
                     }}
                   >
@@ -1299,7 +1223,6 @@ export default function TeacherTimetable() {
               </div>
             ))}
           </div>
-
           {viewSaved && (
             <div className="mt-4 space-y-4">
               <CombinedView

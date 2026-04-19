@@ -101,8 +101,6 @@ function SyncBar() {
   } = useSync();
   const [showTooltip, setShowTooltip] = useState(false);
 
-  // Build a human-readable count summary from real MySQL counts (/sync/status).
-  // Fall back to in-memory cache counts when serverCounts not yet populated.
   const displayCounts =
     Object.keys(serverCounts).length > 0 ? serverCounts : syncedCounts;
 
@@ -229,7 +227,6 @@ function SyncBar() {
         </Button>
       )}
 
-      {/* Refresh button */}
       {mode !== "local" && !needsAuth && (
         <button
           type="button"
@@ -259,7 +256,7 @@ function SyncBar() {
               {mode === "connected" ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
-                  MySQL Server (All devices share this data)
+                  MySQL Server
                 </>
               ) : mode === "local" ? (
                 <>
@@ -282,16 +279,13 @@ function SyncBar() {
                 </>
               )}
             </p>
-            {mode === "connected" ? (
+            {mode === "connected" && (
               <div className="space-y-0.5 text-muted-foreground">
                 {serverInfo?.db_version && <p>MySQL {serverInfo.db_version}</p>}
                 {serverInfo?.version && <p>API v{serverInfo.version}</p>}
-                {serverInfo?.last_backup && (
-                  <p>Last backup: {serverInfo.last_backup}</p>
-                )}
                 <div className="mt-1 pt-1 border-t border-border/50">
                   <p className="font-medium text-foreground mb-0.5">
-                    Records in MySQL (from server):
+                    Records in MySQL:
                   </p>
                   {Object.entries(displayCounts)
                     .filter(([, count]) => count > 0)
@@ -307,35 +301,32 @@ function SyncBar() {
                     ))}
                 </div>
               </div>
-            ) : mode === "local" ? (
+            )}
+            {mode === "local" && (
               <p className="text-muted-foreground leading-relaxed">
                 Data is stored in this browser only. Configure a MySQL server in
-                Settings → Data Management → Database Server to sync across all
-                devices.
+                Settings → Data Management to sync across devices.
               </p>
-            ) : mode === "auth_error" ? (
+            )}
+            {mode === "auth_error" && (
               <p className="text-muted-foreground leading-relaxed">
-                The server rejected the request with "Super Admin only". Go to{" "}
+                Go to{" "}
                 <strong>Settings → Data Management → Database Server</strong>{" "}
-                and click <strong>Authenticate Now</strong> to fix this.
+                and click <strong>Authenticate Now</strong>.
               </p>
-            ) : mode === "offline" ? (
+            )}
+            {mode === "offline" && (
               <p className="text-muted-foreground leading-relaxed">
                 Server is configured but unreachable. Check your internet
-                connection or server status. The app is running on locally
-                cached data.
+                connection or server status.
               </p>
-            ) : null}
+            )}
           </div>
         )}
       </div>
 
-      {/* Navigate to settings */}
       {mode === "local" && (
-        <div
-          className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors"
-          title="Configure database server"
-        >
+        <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors">
           <Server className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">Configure Server</span>
         </div>
@@ -355,17 +346,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const sessionId = currentSession?.id ?? "";
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
-  /**
-   * useSync gives us:
-   *   serverCounts — real MySQL COUNT(*) from /sync/status (arrives in ~1s, no auth needed)
-   *   mode         — connection state
-   * This is the PRIMARY source for dashboard stat cards.
-   * On a fresh device with empty localStorage, serverCounts will populate within ~1s
-   * and the stat cards will update immediately — no need to wait for full data fetch.
-   */
   const { serverCounts, mode: syncMode } = useSync();
 
-  // Whether we have received a response from /sync/status yet
   const serverCountsLoaded =
     Object.keys(serverCounts).length > 0 ||
     syncMode === "offline" ||
@@ -382,20 +364,10 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   );
 
   const stats = useMemo(() => {
-    /**
-     * STAT RESOLUTION PRIORITY
-     * 1. serverCounts (MySQL COUNT(*) from /sync/status) — ALWAYS accurate, available fast
-     * 2. DataService in-memory cache — populated after full data fetch
-     * 3. localStorage — local-only fallback
-     *
-     * For counts (students, staff) we ALWAYS use serverCounts when available.
-     * For teacher count we filter the in-memory staff array (designation-based).
-     */
     const cachedStudents = dataService.get<Student>("students");
     const cachedStaff = dataService.get<Staff>("staff");
 
-    // Total students: always prefer server count from /sync/status (real MySQL)
-    // Show "—" (not 0) when API is configured but server hasn't responded yet
+    // Total students — always prefer server count (real MySQL)
     const totalStudentsCount: number | "—" =
       serverCounts.students != null
         ? serverCounts.students
@@ -405,10 +377,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           ? cachedStudents.filter(
               (s) => s.sessionId === sessionId && s.status === "active",
             ).length
-          : "—"; // API configured, waiting for server response
+          : "—";
 
-    // Teacher count: filter in-memory staff by designation.
-    // Falls back to 0 while staff data is loading (acceptable — staff fetch runs async).
     const totalTeachersCount = cachedStaff.filter(
       (s) =>
         s.designation?.toLowerCase().includes("teacher") ||
@@ -417,12 +387,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         s.designation?.toLowerCase() === "prt",
     ).length;
 
-    // Total staff: prefer MySQL count, then in-memory cache
     const totalStaffCount =
       serverCounts.staff ?? (cachedStaff.length > 0 ? cachedStaff.length : 0);
 
-    // Active students in current session (for attendance / dues calculation)
-    // Use cached data for session-scoped filtering; server count for the KPI card
     const sessionStudents = cachedStudents.filter(
       (s) => s.sessionId === sessionId && s.status === "active",
     );
@@ -551,10 +518,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       if (studentHasTransportDue) transportDueStudents++;
     }
 
-    // Count unique classes:
-    // Priority: 1) serverCounts.classes (MySQL COUNT(*) from /sync/status — now includes classes table)
-    //           2) unique class values from loaded student records
-    //           3) localStorage classes array length
     const uniqueClassesFromStudents = new Set(
       sessionStudents.map((s) => s.class).filter(Boolean),
     ).size;
@@ -606,17 +569,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           : new Date().getMonth() + 9
       ];
 
-    // The KPI "Total Students" always shows the MySQL count from /sync/status.
-    // This ensures the live cPanel site shows 1184 (MySQL) not 0 (empty localStorage).
-    const displayStudents = totalStudentsCount;
     const displayStudentsNum =
-      typeof displayStudents === "number" ? displayStudents : 0;
-    const displayStaff = totalStaffCount;
+      typeof totalStudentsCount === "number" ? totalStudentsCount : 0;
 
     return {
-      students: displayStudents,
+      students: totalStudentsCount,
       teachers: totalTeachersCount,
-      totalStaff: displayStaff,
+      totalStaff: totalStaffCount,
       presentCount,
       presentPct:
         displayStudentsNum > 0
@@ -666,7 +625,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     {
       label: "Collect Fees",
       icon: IndianRupee,
-      page: "fees/collect",
+      page: "fees",
       color: "bg-accent/10 text-accent hover:bg-accent/20",
     },
     {
@@ -683,12 +642,12 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     },
   ];
 
-  // Only show loading skeleton if API is configured and we haven't received counts yet
+  // Show skeleton only when API configured and server hasn't responded yet
   const showLoadingSkeleton = isApiConfigured() && !serverCountsLoaded;
 
   return (
     <div className="flex flex-col gap-0">
-      {/* Hero */}
+      {/* Hero Banner */}
       <div
         className="relative w-full min-h-[120px] flex items-center px-6 py-5 overflow-hidden"
         style={
@@ -749,11 +708,11 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
         </Badge>
       </div>
 
-      {/* Dynamic Sync Status Bar */}
+      {/* Sync status bar */}
       <SyncBar />
 
       <div className="p-4 lg:p-6 space-y-6">
-        {/* KPI cards */}
+        {/* KPI stat cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
           <StatCard
             label="Total Students"
@@ -803,7 +762,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             sub={`Session: ${formatCurrency(stats.totalCollectedSession)}`}
             icon={IndianRupee}
             color="bg-emerald-600"
-            onClick={() => onNavigate("fees/register")}
+            onClick={() => onNavigate("fees")}
             data-ocid="dashboard.fees_collected.card"
           />
           <StatCard
@@ -819,7 +778,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           {/* Fees Awaiting */}
           <Card
             data-ocid="dashboard.fees_awaiting.card"
-            onClick={() => onNavigate("fees/due")}
+            onClick={() => onNavigate("fees")}
             className="p-5 flex items-start gap-4 cursor-pointer hover:shadow-elevated transition-shadow col-span-2 sm:col-span-1"
           >
             <div className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 bg-orange-500">
@@ -937,7 +896,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               </h2>
               <button
                 type="button"
-                onClick={() => onNavigate("fees/register")}
+                onClick={() => onNavigate("fees")}
                 className="text-xs text-primary hover:underline"
               >
                 View all →
@@ -952,7 +911,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 <p className="text-sm">No receipts yet</p>
                 <button
                   type="button"
-                  onClick={() => onNavigate("fees/collect")}
+                  onClick={() => onNavigate("fees")}
                   className="text-primary text-sm hover:underline mt-1"
                 >
                   Collect Fees →
@@ -1027,181 +986,172 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => onNavigate("fees/due")}
+            onClick={() => onNavigate("fees")}
             className="ml-auto flex-shrink-0 border-amber-300 text-amber-700 hover:bg-amber-100"
             data-ocid="dashboard.view_dues.button"
           >
             View Dues
           </Button>
         </div>
+      </div>
 
-        {/* Attendance modal */}
-        {showAttendanceModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-            <div
-              className="bg-card rounded-2xl shadow-elevated w-full max-w-2xl border border-border max-h-[85vh] flex flex-col"
-              data-ocid="dashboard.attendance.dialog"
-            >
-              <div className="flex items-center justify-between p-5 border-b border-border">
-                <h2 className="font-display font-semibold text-foreground">
-                  Today's Attendance — {new Date().toLocaleDateString("en-IN")}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => setShowAttendanceModal(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                  aria-label="Close"
-                  data-ocid="dashboard.attendance.close_button"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-              <div className="overflow-y-auto p-5 space-y-6">
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-primary/5 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-primary font-display">
-                      {stats.presentCount}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Present
-                    </p>
-                  </div>
-                  <div className="bg-destructive/5 rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-destructive font-display">
-                      {typeof stats.students === "number"
-                        ? stats.students - stats.presentCount
-                        : "—"}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Absent
-                    </p>
-                  </div>
-                  <div className="bg-muted rounded-lg p-3 text-center">
-                    <p className="text-2xl font-bold text-foreground font-display">
-                      {stats.students}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Total
-                    </p>
-                  </div>
+      {/* Attendance modal */}
+      {showAttendanceModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
+          <div
+            className="bg-card rounded-2xl shadow-elevated w-full max-w-2xl border border-border max-h-[85vh] flex flex-col"
+            data-ocid="dashboard.attendance.dialog"
+          >
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="font-display font-semibold text-foreground">
+                Today's Attendance — {new Date().toLocaleDateString("en-IN")}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowAttendanceModal(false)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label="Close"
+                data-ocid="dashboard.attendance.close_button"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto p-5 space-y-6">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-primary/5 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-primary font-display">
+                    {stats.presentCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Present
+                  </p>
                 </div>
+                <div className="bg-destructive/5 rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-destructive font-display">
+                    {typeof stats.students === "number"
+                      ? stats.students - stats.presentCount
+                      : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Absent</p>
+                </div>
+                <div className="bg-muted rounded-lg p-3 text-center">
+                  <p className="text-2xl font-bold text-foreground font-display">
+                    {stats.students}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Total</p>
+                </div>
+              </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
-                    Class Wise
-                  </h3>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-muted/50">
-                          <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                            Class
-                          </th>
-                          <th className="text-center p-2 text-xs font-medium text-muted-foreground">
-                            Present
-                          </th>
-                          <th className="text-center p-2 text-xs font-medium text-muted-foreground">
-                            Absent
-                          </th>
-                          <th className="text-center p-2 text-xs font-medium text-muted-foreground">
-                            Total
-                          </th>
-                          <th className="text-center p-2 text-xs font-medium text-muted-foreground">
-                            %
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(stats.classCounts).map(
-                          ([cls, data]) => {
-                            const pct =
-                              data.total > 0
-                                ? Math.round((data.present / data.total) * 100)
-                                : 0;
-                            return (
-                              <tr
-                                key={cls}
-                                className="border-t border-border/50"
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide">
+                  Class Wise
+                </h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/50">
+                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
+                          Class
+                        </th>
+                        <th className="text-center p-2 text-xs font-medium text-muted-foreground">
+                          Present
+                        </th>
+                        <th className="text-center p-2 text-xs font-medium text-muted-foreground">
+                          Absent
+                        </th>
+                        <th className="text-center p-2 text-xs font-medium text-muted-foreground">
+                          Total
+                        </th>
+                        <th className="text-center p-2 text-xs font-medium text-muted-foreground">
+                          %
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(stats.classCounts).map(([cls, data]) => {
+                        const pct =
+                          data.total > 0
+                            ? Math.round((data.present / data.total) * 100)
+                            : 0;
+                        return (
+                          <tr key={cls} className="border-t border-border/50">
+                            <td className="p-2 text-sm font-medium text-foreground">
+                              {cls}
+                            </td>
+                            <td className="p-2 text-center text-sm text-green-600 font-semibold">
+                              {data.present}
+                            </td>
+                            <td className="p-2 text-center text-sm text-destructive font-semibold">
+                              {data.total - data.present}
+                            </td>
+                            <td className="p-2 text-center text-sm text-muted-foreground">
+                              {data.total}
+                            </td>
+                            <td className="p-2 text-center">
+                              <span
+                                className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pct >= 75 ? "bg-accent/20 text-accent" : "bg-orange-100 text-orange-700"}`}
                               >
-                                <td className="p-2 text-sm font-medium text-foreground">
-                                  {cls}
-                                </td>
-                                <td className="p-2 text-center text-sm text-green-600 font-semibold">
-                                  {data.present}
-                                </td>
-                                <td className="p-2 text-center text-sm text-destructive font-semibold">
-                                  {data.total - data.present}
-                                </td>
-                                <td className="p-2 text-center text-sm text-muted-foreground">
-                                  {data.total}
-                                </td>
-                                <td className="p-2 text-center">
-                                  <span
-                                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${pct >= 75 ? "bg-accent/20 text-accent" : "bg-orange-100 text-orange-700"}`}
-                                  >
-                                    {pct}%
-                                  </span>
-                                </td>
-                              </tr>
-                            );
-                          },
-                        )}
-                        {Object.keys(stats.classCounts).length === 0 && (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="p-4 text-center text-muted-foreground text-sm"
-                            >
-                              No attendance recorded today
+                                {pct}%
+                              </span>
                             </td>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                        );
+                      })}
+                      {Object.keys(stats.classCounts).length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={5}
+                            className="p-4 text-center text-muted-foreground text-sm"
+                          >
+                            No attendance recorded today
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
                 </div>
+              </div>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide flex items-center gap-1.5">
-                    <Bus className="w-4 h-4" /> Route Wise
-                  </h3>
-                  <div className="space-y-2">
-                    {Object.entries(stats.routeCounts).map(([route, data]) => {
-                      const pct =
-                        data.total > 0
-                          ? Math.round((data.present / data.total) * 100)
-                          : 0;
-                      return (
-                        <div
-                          key={route}
-                          className="flex items-center justify-between py-2 border-b border-border/50"
-                        >
-                          <span className="text-sm font-medium text-foreground">
-                            {route}
+              <div>
+                <h3 className="text-sm font-semibold text-muted-foreground mb-3 uppercase tracking-wide flex items-center gap-1.5">
+                  <Bus className="w-4 h-4" /> Route Wise
+                </h3>
+                <div className="space-y-2">
+                  {Object.entries(stats.routeCounts).map(([route, data]) => {
+                    const pct =
+                      data.total > 0
+                        ? Math.round((data.present / data.total) * 100)
+                        : 0;
+                    return (
+                      <div
+                        key={route}
+                        className="flex items-center justify-between py-2 border-b border-border/50"
+                      >
+                        <span className="text-sm font-medium text-foreground">
+                          {route}
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-muted-foreground">
+                            {data.present}/{data.total}
                           </span>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-muted-foreground">
-                              {data.present}/{data.total}
-                            </span>
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                              {pct}%
-                            </span>
-                          </div>
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                            {pct}%
+                          </span>
                         </div>
-                      );
-                    })}
-                    {Object.keys(stats.routeCounts).length === 0 && (
-                      <p className="text-muted-foreground text-sm">
-                        No transport data available
-                      </p>
-                    )}
-                  </div>
+                      </div>
+                    );
+                  })}
+                  {Object.keys(stats.routeCounts).length === 0 && (
+                    <p className="text-muted-foreground text-sm">
+                      No transport data available
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

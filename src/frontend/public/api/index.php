@@ -1,6 +1,6 @@
 <?php
 /**
- * SHUBH SCHOOL ERP — Complete PHP API Backend v3.0
+ * SHUBH SCHOOL ERP — Complete PHP API Backend v4.0
  * camelCase columns throughout — matches frontend JS object keys exactly.
  *
  * Usage: https://shubh.psmkgs.com/api/index.php?route=ROUTE_NAME
@@ -35,7 +35,7 @@ register_shutdown_function(function () {
 });
 
 @ini_set('display_errors', '0');
-@ini_set('log_errors',     '1');
+@ini_set('log_errors', '1');
 @error_reporting(0);
 
 header('Content-Type: application/json; charset=utf-8');
@@ -55,67 +55,94 @@ $route  = trim($_GET['route'] ?? '', '/');
 $method = $_SERVER['REQUEST_METHOD'];
 $body   = json_decode(file_get_contents('php://input'), true) ?? [];
 $auth   = get_jwt_payload();
-$sid    = school_id_from_auth($auth);
 
 try {
-    // --- health ---------------------------------------------------------------
+
+    // ── health ──────────────────────────────────────────────────────────────────
     if ($route === '' || $route === 'health') {
+        $dbOk = false;
+        try { getDB(); $dbOk = true; } catch (Throwable $e) {}
         json_success([
             'status'      => 'ok',
             'version'     => API_VERSION,
-            'server'      => 'SHUBH SCHOOL ERP API v3.0',
+            'server'      => 'SHUBH SCHOOL ERP API v4.0',
             'server_time' => gmdate('c'),
+            'dbConnected' => $dbOk,
             'routing'     => 'query-string (no .htaccess needed)',
             'columns'     => 'camelCase throughout',
         ], 'API is running');
     }
 
-    // --- sync/status ----------------------------------------------------------
-    if ($route === 'sync/status') { handle_sync_status($sid); }
+    // ── sync/status (no auth required) ─────────────────────────────────────────
+    if ($route === 'sync/status') { handle_sync_status(); }
 
-    // --- auth -----------------------------------------------------------------
+    // ── auth ────────────────────────────────────────────────────────────────────
     if ($route === 'auth/login')           { handle_auth_login($method, $body); }
+    if ($route === 'auth/logout')          { json_success(null, 'Logged out'); }
     if ($route === 'auth/refresh')         { handle_auth_refresh($method, $body); }
     if ($route === 'auth/verify')          { handle_auth_verify($auth); }
     if ($route === 'auth/change-password') { handle_change_password($method, $body, $auth); }
 
-    // --- migrate --------------------------------------------------------------
-    if ($route === 'migrate/run')              { handle_migrate_run($method, $sid); }
-    if ($route === 'migrate/reset')            { handle_migrate_reset($method, $body, $auth, $sid); }
-    if ($route === 'migrate/reset-db')         { handle_migrate_reset($method, $body, $auth, $sid); } // alias
-    if ($route === 'migrate/reset-superadmin') { handle_migrate_reset_superadmin($method, $sid); }
+    // ── migrate ──────────────────────────────────────────────────────────────────
+    if ($route === 'migrate/run')              { handle_migrate_run($method); }
+    if ($route === 'migrate/reset')            { handle_migrate_reset($method, $body, $auth); }
+    if ($route === 'migrate/reset-db')         { handle_migrate_reset($method, $body, $auth); }
+    if ($route === 'migrate/reset-superadmin') { handle_migrate_reset_superadmin($method); }
     if ($route === 'migrate/status')           { handle_migrate_status($method); }
 
-    // --- sync -----------------------------------------------------------------
-    if ($route === 'sync/push')  { handle_sync_push($method, $body, $auth, $sid); }
-    if ($route === 'sync/batch') { handle_sync_batch($method, $body, $auth, $sid); }
-    if ($route === 'sync/pull')  { handle_sync_pull($method, $auth, $sid); }
+    // ── sync ─────────────────────────────────────────────────────────────────────
+    if ($route === 'sync/all')        { handle_sync_all($method, $auth); }
+    if ($route === 'sync/push')       { handle_sync_push($method, $body, $auth); }
+    if ($route === 'sync/push-batch') { handle_sync_push($method, $body, $auth); } // alias
+    if ($route === 'sync/batch')      { handle_sync_single_batch($method, $body, $auth); }
+    if ($route === 'sync/pull')       { handle_sync_pull($method, $auth); }
 
-    // --- backup ---------------------------------------------------------------
-    if ($route === 'backup/export')        { handle_backup_export($method, $auth, $sid); }
-    if ($route === 'backup/import')        { handle_backup_import($method, $body, $auth, $sid); }
-    if ($route === 'backup/history')       { handle_backup_history($method, $auth, $sid); }
-    if ($route === 'backup/factory-reset') { handle_factory_reset($method, $body, $auth, $sid); }
+    // ── backup ───────────────────────────────────────────────────────────────────
+    if ($route === 'backup/export')        { handle_backup_export($method, $auth); }
+    if ($route === 'backup/import')        { handle_backup_import($method, $body, $auth); }
+    if ($route === 'backup/history')       { handle_backup_history($method, $auth); }
+    if ($route === 'backup/factory-reset') { handle_factory_reset($method, $body, $auth); }
 
-    // --- settings -------------------------------------------------------------
-    if ($route === 'settings/school') { handle_settings_school($method, $body, $auth, $sid); }
-    if ($route === 'settings/users')  { handle_settings_users($method, $body, $auth, $sid); }
+    // ── changelog ────────────────────────────────────────────────────────────────
+    if ($route === 'changelog/list')  { handle_changelog_list($method, $auth); }
 
-    // --- stats ----------------------------------------------------------------
-    if ($route === 'stats') { handle_stats($auth); }
+    // ── users ────────────────────────────────────────────────────────────────────
+    if ($route === 'users/list')           { handle_users_list($method, $auth); }
+    if ($route === 'users/create')         { handle_users_create($method, $body, $auth); }
+    if ($route === 'users/update')         { handle_users_update($method, $body, $auth); }
+    if ($route === 'users/delete')         { handle_users_delete($method, $body, $auth); }
+    if ($route === 'users/reset-password') { handle_users_reset_password($method, $body, $auth); }
 
-    // --- staff/count — quick staff + teacher count for dashboard ----------------
-    if ($route === 'staff/count') { handle_staff_count($auth); }
+    // ── permissions ──────────────────────────────────────────────────────────────
+    if ($route === 'permissions/get')    { handle_permissions_get($method, $auth); }
+    if ($route === 'permissions/update') { handle_permissions_update($method, $body, $auth); }
 
-    // --- students/count -------------------------------------------------------
-    if ($route === 'students/count') { handle_students_count($auth); }
+    // ── settings ─────────────────────────────────────────────────────────────────
+    if ($route === 'settings/school') { handle_settings_school($method, $body, $auth); }
 
-    // --- data/{collection} generic CRUD --------------------------------------
-    if (preg_match('#^data/([a-z_]+)$#', $route, $m)) {
-        handle_data_collection($method, $m[1], $body, $auth, $sid, null);
+    // ── stats / counts (no auth for dashboard widgets) ───────────────────────────
+    if ($route === 'stats')           { handle_stats(); }
+    if ($route === 'staff/count')     { handle_staff_count(); }
+    if ($route === 'students/count')  { handle_students_count(); }
+
+    // ── collection CRUD: {collection}/list|get|create|update|delete|batch ────────
+    $collectionMap = collection_table_map();
+    foreach (array_keys($collectionMap) as $col) {
+        // exact: students/list, students/get, students/create ...
+        if ($route === "{$col}/list")   { handle_col_list($method, $col, $auth); }
+        if ($route === "{$col}/get")    { handle_col_get($method, $col, $auth); }
+        if ($route === "{$col}/create") { handle_col_create($method, $col, $body, $auth); }
+        if ($route === "{$col}/update") { handle_col_update($method, $col, $body, $auth); }
+        if ($route === "{$col}/delete") { handle_col_delete($method, $col, $auth); }
+        if ($route === "{$col}/batch")  { handle_col_batch($method, $col, $body, $auth); }
     }
-    if (preg_match('#^data/([a-z_]+)/(.+)$#', $route, $m)) {
-        handle_data_collection($method, $m[1], $body, $auth, $sid, $m[2]);
+
+    // ── legacy data/{collection} generic CRUD ────────────────────────────────────
+    if (preg_match('#^data/([a-zA-Z0-9_]+)$#', $route, $m)) {
+        handle_data_collection($method, $m[1], $body, $auth, null);
+    }
+    if (preg_match('#^data/([a-zA-Z0-9_]+)/(.+)$#', $route, $m)) {
+        handle_data_collection($method, $m[1], $body, $auth, $m[2]);
     }
 
     json_error('Route not found: ' . $route, 404);
@@ -128,27 +155,14 @@ try {
 
 
 // =============================================================================
-// HANDLER FUNCTIONS
+// SYNC / STATUS — no auth required
 // =============================================================================
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SYNC / STATUS
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_sync_status(int $sid): void {
+function handle_sync_status(): void {
     $connected = false;
     $dbVersion = null;
     $counts    = [];
 
-    $tables = [
-        'students','staff','fee_receipts','fees_plan','fee_headings',
-        'attendance','staff_attendance','routes','pickup_points',
-        'student_transport','student_discounts','inventory_items',
-        'inventory_transactions','expenses','expense_heads',
-        'homework','school_sessions','notices','exam_timetables',
-        'teacher_timetables','users','school_settings',
-        'chat_messages','chat_groups','call_logs','biometric_devices','payroll',
-        'classes',
-    ];
+    $tables = array_values(array_unique(array_values(collection_table_map())));
 
     try {
         $db        = getDB();
@@ -169,23 +183,25 @@ function handle_sync_status(int $sid): void {
         $connected = false;
     }
 
-    http_response_code(200);
-    echo json_encode([
-        'status'      => 'ok',
+    json_success([
         'version'     => API_VERSION,
         'db_version'  => $dbVersion,
         'server_time' => gmdate('c'),
         'connected'   => $connected,
         'synced'      => $connected,
         'counts'      => $counts,
+        // camelCase aliases used by frontend
+        'students'    => $counts['students'] ?? 0,
+        'staff'       => $counts['staff'] ?? 0,
+        'classes'     => $counts['classes'] ?? 0,
+        'sessions'    => $counts['school_sessions'] ?? 0,
     ]);
-    exit;
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 // AUTH
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 function handle_auth_login(string $method, array $body): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
 
@@ -199,62 +215,57 @@ function handle_auth_login(string $method, array $body): void {
         json_error('Database not set up. Run ?route=migrate/run first. ' . $e->getMessage(), 503);
     }
 
-    // Users table uses camelCase: username, password, role, name
     $stmt = $db->prepare('SELECT * FROM `users` WHERE `username`=:u LIMIT 1');
     $stmt->execute([':u' => $username]);
     $user = $stmt->fetch();
 
-    if (!$user) {
+    if (!$user) json_error('Invalid username or password', 401);
+
+    if (!verify_password($password, $user['password'] ?? '')) {
         json_error('Invalid username or password', 401);
     }
 
-    $storedPass = $user['password'] ?? '';
-    $ok = false;
-
-    // Support SHA2 hex (64 chars), bcrypt ($2...), and plain text for legacy
-    if (strlen($storedPass) === 64 && ctype_xdigit($storedPass)) {
-        $ok = (hash('sha256', $password) === $storedPass);
-    } elseif (strpos($storedPass, '$2') === 0) {
-        $ok = password_verify($password, $storedPass);
-    } else {
-        $ok = ($password === $storedPass);
-    }
-
-    if (!$ok) json_error('Invalid username or password', 401);
-
-    $now = time();
+    $now     = time();
     $payload = [
         'user_id'   => $user['id'],
         'school_id' => 1,
         'role'      => $user['role'],
-        'name'      => $user['name'] ?? $username,
+        'name'      => $user['fullName'] ?? $user['name'] ?? $username,
+        'username'  => $user['username'],
         'iat'       => $now,
         'exp'       => $now + JWT_EXPIRY,
     ];
-    $token = jwt_encode($payload);
+    $token        = jwt_encode($payload);
+    $refreshPayload = array_merge($payload, ['exp' => $now + JWT_REFRESH, 'is_refresh' => true]);
+    $refreshToken = jwt_encode($refreshPayload);
 
     json_success([
-        'token'      => $token,
-        'expires_in' => JWT_EXPIRY,
-        'user'       => [
+        'token'        => $token,
+        'refreshToken' => $refreshToken,
+        'expires_in'   => JWT_EXPIRY,
+        'user'         => [
             'id'       => $user['id'],
             'username' => $user['username'],
-            'name'     => $user['name'] ?? $username,
+            'name'     => $user['fullName'] ?? $user['name'] ?? $username,
+            'fullName' => $user['fullName'] ?? $user['name'] ?? $username,
             'role'     => $user['role'],
+            'mobile'   => $user['mobile'] ?? '',
+            'email'    => $user['email'] ?? '',
         ],
     ], 'Login successful');
 }
 
 function handle_auth_refresh(string $method, array $body): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    $rt = $body['refresh_token'] ?? $body['token'] ?? '';
-    if (!$rt) json_error('token is required', 400);
+    $rt = $body['refreshToken'] ?? $body['refresh_token'] ?? $body['token'] ?? '';
+    if (!$rt) json_error('refreshToken is required', 400);
 
     $payload = jwt_verify($rt);
     if (!$payload) json_error('Invalid or expired token', 401);
 
     $now = time();
     $np  = array_merge($payload, ['iat' => $now, 'exp' => $now + JWT_EXPIRY]);
+    unset($np['is_refresh']);
     json_success(['token' => jwt_encode($np), 'expires_in' => JWT_EXPIRY], 'Token refreshed');
 }
 
@@ -263,13 +274,17 @@ function handle_auth_verify(?array $auth): void {
 
     try {
         $db   = getDB();
-        $stmt = $db->prepare('SELECT `id`,`username`,`role`,`name` FROM `users` WHERE `id`=:id LIMIT 1');
+        $stmt = $db->prepare('SELECT `id`,`username`,`role`,`name`,`fullName`,`mobile`,`email` FROM `users` WHERE `id`=:id LIMIT 1');
         $stmt->execute([':id' => $auth['user_id'] ?? '']);
         $user = $stmt->fetch();
         if (!$user) json_error('User not found', 401);
-        json_success(['user' => $user]);
+        $user['fullName'] = $user['fullName'] ?? $user['name'] ?? '';
+        json_success(['valid' => true, 'user' => $user]);
     } catch (Throwable $e) {
-        json_success(['user' => ['id' => $auth['user_id'] ?? '', 'role' => $auth['role'] ?? '']]);
+        json_success(['valid' => true, 'user' => [
+            'id'   => $auth['user_id'] ?? '',
+            'role' => $auth['role'] ?? '',
+        ]]);
     }
 }
 
@@ -277,17 +292,29 @@ function handle_change_password(string $method, array $body, ?array $auth): void
     if ($method !== 'POST') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
 
-    $newPassword = $body['new_password'] ?? '';
+    $newPassword = $body['newPassword'] ?? $body['new_password'] ?? '';
+    $oldPassword = $body['oldPassword'] ?? $body['old_password'] ?? '';
     if (strlen($newPassword) < 6) json_error('New password must be at least 6 characters', 400);
 
-    $targetId = $body['user_id'] ?? ($auth['user_id'] ?? '');
-    $db       = getDB();
-
-    $isSuperAdmin = in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true);
+    $targetId     = $body['userId'] ?? $body['user_id'] ?? ($auth['user_id'] ?? '');
+    $isSuperAdmin = is_superadmin($auth);
     $isSelf       = ($auth['user_id'] ?? '') == $targetId;
+
     if (!$isSuperAdmin && !$isSelf) json_error('Forbidden', 403);
 
-    $hash = hash('sha256', $newPassword);
+    $db = getDB();
+
+    // If changing own password, verify old password
+    if ($isSelf && !$isSuperAdmin && $oldPassword) {
+        $stmt = $db->prepare('SELECT `password` FROM `users` WHERE `id`=:id LIMIT 1');
+        $stmt->execute([':id' => $targetId]);
+        $row = $stmt->fetch();
+        if ($row && !verify_password($oldPassword, $row['password'] ?? '')) {
+            json_error('Current password is incorrect', 401);
+        }
+    }
+
+    $hash = hash_password($newPassword);
     try {
         $db->prepare('UPDATE `users` SET `password`=:h WHERE `id`=:id')
            ->execute([':h' => $hash, ':id' => $targetId]);
@@ -298,11 +325,10 @@ function handle_change_password(string $method, array $body, ?array $auth): void
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MIGRATE — CREATE IF NOT EXISTS (safe to re-run; preserves existing data)
-// Use migrate/reset or migrate/reset-db to drop+recreate (fixes column issues)
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_migrate_run(string $method, int $sid): void {
+// =============================================================================
+// MIGRATE
+// =============================================================================
+function handle_migrate_run(string $method): void {
     if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
 
     try {
@@ -312,13 +338,11 @@ function handle_migrate_run(string $method, int $sid): void {
     }
 
     $applied = [];
-    $skipped = [];
     $errors  = [];
 
     foreach (get_table_definitions() as $tableName => $createSql) {
-        // Replace CREATE TABLE with CREATE TABLE IF NOT EXISTS so existing data is preserved
-        $safeSql = preg_replace(
-            '/^CREATE TABLE\s+`?' . preg_quote($tableName, '/') . '`?/i',
+        $safeSql = str_replace(
+            "CREATE TABLE `{$tableName}`",
             "CREATE TABLE IF NOT EXISTS `{$tableName}`",
             $createSql
         );
@@ -330,23 +354,76 @@ function handle_migrate_run(string $method, int $sid): void {
         }
     }
 
-    // Seed superadmin (only if not already present)
     $seedResult = seed_superadmin_user($db);
-
-    // Seed default settings (only if empty)
     seed_default_settings($db);
+    seed_default_session($db);
+    seed_default_permissions($db);
 
     json_success([
         'applied'  => $applied,
-        'skipped'  => $skipped,
         'errors'   => $errors,
         'seeded'   => $seedResult,
-        'message'  => count($applied) . ' tables ensured. Existing data preserved. Login: superadmin / admin123',
-        'note'     => 'migrate/run uses CREATE TABLE IF NOT EXISTS — safe to re-run. To fix column mismatch errors, call migrate/reset or migrate/reset-db instead.',
+        'message'  => count($applied) . ' tables ensured. Login: superadmin / admin123',
     ], 'Migration complete. Login with superadmin / admin123');
 }
 
-function handle_migrate_reset_superadmin(string $method, int $sid): void {
+function handle_migrate_reset(string $method, array $body, ?array $auth): void {
+    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
+
+    $isAuthed        = is_superadmin($auth);
+    $hasConfirmation = ($body['confirmation'] ?? '') === 'RESET_DB_TABLES';
+
+    if (!$isAuthed && !$hasConfirmation && $method !== 'GET') {
+        json_error_coded(
+            'Authentication required OR provide confirmation=RESET_DB_TABLES in body.',
+            401, 'AUTH_REQUIRED'
+        );
+    }
+
+    try {
+        $db = getDB();
+    } catch (Throwable $e) {
+        json_error('Database connection failed: ' . $e->getMessage(), 503);
+    }
+
+    $dropped = [];
+    $created = [];
+    $errors  = [];
+
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=0'); } catch (Throwable $e) {}
+
+    foreach (get_table_definitions() as $tableName => $createSql) {
+        try {
+            $db->exec("DROP TABLE IF EXISTS `{$tableName}`");
+            $dropped[] = $tableName;
+        } catch (Throwable $e) {
+            $errors[] = ['table' => $tableName, 'stage' => 'drop', 'error' => $e->getMessage()];
+        }
+        try {
+            $db->exec($createSql);
+            $created[] = $tableName;
+        } catch (Throwable $e) {
+            $errors[] = ['table' => $tableName, 'stage' => 'create', 'error' => $e->getMessage()];
+        }
+    }
+
+    try { $db->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (Throwable $e) {}
+
+    $seedResult = seed_superadmin_user($db, true);
+    seed_default_settings($db);
+    seed_default_session($db);
+    seed_default_permissions($db);
+
+    json_success([
+        'dropped' => $dropped,
+        'created' => $created,
+        'errors'  => $errors,
+        'seeded'  => $seedResult,
+        'note'    => 'All tables rebuilt with camelCase columns. Login: superadmin / admin123',
+    ], count($created) . ' tables reset. Login: superadmin / admin123');
+}
+
+function handle_migrate_reset_superadmin(string $method): void {
     if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
 
     try {
@@ -356,8 +433,8 @@ function handle_migrate_reset_superadmin(string $method, int $sid): void {
     }
 
     try {
-        $db->prepare("DELETE FROM `users` WHERE `role`='superadmin'")->execute();
-    } catch (Throwable $e) { /* table may not exist yet */ }
+        $db->prepare("DELETE FROM `users` WHERE `username`='superadmin'")->execute();
+    } catch (Throwable $e) {}
 
     $result = seed_superadmin_user($db, true);
     json_success(['action' => $result, 'username' => 'superadmin', 'password' => 'admin123'],
@@ -385,108 +462,35 @@ function handle_migrate_status(string $method): void {
     }
 }
 
-/**
- * migrate/reset — Drop ALL tables and recreate them fresh with correct camelCase columns.
- * Also re-seeds superadmin. Use this to fix SQLSTATE[42S22] column-not-found errors
- * caused by old snake_case tables created by the legacy migrate.php.
- *
- * WARNING: This drops all existing data. Requires Super Admin authentication OR
- * accepts a special confirmation body without auth (for initial setup from UI).
- */
-function handle_migrate_reset(string $method, array $body, ?array $auth, int $sid): void {
-    if (!in_array($method, ['GET', 'POST'], true)) json_error('Method not allowed', 405);
-
-    // Allow unauthenticated access only with explicit confirmation token
-    // (so the UI button can call this during first-time setup when no JWT exists yet)
-    $isAuthed = $auth &&
-        in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true);
-    $hasConfirmation = ($body['confirmation'] ?? '') === 'RESET_DB_TABLES';
-
-    if (!$isAuthed && !$hasConfirmation && $method !== 'GET') {
-        json_error_coded(
-            'Authentication required OR provide confirmation=RESET_DB_TABLES in body.',
-            401,
-            'AUTH_REQUIRED'
-        );
-    }
-
-    try {
-        $db = getDB();
-    } catch (Throwable $e) {
-        json_error('Database connection failed: ' . $e->getMessage(), 503);
-    }
-
-    $dropped  = [];
-    $created  = [];
-    $errors   = [];
-
-    // Disable FK checks so we can DROP freely
-    try { $db->exec('SET FOREIGN_KEY_CHECKS=0'); } catch (Throwable $e) {}
-
-    foreach (get_table_definitions() as $tableName => $createSql) {
-        try {
-            $db->exec("DROP TABLE IF EXISTS `{$tableName}`");
-            $dropped[] = $tableName;
-        } catch (Throwable $e) {
-            $errors[] = ['table' => $tableName, 'stage' => 'drop', 'error' => $e->getMessage()];
-        }
-        try {
-            $db->exec($createSql);
-            $created[] = $tableName;
-        } catch (Throwable $e) {
-            $errors[] = ['table' => $tableName, 'stage' => 'create', 'error' => $e->getMessage()];
-        }
-    }
-
-    try { $db->exec('SET FOREIGN_KEY_CHECKS=1'); } catch (Throwable $e) {}
-
-    // Re-seed superadmin
-    $seedResult = seed_superadmin_user($db, true);
-
-    // Re-seed default settings
-    seed_default_settings($db);
-
-    json_success([
-        'dropped' => $dropped,
-        'created' => $created,
-        'errors'  => $errors,
-        'seeded'  => $seedResult,
-        'note'    => 'All tables rebuilt with camelCase columns. Login: superadmin / admin123',
-    ], count($created) . ' tables reset successfully. SQLSTATE[42S22] errors are now fixed.');
-}
-
-/**
- * Insert or force-reset the superadmin user.
- * Uses camelCase columns: id, username, password, role, name
- */
 function seed_superadmin_user(PDO $db, bool $force = false): string {
-    $hash = hash('sha256', 'admin123');
+    $hash = hash_password('admin123');
 
     try {
-        // Ensure users table exists minimally
         $db->exec("CREATE TABLE IF NOT EXISTS `users` (
             `id`          VARCHAR(36) PRIMARY KEY,
-            `username`    VARCHAR(255),
+            `username`    VARCHAR(255) UNIQUE,
             `password`    VARCHAR(255),
             `role`        VARCHAR(100),
+            `fullName`    VARCHAR(255),
             `name`        VARCHAR(255),
             `mobile`      VARCHAR(50),
             `email`       VARCHAR(255),
             `session`     VARCHAR(100),
             `permissions` TEXT,
-            `linkedId`    VARCHAR(36)
+            `linkedId`    VARCHAR(36),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-    } catch (Throwable $e) { /* already exists */ }
+    } catch (Throwable $e) {}
 
     $stmt = $db->prepare("SELECT `id` FROM `users` WHERE `username`='superadmin' LIMIT 1");
     $stmt->execute();
     $existing = $stmt->fetch();
-
-    $id = 'superadmin-' . date('Y');
+    $id       = 'superadmin-' . date('Y');
 
     if (!$existing) {
         try {
-            $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`name`) VALUES (:id,'superadmin',:pw,'superadmin','Super Admin')")
+            $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`fullName`,`name`) VALUES (:id,'superadmin',:pw,'superadmin','Super Admin','Super Admin')")
                ->execute([':id' => $id, ':pw' => $hash]);
             return 'superadmin created';
         } catch (Throwable $e) {
@@ -496,7 +500,7 @@ function seed_superadmin_user(PDO $db, bool $force = false): string {
 
     if ($force) {
         try {
-            $db->prepare("UPDATE `users` SET `password`=:pw, `role`='superadmin', `name`='Super Admin' WHERE `username`='superadmin'")
+            $db->prepare("UPDATE `users` SET `password`=:pw, `role`='superadmin', `fullName`='Super Admin', `name`='Super Admin' WHERE `username`='superadmin'")
                ->execute([':pw' => $hash]);
             return 'superadmin password reset';
         } catch (Throwable $e) {
@@ -512,89 +516,238 @@ function seed_default_settings(PDO $db): void {
         $check = $db->query("SELECT COUNT(*) FROM `school_settings`");
         if ($check && (int)$check->fetchColumn() === 0) {
             $defaults = [
-                ['key' => 'school_name',  'value' => 'SHUBH SCHOOL ERP'],
-                ['key' => 'session',      'value' => date('Y') . '-' . (date('y') + 1)],
-                ['key' => 'currency',     'value' => 'INR'],
-                ['key' => 'whatsapp_enabled', 'value' => '0'],
+                ['key' => 'school_name', 'value' => 'SHUBH SCHOOL ERP'],
+                ['key' => 'session',     'value' => date('Y') . '-' . substr((string)(date('Y') + 1), 2)],
+                ['key' => 'currency',    'value' => 'INR'],
             ];
             $ins = $db->prepare("INSERT IGNORE INTO `school_settings` (`id`,`key`,`value`) VALUES (UUID(),:k,:v)");
             foreach ($defaults as $d) {
                 $ins->execute([':k' => $d['key'], ':v' => $d['value']]);
             }
         }
-    } catch (Throwable $e) { /* ignore */ }
+    } catch (Throwable $e) {}
+}
+
+function seed_default_session(PDO $db): void {
+    try {
+        $check = $db->query("SELECT COUNT(*) FROM `school_sessions`");
+        if ($check && (int)$check->fetchColumn() === 0) {
+            $year  = (int)date('Y');
+            $label = $year . '-' . substr((string)($year + 1), 2);
+            $id    = 'sess-' . $year;
+            $db->prepare("INSERT IGNORE INTO `school_sessions`
+                (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`isArchived`,`createdAt`)
+                VALUES (:id,:label,:name,:sy,:ey,1,1,0,:ca)")
+               ->execute([':id'=>$id, ':label'=>$label, ':name'=>$label, ':sy'=>$year, ':ey'=>$year+1, ':ca'=>now_str()]);
+        }
+    } catch (Throwable $e) {}
+}
+
+function seed_default_permissions(PDO $db): void {
+    try {
+        $check = $db->query("SELECT COUNT(*) FROM `permissions`");
+        if ($check && (int)$check->fetchColumn() === 0) {
+            $modules = [
+                'students','fees','attendance','staff','transport','inventory',
+                'expenses','homework','alumni','reports','settings','users',
+                'classes','subjects','notices','exams','payroll','chat',
+            ];
+            $roles = [
+                'superadmin' => [1,1,1,1],
+                'admin'      => [1,1,1,1],
+                'teacher'    => [1,0,1,0],
+                'receptionist'=>[1,1,1,0],
+                'accountant' => [1,1,1,0],
+                'parent'     => [1,0,0,0],
+                'student'    => [1,0,0,0],
+            ];
+            $ins = $db->prepare("INSERT IGNORE INTO `permissions`
+                (`id`,`role`,`module`,`canRead`,`canWrite`,`canAdd`,`canDelete`)
+                VALUES (UUID(),:role,:module,:read,:write,:add,:delete)");
+            foreach ($roles as $role => [$r,$w,$a,$d]) {
+                foreach ($modules as $mod) {
+                    $ins->execute([':role'=>$role, ':module'=>$mod, ':read'=>$r, ':write'=>$w, ':add'=>$a, ':delete'=>$d]);
+                }
+            }
+        }
+    } catch (Throwable $e) {}
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SYNC / PUSH — bulk upsert all collections
-// Uses positional ? parameters to avoid SQLSTATE[HY093] (named param collision
-// between VALUES(:x) and ON DUPLICATE KEY UPDATE col=:x).
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
+// SYNC / ALL — returns every collection in one request
+// =============================================================================
+function handle_sync_all(string $method, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
 
-/**
- * Upsert a batch of rows into a table using positional ? parameters.
- * Returns ['pushed' => int, 'failed' => int, 'errors' => string[]]
- */
-function batchUpsert(PDO $pdo, string $table, array $rows): array {
+    $db     = getDB();
+    $result = [];
+
+    // changelog: last 1000 entries only
+    $collectionMap = collection_table_map();
+    foreach ($collectionMap as $key => $table) {
+        // Deduplicate by table (multiple keys may map to same table)
+        if (isset($result[$key])) continue;
+        try {
+            if ($key === 'changelog') {
+                $stmt = $db->query("SELECT * FROM `{$table}` ORDER BY `createdAt` DESC LIMIT 1000");
+            } else {
+                $stmt = $db->query("SELECT * FROM `{$table}`");
+            }
+            $rows = $stmt ? $stmt->fetchAll() : [];
+            // Post-process
+            $rows = post_process_rows($rows, $table);
+            $result[$key] = $rows;
+        } catch (Throwable $e) {
+            $result[$key] = [];
+        }
+    }
+
+    // Ensure expected keys exist (frontend may expect them even if empty)
+    $expected = [
+        'students','staff','classes','feeHeadings','feesPlans','feeReceipts',
+        'attendanceRecords','routes','sessions','subjects','inventory',
+        'expenses','homework','alumni','users','permissions',
+        'chatMessages','chatGroups','calls','notifications','changelog',
+    ];
+    foreach ($expected as $k) {
+        if (!isset($result[$k])) $result[$k] = [];
+    }
+
+    json_success($result, 'All collections fetched');
+}
+
+// Post-process rows for specific tables (decode JSON fields, add aliases)
+function post_process_rows(array $rows, string $table): array {
+    if (empty($rows)) return $rows;
+
+    foreach ($rows as &$row) {
+        if ($table === 'classes') {
+            if (isset($row['sections']) && is_string($row['sections'])) {
+                $d = json_decode($row['sections'], true);
+                if (is_array($d)) $row['sections'] = $d;
+            }
+            if (empty($row['className']) && !empty($row['name'])) $row['className'] = $row['name'];
+            if (empty($row['name']) && !empty($row['className']))  $row['name'] = $row['className'];
+        }
+        if ($table === 'school_sessions') {
+            if (empty($row['label']))      $row['label']      = $row['name'] ?? '';
+            if (!isset($row['isActive']))  $row['isActive']   = (bool)($row['isCurrent'] ?? 0);
+            if (!isset($row['isArchived']))$row['isArchived']  = (bool)($row['archived'] ?? 0);
+        }
+        if ($table === 'students') {
+            if (empty($row['fullName']) && !empty($row['name'])) $row['fullName'] = $row['name'];
+            if (empty($row['name']) && !empty($row['fullName'])) $row['name'] = $row['fullName'];
+        }
+        if ($table === 'staff') {
+            if (empty($row['fullName']) && !empty($row['name'])) $row['fullName'] = $row['name'];
+            if (empty($row['name']) && !empty($row['fullName'])) $row['name'] = $row['fullName'];
+        }
+    }
+    unset($row);
+    return $rows;
+}
+
+
+// =============================================================================
+// SYNC / PUSH — bulk upsert, all collections or single collection
+// =============================================================================
+function handle_sync_push(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
+    if (!is_superadmin($auth)) json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
+
+    // Single-collection format: { collection, items }
+    if (isset($body['collection']) && isset($body['items'])) {
+        handle_sync_single_batch($method, $body, $auth);
+        return;
+    }
+
+    $db         = getDB();
+    $tableMap   = collection_table_map();
+    $results    = [];
+
+    foreach ($tableMap as $key => $table) {
+        $records = $body[$key] ?? [];
+        if (empty($records) || !is_array($records)) continue;
+        $result           = batchUpsert($db, $table, $records, $auth);
+        $results[$key]    = [
+            'pushed' => $result['pushed'],
+            'failed' => $result['failed'],
+            'errors' => $result['errors'],
+        ];
+    }
+
+    json_success(['results' => $results], 'Push complete');
+}
+
+function handle_sync_single_batch(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
+    if (!is_superadmin($auth)) json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
+
+    $collection = trim($body['collection'] ?? '');
+    $items      = $body['items'] ?? $body['records'] ?? [];
+    if ($collection === '') json_error('collection is required', 400);
+    if (!is_array($items))  json_error('items must be an array', 400);
+
+    $tableMap = collection_table_map();
+    if (!isset($tableMap[$collection])) json_error("Unknown collection: {$collection}", 400);
+
+    $table  = $tableMap[$collection];
+    $db     = getDB();
+    $result = batchUpsert($db, $table, $items, $auth);
+
+    json_success([
+        'pushed'     => $result['pushed'],
+        'failed'     => $result['failed'],
+        'total'      => count($items),
+        'errors'     => $result['errors'],
+        'collection' => $collection,
+    ], "{$result['pushed']} of " . count($items) . " records saved");
+}
+
+function handle_sync_pull(string $method, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $db    = getDB();
+    $since = $_GET['since'] ?? null;
+    $pull  = [];
+
+    foreach (array_unique(array_values(collection_table_map())) as $table) {
+        try {
+            $stmt = $db->prepare("SELECT * FROM `{$table}`");
+            $stmt->execute();
+            $rows = $stmt->fetchAll();
+            if (!empty($rows)) $pull[$table] = post_process_rows($rows, $table);
+        } catch (Throwable $e) {}
+    }
+
+    json_success(['pulled_at' => gmdate('c'), 'since' => $since, 'tables' => $pull]);
+}
+
+
+// =============================================================================
+// BATCH UPSERT — positional ? params — no HY093 possible
+// =============================================================================
+function batchUpsert(PDO $pdo, string $table, array $rows, ?array $auth = null): array {
     if (empty($rows)) return ['pushed' => 0, 'failed' => 0, 'errors' => []];
 
     $pushed = 0;
     $failed = 0;
     $errors = [];
 
-    // ── Bug 1 fix: fullName ↔ name mapping for students table ────────────────
-    // The frontend Student type uses `fullName`; the MySQL column has both `name` and `fullName`.
-    // Accept both and keep them in sync so reads always return fullName correctly.
-    if ($table === 'students') {
-        foreach ($rows as &$row) {
-            if (!is_array($row)) continue;
-            // fullName present → also set name
-            if (isset($row['fullName']) && $row['fullName'] !== null && $row['fullName'] !== '') {
-                $row['name'] = $row['fullName'];
-            }
-            // name present → also set fullName
-            if (isset($row['name']) && $row['name'] !== null && $row['name'] !== '') {
-                $row['fullName'] = $row['name'];
-            }
-            // sessionId → also set session (schema has both)
-            if (isset($row['sessionId']) && (!isset($row['session']) || $row['session'] === '')) {
-                $row['session'] = $row['sessionId'];
-            }
-        }
-        unset($row); // break reference
-    }
+    // Normalize field names before touching the DB
+    $rows = normalize_rows($table, $rows);
 
-    // ── Bug fix: className ↔ name mapping for classes table ──────────────────
-    // ClassSection frontend type uses `className`; MySQL column now has both `name` and `className`.
-    if ($table === 'classes') {
-        foreach ($rows as &$row) {
-            if (!is_array($row)) continue;
-            // className present → also set name
-            if (isset($row['className']) && $row['className'] !== null && $row['className'] !== '') {
-                $row['name'] = $row['className'];
-            }
-            // name present → also set className
-            if (isset($row['name']) && $row['name'] !== null && $row['name'] !== '') {
-                $row['className'] = $row['name'];
-            }
-            // sections array → JSON string for storage
-            if (isset($row['sections']) && is_array($row['sections'])) {
-                $row['sections'] = json_encode($row['sections'], JSON_UNESCAPED_UNICODE);
-            }
-        }
-        unset($row);
-    }
-
-    // Cache known columns from live DB schema to prevent SQLSTATE[42S22]
+    // Get live column list to skip unknown fields
     $tableColumns = [];
     try {
         $stmt = $pdo->query("DESCRIBE `{$table}`");
         $tableColumns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN, 0) : [];
-    } catch (Throwable $e) {
-        // DESCRIBE failed (table missing) — let INSERT report the error naturally
-        $tableColumns = [];
-    }
+    } catch (Throwable $e) {}
 
     foreach ($rows as $idx => $row) {
         if (!is_array($row)) {
@@ -603,51 +756,46 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
             continue;
         }
 
-        // Keep only scalar/null values and valid identifier column names
-        // Arrays are JSON-encoded so sections/months/etc are stored as JSON strings
         $filteredRow = [];
         foreach ($row as $k => $v) {
             if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
             if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
             if (is_array($v) || is_object($v)) {
-                // Encode arrays/objects to JSON string (e.g. sections, months, amounts)
                 $filteredRow[$k] = json_encode($v, JSON_UNESCAPED_UNICODE);
             } elseif (is_scalar($v) || is_null($v)) {
                 $filteredRow[$k] = $v;
             }
-            // skip resources and other non-storable types
         }
 
         if (empty($filteredRow)) {
             $failed++;
-            $errors[] = "Row {$idx}: no valid columns after filtering (table: {$table})";
+            $errors[] = "Row {$idx}: no valid columns for table '{$table}'";
             continue;
         }
 
-        $columns = array_keys($filteredRow);
-        $values  = array_values($filteredRow);
-
-        // Build with positional ? placeholders — eliminates HY093 entirely
+        $columns      = array_keys($filteredRow);
+        $values       = array_values($filteredRow);
         $colList      = implode(', ', array_map(fn($c) => "`{$c}`", $columns));
         $placeholders = implode(', ', array_fill(0, count($columns), '?'));
-
-        // ON DUPLICATE KEY UPDATE — use VALUES(col) so no extra params needed
-        $updateParts = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $columns);
+        $updateParts  = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $columns);
         $updateClause = implode(', ', $updateParts);
 
         $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}";
 
         try {
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute($values);
+            $pdo->prepare($sql)->execute($values);
             $pushed++;
+            // Changelog auto-write for non-changelog tables
+            if ($table !== 'changelog' && $auth) {
+                write_changelog($pdo, $auth, $table, 'upsert', $filteredRow['id'] ?? null, null, $filteredRow);
+            }
         } catch (PDOException $e) {
             $failed++;
             $msg = $e->getMessage();
             if (strpos($msg, "doesn't exist") !== false) {
-                $errors[] = "Row {$idx}: Table '{$table}' not found — run ?route=migrate/run first";
+                $errors[] = "Row {$idx}: Table '{$table}' missing — run ?route=migrate/run";
             } elseif (strpos($msg, '42S22') !== false || stripos($msg, 'Unknown column') !== false) {
-                $errors[] = "Row {$idx}: Column mismatch in '{$table}' — run ?route=migrate/reset-db to fix";
+                $errors[] = "Row {$idx}: Column mismatch in '{$table}' — run ?route=migrate/reset-db";
             } else {
                 $errors[] = "Row {$idx}: {$msg}";
             }
@@ -657,124 +805,306 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
     return ['pushed' => $pushed, 'failed' => $failed, 'errors' => $errors];
 }
 
-function handle_sync_push(string $method, array $body, ?array $auth, int $sid): void {
-    if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) {
-        json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
-    }
+// Normalize rows: fix field aliases, JSON-encode arrays, etc.
+function normalize_rows(string $table, array $rows): array {
+    foreach ($rows as &$row) {
+        if (!is_array($row)) continue;
 
-    // Single-collection batch format: { collection, items }
-    if (isset($body['collection']) && isset($body['items'])) {
-        handle_sync_batch($method, $body, $auth, $sid);
-        return;
+        if ($table === 'students') {
+            if (!empty($row['fullName']) && empty($row['name'])) $row['name'] = $row['fullName'];
+            if (!empty($row['name']) && empty($row['fullName'])) $row['fullName'] = $row['name'];
+            if (!empty($row['sessionId']) && empty($row['session'])) $row['session'] = $row['sessionId'];
+        }
+        if ($table === 'staff') {
+            if (!empty($row['fullName']) && empty($row['name'])) $row['name'] = $row['fullName'];
+            if (!empty($row['name']) && empty($row['fullName'])) $row['fullName'] = $row['name'];
+        }
+        if ($table === 'classes') {
+            if (!empty($row['className']) && empty($row['name'])) $row['name'] = $row['className'];
+            if (!empty($row['name']) && empty($row['className'])) $row['className'] = $row['name'];
+            if (isset($row['sections']) && is_array($row['sections'])) {
+                $row['sections'] = json_encode($row['sections'], JSON_UNESCAPED_UNICODE);
+            }
+        }
+        if ($table === 'school_sessions') {
+            if (!empty($row['label']) && empty($row['name'])) $row['name'] = $row['label'];
+            if (isset($row['isActive']))   $row['isCurrent']  = $row['isActive']  ? 1 : 0;
+            if (isset($row['isArchived'])) $row['archived']   = $row['isArchived'] ? 1 : 0;
+        }
+        // Generic: JSON-encode any remaining array values
+        foreach ($row as $k => &$v) {
+            if (is_array($v) || is_object($v)) {
+                $v = json_encode($v, JSON_UNESCAPED_UNICODE);
+            }
+        }
+        unset($v);
     }
+    unset($row);
+    return $rows;
+}
+
+
+// =============================================================================
+// CHANGELOG
+// =============================================================================
+function write_changelog(PDO $db, ?array $auth, string $module, string $action, ?string $recordId, $oldValue, $newValue): void {
+    try {
+        $db->prepare("INSERT IGNORE INTO `changelog`
+            (`id`,`userId`,`username`,`role`,`module`,`action`,`recordId`,`oldValue`,`newValue`,`createdAt`)
+            VALUES (UUID(),:uid,:uname,:role,:module,:action,:rid,:old,:new,:ca)")
+           ->execute([
+               ':uid'    => $auth['user_id'] ?? 'system',
+               ':uname'  => $auth['username'] ?? $auth['name'] ?? 'system',
+               ':role'   => $auth['role'] ?? 'system',
+               ':module' => $module,
+               ':action' => $action,
+               ':rid'    => $recordId,
+               ':old'    => $oldValue ? json_encode($oldValue) : null,
+               ':new'    => $newValue ? json_encode($newValue) : null,
+               ':ca'     => now_str(),
+           ]);
+    } catch (Throwable $e) {}
+}
+
+function handle_changelog_list(string $method, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $limit = min((int)($_GET['limit'] ?? 500), 1000);
+    try {
+        $db   = getDB();
+        $stmt = $db->prepare("SELECT * FROM `changelog` ORDER BY `createdAt` DESC LIMIT {$limit}");
+        $stmt->execute();
+        json_success($stmt->fetchAll());
+    } catch (Throwable $e) {
+        json_success([]);
+    }
+}
+
+
+// =============================================================================
+// USERS (Super Admin only for write operations)
+// =============================================================================
+function handle_users_list(string $method, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
+
+    try {
+        $db   = getDB();
+        $stmt = $db->query("SELECT `id`,`username`,`role`,`fullName`,`name`,`mobile`,`email`,`linkedId`,`createdAt` FROM `users`");
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['fullName'] = $r['fullName'] ?? $r['name'] ?? '';
+            unset($r['password']);
+        }
+        unset($r);
+        json_success($rows);
+    } catch (Throwable $e) {
+        json_success([]);
+    }
+}
+
+function handle_users_create(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
+
+    $username = trim($body['username'] ?? '');
+    $password = trim($body['password'] ?? 'admin123');
+    $role     = $body['role'] ?? 'teacher';
+    $fullName = $body['fullName'] ?? $body['name'] ?? $username;
+    $mobile   = $body['mobile'] ?? '';
+    $email    = $body['email'] ?? '';
+    $linkedId = $body['linkedId'] ?? null;
+
+    if (!$username) json_error('username is required', 400);
+    if (strlen($password) < 6) json_error('Password must be at least 6 characters', 400);
+
+    $hash = hash_password($password);
+    $id   = gen_uuid();
 
     $db = getDB();
+    try {
+        $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`fullName`,`name`,`mobile`,`email`,`linkedId`,`createdAt`)
+            VALUES (:id,:u,:h,:r,:fn,:fn2,:mob,:email,:lid,NOW())")
+           ->execute([
+               ':id'=>$id, ':u'=>$username, ':h'=>$hash, ':r'=>$role,
+               ':fn'=>$fullName, ':fn2'=>$fullName, ':mob'=>$mobile,
+               ':email'=>$email, ':lid'=>$linkedId,
+           ]);
+    } catch (Throwable $e) {
+        if (strpos($e->getMessage(), 'Duplicate') !== false) {
+            json_error("Username '{$username}' already exists", 409);
+        }
+        json_error('Failed to create user: ' . $e->getMessage(), 500);
+    }
 
-    $tableMap = collection_table_map();
+    write_changelog($db, $auth, 'users', 'create', $id, null, ['username'=>$username,'role'=>$role]);
+    json_success(['id' => $id, 'username' => $username, 'role' => $role], 'User created', 201);
+}
 
-    $results = [];
-    foreach ($tableMap as $key => $table) {
-        if (!isset($results[$key])) {
-            $results[$key] = ['pushed' => 0, 'failed' => 0, 'errors' => []];
+function handle_users_update(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
+
+    $id = $body['id'] ?? '';
+    if (!$id) json_error('id is required', 400);
+
+    $db   = getDB();
+    $sets = [];
+    $vals = [];
+
+    $allowed = ['role','fullName','name','mobile','email','linkedId'];
+    foreach ($allowed as $field) {
+        if (isset($body[$field])) {
+            $sets[] = "`{$field}`=?";
+            $vals[] = $body[$field];
         }
     }
-
-    foreach ($tableMap as $key => $table) {
-        $records = $body[$key] ?? [];
-        if (empty($records) || !is_array($records)) continue;
-
-        $result = batchUpsert($db, $table, $records);
-        $results[$key]['pushed'] += $result['pushed'];
-        $results[$key]['failed'] += $result['failed'];
-        $results[$key]['errors'] = array_merge($results[$key]['errors'], $result['errors']);
+    // Sync fullName ↔ name
+    if (isset($body['fullName']) && !isset($body['name'])) {
+        $sets[] = '`name`=?'; $vals[] = $body['fullName'];
+    }
+    if (isset($body['name']) && !isset($body['fullName'])) {
+        $sets[] = '`fullName`=?'; $vals[] = $body['name'];
+    }
+    if (!empty($body['password'])) {
+        $sets[] = '`password`=?';
+        $vals[] = hash_password($body['password']);
     }
 
-    json_success(['results' => $results], 'Push complete');
+    if (empty($sets)) json_error('No valid fields to update', 400);
+
+    $vals[] = $id;
+    try {
+        $db->prepare("UPDATE `users` SET " . implode(',', $sets) . " WHERE `id`=?")->execute($vals);
+    } catch (Throwable $e) {
+        json_error('Update failed: ' . $e->getMessage(), 500);
+    }
+
+    write_changelog($db, $auth, 'users', 'update', $id, null, $body);
+    json_success(['id' => $id], 'User updated');
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SYNC / BATCH — upsert a single named collection
-// Uses batchUpsert() with positional ? parameters (no HY093 possible).
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_sync_batch(string $method, array $body, ?array $auth, int $sid): void {
+function handle_users_delete(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error_coded('Token expired or missing. Please re-authenticate.', 401, 'TOKEN_EXPIRED');
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) {
-        json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
+
+    $id = $body['id'] ?? $_GET['id'] ?? '';
+    if (!$id) json_error('id is required', 400);
+
+    // Prevent deleting superadmin
+    $db   = getDB();
+    $stmt = $db->prepare("SELECT `username` FROM `users` WHERE `id`=:id LIMIT 1");
+    $stmt->execute([':id' => $id]);
+    $u = $stmt->fetch();
+    if ($u && $u['username'] === 'superadmin') json_error('Cannot delete the superadmin account', 403);
+
+    try {
+        $db->prepare("DELETE FROM `users` WHERE `id`=:id")->execute([':id' => $id]);
+    } catch (Throwable $e) {
+        json_error('Delete failed: ' . $e->getMessage(), 500);
     }
 
-    $collection = trim($body['collection'] ?? '');
-    $items      = $body['items'] ?? [];
-    if ($collection === '') json_error('collection is required', 400);
-    if (!is_array($items))  json_error('items must be an array', 400);
+    write_changelog($db, $auth, 'users', 'delete', $id, null, null);
+    json_success(null, 'User deleted');
+}
 
-    $tableMap = collection_table_map();
-    if (!isset($tableMap[$collection])) json_error("Unknown collection: {$collection}", 400);
+function handle_users_reset_password(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
 
-    $table  = $tableMap[$collection];
-    $db     = getDB();
+    $id          = $body['id'] ?? $body['userId'] ?? '';
+    $newPassword = $body['newPassword'] ?? $body['password'] ?? 'admin123';
+    if (!$id) json_error('id is required', 400);
 
-    $result = batchUpsert($db, $table, $items);
+    $hash = hash_password($newPassword);
+    $db   = getDB();
+    try {
+        $db->prepare("UPDATE `users` SET `password`=? WHERE `id`=?")->execute([$hash, $id]);
+    } catch (Throwable $e) {
+        json_error('Failed: ' . $e->getMessage(), 500);
+    }
 
-    json_success([
-        'pushed'     => $result['pushed'],
-        'failed'     => $result['failed'],
-        'total'      => count($items),
-        'errors'     => $result['errors'],
-        'collection' => $collection,
-        'table'      => $table,
-    ], "{$result['pushed']} of " . count($items) . " records saved");
+    write_changelog($db, $auth, 'users', 'reset_password', $id, null, null);
+    json_success(null, 'Password reset successfully');
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SYNC / PULL
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_sync_pull(string $method, ?array $auth, int $sid): void {
+// =============================================================================
+// PERMISSIONS
+// =============================================================================
+function handle_permissions_get(string $method, ?array $auth): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
 
-    $db    = getDB();
-    $since = $_GET['since'] ?? null;
+    $role = $_GET['role'] ?? ($auth['role'] ?? '');
+    try {
+        $db   = getDB();
+        $stmt = $db->prepare("SELECT * FROM `permissions` WHERE `role`=:role");
+        $stmt->execute([':role' => $role]);
+        $rows = $stmt->fetchAll();
+        // Convert to {module: {canRead,canWrite,canAdd,canDelete}} map
+        $matrix = [];
+        foreach ($rows as $r) {
+            $matrix[$r['module']] = [
+                'canRead'   => (bool)$r['canRead'],
+                'canWrite'  => (bool)$r['canWrite'],
+                'canAdd'    => (bool)$r['canAdd'],
+                'canDelete' => (bool)$r['canDelete'],
+            ];
+        }
+        json_success(['role' => $role, 'permissions' => $matrix]);
+    } catch (Throwable $e) {
+        json_success(['role' => $role, 'permissions' => []]);
+    }
+}
 
-    $tables = array_values(array_unique(array_values(collection_table_map())));
+function handle_permissions_update(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
 
-    $pull = [];
-    foreach ($tables as $table) {
+    $role        = $body['role'] ?? '';
+    $permissions = $body['permissions'] ?? [];
+    if (!$role) json_error('role is required', 400);
+
+    $db  = getDB();
+    $ins = $db->prepare("INSERT INTO `permissions`
+        (`id`,`role`,`module`,`canRead`,`canWrite`,`canAdd`,`canDelete`)
+        VALUES (UUID(),:role,:module,:read,:write,:add,:delete)
+        ON DUPLICATE KEY UPDATE `canRead`=VALUES(`canRead`),`canWrite`=VALUES(`canWrite`),`canAdd`=VALUES(`canAdd`),`canDelete`=VALUES(`canDelete`)");
+
+    foreach ($permissions as $module => $perms) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', $module)) continue;
         try {
-            // Both `name` and `fullName` columns now exist in students — no alias needed
-            $stmt = $db->prepare("SELECT * FROM `{$table}`");
-            $stmt->execute();
-            $rows = $stmt->fetchAll();
-            if (!empty($rows)) $pull[$table] = $rows;
-        } catch (Throwable $e) { /* skip missing tables */ }
+            $ins->execute([
+                ':role'   => $role,
+                ':module' => $module,
+                ':read'   => (int)($perms['canRead'] ?? 0),
+                ':write'  => (int)($perms['canWrite'] ?? 0),
+                ':add'    => (int)($perms['canAdd'] ?? 0),
+                ':delete' => (int)($perms['canDelete'] ?? 0),
+            ]);
+        } catch (Throwable $e) {}
     }
 
-    json_success(['pulled_at' => gmdate('c'), 'since' => $since, 'tables' => $pull]);
+    write_changelog($db, $auth, 'permissions', 'update', $role, null, $body);
+    json_success(null, 'Permissions updated');
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 // BACKUP
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_backup_export(string $method, ?array $auth, int $sid): void {
+// =============================================================================
+function handle_backup_export(string $method, ?array $auth): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
 
     $db     = getDB();
-    $tables = array_values(array_unique(array_values(collection_table_map())));
-    $export = [
-        'version'     => API_VERSION,
-        'exported_at' => gmdate('c'),
-        'tables'      => [],
-    ];
+    $tables = array_unique(array_values(collection_table_map()));
+    $export = ['version' => API_VERSION, 'exported_at' => gmdate('c'), 'tables' => []];
 
     foreach ($tables as $table) {
         try {
-            // No LIMIT — export ALL rows for a complete backup
             $stmt = $db->prepare("SELECT * FROM `{$table}`");
             $stmt->execute();
             $export['tables'][$table] = $stmt->fetchAll();
@@ -786,10 +1116,9 @@ function handle_backup_export(string $method, ?array $auth, int $sid): void {
     json_success($export, 'Backup ready');
 }
 
-function handle_backup_import(string $method, array $body, ?array $auth, int $sid): void {
+function handle_backup_import(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error('Authentication required', 401);
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
 
     $data = $body['data'] ?? null;
     if (!$data || !isset($data['tables'])) json_error('Invalid backup — missing tables key', 400);
@@ -801,7 +1130,7 @@ function handle_backup_import(string $method, array $body, ?array $auth, int $si
     try {
         foreach ($data['tables'] as $table => $rows) {
             if (!is_array($rows) || empty($rows)) { $imported[$table] = 0; continue; }
-            $result = batchUpsert($db, $table, $rows);
+            $result = batchUpsert($db, $table, $rows, $auth);
             $imported[$table] = $result['pushed'];
         }
         $db->commit();
@@ -812,28 +1141,26 @@ function handle_backup_import(string $method, array $body, ?array $auth, int $si
     }
 }
 
-function handle_backup_history(string $method, ?array $auth, int $sid): void {
+function handle_backup_history(string $method, ?array $auth): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
     json_success([], 'No backup history tracked server-side');
 }
 
-function handle_factory_reset(string $method, array $body, ?array $auth, int $sid): void {
+function handle_factory_reset(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') json_error('Method not allowed', 405);
-    if (!$auth) json_error('Authentication required', 401);
-    if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+    if (!is_superadmin($auth)) json_error('Super Admin only', 403);
     if (($body['confirmation'] ?? '') !== 'DELETE_ALL_DATA') {
         json_error('confirmation must equal "DELETE_ALL_DATA"', 400);
     }
 
     $db     = getDB();
-    $tables = array_values(array_unique(array_values(collection_table_map())));
+    $tables = array_unique(array_values(collection_table_map()));
     $db->beginTransaction();
     try {
         foreach ($tables as $table) {
             try { $db->exec("DELETE FROM `{$table}`"); } catch (Throwable $e) {}
         }
-        // Keep superadmin
         seed_superadmin_user($db, false);
         $db->commit();
         json_success(null, 'Factory reset complete. All data wiped.');
@@ -844,10 +1171,10 @@ function handle_factory_reset(string $method, array $body, ?array $auth, int $si
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
+// =============================================================================
 // SETTINGS
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_settings_school(string $method, array $body, ?array $auth, int $sid): void {
+// =============================================================================
+function handle_settings_school(string $method, array $body, ?array $auth): void {
     if (!$auth) json_error('Authentication required', 401);
     $db = getDB();
 
@@ -864,12 +1191,12 @@ function handle_settings_school(string $method, array $body, ?array $auth, int $
     }
 
     if ($method === 'POST' || $method === 'PUT') {
-        if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
+        if (!is_superadmin($auth)) json_error('Super Admin only', 403);
         try {
-            $ins = $db->prepare("INSERT INTO `school_settings` (`id`,`key`,`value`) VALUES (UUID(),:k,:v) ON DUPLICATE KEY UPDATE `value`=:v2");
+            $ins = $db->prepare("INSERT INTO `school_settings` (`id`,`key`,`value`) VALUES (UUID(),:k,:v) ON DUPLICATE KEY UPDATE `value`=VALUES(`value`)");
             foreach ($body as $key => $value) {
                 if (is_scalar($value) && preg_match('/^[a-zA-Z0-9_]+$/', $key)) {
-                    $ins->execute([':k' => $key, ':v' => (string)$value, ':v2' => (string)$value]);
+                    $ins->execute([':k' => $key, ':v' => (string)$value]);
                 }
             }
             json_success(null, 'Settings saved');
@@ -881,46 +1208,278 @@ function handle_settings_school(string $method, array $body, ?array $auth, int $
     json_error('Method not allowed', 405);
 }
 
-function handle_settings_users(string $method, array $body, ?array $auth, int $sid): void {
-    if (!$auth) json_error('Authentication required', 401);
-    $db = getDB();
 
-    if ($method === 'GET') {
-        try {
-            $stmt = $db->query("SELECT `id`,`username`,`role`,`name`,`mobile`,`email` FROM `users`");
-            json_success($stmt->fetchAll());
-        } catch (Throwable $e) {
-            json_success([]);
+// =============================================================================
+// STATS / COUNTS (no auth required for dashboard)
+// =============================================================================
+function handle_stats(): void {
+    try {
+        $db     = getDB();
+        $counts = [];
+
+        $queries = [
+            'students' => "SELECT COUNT(*) FROM `students`",
+            'staff'    => "SELECT COUNT(*) FROM `staff`",
+            'teachers' => "SELECT COUNT(*) FROM `staff` WHERE LOWER(`designation`) LIKE '%teacher%' OR LOWER(`designation`) IN ('pgt','tgt','prt')",
+            'fees'     => "SELECT COUNT(*) FROM `fee_receipts`",
+            'attendance'=> "SELECT COUNT(*) FROM `attendance`",
+            'classes'  => "SELECT COUNT(*) FROM `classes`",
+        ];
+
+        foreach ($queries as $key => $sql) {
+            try {
+                $stmt = $db->query($sql);
+                $counts[$key] = $stmt ? (int)$stmt->fetchColumn() : 0;
+            } catch (Throwable $e) {
+                $counts[$key] = 0;
+            }
         }
+
+        json_success($counts, 'Stats fetched');
+    } catch (Throwable $e) {
+        json_error('Database not available', 503);
     }
+}
 
-    if ($method === 'POST') {
-        if (!in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true)) json_error('Super Admin only', 403);
-        $username = trim($body['username'] ?? '');
-        $password = trim($body['password'] ?? 'admin123');
-        $role     = $body['role'] ?? 'teacher';
-        $name     = $body['name'] ?? $username;
-        if (!$username) json_error('username is required', 400);
-
-        $hash = hash('sha256', $password);
-        try {
-            $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`name`) VALUES (UUID(),:u,:h,:r,:n)")
-               ->execute([':u' => $username, ':h' => $hash, ':r' => $role, ':n' => $name]);
-        } catch (Throwable $e) {
-            if (strpos($e->getMessage(), 'Duplicate') !== false) json_error("Username '{$username}' already exists", 409);
-            json_error('Failed to create user: ' . $e->getMessage(), 500);
-        }
-        json_success(['username' => $username, 'role' => $role], 'User created');
+function handle_staff_count(): void {
+    try {
+        $db    = getDB();
+        $total = (int)$db->query("SELECT COUNT(*) FROM `staff`")->fetchColumn();
+        $teach = (int)$db->query(
+            "SELECT COUNT(*) FROM `staff` WHERE LOWER(`designation`) LIKE '%teacher%' OR LOWER(`designation`) IN ('pgt','tgt','prt')"
+        )->fetchColumn();
+        json_success(['total' => $total, 'teachers' => $teach]);
+    } catch (Throwable $e) {
+        json_success(['total' => 0, 'teachers' => 0]);
     }
+}
 
-    json_error('Method not allowed', 405);
+function handle_students_count(): void {
+    try {
+        $db    = getDB();
+        $count = (int)$db->query("SELECT COUNT(*) FROM `students`")->fetchColumn();
+        json_success(['count' => $count]);
+    } catch (Throwable $e) {
+        json_success(['count' => 0]);
+    }
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DATA / {collection} — generic CRUD
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_data_collection(string $method, string $collection, array $body, ?array $auth, int $sid, ?string $id): void {
+// =============================================================================
+// COLLECTION CRUD HANDLERS
+// =============================================================================
+function handle_col_list(string $method, string $collection, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $table  = collection_table_map()[$collection];
+    $db     = getDB();
+    $limit  = isset($_GET['limit'])  ? min((int)$_GET['limit'], 100000) : PHP_INT_MAX;
+    $offset = max((int)($_GET['offset'] ?? 0), 0);
+    $since  = $_GET['since'] ?? null;
+
+    $where  = [];
+    $params = [];
+
+    // Common filters
+    if (!empty($_GET['search'])) {
+        $s = '%' . $_GET['search'] . '%';
+        if ($table === 'students') {
+            $where[]  = "(`fullName` LIKE ? OR `admNo` LIKE ? OR `fatherName` LIKE ? OR `motherName` LIKE ? OR `mobile` LIKE ?)";
+            $params   = array_merge($params, [$s,$s,$s,$s,$s]);
+        } else {
+            $where[]  = "(`name` LIKE ? OR `id` LIKE ?)";
+            $params   = array_merge($params, [$s,$s]);
+        }
+    }
+    if (!empty($_GET['class']))   { $where[] = '`class`=?';   $params[] = $_GET['class']; }
+    if (!empty($_GET['section'])) { $where[] = '`section`=?'; $params[] = $_GET['section']; }
+
+    if ($since) {
+        try {
+            $col = $db->query("SHOW COLUMNS FROM `{$table}` LIKE 'updatedAt'");
+            if ($col && $col->rowCount() > 0) {
+                $where[] = '`updatedAt` > ?';
+                $params[] = $since;
+            }
+        } catch (Throwable $e) {}
+    }
+
+    $whereClause = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+    $limitClause = $limit === PHP_INT_MAX ? '' : " LIMIT {$limit} OFFSET {$offset}";
+
+    try {
+        $stmt = $db->prepare("SELECT * FROM `{$table}`{$whereClause}{$limitClause}");
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        $rows = post_process_rows($rows, $table);
+        json_success($rows);
+    } catch (Throwable $e) {
+        json_success([]);
+    }
+}
+
+function handle_col_get(string $method, string $collection, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $id = $_GET['id'] ?? '';
+    if (!$id) json_error('id is required', 400);
+
+    $table = collection_table_map()[$collection];
+    $db    = getDB();
+
+    try {
+        $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE `id`=? LIMIT 1");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch();
+        if (!$row) json_error('Record not found', 404);
+        $rows = post_process_rows([$row], $table);
+        json_success($rows[0]);
+    } catch (Throwable $e) {
+        json_error('Fetch failed: ' . $e->getMessage(), 500);
+    }
+}
+
+function handle_col_create(string $method, string $collection, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $table = collection_table_map()[$collection];
+    $db    = getDB();
+
+    // Normalize
+    $normalized = normalize_rows($table, [$body]);
+    $body = $normalized[0];
+
+    if (empty($body['id'])) $body['id'] = gen_uuid();
+
+    // Filter to valid scalar values only
+    $tableColumns = [];
+    try {
+        $stmt = $db->query("DESCRIBE `{$table}`");
+        $tableColumns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN, 0) : [];
+    } catch (Throwable $e) {}
+
+    $filteredRow = [];
+    foreach ($body as $k => $v) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
+        if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
+        if (is_array($v) || is_object($v)) {
+            $filteredRow[$k] = json_encode($v, JSON_UNESCAPED_UNICODE);
+        } elseif (is_scalar($v) || is_null($v)) {
+            $filteredRow[$k] = $v;
+        }
+    }
+
+    if (empty($filteredRow)) json_error('No valid fields provided', 400);
+
+    $columns      = array_keys($filteredRow);
+    $values       = array_values($filteredRow);
+    $colList      = implode(',', array_map(fn($c) => "`{$c}`", $columns));
+    $placeholders = implode(',', array_fill(0, count($columns), '?'));
+    $updateParts  = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $columns);
+    $updateClause = implode(',', $updateParts);
+
+    try {
+        $db->prepare("INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}")
+           ->execute($values);
+        write_changelog($db, $auth, $table, 'create', $filteredRow['id'] ?? null, null, $filteredRow);
+        json_success(['id' => $filteredRow['id']], 'Created', 201);
+    } catch (Throwable $e) {
+        json_error('Failed to create: ' . $e->getMessage(), 500);
+    }
+}
+
+function handle_col_update(string $method, string $collection, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $id = $body['id'] ?? $_GET['id'] ?? '';
+    if (!$id) json_error('id is required', 400);
+
+    $table = collection_table_map()[$collection];
+    $db    = getDB();
+
+    $normalized = normalize_rows($table, [$body]);
+    $body = $normalized[0];
+    unset($body['id']);
+
+    $tableColumns = [];
+    try {
+        $stmt = $db->query("DESCRIBE `{$table}`");
+        $tableColumns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN, 0) : [];
+    } catch (Throwable $e) {}
+
+    $sets   = [];
+    $values = [];
+    foreach ($body as $k => $v) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
+        if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
+        if (is_array($v) || is_object($v)) {
+            $sets[]   = "`{$k}`=?";
+            $values[] = json_encode($v, JSON_UNESCAPED_UNICODE);
+        } elseif (is_scalar($v) || is_null($v)) {
+            $sets[]   = "`{$k}`=?";
+            $values[] = $v;
+        }
+    }
+
+    if (empty($sets)) json_error('No valid fields to update', 400);
+
+    $values[] = $id;
+    try {
+        $db->prepare("UPDATE `{$table}` SET " . implode(',', $sets) . " WHERE `id`=?")->execute($values);
+        write_changelog($db, $auth, $table, 'update', $id, null, $body);
+        json_success(['id' => $id], 'Updated');
+    } catch (Throwable $e) {
+        json_error('Update failed: ' . $e->getMessage(), 500);
+    }
+}
+
+function handle_col_delete(string $method, string $collection, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    $id   = $body['id'] ?? $_GET['id'] ?? '';
+    if (!$id) json_error('id is required', 400);
+
+    $table = collection_table_map()[$collection];
+    $db    = getDB();
+
+    try {
+        $db->prepare("DELETE FROM `{$table}` WHERE `id`=?")->execute([$id]);
+        write_changelog($db, $auth, $table, 'delete', $id, null, null);
+        json_success(null, 'Deleted');
+    } catch (Throwable $e) {
+        json_error('Delete failed: ' . $e->getMessage(), 500);
+    }
+}
+
+function handle_col_batch(string $method, string $collection, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $records = $body['records'] ?? $body['items'] ?? $body;
+    if (!is_array($records)) json_error('Body must be an array of records', 400);
+
+    $table  = collection_table_map()[$collection];
+    $db     = getDB();
+    $result = batchUpsert($db, $table, $records, $auth);
+
+    json_success([
+        'pushed' => $result['pushed'],
+        'failed' => $result['failed'],
+        'errors' => $result['errors'],
+    ], "{$result['pushed']} records saved");
+}
+
+
+// =============================================================================
+// LEGACY: data/{collection} generic CRUD
+// =============================================================================
+function handle_data_collection(string $method, string $collection, array $body, ?array $auth, ?string $id): void {
     if (!$auth) json_error('Authentication required', 401);
 
     $tableMap = collection_table_map();
@@ -929,98 +1488,21 @@ function handle_data_collection(string $method, string $collection, array $body,
     $db    = getDB();
 
     if ($method === 'GET') {
-        // Students table now has both `name` and `fullName` columns — return all columns directly
-        $selectExpr = '*';
-
         if ($id !== null) {
-            $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` WHERE `id`=:id LIMIT 1");
-            $stmt->execute([':id' => $id]);
+            $stmt = $db->prepare("SELECT * FROM `{$table}` WHERE `id`=? LIMIT 1");
+            $stmt->execute([$id]);
             $row = $stmt->fetch();
             if (!$row) json_error('Record not found', 404);
-                // Decode JSON fields for classes
-                if ($table === 'classes') {
-                    if (isset($row['sections']) && is_string($row['sections'])) {
-                        $decoded = json_decode($row['sections'], true);
-                        if (is_array($decoded)) $row['sections'] = $decoded;
-                    }
-                    // Ensure both name and className are populated from each other
-                    if ((!isset($row['className']) || $row['className'] === null || $row['className'] === '') && isset($row['name'])) {
-                        $row['className'] = $row['name'];
-                    }
-                    if ((!isset($row['name']) || $row['name'] === null || $row['name'] === '') && isset($row['className'])) {
-                        $row['name'] = $row['className'];
-                    }
-                }
-            json_success($row);
+            $rows = post_process_rows([$row], $table);
+            json_success($rows[0]);
         } else {
-            // No hard limit — return ALL rows. Use offset for pagination if needed.
             $limit  = isset($_GET['limit']) ? min((int)$_GET['limit'], 100000) : PHP_INT_MAX;
             $offset = max((int)($_GET['offset'] ?? 0), 0);
-            // Delta sync: if ?since= is provided, only return rows updated after that timestamp
-            $since = isset($_GET['since']) ? trim($_GET['since']) : null;
             try {
-                // Build WHERE clause for delta sync
-                $whereClause = '';
-                $whereParams = [];
-                if ($since) {
-                    // Check if table has updatedAt column
-                    try {
-                        $colCheck = $db->query("SHOW COLUMNS FROM `{$table}` LIKE 'updatedAt'");
-                        if ($colCheck && $colCheck->rowCount() > 0) {
-                            $whereClause = ' WHERE `updatedAt` > :since';
-                            $whereParams[':since'] = $since;
-                        }
-                    } catch (Throwable $e) { /* column doesn't exist — ignore since */ }
-                }
-                if ($limit === PHP_INT_MAX) {
-                    $sql = "SELECT {$selectExpr} FROM `{$table}`{$whereClause} LIMIT 18446744073709551615 OFFSET {$offset}";
-                } else {
-                    $sql = "SELECT {$selectExpr} FROM `{$table}`{$whereClause} LIMIT {$limit} OFFSET {$offset}";
-                }
-                $stmt = $db->prepare($sql);
-                if (!empty($whereParams)) {
-                    foreach ($whereParams as $pk => $pv) {
-                        $stmt->bindValue($pk, $pv);
-                    }
-                }
+                $limitClause = $limit === PHP_INT_MAX ? '' : " LIMIT {$limit} OFFSET {$offset}";
+                $stmt = $db->prepare("SELECT * FROM `{$table}`{$limitClause}");
                 $stmt->execute();
-                $rows = $stmt->fetchAll();
-                // Decode JSON fields for classes table
-                if ($table === 'classes') {
-                    foreach ($rows as &$row) {
-                        if (isset($row['sections']) && is_string($row['sections'])) {
-                            $decoded = json_decode($row['sections'], true);
-                            if (is_array($decoded)) $row['sections'] = $decoded;
-                        }
-                        // Expose className alias (frontend ClassSection type uses className)
-                        // Ensure both columns populated from each other
-                        if ((!isset($row['className']) || $row['className'] === null || $row['className'] === '') && isset($row['name'])) {
-                            $row['className'] = $row['name'];
-                        }
-                        if ((!isset($row['name']) || $row['name'] === null || $row['name'] === '') && isset($row['className'])) {
-                            $row['name'] = $row['className'];
-                        }
-                    }
-                    unset($row);
-                }
-                // Normalize school_sessions rows to match frontend Session type
-                if ($table === 'school_sessions') {
-                    foreach ($rows as &$row) {
-                        if (!isset($row['label']) || $row['label'] === '') {
-                            $row['label'] = $row['name'] ?? '';
-                        }
-                        if (!isset($row['isActive'])) {
-                            $row['isActive'] = (bool)($row['isCurrent'] ?? 0);
-                        }
-                        if (!isset($row['isArchived'])) {
-                            $row['isArchived'] = (bool)($row['archived'] ?? 0);
-                        }
-                        if (!isset($row['startYear'])) $row['startYear'] = 0;
-                        if (!isset($row['endYear']))   $row['endYear']   = 0;
-                        if (!isset($row['createdAt'])) $row['createdAt'] = '';
-                    }
-                    unset($row);
-                }
+                $rows = post_process_rows($stmt->fetchAll(), $table);
                 json_success($rows);
             } catch (Throwable $e) {
                 json_success([]);
@@ -1029,54 +1511,13 @@ function handle_data_collection(string $method, string $collection, array $body,
     }
 
     if ($method === 'POST') {
-        // ── Bug fix: fullName ↔ name sync for students ───────────────────────────
-        if ($table === 'students') {
-            if (isset($body['fullName']) && $body['fullName'] !== null && $body['fullName'] !== '') {
-                $body['name'] = $body['fullName'];
-            }
-            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
-                $body['fullName'] = $body['name'];
-            }
-            // sessionId → session
-            if (isset($body['sessionId']) && (!isset($body['session']) || $body['session'] === '')) {
-                $body['session'] = $body['sessionId'];
-            }
-        }
-        // ── Bug fix: sections array for classes table — JSON-encode it ───────────
-        if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
-            $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
-        }
-        // ── Bug fix: className ↔ name sync for classes table ─────────────────────
-        if ($table === 'classes') {
-            if (isset($body['className']) && $body['className'] !== null && $body['className'] !== '') {
-                $body['name'] = $body['className'];
-            }
-            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
-                $body['className'] = $body['name'];
-            }
-        }
-        // ── Bug fix: school_sessions — map frontend Session fields ───────────────
-        if ($table === 'school_sessions') {
-            if (isset($body['label']) && (!isset($body['name']) || $body['name'] === '')) {
-                $body['name'] = $body['label'];
-            }
-            if (isset($body['isActive'])) {
-                $body['isCurrent'] = $body['isActive'] ? 1 : 0;
-            }
-            if (isset($body['isArchived'])) {
-                $body['archived'] = $body['isArchived'] ? 1 : 0;
-            }
-        }
-
-        $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
-        $safeCols = array_values(array_filter(
-            array_keys($body),
-            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
-        ));
+        $normalized = normalize_rows($table, [$body]);
+        $body = $normalized[0];
+        $body = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
+        $safeCols = array_values(array_filter(array_keys($body), fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
         if (empty($safeCols)) json_error('No valid fields provided', 400);
         if (empty($body['id'])) { $body['id'] = gen_uuid(); $safeCols[] = 'id'; $safeCols = array_unique($safeCols); }
 
-        // Use positional ? to avoid HY093 when same column appears in VALUES and UPDATE
         $colList      = implode(',', array_map(fn($c) => "`{$c}`", $safeCols));
         $placeholders = implode(',', array_fill(0, count($safeCols), '?'));
         $updateParts  = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $safeCols);
@@ -1084,8 +1525,9 @@ function handle_data_collection(string $method, string $collection, array $body,
         $values = array_map(fn($c) => $body[$c], $safeCols);
 
         try {
-            $sql = "INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}";
-            $db->prepare($sql)->execute($values);
+            $db->prepare("INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}")
+               ->execute($values);
+            write_changelog($db, $auth, $table, 'create', $body['id'], null, $body);
             json_success(['id' => $body['id']], 'Saved', 201);
         } catch (Throwable $e) {
             json_error('Failed to save: ' . $e->getMessage(), 500);
@@ -1095,43 +1537,19 @@ function handle_data_collection(string $method, string $collection, array $body,
     if ($method === 'PUT') {
         if (!$id) json_error('Record ID required', 400);
         unset($body['id']);
-        // ── Bug fix: fullName ↔ name mapping for students on update ─────────────
-        if ($table === 'students') {
-            if (isset($body['fullName']) && $body['fullName'] !== null && $body['fullName'] !== '') {
-                $body['name'] = $body['fullName'];
-            }
-            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
-                $body['fullName'] = $body['name'];
-            }
-        }
-        // ── Bug fix: sections array for classes table — JSON-encode it ───────────
-        if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
-            $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
-        }
-        // ── Bug fix: className ↔ name sync for classes table on update ───────────
-        if ($table === 'classes') {
-            if (isset($body['className']) && $body['className'] !== null && $body['className'] !== '') {
-                $body['name'] = $body['className'];
-            }
-            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
-                $body['className'] = $body['name'];
-            }
-        }
-
-        $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
-        $safeCols = array_values(array_filter(
-            array_keys($body),
-            fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)
-        ));
+        $normalized = normalize_rows($table, [$body]);
+        $body = $normalized[0];
+        $body = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
+        $safeCols = array_values(array_filter(array_keys($body), fn($c) => (bool)preg_match('/^[a-zA-Z0-9_]+$/', $c)));
         if (empty($safeCols)) json_error('No valid fields provided', 400);
 
-        $setList = implode(',', array_map(fn($c) => "`{$c}`=:{$c}", $safeCols));
-        $params  = [];
-        foreach ($safeCols as $c) $params[":{$c}"] = $body[$c];
-        $params[':id'] = $id;
+        $sets   = array_map(fn($c) => "`{$c}`=?", $safeCols);
+        $values = array_map(fn($c) => $body[$c], $safeCols);
+        $values[] = $id;
 
         try {
-            $db->prepare("UPDATE `{$table}` SET {$setList} WHERE `id`=:id")->execute($params);
+            $db->prepare("UPDATE `{$table}` SET " . implode(',', $sets) . " WHERE `id`=?")->execute($values);
+            write_changelog($db, $auth, $table, 'update', $id, null, $body);
             json_success(['id' => $id], 'Updated');
         } catch (Throwable $e) {
             json_error('Failed to update: ' . $e->getMessage(), 500);
@@ -1141,7 +1559,8 @@ function handle_data_collection(string $method, string $collection, array $body,
     if ($method === 'DELETE') {
         if (!$id) json_error('Record ID required', 400);
         try {
-            $db->prepare("DELETE FROM `{$table}` WHERE `id`=:id")->execute([':id' => $id]);
+            $db->prepare("DELETE FROM `{$table}` WHERE `id`=?")->execute([$id]);
+            write_changelog($db, $auth, $table, 'delete', $id, null, null);
             json_success(null, 'Deleted');
         } catch (Throwable $e) {
             json_error('Failed to delete: ' . $e->getMessage(), 500);
@@ -1152,163 +1571,94 @@ function handle_data_collection(string $method, string $collection, array $body,
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STATS — dashboard counts from all main tables
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_stats(?array $auth): void {
-    // Stats are public (no auth required) so dashboard can show counts without login
-    try {
-        $db = getDB();
-    } catch (Throwable $e) {
-        json_error('Database not available', 503);
-    }
-
-    $counts = [];
-
-    // students
-    try {
-        $stmt = $db->query("SELECT COUNT(*) FROM `students`");
-        $counts['students'] = $stmt ? (int)$stmt->fetchColumn() : 0;
-    } catch (Throwable $e) { $counts['students'] = 0; }
-
-    // staff total
-    try {
-        $stmt = $db->query("SELECT COUNT(*) FROM `staff`");
-        $counts['staff'] = $stmt ? (int)$stmt->fetchColumn() : 0;
-    } catch (Throwable $e) { $counts['staff'] = 0; }
-
-    // teachers — staff rows whose designation contains 'teacher', 'PGT', 'TGT', or 'PRT' (case-insensitive)
-    try {
-        $stmt = $db->query(
-            "SELECT COUNT(*) FROM `staff` WHERE "
-            . "LOWER(`designation`) LIKE '%teacher%' "
-            . "OR LOWER(`designation`) IN ('pgt','tgt','prt')"
-        );
-        $counts['teachers'] = $stmt ? (int)$stmt->fetchColumn() : 0;
-    } catch (Throwable $e) { $counts['teachers'] = 0; }
-
-    // fee_receipts
-    try {
-        $stmt = $db->query("SELECT COUNT(*) FROM `fee_receipts`");
-        $counts['fees'] = $stmt ? (int)$stmt->fetchColumn() : 0;
-    } catch (Throwable $e) { $counts['fees'] = 0; }
-
-    // attendance
-    try {
-        $stmt = $db->query("SELECT COUNT(*) FROM `attendance`");
-        $counts['attendance'] = $stmt ? (int)$stmt->fetchColumn() : 0;
-    } catch (Throwable $e) { $counts['attendance'] = 0; }
-
-    json_success($counts, 'Stats fetched');
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STAFF/COUNT — returns total staff count + teacher sub-count from MySQL
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_staff_count(?array $auth): void {
-    try {
-        $db = getDB();
-
-        $totalStmt = $db->query("SELECT COUNT(*) FROM `staff`");
-        $total = $totalStmt ? (int)$totalStmt->fetchColumn() : 0;
-
-        $teacherStmt = $db->query(
-            "SELECT COUNT(*) FROM `staff` WHERE "
-            . "LOWER(`designation`) LIKE '%teacher%' "
-            . "OR LOWER(`designation`) IN ('pgt','tgt','prt')"
-        );
-        $teachers = $teacherStmt ? (int)$teacherStmt->fetchColumn() : 0;
-
-        json_success([
-            'total'    => $total,
-            'teachers' => $teachers,
-        ], 'Staff count fetched');
-    } catch (Throwable $e) {
-        json_success(['total' => 0, 'teachers' => 0], 'Staff table not ready');
-    }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// STUDENTS/COUNT — quick count for dashboard stat cards
-// ─────────────────────────────────────────────────────────────────────────────
-function handle_students_count(?array $auth): void {
-    try {
-        $db   = getDB();
-        $stmt = $db->query("SELECT COUNT(*) FROM `students`");
-        $count = $stmt ? (int)$stmt->fetchColumn() : 0;
-        json_success(['count' => $count], 'Student count fetched');
-    } catch (Throwable $e) {
-        json_success(['count' => 0], 'Students table not ready');
-    }
-}
-
-
 // =============================================================================
 // COLLECTION → TABLE MAP
 // =============================================================================
 function collection_table_map(): array {
     return [
-        'students'              => 'students',
-        'staff'                 => 'staff',
-        'classes'               => 'classes',
-        'fees_plan'             => 'fees_plan',
-        'fee_plans'             => 'fees_plan',
-        'fee_headings'          => 'fee_headings',
-        'fee_heads'             => 'fee_headings',
-        'fee_receipts'          => 'fee_receipts',
-        'attendance'            => 'attendance',
-        'staff_attendance'      => 'staff_attendance',
-        'routes'                => 'routes',
-        'pickup_points'         => 'pickup_points',
-        'student_transport'     => 'student_transport',
-        'student_discounts'     => 'student_discounts',
-        'inventory_items'       => 'inventory_items',
-        'inventory_transactions'=> 'inventory_transactions',
-        'expenses'              => 'expenses',
-        'expense_heads'         => 'expense_heads',
-        'homework'              => 'homework',
-        'school_sessions'       => 'school_sessions',
-        'sessions'              => 'school_sessions',
-        // notices and notifications are SEPARATE tables with different schemas
-        'notices'               => 'notices',
-        'notifications'         => 'notifications',
-        'exam_timetables'       => 'exam_timetables',
-        'teacher_timetables'    => 'teacher_timetables',
-        'users'                 => 'users',
-        'school_settings'       => 'school_settings',
-        'settings'              => 'school_settings',
-        'chat_messages'         => 'chat_messages',
-        'chat_groups'           => 'chat_groups',
-        'call_logs'             => 'call_logs',
-        'biometric_devices'     => 'biometric_devices',
-        'payroll'               => 'payroll',
+        // Students
+        'students'               => 'students',
+        // Staff
+        'staff'                  => 'staff',
+        // Classes
+        'classes'                => 'classes',
+        // Subjects
+        'subjects'               => 'subjects',
+        // Fees
+        'feesPlans'              => 'fees_plan',
+        'fees_plan'              => 'fees_plan',
+        'fee_plans'              => 'fees_plan',
+        'feeHeadings'            => 'fee_headings',
+        'fee_headings'           => 'fee_headings',
+        'fee_heads'              => 'fee_headings',
+        'feeReceipts'            => 'fee_receipts',
+        'fee_receipts'           => 'fee_receipts',
+        // Attendance
+        'attendanceRecords'      => 'attendance',
+        'attendance'             => 'attendance',
+        'staffAttendance'        => 'staff_attendance',
+        'staff_attendance'       => 'staff_attendance',
+        // Transport
+        'routes'                 => 'routes',
+        'pickup_points'          => 'pickup_points',
+        'pickupPoints'           => 'pickup_points',
+        'student_transport'      => 'student_transport',
+        'studentTransport'       => 'student_transport',
+        'student_discounts'      => 'student_discounts',
+        'studentDiscounts'       => 'student_discounts',
+        // Inventory
+        'inventory'              => 'inventory_items',
+        'inventory_items'        => 'inventory_items',
+        'inventoryItems'         => 'inventory_items',
+        'inventory_transactions' => 'inventory_transactions',
+        'inventoryTransactions'  => 'inventory_transactions',
+        // Finance
+        'expenses'               => 'expenses',
+        'expense_heads'          => 'expense_heads',
+        'expenseHeads'           => 'expense_heads',
+        // Academic
+        'homework'               => 'homework',
+        'exam_timetables'        => 'exam_timetables',
+        'examTimetables'         => 'exam_timetables',
+        'teacher_timetables'     => 'teacher_timetables',
+        'teacherTimetables'      => 'teacher_timetables',
+        // Sessions
+        'sessions'               => 'school_sessions',
+        'school_sessions'        => 'school_sessions',
+        // Alumni
+        'alumni'                 => 'alumni',
+        // Communication
+        'notices'                => 'notices',
+        'notifications'          => 'notifications',
+        // Users & Permissions
+        'users'                  => 'users',
+        'permissions'            => 'permissions',
+        // Chat & Calls
+        'chatMessages'           => 'chat_messages',
+        'chat_messages'          => 'chat_messages',
+        'chatGroups'             => 'chat_groups',
+        'chat_groups'            => 'chat_groups',
+        'calls'                  => 'call_logs',
+        'call_logs'              => 'call_logs',
+        // HR
+        'biometric_devices'      => 'biometric_devices',
+        'biometricDevices'       => 'biometric_devices',
+        'payroll'                => 'payroll',
+        // Settings
+        'settings'               => 'school_settings',
+        'school_settings'        => 'school_settings',
+        // Changelog
+        'changelog'              => 'changelog',
     ];
-}
-
-function gen_uuid(): string {
-    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
-        mt_rand(0, 0xffff), mt_rand(0, 0xffff),
-        mt_rand(0, 0xffff),
-        mt_rand(0, 0x0fff) | 0x4000,
-        mt_rand(0, 0x3fff) | 0x8000,
-        mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
-    );
 }
 
 
 // =============================================================================
-// TABLE DEFINITIONS — ALL camelCase columns matching frontend JS object keys
-// Using DROP TABLE IF EXISTS + CREATE TABLE for clean migration every time
+// TABLE DEFINITIONS — ALL camelCase columns matching frontend JS keys
 // =============================================================================
 function get_table_definitions(): array {
     return [
 
-        // ── students ──────────────────────────────────────────────────────────
-        // Column names match EXACTLY what the frontend JS sends (camelCase)
-        // BOTH `name` and `fullName` columns exist so reads/writes work regardless
-        // of which field the frontend sends. batchUpsert copies fullName→name.
         'students' => "CREATE TABLE `students` (
             `id`               VARCHAR(36) PRIMARY KEY,
             `admNo`            VARCHAR(100),
@@ -1356,29 +1706,15 @@ function get_table_definitions(): array {
             `emergencyContact` VARCHAR(50),
             `leavingDate`      VARCHAR(50),
             `leavingReason`    TEXT,
-            `leavingRemarks`   TEXT,
             `remarks`          TEXT,
             `updatedAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             `createdAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── classes ───────────────────────────────────────────────────────────
-        // Frontend sends: { id, className, sections } where sections is array→JSON
-        // className stored in BOTH `name` and `className` columns for compatibility
-        'classes' => "CREATE TABLE `classes` (
-            `id`        VARCHAR(36) PRIMARY KEY,
-            `name`      VARCHAR(255),
-            `className` VARCHAR(255),
-            `sections`  TEXT,
-            `session`   VARCHAR(100),
-            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // ── staff ─────────────────────────────────────────────────────────────
-        // Column names match EXACTLY what the frontend JS sends (camelCase)
         'staff' => "CREATE TABLE `staff` (
             `id`            VARCHAR(36) PRIMARY KEY,
             `empId`         VARCHAR(100),
+            `fullName`      VARCHAR(255),
             `name`          VARCHAR(255),
             `designation`   VARCHAR(255),
             `department`    VARCHAR(255),
@@ -1386,11 +1722,13 @@ function get_table_definitions(): array {
             `email`         VARCHAR(255),
             `address`       TEXT,
             `joiningDate`   VARCHAR(50),
+            `joinDate`      VARCHAR(50),
             `salary`        DECIMAL(12,2) DEFAULT 0,
             `status`        VARCHAR(50) DEFAULT 'Active',
             `photo`         TEXT,
             `gender`        VARCHAR(20),
             `dob`           VARCHAR(50),
+            `aadhaarNo`     VARCHAR(50),
             `aadharNo`      VARCHAR(50),
             `bankAccount`   VARCHAR(100),
             `ifscCode`      VARCHAR(50),
@@ -1399,80 +1737,104 @@ function get_table_definitions(): array {
             `subject`       VARCHAR(255),
             `qualification` VARCHAR(255),
             `experience`    VARCHAR(255),
-            `session`       VARCHAR(100)
+            `session`       VARCHAR(100),
+            `updatedAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `createdAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── fees_plan ─────────────────────────────────────────────────────────
-        // Frontend sends: { id, classId, sectionId, headingId, amounts }
+        'classes' => "CREATE TABLE `classes` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `name`      VARCHAR(255),
+            `className` VARCHAR(255),
+            `sections`  TEXT,
+            `session`   VARCHAR(100),
+            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'subjects' => "CREATE TABLE `subjects` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `name`      VARCHAR(255),
+            `code`      VARCHAR(100),
+            `classes`   TEXT,
+            `session`   VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
         'fees_plan' => "CREATE TABLE `fees_plan` (
             `id`        VARCHAR(36) PRIMARY KEY,
             `classId`   VARCHAR(100),
+            `class`     VARCHAR(100),
             `sectionId` VARCHAR(50),
+            `section`   VARCHAR(50),
             `headingId` VARCHAR(36),
             `amounts`   TEXT,
             `amount`    DECIMAL(12,2) DEFAULT 0,
             `months`    TEXT,
-            `session`   VARCHAR(100)
+            `session`   VARCHAR(100),
+            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── classes ───────────────────────────────────────────────────────────
-        // Frontend sends: { id, name, sections } where sections is array→JSON
-        'classes' => "CREATE TABLE `classes` (
-            `id`       VARCHAR(36) PRIMARY KEY,
-            `name`     VARCHAR(255),
-            `sections` TEXT,
-            `session`  VARCHAR(100)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
-
-        // ── fee_headings ──────────────────────────────────────────────────────
         'fee_headings' => "CREATE TABLE `fee_headings` (
             `id`                VARCHAR(36) PRIMARY KEY,
             `name`              VARCHAR(255),
+            `type`              VARCHAR(100),
+            `description`       TEXT,
             `amount`            DECIMAL(12,2) DEFAULT 0,
             `months`            TEXT,
             `applicableClasses` TEXT,
-            `session`           VARCHAR(100)
+            `session`           VARCHAR(100),
+            `createdAt`         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`         TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── fee_receipts ──────────────────────────────────────────────────────
         'fee_receipts' => "CREATE TABLE `fee_receipts` (
             `id`               VARCHAR(36) PRIMARY KEY,
+            `receiptNo`        VARCHAR(100),
             `studentId`        VARCHAR(36),
             `admNo`            VARCHAR(100),
             `studentName`      VARCHAR(255),
             `class`            VARCHAR(100),
             `section`          VARCHAR(50),
+            `session`          VARCHAR(100),
             `months`           TEXT,
+            `headings`         TEXT,
             `amounts`          TEXT,
+            `headingAmounts`   TEXT,
             `otherCharges`     DECIMAL(12,2) DEFAULT 0,
             `otherDescription` VARCHAR(255),
             `totalAmount`      DECIMAL(12,2) DEFAULT 0,
             `paidAmount`       DECIMAL(12,2) DEFAULT 0,
             `balance`          DECIMAL(12,2) DEFAULT 0,
             `paymentMode`      VARCHAR(50) DEFAULT 'Cash',
-            `receiptNo`        VARCHAR(100),
+            `paymentDate`      VARCHAR(50),
             `date`             VARCHAR(50),
-            `session`          VARCHAR(100),
-            `headingAmounts`   TEXT
+            `notes`            TEXT,
+            `createdAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── attendance ────────────────────────────────────────────────────────
         'attendance' => "CREATE TABLE `attendance` (
-            `id`        VARCHAR(36) PRIMARY KEY,
-            `studentId` VARCHAR(36),
-            `admNo`     VARCHAR(100),
-            `name`      VARCHAR(255),
-            `class`     VARCHAR(100),
-            `section`   VARCHAR(50),
-            `date`      VARCHAR(50),
-            `status`    VARCHAR(20) DEFAULT 'Present',
-            `inTime`    VARCHAR(50),
-            `outTime`   VARCHAR(50),
-            `method`    VARCHAR(50),
-            `session`   VARCHAR(100)
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `studentId`   VARCHAR(36),
+            `admNo`       VARCHAR(100),
+            `name`        VARCHAR(255),
+            `class`       VARCHAR(100),
+            `section`     VARCHAR(50),
+            `date`        VARCHAR(50),
+            `status`      VARCHAR(20) DEFAULT 'Present',
+            `checkInTime` VARCHAR(50),
+            `checkOutTime`VARCHAR(50),
+            `inTime`      VARCHAR(50),
+            `outTime`     VARCHAR(50),
+            `markedBy`    VARCHAR(255),
+            `method`      VARCHAR(50),
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── staff_attendance ──────────────────────────────────────────────────
         'staff_attendance' => "CREATE TABLE `staff_attendance` (
             `id`      VARCHAR(36) PRIMARY KEY,
             `staffId` VARCHAR(36),
@@ -1482,30 +1844,32 @@ function get_table_definitions(): array {
             `status`  VARCHAR(20) DEFAULT 'Present',
             `inTime`  VARCHAR(50),
             `outTime` VARCHAR(50),
-            `session` VARCHAR(100)
+            `session` VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── routes ────────────────────────────────────────────────────────────
-        // Frontend sends: { id, name, description, pickupPoints }
         'routes' => "CREATE TABLE `routes` (
             `id`           VARCHAR(36) PRIMARY KEY,
             `name`         VARCHAR(255),
             `description`  TEXT,
+            `driver`       VARCHAR(255),
+            `stops`        TEXT,
             `pickupPoints` TEXT,
-            `session`      VARCHAR(100)
+            `session`      VARCHAR(100),
+            `createdAt`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── pickup_points ─────────────────────────────────────────────────────
         'pickup_points' => "CREATE TABLE `pickup_points` (
             `id`      VARCHAR(36) PRIMARY KEY,
             `routeId` VARCHAR(36),
             `name`    VARCHAR(255),
             `fare`    DECIMAL(12,2) DEFAULT 0,
             `order`   INT DEFAULT 0,
-            `session` VARCHAR(100)
+            `session` VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── student_transport ─────────────────────────────────────────────────
         'student_transport' => "CREATE TABLE `student_transport` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `studentId`   VARCHAR(36),
@@ -1513,34 +1877,37 @@ function get_table_definitions(): array {
             `routeId`     VARCHAR(36),
             `pickupPoint` VARCHAR(255),
             `months`      TEXT,
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── student_discounts ─────────────────────────────────────────────────
         'student_discounts' => "CREATE TABLE `student_discounts` (
-            `id`                  VARCHAR(36) PRIMARY KEY,
-            `studentId`           VARCHAR(36),
-            `admNo`               VARCHAR(100),
-            `discountAmount`      DECIMAL(12,2) DEFAULT 0,
-            `applicableHeadings`  TEXT,
-            `months`              TEXT,
-            `session`             VARCHAR(100)
+            `id`                 VARCHAR(36) PRIMARY KEY,
+            `studentId`          VARCHAR(36),
+            `admNo`              VARCHAR(100),
+            `discountAmount`     DECIMAL(12,2) DEFAULT 0,
+            `applicableHeadings` TEXT,
+            `months`             TEXT,
+            `session`            VARCHAR(100),
+            `createdAt`          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── inventory_items ───────────────────────────────────────────────────
         'inventory_items' => "CREATE TABLE `inventory_items` (
             `id`            VARCHAR(36) PRIMARY KEY,
             `name`          VARCHAR(255),
             `category`      VARCHAR(255),
             `quantity`      INT DEFAULT 0,
+            `stock`         INT DEFAULT 0,
             `unit`          VARCHAR(50),
+            `price`         DECIMAL(12,2) DEFAULT 0,
             `purchasePrice` DECIMAL(12,2) DEFAULT 0,
             `sellPrice`     DECIMAL(12,2) DEFAULT 0,
             `description`   TEXT,
-            `session`       VARCHAR(100)
+            `session`       VARCHAR(100),
+            `createdAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── inventory_transactions ────────────────────────────────────────────
         'inventory_transactions' => "CREATE TABLE `inventory_transactions` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `itemId`      VARCHAR(36),
@@ -1549,31 +1916,33 @@ function get_table_definitions(): array {
             `price`       DECIMAL(12,2) DEFAULT 0,
             `date`        VARCHAR(50),
             `description` TEXT,
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── expenses ──────────────────────────────────────────────────────────
         'expenses' => "CREATE TABLE `expenses` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `type`        VARCHAR(50),
+            `head`        VARCHAR(255),
             `headId`      VARCHAR(36),
             `amount`      DECIMAL(12,2) DEFAULT 0,
             `date`        VARCHAR(50),
             `description` TEXT,
             `paymentMode` VARCHAR(50),
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── expense_heads ─────────────────────────────────────────────────────
         'expense_heads' => "CREATE TABLE `expense_heads` (
             `id`      VARCHAR(36) PRIMARY KEY,
             `name`    VARCHAR(255),
             `type`    VARCHAR(50),
             `budget`  DECIMAL(12,2) DEFAULT 0,
-            `session` VARCHAR(100)
+            `session` VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── homework ──────────────────────────────────────────────────────────
         'homework' => "CREATE TABLE `homework` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `class`       VARCHAR(100),
@@ -1583,11 +1952,12 @@ function get_table_definitions(): array {
             `description` TEXT,
             `dueDate`     VARCHAR(50),
             `assignedBy`  VARCHAR(255),
-            `session`     VARCHAR(100)
+            `submittedBy` TEXT,
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── school_sessions ───────────────────────────────────────────────────
-        // Columns match frontend Session type: label, isActive, isArchived, startYear, endYear
         'school_sessions' => "CREATE TABLE `school_sessions` (
             `id`         VARCHAR(36) PRIMARY KEY,
             `label`      VARCHAR(100),
@@ -1603,7 +1973,21 @@ function get_table_definitions(): array {
             `createdAt`  VARCHAR(50)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── notices ───────────────────────────────────────────────────────────
+        'alumni' => "CREATE TABLE `alumni` (
+            `id`            VARCHAR(36) PRIMARY KEY,
+            `fullName`      VARCHAR(255),
+            `name`          VARCHAR(255),
+            `admNo`         VARCHAR(100),
+            `yearOfPassing` VARCHAR(10),
+            `class`         VARCHAR(100),
+            `mobile`        VARCHAR(50),
+            `email`         VARCHAR(255),
+            `occupation`    VARCHAR(255),
+            `session`       VARCHAR(100),
+            `createdAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
         'notices' => "CREATE TABLE `notices` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `title`       VARCHAR(500),
@@ -1612,87 +1996,101 @@ function get_table_definitions(): array {
             `author`      VARCHAR(255),
             `targetRoles` TEXT,
             `attachments` TEXT,
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── notifications (separate from notices) ─────────────────────────────
         'notifications' => "CREATE TABLE `notifications` (
             `id`        VARCHAR(36) PRIMARY KEY,
             `userId`    VARCHAR(36),
+            `title`     VARCHAR(500),
             `message`   TEXT,
             `type`      VARCHAR(50),
-            `timestamp` VARCHAR(50),
             `isRead`    TINYINT(1) DEFAULT 0,
+            `timestamp` VARCHAR(50),
             `icon`      VARCHAR(100),
-            `title`     VARCHAR(500),
-            `session`   VARCHAR(100)
+            `session`   VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── exam_timetables ───────────────────────────────────────────────────
         'exam_timetables' => "CREATE TABLE `exam_timetables` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `examName`    VARCHAR(255),
             `class`       VARCHAR(100),
             `entries`     TEXT,
             `publishDate` VARCHAR(50),
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── teacher_timetables ────────────────────────────────────────────────
         'teacher_timetables' => "CREATE TABLE `teacher_timetables` (
             `id`        VARCHAR(36) PRIMARY KEY,
             `teacherId` VARCHAR(36),
             `entries`   TEXT,
-            `session`   VARCHAR(100)
+            `session`   VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── users ─────────────────────────────────────────────────────────────
         'users' => "CREATE TABLE `users` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `username`    VARCHAR(255) UNIQUE,
             `password`    VARCHAR(255),
             `role`        VARCHAR(100),
+            `fullName`    VARCHAR(255),
             `name`        VARCHAR(255),
             `mobile`      VARCHAR(50),
             `email`       VARCHAR(255),
             `session`     VARCHAR(100),
             `permissions` TEXT,
-            `linkedId`    VARCHAR(36)
+            `linkedId`    VARCHAR(36),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── school_settings ───────────────────────────────────────────────────
+        'permissions' => "CREATE TABLE `permissions` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `role`      VARCHAR(100),
+            `module`    VARCHAR(100),
+            `canRead`   TINYINT(1) DEFAULT 0,
+            `canWrite`  TINYINT(1) DEFAULT 0,
+            `canAdd`    TINYINT(1) DEFAULT 0,
+            `canDelete` TINYINT(1) DEFAULT 0,
+            UNIQUE KEY `role_module` (`role`,`module`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
         'school_settings' => "CREATE TABLE `school_settings` (
             `id`    VARCHAR(36) PRIMARY KEY,
             `key`   VARCHAR(255) UNIQUE,
             `value` TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── chat_messages ─────────────────────────────────────────────────────
         'chat_messages' => "CREATE TABLE `chat_messages` (
             `id`         VARCHAR(36) PRIMARY KEY,
+            `groupId`    VARCHAR(36),
             `senderId`   VARCHAR(36),
             `senderName` VARCHAR(255),
             `senderRole` VARCHAR(100),
             `receiverId` VARCHAR(36),
-            `groupId`    VARCHAR(36),
+            `content`    TEXT,
             `message`    TEXT,
+            `type`       VARCHAR(50) DEFAULT 'text',
             `fileUrl`    TEXT,
             `fileName`   VARCHAR(500),
             `timestamp`  VARCHAR(50),
             `readBy`     TEXT,
-            `session`    VARCHAR(100)
+            `session`    VARCHAR(100),
+            `createdAt`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── chat_groups ───────────────────────────────────────────────────────
         'chat_groups' => "CREATE TABLE `chat_groups` (
             `id`      VARCHAR(36) PRIMARY KEY,
             `name`    VARCHAR(255),
             `type`    VARCHAR(50),
             `members` TEXT,
-            `session` VARCHAR(100)
+            `session` VARCHAR(100),
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── call_logs ─────────────────────────────────────────────────────────
         'call_logs' => "CREATE TABLE `call_logs` (
             `id`           VARCHAR(36) PRIMARY KEY,
             `callerId`     VARCHAR(36),
@@ -1700,13 +2098,15 @@ function get_table_definitions(): array {
             `receiverId`   VARCHAR(36),
             `receiverName` VARCHAR(255),
             `duration`     INT DEFAULT 0,
+            `status`       VARCHAR(50),
+            `startedAt`    VARCHAR(50),
+            `endedAt`      VARCHAR(50),
             `startTime`    VARCHAR(50),
             `endTime`      VARCHAR(50),
-            `status`       VARCHAR(50),
-            `session`      VARCHAR(100)
+            `session`      VARCHAR(100),
+            `createdAt`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── biometric_devices ─────────────────────────────────────────────────
         'biometric_devices' => "CREATE TABLE `biometric_devices` (
             `id`         VARCHAR(36) PRIMARY KEY,
             `name`       VARCHAR(255),
@@ -1715,15 +2115,16 @@ function get_table_definitions(): array {
             `deviceType` VARCHAR(100),
             `location`   VARCHAR(255),
             `status`     VARCHAR(50) DEFAULT 'Active',
-            `session`    VARCHAR(100)
+            `session`    VARCHAR(100),
+            `createdAt`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
-        // ── payroll ───────────────────────────────────────────────────────────
         'payroll' => "CREATE TABLE `payroll` (
             `id`          VARCHAR(36) PRIMARY KEY,
             `staffId`     VARCHAR(36),
             `empId`       VARCHAR(100),
             `name`        VARCHAR(255),
+            `fullName`    VARCHAR(255),
             `month`       VARCHAR(20),
             `year`        VARCHAR(10),
             `basicSalary` DECIMAL(12,2) DEFAULT 0,
@@ -1735,7 +2136,24 @@ function get_table_definitions(): array {
             `payslipNo`   VARCHAR(100),
             `paymentDate` VARCHAR(50),
             `status`      VARCHAR(50) DEFAULT 'Pending',
-            `session`     VARCHAR(100)
+            `session`     VARCHAR(100),
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'changelog' => "CREATE TABLE `changelog` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `userId`    VARCHAR(36),
+            `username`  VARCHAR(255),
+            `role`      VARCHAR(100),
+            `module`    VARCHAR(100),
+            `action`    VARCHAR(50),
+            `recordId`  VARCHAR(36),
+            `oldValue`  LONGTEXT,
+            `newValue`  LONGTEXT,
+            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_module` (`module`),
+            INDEX `idx_createdAt` (`createdAt`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
 }

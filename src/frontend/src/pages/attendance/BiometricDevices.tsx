@@ -29,8 +29,9 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Staff, Student } from "../../types";
-import { generateId, ls } from "../../utils/localStorage";
+import { generateId } from "../../utils/localStorage";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,14 +81,12 @@ const DEVICE_TYPES: DeviceType[] = [
   "FingerTec",
   "Other",
 ];
-
 const DEFAULT_PORTS: Record<DeviceType, number> = {
   "ESSL eBioServer": 8080,
   "ZKTeco/eSSL": 4370,
   FingerTec: 4370,
   Other: 4370,
 };
-
 const EMPTY_DEVICE: Omit<BiometricDevice, "id"> = {
   name: "",
   deviceType: "ESSL eBioServer",
@@ -111,12 +110,6 @@ function statusIcon(status: DeviceStatus) {
   return <Activity className="w-4 h-4 text-muted-foreground" />;
 }
 
-function statusLabel(status: DeviceStatus) {
-  if (status === "online") return "Online";
-  if (status === "offline") return "Offline";
-  return "Unknown";
-}
-
 function statusBadgeVariant(
   status: DeviceStatus,
 ): "default" | "destructive" | "secondary" {
@@ -128,8 +121,6 @@ function statusBadgeVariant(
 function validateIP(ip: string) {
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(ip);
 }
-
-// ─── Sync simulation ──────────────────────────────────────────────────────────
 
 function simulateSyncLogs(
   device: BiometricDevice,
@@ -217,15 +208,27 @@ function simulateSyncLogs(
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BiometricDevices() {
-  const [devices, setDevices] = useState<BiometricDevice[]>(() =>
-    ls.get<BiometricDevice[]>("biometric_devices", []),
-  );
-  const [mappings, setMappings] = useState<BiometricMapping[]>(() =>
-    ls.get<BiometricMapping[]>("biometric_mappings", []),
-  );
+  const { getData, saveData } = useApp();
 
-  const students = useMemo(() => ls.get<Student[]>("students", []), []);
-  const staff = useMemo(() => ls.get<Staff[]>("staff", []), []);
+  const [devices, setDevices] = useState<BiometricDevice[]>(() => {
+    try {
+      const raw = localStorage.getItem("biometric_devices");
+      return raw ? (JSON.parse(raw) as BiometricDevice[]) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [mappings, setMappings] = useState<BiometricMapping[]>(() => {
+    try {
+      const raw = localStorage.getItem("biometric_mappings");
+      return raw ? (JSON.parse(raw) as BiometricMapping[]) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const students = useMemo(() => getData("students") as Student[], [getData]);
+  const staff = useMemo(() => getData("staff") as Staff[], [getData]);
 
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [editingDevice, setEditingDevice] = useState<BiometricDevice | null>(
@@ -250,23 +253,11 @@ export default function BiometricDevices() {
     "devices" | "mappings" | "help"
   >("devices");
 
-  // ── Device CRUD ──────────────────────────────────────────────────────────────
+  // ── Device CRUD ──
 
   function saveDevices(updated: BiometricDevice[]) {
     setDevices(updated);
-    ls.set("biometric_devices", updated);
-  }
-
-  function openAddDevice() {
-    setEditingDevice(null);
-    setDeviceForm({ ...EMPTY_DEVICE });
-    setShowDeviceModal(true);
-  }
-
-  function openEditDevice(dev: BiometricDevice) {
-    setEditingDevice(dev);
-    setDeviceForm({ ...dev });
-    setShowDeviceModal(true);
+    localStorage.setItem("biometric_devices", JSON.stringify(updated));
   }
 
   function handleDeviceTypeChange(dt: DeviceType) {
@@ -304,7 +295,7 @@ export default function BiometricDevices() {
     toast.success("Device deleted");
   }
 
-  // ── Sync ─────────────────────────────────────────────────────────────────────
+  // ── Sync ─────
 
   const handleSync = useCallback(
     async (device: BiometricDevice) => {
@@ -314,7 +305,6 @@ export default function BiometricDevices() {
 
       const result = await simulateSyncLogs(device, mappings);
 
-      // Update device lastSync + set online
       setDevices((prev) => {
         const updated = prev.map((d) =>
           d.id === device.id
@@ -325,15 +315,15 @@ export default function BiometricDevices() {
               }
             : d,
         );
-        ls.set("biometric_devices", updated);
+        localStorage.setItem("biometric_devices", JSON.stringify(updated));
         return updated;
       });
 
-      // Write attendance records
+      // Write attendance records to MySQL via saveData
       const today = new Date().toISOString().split("T")[0];
-      const existing = ls.get<AttendanceRecord[]>("attendance", []);
-      const newRecs: AttendanceRecord[] = [];
+      const existing = getData("attendance") as AttendanceRecord[];
 
+      const savePromises: Promise<unknown>[] = [];
       for (const punch of result.records) {
         const mapping = mappings.find(
           (m) => m.biometricId === punch.biometricId,
@@ -362,24 +352,24 @@ export default function BiometricDevices() {
             timeIn: punchTime,
             markedBy: `Biometric (${device.name})`,
             type: mapping.personType,
-            method: "rfid",
+            method: "essl",
           };
-          newRecs.push(rec);
-        } else if (punch.type === "out" && alreadyIn && !alreadyIn.timeOut) {
-          alreadyIn.timeOut = punchTime;
+          savePromises.push(
+            saveData("attendance", rec as unknown as Record<string, unknown>),
+          );
         }
       }
 
-      ls.set("attendance", [...existing, ...newRecs]);
+      await Promise.allSettled(savePromises);
       setSyncResult(result);
       setSyncLogs(result.logs);
       setSyncingId(null);
       toast.success(`Sync complete: ${result.synced} records imported`);
     },
-    [mappings],
+    [mappings, getData, saveData],
   );
 
-  // ── ID Mapping ───────────────────────────────────────────────────────────────
+  // ── ID Mappings ──
 
   const searchResults = useMemo(() => {
     if (!mapSearch.trim()) return [];
@@ -399,20 +389,21 @@ export default function BiometricDevices() {
     const staffMatches = staff
       .filter(
         (s) =>
-          s.name.toLowerCase().includes(q) || s.empId.toLowerCase().includes(q),
+          (s.name ?? s.fullName ?? "").toLowerCase().includes(q) ||
+          s.empId.toLowerCase().includes(q),
       )
       .slice(0, 5)
       .map((s) => ({
         id: s.id,
         type: "staff" as const,
-        label: `${s.name} (${s.empId}) — ${s.designation}`,
+        label: `${s.name ?? s.fullName} (${s.empId}) — ${s.designation}`,
       }));
     return [...studentMatches, ...staffMatches];
   }, [mapSearch, students, staff]);
 
   function saveMappings(updated: BiometricMapping[]) {
     setMappings(updated);
-    ls.set("biometric_mappings", updated);
+    localStorage.setItem("biometric_mappings", JSON.stringify(updated));
   }
 
   function assignMapping() {
@@ -452,7 +443,7 @@ export default function BiometricDevices() {
       return s ? `${s.fullName} (${s.admNo})` : m.personId;
     }
     const s = staff.find((x) => x.id === m.personId);
-    return s ? `${s.name} (${s.empId})` : m.personId;
+    return s ? `${s.name ?? s.fullName} (${s.empId})` : m.personId;
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
@@ -468,7 +459,8 @@ export default function BiometricDevices() {
           </p>
           <p className="text-muted-foreground text-xs mt-0.5">
             Configure your biometric device IP and port, map employee/student
-            IDs, then sync attendance records automatically.
+            IDs, then sync attendance records automatically. All synced records
+            save to MySQL.
           </p>
         </div>
       </div>
@@ -482,17 +474,15 @@ export default function BiometricDevices() {
           </p>
           <p>
             Web browsers cannot directly connect to LAN biometric devices due to
-            CORS and network restrictions. For real ESSL eBioServer or ZKTeco
-            PUSH SDK integration on cPanel hosting, a{" "}
-            <strong>PHP proxy script</strong> is required on your server. See{" "}
-            <span className="underline">Documentation → ESSL Setup</span> for
-            full instructions. The "Sync Now" button below performs a realistic
-            simulation while your proxy is being set up.
+            CORS restrictions. A <strong>PHP proxy script</strong> on your
+            cPanel server is required for real ESSL/ZKTeco integration. The
+            "Sync Now" button performs a realistic simulation. See{" "}
+            <span className="underline">Documentation → ESSL Setup</span>.
           </p>
         </div>
       </div>
 
-      {/* ── Section: Devices ───────────────────────────────────── */}
+      {/* ── Devices Section ─── */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -502,6 +492,7 @@ export default function BiometricDevices() {
               expandedSection === "devices" ? "mappings" : "devices",
             )
           }
+          data-ocid="biometric.devices-section.toggle"
         >
           <div className="flex items-center gap-2">
             <Wifi className="w-5 h-5 text-primary" />
@@ -522,15 +513,22 @@ export default function BiometricDevices() {
             <div className="p-4 flex justify-end">
               <Button
                 size="sm"
-                onClick={openAddDevice}
-                data-ocid="biometric-add-device"
+                onClick={() => {
+                  setEditingDevice(null);
+                  setDeviceForm({ ...EMPTY_DEVICE });
+                  setShowDeviceModal(true);
+                }}
+                data-ocid="biometric.add-device.button"
               >
                 <Plus className="w-4 h-4 mr-1.5" /> Add Device
               </Button>
             </div>
 
             {devices.length === 0 ? (
-              <div className="py-12 text-center text-muted-foreground pb-6">
+              <div
+                className="py-12 text-center text-muted-foreground pb-6"
+                data-ocid="biometric.devices.empty-state"
+              >
                 <Wifi className="w-10 h-10 mx-auto mb-3 opacity-20" />
                 <p className="font-medium">No biometric devices configured</p>
                 <p className="text-xs mt-1">
@@ -539,11 +537,11 @@ export default function BiometricDevices() {
               </div>
             ) : (
               <div className="grid gap-3 p-4 sm:grid-cols-2">
-                {devices.map((dev) => (
+                {devices.map((dev, idx) => (
                   <Card
                     key={dev.id}
                     className="p-4 border"
-                    data-ocid={`biometric-device-card-${dev.id}`}
+                    data-ocid={`biometric.device-card.${idx + 1}`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -556,7 +554,11 @@ export default function BiometricDevices() {
                             className="text-xs flex items-center gap-1"
                           >
                             {statusIcon(dev.status)}
-                            {statusLabel(dev.status)}
+                            {dev.status === "online"
+                              ? "Online"
+                              : dev.status === "offline"
+                                ? "Offline"
+                                : "Unknown"}
                           </Badge>
                           {!dev.enabled && (
                             <Badge variant="secondary" className="text-xs">
@@ -584,8 +586,12 @@ export default function BiometricDevices() {
                           size="icon"
                           variant="outline"
                           className="h-7 w-7"
-                          onClick={() => openEditDevice(dev)}
-                          data-ocid={`biometric-edit-${dev.id}`}
+                          onClick={() => {
+                            setEditingDevice(dev);
+                            setDeviceForm({ ...dev });
+                            setShowDeviceModal(true);
+                          }}
+                          data-ocid={`biometric.edit-device.${idx + 1}`}
                           aria-label="Edit device"
                         >
                           <Edit2 className="w-3 h-3" />
@@ -595,7 +601,7 @@ export default function BiometricDevices() {
                           variant="outline"
                           className="h-7 w-7 text-destructive hover:text-destructive"
                           onClick={() => deleteDevice(dev.id)}
-                          data-ocid={`biometric-delete-${dev.id}`}
+                          data-ocid={`biometric.delete-device.${idx + 1}`}
                           aria-label="Delete device"
                         >
                           <Trash2 className="w-3 h-3" />
@@ -608,8 +614,10 @@ export default function BiometricDevices() {
                         variant="outline"
                         className="w-full"
                         disabled={syncingId === dev.id}
-                        onClick={() => handleSync(dev)}
-                        data-ocid={`biometric-sync-${dev.id}`}
+                        onClick={() => {
+                          void handleSync(dev);
+                        }}
+                        data-ocid={`biometric.sync-device.${idx + 1}`}
                       >
                         <RefreshCw
                           className={`w-3.5 h-3.5 mr-1.5 ${syncingId === dev.id ? "animate-spin" : ""}`}
@@ -622,11 +630,10 @@ export default function BiometricDevices() {
               </div>
             )}
 
-            {/* Sync result logs */}
             {syncLogs.length > 0 && (
               <div
                 className="m-4 mt-0 rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs space-y-1"
-                data-ocid="sync-log-panel"
+                data-ocid="biometric.sync-log-panel"
               >
                 <p className="font-semibold text-muted-foreground mb-2 uppercase tracking-wide text-[10px]">
                   Sync Log
@@ -643,9 +650,9 @@ export default function BiometricDevices() {
                 {syncResult && (
                   <div className="mt-2 pt-2 border-t border-border">
                     <p className="font-semibold text-foreground text-[11px]">
-                      ✅ {syncResult.synced} attendance records synced
+                      ✅ {syncResult.synced} attendance records synced to MySQL
                       {syncResult.unmatched > 0 &&
-                        ` · ⚠️ ${syncResult.unmatched} unmatched (no biometric ID mapping)`}
+                        ` · ⚠️ ${syncResult.unmatched} unmatched`}
                     </p>
                   </div>
                 )}
@@ -655,7 +662,7 @@ export default function BiometricDevices() {
         )}
       </Card>
 
-      {/* ── Section: ID Mappings ───────────────────────────────── */}
+      {/* ── ID Mappings Section ─── */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -665,6 +672,7 @@ export default function BiometricDevices() {
               expandedSection === "mappings" ? "devices" : "mappings",
             )
           }
+          data-ocid="biometric.mappings-section.toggle"
         >
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-5 h-5 text-primary" />
@@ -684,11 +692,9 @@ export default function BiometricDevices() {
           <div className="border-t border-border p-4 space-y-4">
             <p className="text-xs text-muted-foreground">
               Map each student or staff member to their enrollment number on the
-              biometric device. This is required for sync to import attendance
-              correctly.
+              biometric device.
             </p>
 
-            {/* Quick mapping form */}
             <div className="grid sm:grid-cols-3 gap-3 bg-muted/30 rounded-lg p-3">
               <div className="space-y-1">
                 <Label className="text-xs">Search Student / Staff</Label>
@@ -702,7 +708,7 @@ export default function BiometricDevices() {
                       setMapSearch(e.target.value);
                       setMapSelectedPerson(null);
                     }}
-                    data-ocid="biometric-map-search"
+                    data-ocid="biometric.map-search.input"
                   />
                 </div>
                 {searchResults.length > 0 && !mapSelectedPerson && (
@@ -737,7 +743,7 @@ export default function BiometricDevices() {
                   placeholder="e.g. 1001"
                   value={mapBiometricId}
                   onChange={(e) => setMapBiometricId(e.target.value)}
-                  data-ocid="biometric-enrollment-id"
+                  data-ocid="biometric.enrollment-id.input"
                 />
               </div>
 
@@ -746,22 +752,20 @@ export default function BiometricDevices() {
                   size="sm"
                   className="w-full h-8"
                   onClick={assignMapping}
-                  data-ocid="biometric-assign-btn"
+                  data-ocid="biometric.assign-id.button"
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" /> Assign ID
                 </Button>
               </div>
             </div>
 
-            {/* Mappings table */}
             {mappings.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground">
+              <div
+                className="py-8 text-center text-muted-foreground"
+                data-ocid="biometric.mappings.empty-state"
+              >
                 <CheckCircle2 className="w-8 h-8 mx-auto mb-2 opacity-20" />
                 <p className="text-sm">No biometric ID mappings yet</p>
-                <p className="text-xs mt-1">
-                  Search for a student or staff above to assign their biometric
-                  ID
-                </p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -783,11 +787,11 @@ export default function BiometricDevices() {
                     </tr>
                   </thead>
                   <tbody>
-                    {mappings.map((m) => (
+                    {mappings.map((m, idx) => (
                       <tr
                         key={m.personId}
                         className="border-t border-border hover:bg-muted/20 transition-colors"
-                        data-ocid={`mapping-row-${m.personId}`}
+                        data-ocid={`biometric.mapping-row.${idx + 1}`}
                       >
                         <td className="p-2.5 font-medium text-foreground">
                           {getMappingLabel(m)}
@@ -814,6 +818,7 @@ export default function BiometricDevices() {
                             className="h-7 w-7 text-destructive hover:text-destructive"
                             onClick={() => removeMapping(m.personId)}
                             aria-label="Remove mapping"
+                            data-ocid={`biometric.remove-mapping.${idx + 1}`}
                           >
                             <X className="w-3 h-3" />
                           </Button>
@@ -828,7 +833,7 @@ export default function BiometricDevices() {
         )}
       </Card>
 
-      {/* ── Section: Help ─────────────────────────────────────── */}
+      {/* ── Help Section ─── */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -836,6 +841,7 @@ export default function BiometricDevices() {
           onClick={() =>
             setExpandedSection(expandedSection === "help" ? "devices" : "help")
           }
+          data-ocid="biometric.help-section.toggle"
         >
           <div className="flex items-center gap-2">
             <Info className="w-5 h-5 text-primary" />
@@ -879,7 +885,7 @@ export default function BiometricDevices() {
                 </li>
                 <li>
                   Click "Sync Now" — attendance data flows from the device into
-                  the ERP automatically
+                  the ERP and saves to MySQL
                 </li>
               </ol>
             </div>
@@ -897,41 +903,18 @@ export default function BiometricDevices() {
                   The PHP proxy bridges the browser request to the device using
                   ZKLib
                 </li>
-                <li>All other steps are the same as ESSL above</li>
               </ol>
-            </div>
-            <div>
-              <h4 className="font-semibold text-foreground mb-1">
-                WhatsApp + Attendance Integration
-              </h4>
-              <p className="text-xs">
-                When attendance is synced from a biometric device, the system
-                can auto-send WhatsApp absence alerts to parents. Configure this
-                in{" "}
-                <strong>
-                  Settings → Notification Scheduler → Absent Alert
-                </strong>
-                .
-              </p>
-            </div>
-            <div className="rounded-md border border-border bg-muted/40 p-3 text-xs">
-              <p className="font-semibold text-foreground mb-1">
-                📥 Parent WhatsApp Auto-Reply
-              </p>
-              <p>
-                Parents can WhatsApp their child's Admission Number to your
-                school's WhatsApp number to get instant attendance and fee
-                details. Configure in{" "}
-                <strong>Communication → WhatsApp API → Auto Reply</strong>.
-              </p>
             </div>
           </div>
         )}
       </Card>
 
-      {/* ── Device Add/Edit Modal ─────────────────────────────── */}
+      {/* Device Add/Edit Modal */}
       {showDeviceModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 m-0 w-full h-full">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 m-0 w-full h-full"
+          data-ocid="biometric.device-modal.dialog"
+        >
           <div className="bg-card rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-4 border-b border-border">
               <h3 className="font-semibold text-foreground">
@@ -942,6 +925,7 @@ export default function BiometricDevices() {
                 variant="ghost"
                 onClick={() => setShowDeviceModal(false)}
                 aria-label="Close"
+                data-ocid="biometric.device-modal.close-button"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -956,17 +940,16 @@ export default function BiometricDevices() {
                   onChange={(e) =>
                     setDeviceForm((f) => ({ ...f, name: e.target.value }))
                   }
-                  data-ocid="device-name-input"
+                  data-ocid="biometric.device-name.input"
                 />
               </div>
-
               <div className="space-y-1">
                 <Label className="text-xs">Device Type *</Label>
                 <Select
                   value={deviceForm.deviceType}
                   onValueChange={(v) => handleDeviceTypeChange(v as DeviceType)}
                 >
-                  <SelectTrigger data-ocid="device-type-select">
+                  <SelectTrigger data-ocid="biometric.device-type.select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -978,7 +961,6 @@ export default function BiometricDevices() {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">IP Address *</Label>
@@ -991,7 +973,7 @@ export default function BiometricDevices() {
                         ipAddress: e.target.value,
                       }))
                     }
-                    data-ocid="device-ip-input"
+                    data-ocid="biometric.device-ip.input"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1005,42 +987,10 @@ export default function BiometricDevices() {
                         port: Number(e.target.value),
                       }))
                     }
-                    data-ocid="device-port-input"
+                    data-ocid="biometric.device-port.input"
                   />
                 </div>
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Device ID</Label>
-                  <Input
-                    type="number"
-                    value={deviceForm.deviceId}
-                    onChange={(e) =>
-                      setDeviceForm((f) => ({
-                        ...f,
-                        deviceId: Number(e.target.value),
-                      }))
-                    }
-                    data-ocid="device-id-input"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Polling Interval (min)</Label>
-                  <Input
-                    type="number"
-                    value={deviceForm.pollingInterval}
-                    onChange={(e) =>
-                      setDeviceForm((f) => ({
-                        ...f,
-                        pollingInterval: Number(e.target.value),
-                      }))
-                    }
-                    data-ocid="device-poll-input"
-                  />
-                </div>
-              </div>
-
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label className="text-xs">Username</Label>
@@ -1049,7 +999,7 @@ export default function BiometricDevices() {
                     onChange={(e) =>
                       setDeviceForm((f) => ({ ...f, username: e.target.value }))
                     }
-                    data-ocid="device-username-input"
+                    data-ocid="biometric.device-username.input"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1060,11 +1010,10 @@ export default function BiometricDevices() {
                     onChange={(e) =>
                       setDeviceForm((f) => ({ ...f, password: e.target.value }))
                     }
-                    data-ocid="device-password-input"
+                    data-ocid="biometric.device-password.input"
                   />
                 </div>
               </div>
-
               <div className="flex items-center gap-2">
                 <input
                   id="device-enabled"
@@ -1074,7 +1023,7 @@ export default function BiometricDevices() {
                     setDeviceForm((f) => ({ ...f, enabled: e.target.checked }))
                   }
                   className="h-4 w-4 accent-primary"
-                  data-ocid="device-enabled-checkbox"
+                  data-ocid="biometric.device-enabled.checkbox"
                 />
                 <Label
                   htmlFor="device-enabled"
@@ -1089,10 +1038,14 @@ export default function BiometricDevices() {
               <Button
                 variant="outline"
                 onClick={() => setShowDeviceModal(false)}
+                data-ocid="biometric.device-modal.cancel-button"
               >
                 Cancel
               </Button>
-              <Button onClick={handleSaveDevice} data-ocid="device-save-btn">
+              <Button
+                onClick={handleSaveDevice}
+                data-ocid="biometric.device-modal.save-button"
+              >
                 {editingDevice ? "Update Device" : "Add Device"}
               </Button>
             </div>

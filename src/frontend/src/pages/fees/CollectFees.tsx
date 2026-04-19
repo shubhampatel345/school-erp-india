@@ -7,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "../../components/ui/dialog";
-import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type {
   FeeHeading,
@@ -16,7 +15,6 @@ import type {
   SchoolProfile,
   Student,
 } from "../../types";
-import { dataService } from "../../utils/dataService";
 import {
   MONTHS,
   MONTH_SHORT,
@@ -44,7 +42,6 @@ interface OtherChargeRow {
   dueAmount: number;
 }
 
-// Full edit state for the Edit Receipt dialog
 interface EditReceiptState {
   receiptId: string;
   date: string;
@@ -53,119 +50,29 @@ interface EditReceiptState {
   discount: number;
   otherLabel: string;
   otherAmount: number;
-  remarks: string;
-  // month + amount per item: headingId -> month -> amount
-  itemAmounts: Record<string, Record<string, number>>;
-  // which months are selected
   selectedMonths: string[];
-  // all headings in receipt
   headings: Array<{
     headingId: string;
     headingName: string;
     months: string[];
     rate: number;
   }>;
+  itemAmounts: Record<string, Record<string, number>>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-/** Get all fee receipts — always prefer DataService cache (server-synced) */
-function getAllReceipts(): FeeReceipt[] {
-  const ds = dataService.get<FeeReceipt>("fee_receipts");
-  if (ds.length > 0) return ds;
-  // Fallback to localStorage only in offline mode (API not configured)
-  return ls.get<FeeReceipt[]>("fee_receipts", []);
-}
-
-function getNextReceiptNo(): string {
-  const receipts = getAllReceipts();
-  const d = new Date();
-  const yy = String(d.getFullYear()).slice(-2);
-  const seq = (receipts.filter((r) => !r.isDeleted).length + 1)
-    .toString()
-    .padStart(4, "0");
-  return `R${yy}-${seq}`;
-}
-
-function getPaidMonths(
-  studentId: string,
-  headingId: string,
-  sessionId: string,
-): string[] {
-  const receipts = getAllReceipts();
-  const paid: string[] = [];
-  for (const r of receipts) {
-    if (
-      r.studentId === studentId &&
-      r.sessionId === sessionId &&
-      !r.isDeleted
-    ) {
-      for (const item of r.items) {
-        if (item.headingId === headingId && !paid.includes(item.month)) {
-          paid.push(item.month);
-        }
-      }
+function safeMonths(v: string[] | string | undefined): string[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string" && v) {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      return [];
     }
   }
-  return paid;
-}
-
-/** Get old balance — prefer DataService fee_balances, fallback to localStorage */
-function getOldBalance(studentId: string): number {
-  // Try DataService fee_balances collection first (server-synced)
-  const balRecords = dataService.get<{ studentId: string; balance: number }>(
-    "fee_balances",
-  );
-  const found = balRecords.find((b) => b.studentId === studentId);
-  if (found !== undefined) return found.balance ?? 0;
-  // Fallback to legacy localStorage key
-  const balances = ls.get<Record<string, number>>("old_balances", {});
-  return balances[studentId] ?? 0;
-}
-
-/**
- * Stores old balance via DataService (server-first).
- * Positive = student owes (shown red).
- * Negative = student has credit (shown green, reduces next payment).
- * Zero = clear.
- */
-async function setOldBalanceStore(
-  studentId: string,
-  balance: number,
-): Promise<void> {
-  // Update legacy localStorage for fallback
-  const balances = ls.get<Record<string, number>>("old_balances", {});
-  if (balance === 0) delete balances[studentId];
-  else balances[studentId] = balance;
-  ls.set("old_balances", balances);
-
-  // Save to server via DataService under fee_balances collection
-  const existingBalances = dataService.get<{
-    id: string;
-    studentId: string;
-    balance: number;
-  }>("fee_balances");
-  const existing = existingBalances.find((b) => b.studentId === studentId);
-  if (existing) {
-    await dataService
-      .update("fee_balances", existing.id, { balance } as Record<
-        string,
-        unknown
-      >)
-      .catch(() => {
-        /* best-effort */
-      });
-  } else {
-    await dataService
-      .save("fee_balances", {
-        id: `bal_${studentId}`,
-        studentId,
-        balance,
-      } as Record<string, unknown>)
-      .catch(() => {
-        /* best-effort */
-      });
-  }
+  return [];
 }
 
 function buildQRData(r: FeeReceipt): string {
@@ -173,7 +80,7 @@ function buildQRData(r: FeeReceipt): string {
   return `Receipt:${r.receiptNo}|Student:${r.studentName}|Adm:${r.admNo}|Class:${r.class}-${r.section}|Amount:${r.totalAmount}|Date:${r.date}|Mode:${r.paymentMode}|Months:${months}`;
 }
 
-function printReceiptHTML(receipt: FeeReceipt) {
+function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
   const school = ls.get<SchoolProfile>("school_profile", {
     name: "SHUBH SCHOOL ERP",
     address: "",
@@ -205,21 +112,19 @@ function printReceiptHTML(receipt: FeeReceipt) {
     grouped[item.headingId].months.push(item.month);
   }
 
-  const historyRows = getAllReceipts()
+  const historyRows = allReceipts
     .filter((r) => r.studentId === receipt.studentId && !r.isDeleted)
     .sort((a, b) => a.date.localeCompare(b.date));
 
   const qrData = buildQRData(receipt);
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=60x60&data=${encodeURIComponent(qrData)}`;
-
   const itemRows = Object.values(grouped)
     .map(
       (g, idx) =>
         `<tr><td>${idx + 1}</td><td>${g.headingName}</td><td>${g.months.map((m) => m.slice(0, 3)).join(",")}</td><td style="text-align:right">₹${(g.amount * g.months.length).toLocaleString("en-IN")}</td></tr>`,
     )
     .join("");
-
-  const otherRows = receipt.otherCharges
+  const otherRows = (receipt.otherCharges ?? [])
     .filter((c) => c.paidAmount > 0)
     .map(
       (c) =>
@@ -227,30 +132,27 @@ function printReceiptHTML(receipt: FeeReceipt) {
     )
     .join("");
 
-  // Old balance row — positive = dues carried forward (red), negative = credit (green)
   const oldBalAbs = Math.abs(receipt.oldBalance ?? 0);
   const oldBalRow =
     (receipt.oldBalance ?? 0) > 0
-      ? `<tr><td>-</td><td>Old Balance (Carried Forward)</td><td>-</td><td style="text-align:right;color:red">₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
+      ? `<tr><td>-</td><td>Old Balance</td><td>-</td><td style="text-align:right;color:red">₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
       : (receipt.oldBalance ?? 0) < 0
         ? `<tr><td>-</td><td>Advance/Credit</td><td>-</td><td style="text-align:right;color:green">-₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
         : "";
 
   const discRow =
     receipt.discount > 0
-      ? `<tr><td>-</td><td>Discount / Concession</td><td>-</td><td style="text-align:right;color:green">-₹${receipt.discount.toLocaleString("en-IN")}</td></tr>`
+      ? `<tr><td>-</td><td>Discount</td><td>-</td><td style="text-align:right;color:green">-₹${receipt.discount.toLocaleString("en-IN")}</td></tr>`
       : "";
 
-  const balance = receipt.balance ?? 0;
-  const paidAmtRow =
+  const bal = receipt.balance ?? 0;
+  const balRow =
     receipt.paidAmount !== undefined &&
     receipt.paidAmount !== receipt.totalAmount
-      ? balance < 0
-        ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount ?? receipt.totalAmount).toLocaleString("en-IN")}</td></tr>
-           <tr style="background:#f0fdf4"><td colspan="3"><b>Credit Balance</b></td><td style="text-align:right;font-weight:bold;color:green">-₹${Math.abs(balance).toLocaleString("en-IN")}</td></tr>`
-        : balance > 0
-          ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount ?? receipt.totalAmount).toLocaleString("en-IN")}</td></tr>
-             <tr style="background:#fff5f5"><td colspan="3"><b>Balance Due</b></td><td style="text-align:right;font-weight:bold;color:red">₹${balance.toLocaleString("en-IN")}</td></tr>`
+      ? bal < 0
+        ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount).toLocaleString("en-IN")}</td></tr><tr style="background:#f0fdf4"><td colspan="3"><b>Credit Balance</b></td><td style="text-align:right;font-weight:bold;color:green">-₹${Math.abs(bal).toLocaleString("en-IN")}</td></tr>`
+        : bal > 0
+          ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount).toLocaleString("en-IN")}</td></tr><tr style="background:#fff5f5"><td colspan="3"><b>Balance Due</b></td><td style="text-align:right;font-weight:bold;color:red">₹${bal.toLocaleString("en-IN")}</td></tr>`
           : ""
       : "";
 
@@ -263,91 +165,31 @@ function printReceiptHTML(receipt: FeeReceipt) {
     })
     .join("");
 
-  const html = `<!DOCTYPE html><html><head>
-    <meta charset="UTF-8">
-    <title>Fee Receipt - ${receipt.receiptNo}</title>
-    <style>
-      @page { size: 105mm 145mm; margin: 0; }
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: Arial, sans-serif; font-size: 9px; padding: 4mm; background: #fff; }
-      .header { text-align: center; border-bottom: 1.5px solid #000; padding-bottom: 3px; margin-bottom: 3px; }
-      .school-name { font-size: 13px; font-weight: bold; margin-bottom: 1px; }
-      .school-sub { font-size: 7.5px; color: #333; line-height: 1.4; }
-      .receipt-title { text-align: center; font-weight: bold; font-size: 10px; letter-spacing: 1px; margin: 3px 0; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 2px 0; }
-      .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 8px; margin: 3px 0; font-size: 8.5px; }
-      .info-item { display: flex; gap: 2px; }
-      .lbl { color: #555; }
-      table { width: 100%; border-collapse: collapse; margin: 3px 0; font-size: 8px; }
-      th, td { border: 0.5px solid #aaa; padding: 1.5px 3px; }
-      th { background: #f2f2f2; font-weight: bold; text-align: left; }
-      .total-row td { font-weight: bold; font-size: 9px; background: #f8f8f8; }
-      .qr-row { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 4px; }
-      .history-section { margin-top: 4px; border-top: 1px dashed #999; padding-top: 3px; }
-      .history-title { font-weight: bold; font-size: 8px; margin-bottom: 2px; }
-      @media print { body { padding: 4mm; } }
-    </style>
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Receipt - ${receipt.receiptNo}</title>
+  <style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.school-sub{font-size:7.5px;color:#333;line-height:1.4}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}.history-section{margin-top:4px;border-top:1px dashed #999;padding-top:3px}</style>
   </head><body>
-    <div class="header">
-      <div class="school-name">${school.name}</div>
-      <div class="school-sub">
-        ${school.address ? `${school.address}<br>` : ""}
-        ${[school.phone ? `Ph: ${school.phone}` : "", school.website || ""].filter(Boolean).join(" | ")}
-        ${school.affiliationNo ? `<br>Affiliation No: ${school.affiliationNo}` : ""}
-      </div>
-    </div>
-    <div class="receipt-title">CASH RECEIPT</div>
-    <div class="info-grid">
-      <div class="info-item"><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div>
-      <div class="info-item"><span class="lbl">Date:</span>${receipt.date}</div>
-      <div class="info-item"><span class="lbl">Name:</span><b>${receipt.studentName}</b></div>
-      <div class="info-item"><span class="lbl">Adm No:</span>${receipt.admNo}</div>
-      <div class="info-item"><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div>
-      <div class="info-item"><span class="lbl">Mode:</span>${receipt.paymentMode}</div>
-    </div>
-    <table>
-      <thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead>
-      <tbody>
-        ${itemRows}${otherRows}${oldBalRow}${discRow}
-        <tr class="total-row"><td colspan="3">Net Fees</td><td style="text-align:right">₹${receipt.totalAmount.toLocaleString("en-IN")}</td></tr>
-        ${paidAmtRow}
-      </tbody>
-    </table>
-    <div class="qr-row">
-      <div>
-        <div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b> (${receipt.receivedByRole})</div>
-        <div style="margin-top:10px;font-size:8px;">Signature: _______________</div>
-      </div>
-      <img src="${qrUrl}" width="60" height="60" alt="QR"/>
-    </div>
-    ${
-      historyRows.length > 0
-        ? `<div class="history-section"><div class="history-title">Payment History</div>
-      <table><thead><tr><th>Date</th><th>Receipt</th><th>Months</th><th>Amount</th><th>Received By</th></tr></thead>
-      <tbody>${histHtml}</tbody></table></div>`
-        : ""
-    }
+  <div class="header"><div class="school-name">${school.name}</div><div class="school-sub">${school.address ? `${school.address}<br>` : ""}${[school.phone ? `Ph: ${school.phone}` : "", school.website || ""].filter(Boolean).join(" | ")}${school.affiliationNo ? `<br>Affiliation No: ${school.affiliationNo}` : ""}</div></div>
+  <div class="receipt-title">CASH RECEIPT</div>
+  <div class="info-grid"><div class="info-item"><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div><div class="info-item"><span class="lbl">Date:</span>${receipt.date}</div><div class="info-item"><span class="lbl">Name:</span><b>${receipt.studentName}</b></div><div class="info-item"><span class="lbl">Adm No:</span>${receipt.admNo}</div><div class="info-item"><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div><div class="info-item"><span class="lbl">Mode:</span>${receipt.paymentMode}</div></div>
+  <table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}${otherRows}${oldBalRow}${discRow}<tr class="total-row"><td colspan="3">Net Fees</td><td style="text-align:right">₹${receipt.totalAmount.toLocaleString("en-IN")}</td></tr>${balRow}</tbody></table>
+  <div class="qr-row"><div><div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b> (${receipt.receivedByRole})</div><div style="margin-top:10px;font-size:8px;">Signature: _______________</div></div><img src="${qrUrl}" width="60" height="60" alt="QR"/></div>
+  ${historyRows.length > 0 ? `<div class="history-section"><div style="font-weight:bold;font-size:8px;margin-bottom:2px;">Payment History</div><table><thead><tr><th>Date</th><th>Receipt</th><th>Months</th><th>Amount</th><th>Received By</th></tr></thead><tbody>${histHtml}</tbody></table></div>` : ""}
   </body></html>`;
 
-  // Use a hidden iframe to print — avoids popup blockers completely
-  const existingFrame = document.getElementById(
+  const existing = document.getElementById(
     "shubh-print-frame",
   ) as HTMLIFrameElement | null;
-  if (existingFrame) existingFrame.remove();
-
+  if (existing) existing.remove();
   const frame = document.createElement("iframe");
   frame.id = "shubh-print-frame";
   frame.style.cssText =
     "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;opacity:0;";
   document.body.appendChild(frame);
-
   const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
   if (!frameDoc) {
-    // Fallback: try window.open if iframe approach fails
     const win = window.open("", "_blank");
     if (!win) {
-      alert(
-        "⚠️ Print blocked. Please allow popups for this site in your browser settings, then try again.",
-      );
+      alert("⚠️ Print blocked. Allow popups.");
       return;
     }
     win.document.write(html);
@@ -355,17 +197,14 @@ function printReceiptHTML(receipt: FeeReceipt) {
     setTimeout(() => win.print(), 500);
     return;
   }
-
   frameDoc.open();
   frameDoc.write(html);
   frameDoc.close();
-
   setTimeout(() => {
     try {
       frame.contentWindow?.focus();
       frame.contentWindow?.print();
     } catch {
-      // Final fallback
       const win = window.open("", "_blank");
       if (win) {
         win.document.write(html);
@@ -373,7 +212,6 @@ function printReceiptHTML(receipt: FeeReceipt) {
         setTimeout(() => win.print(), 300);
       }
     }
-    // Clean up frame after print dialog closes
     setTimeout(() => frame.remove(), 3000);
   }, 400);
 }
@@ -398,84 +236,62 @@ function LabelValue({
   );
 }
 
-// ── Family helpers ─────────────────────────────────────────────────────────────
 function getPrimaryMobile(s: Student): string {
   return (s.fatherMobile?.trim() || s.guardianMobile?.trim() || "").trim();
 }
 
-function getFamilyMembers(student: Student, allStudents: Student[]): Student[] {
-  const pm = getPrimaryMobile(student);
-  if (!pm) return [];
-  return allStudents.filter(
-    (s) =>
-      s.id !== student.id &&
-      s.status === "active" &&
-      getPrimaryMobile(s) === pm,
-  );
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function CollectFees() {
-  const { currentUser, currentSession, addNotification, isReadOnly } = useApp();
+  const {
+    currentUser,
+    currentSession,
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    addNotification,
+    isReadOnly,
+  } = useApp();
 
-  // ── Search state ──────────────────────────────────────────────────────────
   const [admNoInput, setAdmNoInput] = useState("");
-  const [allStudents, setAllStudents] = useState<Student[]>([]);
   const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const admNoRef = useRef<HTMLInputElement>(null);
 
-  // ── Family members panel ──────────────────────────────────────────────────
   const [familyOpen, setFamilyOpen] = useState(true);
-
-  // ── Student & fee data ────────────────────────────────────────────────────
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [rows, setRows] = useState<ReceiptRow[]>([]);
-  const [oldBalance, setOldBalance] = useState(0); // negative = credit
-  const [receiptHistory, setReceiptHistory] = useState<FeeReceipt[]>([]);
-  const [feeLoadingState, setFeeLoadingState] = useState<
-    "idle" | "loading" | "loaded" | "error" | "empty"
-  >("idle");
-  const [feeLoadError, setFeeLoadError] = useState("");
-
-  // ── Month panel ───────────────────────────────────────────────────────────
+  const [oldBalance, setOldBalance] = useState(0);
   const [panelMonths, setPanelMonths] = useState<string[]>([]);
-
-  // ── Cell amount overrides ─────────────────────────────────────────────────
   const [cellAmounts, setCellAmounts] = useState<
     Record<string, Record<string, number>>
   >({});
-
-  // ── Other charges ─────────────────────────────────────────────────────────
   const [otherCharge, setOtherCharge] = useState<OtherChargeRow>({
     label: "",
     paidAmount: 0,
     dueAmount: 0,
   });
-
-  // ── Payment fields ────────────────────────────────────────────────────────
   const [paymentMode, setPaymentMode] =
     useState<FeeReceipt["paymentMode"]>("Cash");
   const [receiptDate, setReceiptDate] = useState(
     new Date().toISOString().split("T")[0],
   );
-  const [receiptNo, setReceiptNo] = useState(getNextReceiptNo);
   const [remarks, setRemarks] = useState("");
   const [lateFees, setLateFees] = useState(0);
-  const [concessionPct, setConcessionPct] = useState(0);
   const [concessionAmt, setConcessionAmt] = useState(0);
   const [receiptAmt, setReceiptAmt] = useState(0);
   const [errorMsg, setErrorMsg] = useState("");
+  const [feeLoadState, setFeeLoadState] = useState<
+    "idle" | "loading" | "loaded" | "empty"
+  >("idle");
 
-  // ── Post-save dialog ──────────────────────────────────────────────────────
   const [showDialog, setShowDialog] = useState(false);
   const [savedReceipt, setSavedReceipt] = useState<FeeReceipt | null>(null);
   const [printDone, setPrintDone] = useState(false);
   const [waDone, setWaDone] = useState(false);
   const [waSending, setWaSending] = useState(false);
 
-  // ── Full Edit Receipt ─────────────────────────────────────────────────────
   const [editOpen, setEditOpen] = useState(false);
   const [editState, setEditState] = useState<EditReceiptState | null>(null);
 
@@ -485,49 +301,35 @@ export default function CollectFees() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // ── Load students + handle preload from global search ─────────────────────
-  useEffect(() => {
-    // Always fetch from server first — this is the source of truth
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => {
-        const loaded = rows.filter((s) => s.status === "active");
-        setAllStudents(loaded);
+  // All data from context — already fetched from server
+  const allStudents = (getData("students") as Student[]).filter(
+    (s) => s.status === "active",
+  );
+  const allReceipts = getData("feeReceipts") as FeeReceipt[];
+  const allHeadings = getData("feeHeadings") as FeeHeading[];
+  const allPlans = getData("feesPlans") as FeesPlan[];
 
-        // Check if navigated here from global search with a pre-selected student
-        const preloadId = sessionStorage.getItem("collectFees_preload");
-        if (preloadId) {
-          sessionStorage.removeItem("collectFees_preload");
-          const student = loaded.find((s) => s.id === preloadId);
-          if (student) {
-            setSelectedStudent(student);
-            setAdmNoInput(student.admNo);
-            setShowDropdown(false);
-            setErrorMsg("");
-            setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-          }
-        }
-      })
-      .catch(() => {
-        // Fallback: use cache
-        const dsStudents = dataService.get<Student>("students");
-        const loaded = dsStudents.filter((s) => s.status === "active");
-        setAllStudents(loaded);
-      });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── Receipt number from existing receipts ─────────────────────────────────
+  const nextReceiptNo = (): string => {
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const seq = (allReceipts.filter((r) => !r.isDeleted).length + 1)
+      .toString()
+      .padStart(4, "0");
+    return `R${yy}-${seq}`;
+  };
+  const [receiptNo, setReceiptNo] = useState(() => nextReceiptNo());
 
-  // ── Load fees when student is preloaded (from global search) ──────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
+  // ── Preload from sessionStorage (global search navigation) ─────────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one-time preload on mount
   useEffect(() => {
-    // Only fire for preload path — selectStudent() calls loadStudentFees() directly,
-    // so only trigger here when selectedStudent was set from the preload sessionStorage
-    // path (rows will still be empty at that point). Guarded to prevent double-call.
-    if (selectedStudent && currentSession && rows.length === 0) {
-      loadStudentFees(selectedStudent);
+    const preloadId = sessionStorage.getItem("collectFees_preload");
+    if (preloadId) {
+      sessionStorage.removeItem("collectFees_preload");
+      const student = allStudents.find((s) => s.id === preloadId);
+      if (student) selectStudent(student);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStudent?.id, currentSession?.id]);
+  }, [allStudents.length]);
 
   // ── Live search ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -546,6 +348,7 @@ export default function CollectFees() {
       .slice(0, 8);
     setFilteredStudents(res);
     setShowDropdown(res.length > 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [admNoInput, allStudents]);
 
   // ── Close dropdown on outside click ───────────────────────────────────────
@@ -554,29 +357,14 @@ export default function CollectFees() {
       if (
         dropdownRef.current &&
         !dropdownRef.current.contains(e.target as Node)
-      ) {
+      )
         setShowDropdown(false);
-      }
     }
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // ── Transport helpers ──────────────────────────────────────────────────────
-  function getTransportInfo(student: Student): string {
-    const st = ls
-      .get<
-        Array<{
-          studentId: string;
-          busNo: string;
-          routeName: string;
-          pickupPoint: string;
-        }>
-      >("student_transport", [])
-      .find((t) => t.studentId === student.id);
-    return st ? `${st.busNo} / ${st.routeName}` : student.transportRoute || "—";
-  }
-
+  // ── Transport fare helper ──────────────────────────────────────────────────
   function getTransportFare(student: Student): {
     fare: number;
     pickupName: string;
@@ -607,184 +395,130 @@ export default function CollectFees() {
     return { fare: pp?.fare ?? 0, pickupName: assignment.pickupPointName };
   }
 
-  // ── Load fees for selected student (async — always fetches fresh from server) ────
-  async function loadStudentFees(student: Student) {
-    if (!currentSession) return;
-
-    setFeeLoadingState("loading");
-    setFeeLoadError("");
-
-    try {
-      // Always fetch fresh from server — this is the fix for blank screen on live browser.
-      // dataService.get() returns [] when cache is empty (first load on a new device).
-      // dataService.getAsync() always fetches from MySQL if API is configured.
-      const [headingsRaw, plansRaw] = await Promise.all([
-        dataService.getAsync<FeeHeading>("fee_heads"),
-        dataService.getAsync<FeesPlan>("fees_plan"),
-      ]);
-
-      // Filter out any NULL/invalid headings that may have come from a bad push
-      const headings = headingsRaw.filter(
-        (h) =>
-          h?.id != null &&
-          h?.name != null &&
-          typeof h.name === "string" &&
-          h.name.trim() !== "" &&
-          Array.isArray(h.months) &&
-          h.months.length > 0,
-      );
-
-      const plans = plansRaw.filter(
-        (p) => p?.headingId != null && p?.classId != null,
-      );
-
-      const applicablePlans = plans.filter(
-        (p) => p.classId === student.class && p.sectionId === student.section,
-      );
-
-      const newRows: ReceiptRow[] = [];
-      for (const plan of applicablePlans) {
-        const heading = headings.find((h) => h.id === plan.headingId);
-        // Skip headings with null/missing name or months (bad server data)
-        if (!heading) continue;
-        if (!heading.name || heading.name.trim() === "") continue;
-        if (!Array.isArray(heading.months) || heading.months.length === 0)
-          continue;
-        if (!plan.amount || plan.amount === 0) continue;
-        if (
-          heading.applicableClasses &&
-          heading.applicableClasses.length > 0 &&
-          !heading.applicableClasses.includes(student.class)
-        )
-          continue;
-
-        const paidMonths = getPaidMonths(
-          student.id,
-          heading.id,
-          currentSession.id,
-        );
-        newRows.push({
-          headingId: heading.id,
-          headingName: heading.name,
-          applicableMonths: heading.months,
-          amount: plan.amount,
-          paidMonths,
-          checked: true,
-        });
-      }
-
-      // ── Transport Fee row ──────────────────────────────────────────────────
-      const { fare: transportFare, pickupName } = getTransportFare(student);
-      const TRANSPORT_HEADING_ID = `transport_${student.id}`;
-      const studentTransportMonths =
-        ls.get<Record<string, string[]>>("student_transport_months", {})[
-          student.id
-        ] ?? MONTHS;
-
-      if (transportFare > 0) {
-        const paidTransportMonths = getPaidMonths(
-          student.id,
-          TRANSPORT_HEADING_ID,
-          currentSession.id,
-        );
-        newRows.push({
-          headingId: TRANSPORT_HEADING_ID,
-          headingName: `Transport Fee (${pickupName})`,
-          applicableMonths: studentTransportMonths,
-          amount: transportFare,
-          paidMonths: paidTransportMonths,
-          checked: true,
-          isTransport: true,
-        });
-      }
-
-      setRows(newRows);
-
-      // ── Auto-select months: April through current calendar month ──────────
-      // Map JS month (0=Jan) to academic year index (April=0):
-      //   Apr=0, May=1, Jun=2, Jul=3, Aug=4, Sep=5, Oct=6, Nov=7, Dec=8, Jan=9, Feb=10, Mar=11
-      const jsMonth = new Date().getMonth(); // 0=Jan … 11=Dec
-      const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
-      // Select all MONTHS from index 0 (April) through currentAcademicIdx inclusive,
-      // but only those that are applicable to this student's fee plan.
-      const applicableSet = new Set(
-        newRows.flatMap((row) => row.applicableMonths),
-      );
-      const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
-        applicableSet.has(m),
-      );
-      // Fallback: if no applicable months in the auto range (e.g. all paid already
-      // or fee plan not yet configured), still show the applicable month list so
-      // the grid is never blank — user can then deselect as needed.
-      const monthsToSelect =
-        autoSelected.length > 0
-          ? autoSelected
-          : MONTHS.filter((m) => applicableSet.has(m));
-      setPanelMonths(monthsToSelect);
-      setCellAmounts({});
-
-      const bal = getOldBalance(student.id);
-      setOldBalance(bal);
-      setLateFees(0);
-      setConcessionPct(0);
-      setConcessionAmt(0);
-      setRemarks("");
-
-      const history = getAllReceipts()
-        .filter(
-          (r) =>
-            r.studentId === student.id &&
-            r.sessionId === currentSession.id &&
-            !r.isDeleted,
-        )
-        .sort((a, b) => b.date.localeCompare(a.date));
-      setReceiptHistory(history);
-
-      // Set final state: empty means no fee plan configured, loaded means rows found
-      setFeeLoadingState(newRows.length === 0 ? "empty" : "loaded");
-    } catch (err) {
-      const msg =
-        err instanceof Error ? err.message : "Failed to load fee data";
-      setFeeLoadError(msg);
-      setFeeLoadingState("error");
-      // Still try to show whatever is in the local cache so the screen is not blank
-      const cachedHeadings = dataService.get<FeeHeading>("fee_heads");
-      const cachedPlans = dataService.get<FeesPlan>("fees_plan");
-      if (cachedHeadings.length > 0 && cachedPlans.length > 0) {
-        // Re-run with cached data (sync path)
-        const applicablePlans = cachedPlans.filter(
-          (p) => p.classId === student.class && p.sectionId === student.section,
-        );
-        const fallbackRows: ReceiptRow[] = [];
-        for (const plan of applicablePlans) {
-          const heading = cachedHeadings.find((h) => h.id === plan.headingId);
-          if (
-            !heading ||
-            !heading.name ||
-            !Array.isArray(heading.months) ||
-            heading.months.length === 0
-          )
-            continue;
-          if (!plan.amount || plan.amount === 0) continue;
-          fallbackRows.push({
-            headingId: heading.id,
-            headingName: heading.name,
-            applicableMonths: heading.months,
-            amount: plan.amount,
-            paidMonths: getPaidMonths(
-              student.id,
-              heading.id,
-              currentSession.id,
-            ),
-            checked: true,
-          });
-        }
-        if (fallbackRows.length > 0) {
-          setRows(fallbackRows);
-          setFeeLoadingState("loaded");
+  // ── Paid months lookup from context receipts ───────────────────────────────
+  function getPaidMonths(studentId: string, headingId: string): string[] {
+    const sessionId = currentSession?.id ?? "";
+    const paid: string[] = [];
+    for (const r of allReceipts) {
+      if (
+        r.studentId === studentId &&
+        r.sessionId === sessionId &&
+        !r.isDeleted
+      ) {
+        for (const item of r.items) {
+          if (item.headingId === headingId && !paid.includes(item.month))
+            paid.push(item.month);
         }
       }
     }
+    return paid;
+  }
+
+  // ── Old balance from context receipts ─────────────────────────────────────
+  function calcOldBalance(studentId: string): number {
+    const sessionId = currentSession?.id ?? "";
+    const remaining = allReceipts
+      .filter(
+        (r) =>
+          r.studentId === studentId &&
+          r.sessionId === sessionId &&
+          !r.isDeleted,
+      )
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (remaining.length === 0) return 0;
+    const last = remaining[remaining.length - 1];
+    return last.balance ?? 0;
+  }
+
+  // ── Load fees for selected student (synchronous — uses context data) ───────
+  function loadStudentFees(student: Student) {
+    if (!currentSession) return;
+    setFeeLoadState("loading");
+
+    const headings = allHeadings
+      .map((h) => ({
+        ...h,
+        months: safeMonths(h.months as unknown as string[]),
+      }))
+      .filter(
+        (h) => h.id && h.name && h.name.trim() !== "" && h.months.length > 0,
+      );
+
+    const applicablePlans = allPlans.filter(
+      (p) => p.classId === student.class && p.sectionId === student.section,
+    );
+
+    const newRows: ReceiptRow[] = [];
+    for (const plan of applicablePlans) {
+      const heading = headings.find((h) => h.id === plan.headingId);
+      if (!heading) continue;
+      if (
+        heading.applicableClasses &&
+        heading.applicableClasses.length > 0 &&
+        !heading.applicableClasses.includes(student.class)
+      )
+        continue;
+      if (!plan.amount || plan.amount === 0) continue;
+
+      const paidMonths = getPaidMonths(student.id, heading.id);
+      newRows.push({
+        headingId: heading.id,
+        headingName: heading.name,
+        applicableMonths: heading.months,
+        amount: plan.amount,
+        paidMonths,
+        checked: true,
+      });
+    }
+
+    // Transport fee row
+    const { fare: transportFare, pickupName } = getTransportFare(student);
+    const TRANSPORT_HEADING_ID = `transport_${student.id}`;
+    const studentTransportMonths =
+      ls.get<Record<string, string[]>>("student_transport_months", {})[
+        student.id
+      ] ?? MONTHS;
+    if (transportFare > 0) {
+      const paidTransportMonths = getPaidMonths(
+        student.id,
+        TRANSPORT_HEADING_ID,
+      );
+      newRows.push({
+        headingId: TRANSPORT_HEADING_ID,
+        headingName: `Transport Fee (${pickupName})`,
+        applicableMonths: studentTransportMonths,
+        amount: transportFare,
+        paidMonths: paidTransportMonths,
+        checked: true,
+        isTransport: true,
+      });
+    }
+
+    setRows(newRows);
+
+    // Auto-select months: April through current month
+    const jsMonth = new Date().getMonth();
+    const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
+    const applicableSet = new Set(
+      newRows.flatMap((row) => row.applicableMonths),
+    );
+    const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
+      applicableSet.has(m),
+    );
+    const monthsToSelect =
+      autoSelected.length > 0
+        ? autoSelected
+        : MONTHS.filter((m) => applicableSet.has(m));
+    setPanelMonths(monthsToSelect);
+    setCellAmounts({});
+
+    const bal = calcOldBalance(student.id);
+    setOldBalance(bal);
+    setLateFees(0);
+    setConcessionAmt(0);
+    setRemarks("");
+
+    setFeeLoadState(newRows.length === 0 ? "empty" : "loaded");
   }
 
   function selectStudent(student: Student) {
@@ -792,28 +526,24 @@ export default function CollectFees() {
     setAdmNoInput(student.admNo);
     setShowDropdown(false);
     setErrorMsg("");
-    setFeeLoadingState("idle");
-    setFeeLoadError("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-    // Refresh receipt number in case more receipts were saved since last load
-    setReceiptNo(getNextReceiptNo());
-    void loadStudentFees(student);
+    setReceiptNo(nextReceiptNo());
+    loadStudentFees(student);
   }
 
   function clearStudent() {
     setSelectedStudent(null);
     setAdmNoInput("");
     setRows([]);
-    setReceiptHistory([]);
     setPanelMonths([]);
     setOldBalance(0);
     setLateFees(0);
-    setConcessionPct(0);
     setConcessionAmt(0);
     setReceiptAmt(0);
     setRemarks("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
     setErrorMsg("");
+    setFeeLoadState("idle");
   }
 
   // ── Month panel helpers ────────────────────────────────────────────────────
@@ -839,72 +569,35 @@ export default function CollectFees() {
     unpaidApplicable.length > 0 &&
     unpaidApplicable.every((m) => panelMonths.includes(m));
 
-  function handleSelectAll(checked: boolean) {
-    setPanelMonths(checked ? unpaidApplicable : []);
-  }
-
-  // ── Row helpers ────────────────────────────────────────────────────────────
   function getRowSelectedMonths(row: ReceiptRow): string[] {
     return panelMonths.filter(
       (m) => row.applicableMonths.includes(m) && !row.paidMonths.includes(m),
     );
   }
 
-  function toggleRowChecked(headingId: string) {
-    setRows((prev) =>
-      prev.map((r) =>
-        r.headingId === headingId ? { ...r, checked: !r.checked } : r,
-      ),
-    );
-  }
-
   // ── Compute totals ─────────────────────────────────────────────────────────
-  function computeFeesSubtotal(): number {
-    let total = 0;
-    for (const row of rows) {
-      if (!row.checked) continue;
-      for (const m of getRowSelectedMonths(row)) {
-        total += cellAmounts[row.headingId]?.[m] ?? row.amount;
-      }
-    }
-    return total;
-  }
+  const feesSubtotal = rows
+    .filter((r) => r.checked)
+    .flatMap((row) =>
+      getRowSelectedMonths(row).map(
+        (m) => cellAmounts[row.headingId]?.[m] ?? row.amount,
+      ),
+    )
+    .reduce((a, b) => a + b, 0);
 
-  const feesSubtotal = computeFeesSubtotal();
   const otherTotal = otherCharge.paidAmount > 0 ? otherCharge.paidAmount : 0;
   const totalFees = feesSubtotal + otherTotal;
-
-  // oldBalance is negative for credit, positive for dues
-  // netFees: subtract credit (negative oldBalance) and concession, add late fees
   const netFees = Math.max(
     0,
     totalFees + oldBalance + lateFees - concessionAmt,
   );
+  const balanceAmt = netFees - receiptAmt;
 
-  // balanceAmt: positive = shortfall/underpayment (red), negative = credit/overpayment (green)
-  const balanceAmt = netFees - receiptAmt; // positive means they still owe, negative means credit
-
-  // Sync receipt amount when net fees changes
   useEffect(() => {
     setReceiptAmt(netFees);
   }, [netFees]);
 
-  function handleConcessionPctChange(pct: number) {
-    const clamped = Math.min(100, Math.max(0, pct));
-    setConcessionPct(clamped);
-    setConcessionAmt(
-      Math.round(((totalFees + oldBalance + lateFees) * clamped) / 100),
-    );
-  }
-
-  function handleConcessionAmtChange(amt: number) {
-    setConcessionAmt(Math.max(0, amt));
-    const base = totalFees + oldBalance + lateFees;
-    if (base > 0) setConcessionPct(Math.round((amt / base) * 100 * 100) / 100);
-    else setConcessionPct(0);
-  }
-
-  // ── Save ───────────────────────────────────────────────────────────────────
+  // ── Save receipt ───────────────────────────────────────────────────────────
   async function handleSave() {
     if (!selectedStudent || !currentSession || isReadOnly) return;
     setErrorMsg("");
@@ -915,7 +608,7 @@ export default function CollectFees() {
       otherCharge.paidAmount === 0 &&
       oldBalance === 0
     ) {
-      setErrorMsg("Please select at least one month to collect fees.");
+      setErrorMsg("Please select at least one month.");
       return;
     }
     if (
@@ -935,23 +628,19 @@ export default function CollectFees() {
     for (const row of checkedRows) {
       for (const month of getRowSelectedMonths(row)) {
         const amt = cellAmounts[row.headingId]?.[month] ?? row.amount;
-        if (amt > 0) {
+        if (amt > 0)
           receiptItems.push({
             headingId: row.headingId,
             headingName: row.headingName,
             month,
             amount: amt,
           });
-        }
       }
     }
 
     const otherCharges =
       otherCharge.label && otherCharge.paidAmount > 0 ? [otherCharge] : [];
-
-    // newBalance: positive = student still owes (red carry-forward), negative = credit (green, reduces next bill)
-    // balanceAmt = netFees - receiptAmt: positive means shortfall, negative means credit
-    const newBalance = balanceAmt; // directly: positive = owe, negative = credit
+    const newBalance = balanceAmt;
 
     const receipt: FeeReceipt = {
       id: generateId(),
@@ -976,14 +665,10 @@ export default function CollectFees() {
       template: 4,
     };
 
-    // Save receipt via DataService FIRST (server-first write, then updates cache + localStorage)
-    await dataService.save(
-      "fee_receipts",
+    await saveData(
+      "feeReceipts",
       receipt as unknown as Record<string, unknown>,
     );
-    // Store balance via DataService (server-first)
-    await setOldBalanceStore(selectedStudent.id, newBalance);
-
     addNotification(
       `💰 Fee receipt saved: ${formatCurrency(receiptAmt)} for ${selectedStudent.fullName}`,
       "success",
@@ -995,8 +680,7 @@ export default function CollectFees() {
     setShowDialog(true);
     loadStudentFees(selectedStudent);
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-    // Refresh receipt number so next receipt gets a new sequential number
-    setReceiptNo(getNextReceiptNo());
+    setReceiptNo(nextReceiptNo());
   }
 
   async function handleWhatsApp() {
@@ -1023,75 +707,41 @@ export default function CollectFees() {
   }
 
   function handlePrint(r: FeeReceipt) {
-    printReceiptHTML(r);
+    printReceiptHTML(r, allReceipts);
     setPrintDone(true);
   }
 
-  function handleDeleteReceipt(receiptId: string) {
+  async function handleDeleteReceipt(receiptId: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-
-    // Soft-delete on server via DataService (also updates local cache)
-    void dataService.delete("fee_receipts", receiptId);
-
-    // Also update localStorage fallback
-    const all = getAllReceipts().map((r) =>
-      r.id === receiptId ? { ...r, isDeleted: true } : r,
-    );
-    ls.set("fee_receipts", all);
-
-    // Recalculate running balance from all remaining non-deleted receipts
-    if (selectedStudent) {
-      const remaining = all
-        .filter(
-          (r) =>
-            r.studentId === selectedStudent.id &&
-            r.sessionId === (currentSession?.id ?? "") &&
-            !r.isDeleted,
-        )
-        .sort((a, b) => a.date.localeCompare(b.date));
-
-      // Running balance: sum of (totalAmount - paidAmount) across all receipts
-      // positive = student still owes, negative = credit
-      let runningBalance = 0;
-      for (const r of remaining) {
-        runningBalance +=
-          (r.totalAmount ?? 0) - (r.paidAmount ?? r.totalAmount ?? 0);
-      }
-      void setOldBalanceStore(selectedStudent.id, runningBalance);
-      loadStudentFees(selectedStudent);
-    }
+    await deleteData("feeReceipts", receiptId);
+    if (selectedStudent) loadStudentFees(selectedStudent);
+    addNotification("Receipt deleted", "info");
   }
 
   // ── Open Full Edit Dialog ──────────────────────────────────────────────────
   function openEditReceipt(r: FeeReceipt) {
-    // Build headings from receipt items
     const headingMap: Record<
       string,
       { headingId: string; headingName: string; months: string[]; rate: number }
     > = {};
     for (const item of r.items) {
-      if (!headingMap[item.headingId]) {
+      if (!headingMap[item.headingId])
         headingMap[item.headingId] = {
           headingId: item.headingId,
           headingName: item.headingName,
           months: [],
           rate: item.amount,
         };
-      }
       headingMap[item.headingId].months.push(item.month);
     }
-
     const headings = Object.values(headingMap);
     const selectedMonths = [...new Set(r.items.map((i) => i.month))];
-
-    // Build item amounts map
     const itemAmounts: Record<string, Record<string, number>> = {};
     for (const item of r.items) {
       if (!itemAmounts[item.headingId]) itemAmounts[item.headingId] = {};
       itemAmounts[item.headingId][item.month] = item.amount;
     }
-
     const otherC = r.otherCharges?.[0];
     setEditState({
       receiptId: r.id,
@@ -1101,53 +751,40 @@ export default function CollectFees() {
       discount: r.discount ?? 0,
       otherLabel: otherC?.label ?? "",
       otherAmount: otherC?.paidAmount ?? 0,
-      remarks: "",
-      itemAmounts,
       selectedMonths,
       headings,
+      itemAmounts,
     });
     setEditOpen(true);
   }
 
-  // Compute total from editState
   function computeEditTotal(state: EditReceiptState): number {
     let total = 0;
     for (const h of state.headings) {
       for (const m of state.selectedMonths) {
-        const amt = state.itemAmounts[h.headingId]?.[m] ?? h.rate;
-        total += amt;
+        total += state.itemAmounts[h.headingId]?.[m] ?? h.rate;
       }
     }
-    total += state.otherAmount;
-    total -= state.discount;
+    total += state.otherAmount - state.discount;
     return Math.max(0, total);
   }
 
-  function saveEditReceipt() {
+  async function saveEditReceipt() {
     if (!editState || !selectedStudent) return;
-    const all = getAllReceipts();
-    const idx = all.findIndex((r) => r.id === editState.receiptId);
-    if (idx < 0) return;
-
-    const original = all[idx];
     const newTotal = computeEditTotal(editState);
-
-    // Rebuild items
     const newItems: FeeReceipt["items"] = [];
     for (const h of editState.headings) {
       for (const m of editState.selectedMonths) {
         const amt = editState.itemAmounts[h.headingId]?.[m] ?? h.rate;
-        if (amt > 0) {
+        if (amt > 0)
           newItems.push({
             headingId: h.headingId,
             headingName: h.headingName,
             month: m,
             amount: amt,
           });
-        }
       }
     }
-
     const newOtherCharges =
       editState.otherLabel && editState.otherAmount > 0
         ? [
@@ -1158,11 +795,9 @@ export default function CollectFees() {
             },
           ]
         : [];
-
     const newBalance = editState.paidAmount - newTotal;
 
-    const updated: FeeReceipt = {
-      ...original,
+    await updateData("feeReceipts", editState.receiptId, {
       date: editState.date,
       paymentMode: editState.paymentMode,
       items: newItems,
@@ -1171,55 +806,52 @@ export default function CollectFees() {
       totalAmount: newTotal,
       paidAmount: editState.paidAmount,
       balance: newBalance,
-    };
-
-    // Update via DataService FIRST (server-first, then updates local cache)
-    void dataService.update(
-      "fee_receipts",
-      updated.id,
-      updated as unknown as Record<string, unknown>,
-    );
-
-    // Also update localStorage fallback
-    all[idx] = updated;
-    ls.set("fee_receipts", all);
-
-    // Recalculate student balance from all non-deleted receipts
-    const studentReceipts = all.filter(
-      (r) => r.studentId === selectedStudent.id && !r.isDeleted,
-    );
-    const lastReceipt = studentReceipts.sort((a, b) =>
-      b.date.localeCompare(a.date),
-    )[0];
-    if (lastReceipt) {
-      void setOldBalanceStore(selectedStudent.id, lastReceipt.balance ?? 0);
-    }
+    });
 
     setEditOpen(false);
     setEditState(null);
-    addNotification("✅ Receipt updated successfully", "success");
+    addNotification("✅ Receipt updated", "success");
     loadStudentFees(selectedStudent);
   }
 
-  // ── Display months in grid ─────────────────────────────────────────────────
+  // ── Display months ─────────────────────────────────────────────────────────
   const displayMonths =
     panelMonths.length > 0
       ? panelMonths
       : MONTHS.filter((m) => applicableMonths.includes(m));
 
-  // ── Balance display helpers ────────────────────────────────────────────────
-  // balanceAmt: positive = shortfall (they owe, red), negative = credit (overpaid, green)
-  const isCredit = balanceAmt < 0; // paid MORE than owed → green
-  const isDue = balanceAmt > 0; // paid LESS than owed → red
+  // ── Balance display ────────────────────────────────────────────────────────
+  const isCredit = balanceAmt < 0;
+  const isDue = balanceAmt > 0;
   const balanceDisplay = isCredit
     ? `-₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`
     : `₹${balanceAmt.toLocaleString("en-IN")}`;
-
-  // oldBalance display: negative = credit from prev payment, positive = dues
   const isOldCredit = oldBalance < 0;
   const isOldDue = oldBalance > 0;
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+  // Receipt history from context
+  const receiptHistory = allReceipts
+    .filter(
+      (r) =>
+        r.studentId === selectedStudent?.id &&
+        r.sessionId === (currentSession?.id ?? "") &&
+        !r.isDeleted,
+    )
+    .sort((a, b) => b.date.localeCompare(a.date));
+
+  // Family members
+  const familyMembers = selectedStudent
+    ? allStudents.filter((s) => {
+        const pm = getPrimaryMobile(selectedStudent);
+        return (
+          s.id !== selectedStudent.id &&
+          s.status === "active" &&
+          pm &&
+          getPrimaryMobile(s) === pm
+        );
+      })
+    : [];
+
   return (
     <div className="space-y-0 flex flex-col gap-0">
       {isReadOnly && (
@@ -1257,7 +889,7 @@ export default function CollectFees() {
               {receiptNo}
             </div>
           </div>
-          {/* Admission No Search */}
+          {/* Search */}
           <div
             ref={dropdownRef}
             className="relative flex flex-col gap-0.5 flex-1 min-w-[180px]"
@@ -1336,7 +968,7 @@ export default function CollectFees() {
             {canEdit && (
               <button
                 type="button"
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={isReadOnly || !selectedStudent}
                 className="h-7 px-3 text-xs font-bold rounded bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 data-ocid="collect-fees-save"
@@ -1354,19 +986,6 @@ export default function CollectFees() {
                 🖨️ Print
               </button>
             )}
-            {isSuperAdmin && selectedStudent && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!confirm("Clear this form?")) return;
-                  clearStudent();
-                }}
-                className="h-7 px-3 text-xs font-bold rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-                data-ocid="collect-fees-delete"
-              >
-                🗑️ Delete
-              </button>
-            )}
             <button
               type="button"
               onClick={clearStudent}
@@ -1375,20 +994,6 @@ export default function CollectFees() {
             >
               ✕ Close
             </button>
-            <button
-              type="button"
-              className="h-7 px-2.5 text-xs font-semibold rounded border border-border hover:bg-muted/50 transition-colors text-primary"
-              data-ocid="fees-card-btn"
-            >
-              Fees Card
-            </button>
-            <button
-              type="button"
-              className="h-7 px-2.5 text-xs font-semibold rounded border border-border hover:bg-muted/50 transition-colors"
-              data-ocid="ledger-btn"
-            >
-              Ledger
-            </button>
           </div>
         </div>
       </div>
@@ -1396,12 +1001,11 @@ export default function CollectFees() {
       {/* ── STUDENT INFO + MONTHS PANEL ── */}
       {selectedStudent ? (
         <div className="flex border border-border border-t-0 bg-card shadow-sm">
-          {/* LEFT: Photo + Student Info */}
+          {/* LEFT: Student Info */}
           <div
             className="flex flex-col"
             style={{ minWidth: 420, maxWidth: 520 }}
           >
-            {/* Photo row */}
             <div className="flex gap-3 p-3 border-b border-border bg-muted/20">
               <div className="w-[72px] h-[80px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
                 {selectedStudent.photo ? (
@@ -1433,23 +1037,8 @@ export default function CollectFees() {
                     {selectedStudent.class} - {selectedStudent.section}
                   </span>
                 </div>
-                <div className="flex gap-2 mt-1.5">
-                  <button
-                    type="button"
-                    className="text-[9px] font-semibold px-2 py-0.5 rounded border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
-                  >
-                    Fee Card
-                  </button>
-                  <button
-                    type="button"
-                    className="text-[9px] font-semibold px-2 py-0.5 rounded border border-border bg-muted/30 text-foreground hover:bg-muted/60 transition-colors"
-                  >
-                    Ledger
-                  </button>
-                </div>
               </div>
 
-              {/* Old Balance / Credit Balance badge */}
               {isOldDue && (
                 <div className="ml-auto flex-shrink-0 flex flex-col items-center justify-center bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-center">
                   <span className="text-[9px] font-bold text-red-500 uppercase tracking-wider">
@@ -1458,9 +1047,7 @@ export default function CollectFees() {
                   <span className="text-base font-extrabold text-red-600 leading-tight">
                     ₹{oldBalance.toLocaleString("en-IN")}
                   </span>
-                  <span className="text-[8px] text-red-400">
-                    Auto-added to total
-                  </span>
+                  <span className="text-[8px] text-red-400">Auto-added</span>
                 </div>
               )}
               {isOldCredit && (
@@ -1478,7 +1065,6 @@ export default function CollectFees() {
               )}
             </div>
 
-            {/* Student details grid */}
             <div className="p-3 grid grid-cols-2 gap-x-4 gap-y-2">
               <LabelValue
                 label="Student Name"
@@ -1497,19 +1083,8 @@ export default function CollectFees() {
                 value={selectedStudent.category || "General"}
               />
               <LabelValue
-                label="Route"
-                value={getTransportInfo(selectedStudent)}
-              />
-              <LabelValue
                 label="Class / Section"
                 value={`Class ${selectedStudent.class} - ${selectedStudent.section}`}
-              />
-              <LabelValue
-                label="Roll No."
-                value={
-                  (selectedStudent as unknown as { rollNo?: string }).rollNo ||
-                  "—"
-                }
               />
               <LabelValue
                 label="Contact No."
@@ -1531,7 +1106,6 @@ export default function CollectFees() {
             </div>
           </div>
 
-          {/* Vertical divider */}
           <div className="w-px bg-border flex-shrink-0" />
 
           {/* RIGHT: Month Selector */}
@@ -1546,7 +1120,9 @@ export default function CollectFees() {
                 <input
                   type="checkbox"
                   checked={allSelected}
-                  onChange={(e) => handleSelectAll(e.target.checked)}
+                  onChange={(e) =>
+                    setPanelMonths(e.target.checked ? unpaidApplicable : [])
+                  }
                   className="w-3 h-3 accent-primary"
                   data-ocid="month-select-all"
                 />
@@ -1561,8 +1137,7 @@ export default function CollectFees() {
                 const isApplicable = applicableMonths.includes(month);
                 const isFullPaid = isMonthFullyPaid(month);
                 const isChecked = panelMonths.includes(month);
-
-                if (!isApplicable) {
+                if (!isApplicable)
                   return (
                     <div
                       key={month}
@@ -1574,8 +1149,7 @@ export default function CollectFees() {
                       </span>
                     </div>
                   );
-                }
-                if (isFullPaid) {
+                if (isFullPaid)
                   return (
                     <div
                       key={month}
@@ -1592,7 +1166,6 @@ export default function CollectFees() {
                       </span>
                     </div>
                   );
-                }
                 return (
                   <label
                     key={month}
@@ -1643,104 +1216,72 @@ export default function CollectFees() {
       )}
 
       {/* ── FAMILY MEMBERS PANEL ── */}
-      {selectedStudent &&
-        (() => {
-          const familyMembers = getFamilyMembers(selectedStudent, allStudents);
-          if (familyMembers.length === 0) return null;
-          return (
-            <div className="bg-card border border-border border-t-0 shadow-sm">
-              <button
-                type="button"
-                className="w-full px-3 py-2 flex items-center gap-2 bg-violet-50 border-b border-border hover:bg-violet-100 transition-colors"
-                onClick={() => setFamilyOpen((v) => !v)}
-                data-ocid="family-members-toggle"
-              >
-                <span className="text-sm font-bold text-violet-700">
-                  👨‍👩‍👧 Family Members
-                </span>
-                <span className="text-xs bg-violet-200 text-violet-800 px-2 py-0.5 rounded-full font-semibold">
-                  {familyMembers.length} sibling
-                  {familyMembers.length !== 1 ? "s" : ""}
-                </span>
-                <span className="text-xs text-violet-600 ml-auto">
-                  {familyOpen ? "▲ Collapse" : "▼ Expand"} · Click to collect
-                  their fees
-                </span>
-              </button>
-              {familyOpen && (
-                <div className="p-3 flex flex-wrap gap-3">
-                  {familyMembers.map((member) => {
-                    // Calculate net dues for this member
-                    const memberReceipts = ls
-                      .get<FeeReceipt[]>("fee_receipts", [])
-                      .filter(
-                        (r) =>
-                          r.studentId === member.id &&
-                          r.sessionId === (currentSession?.id ?? "") &&
-                          !r.isDeleted,
-                      );
-                    const memberBalance =
-                      ls.get<Record<string, number>>("old_balances", {})[
-                        member.id
-                      ] ?? 0;
-                    const totalPaid = memberReceipts.reduce(
-                      (sum, r) => sum + (r.paidAmount ?? r.totalAmount),
-                      0,
-                    );
-
-                    return (
-                      <button
-                        key={member.id}
-                        type="button"
-                        data-ocid="family-member-card"
-                        onClick={() => selectStudent(member)}
-                        className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
+      {selectedStudent && familyMembers.length > 0 && (
+        <div className="bg-card border border-border border-t-0 shadow-sm">
+          <button
+            type="button"
+            className="w-full px-3 py-2 flex items-center gap-2 bg-violet-50 border-b border-border hover:bg-violet-100 transition-colors"
+            onClick={() => setFamilyOpen((v) => !v)}
+            data-ocid="family-members-toggle"
+          >
+            <span className="text-sm font-bold text-violet-700">
+              👨‍👩‍👧 Family Members
+            </span>
+            <span className="text-xs bg-violet-200 text-violet-800 px-2 py-0.5 rounded-full font-semibold">
+              {familyMembers.length} sibling
+              {familyMembers.length !== 1 ? "s" : ""}
+            </span>
+            <span className="text-xs text-violet-600 ml-auto">
+              {familyOpen ? "▲ Collapse" : "▼ Expand"}
+            </span>
+          </button>
+          {familyOpen && (
+            <div className="p-3 flex flex-wrap gap-3">
+              {familyMembers.map((member) => {
+                const memberBal = calcOldBalance(member.id);
+                return (
+                  <button
+                    key={member.id}
+                    type="button"
+                    data-ocid="family-member-card"
+                    onClick={() => selectStudent(member)}
+                    className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
+                  >
+                    {member.photo ? (
+                      <img
+                        src={member.photo}
+                        alt={member.fullName}
+                        className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0">
+                        {member.fullName[0]}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0 text-left">
+                      <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
+                        {member.fullName}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Class {member.class}-{member.section} · #{member.admNo}
+                      </div>
+                      <div
+                        className={`text-[11px] font-bold mt-0.5 ${memberBal > 0 ? "text-red-600" : memberBal < 0 ? "text-green-600" : "text-muted-foreground"}`}
                       >
-                        {member.photo ? (
-                          <img
-                            src={member.photo}
-                            alt={member.fullName}
-                            className="w-10 h-10 rounded-full object-cover flex-shrink-0 border-2 border-border group-hover:border-violet-300"
-                          />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0 group-hover:bg-violet-200">
-                            {member.fullName[0]}
-                          </div>
-                        )}
-                        <div className="flex-1 min-w-0 text-left">
-                          <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
-                            {member.fullName}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground">
-                            Class {member.class}-{member.section} · #
-                            {member.admNo}
-                          </div>
-                          <div
-                            className={`text-[11px] font-bold mt-0.5 ${
-                              memberBalance > 0
-                                ? "text-red-600"
-                                : memberBalance < 0
-                                  ? "text-green-600"
-                                  : "text-muted-foreground"
-                            }`}
-                          >
-                            {memberBalance > 0
-                              ? `Due: ₹${memberBalance.toLocaleString("en-IN")}`
-                              : memberBalance < 0
-                                ? `Credit: -₹${Math.abs(memberBalance).toLocaleString("en-IN")}`
-                                : totalPaid > 0
-                                  ? `Paid: ₹${totalPaid.toLocaleString("en-IN")}`
-                                  : "No dues"}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+                        {memberBal > 0
+                          ? `Due: ₹${memberBal.toLocaleString("en-IN")}`
+                          : memberBal < 0
+                            ? `Credit: -₹${Math.abs(memberBal).toLocaleString("en-IN")}`
+                            : "No dues"}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
-          );
-        })()}
+          )}
+        </div>
+      )}
 
       {/* ── FEE GRID ── */}
       {selectedStudent && (
@@ -1748,47 +1289,16 @@ export default function CollectFees() {
           id="fee-grid-section"
           className="bg-card border border-border border-t-0 shadow-sm overflow-hidden"
         >
-          {/* Loading state — shown while fetching fee data from server */}
-          {feeLoadingState === "loading" && (
+          {feeLoadState === "loading" && (
             <div
               className="p-8 flex flex-col items-center justify-center gap-3 text-muted-foreground"
               data-ocid="fee-grid-loading"
             >
               <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium">
-                Loading fee data from server…
-              </p>
-              <p className="text-xs text-muted-foreground/70">
-                Fetching fee headings and plans for {selectedStudent.class}-
-                {selectedStudent.section}
-              </p>
+              <p className="text-sm font-medium">Loading fee data…</p>
             </div>
           )}
-
-          {/* Error state — API fetch failed */}
-          {feeLoadingState === "error" && (
-            <div className="p-6 text-center" data-ocid="fee-grid-error">
-              <div className="text-3xl mb-2">⚠️</div>
-              <p className="text-sm font-semibold text-red-600 mb-1">
-                Failed to load fee data
-              </p>
-              <p className="text-xs text-muted-foreground mb-3">
-                {feeLoadError ||
-                  "Could not fetch fee headings from the server. Check your server connection."}
-              </p>
-              <button
-                type="button"
-                onClick={() => void loadStudentFees(selectedStudent)}
-                className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
-                data-ocid="fee-grid-retry-btn"
-              >
-                🔄 Retry
-              </button>
-            </div>
-          )}
-
-          {/* Empty state — no fee plan configured for this class */}
-          {feeLoadingState === "empty" && (
+          {feeLoadState === "empty" && (
             <div
               className="p-8 text-center text-muted-foreground"
               data-ocid="fee-grid-empty"
@@ -1799,12 +1309,12 @@ export default function CollectFees() {
                 {selectedStudent.section}
               </p>
               <p className="text-xs text-muted-foreground/70 mb-3">
-                Go to <strong>Fees → Fee Master</strong> and add fee plans for
+                Go to <strong>Fees → Fees Plan</strong> and add fee plans for
                 this class/section first.
               </p>
               <button
                 type="button"
-                onClick={() => void loadStudentFees(selectedStudent)}
+                onClick={() => loadStudentFees(selectedStudent)}
                 className="px-3 py-1 text-xs font-semibold rounded border border-border hover:bg-muted/50 transition-colors"
                 data-ocid="fee-grid-refresh-btn"
               >
@@ -1812,22 +1322,16 @@ export default function CollectFees() {
               </button>
             </div>
           )}
-
-          {/* Idle (initial) state before any student loaded */}
-          {feeLoadingState === "idle" && rows.length === 0 && (
+          {feeLoadState === "idle" && rows.length === 0 && (
             <div className="p-8 text-center text-muted-foreground">
-              <p className="text-sm font-medium mb-1">
-                No fee headings configured
-              </p>
-              <p className="text-xs">
+              <p className="text-sm">
                 Set up Fee Headings and Fees Plan for Class{" "}
                 {selectedStudent.class}-{selectedStudent.section} first.
               </p>
             </div>
           )}
 
-          {/* Fee grid — shown when rows are loaded */}
-          {feeLoadingState === "loaded" && rows.length > 0 && (
+          {feeLoadState === "loaded" && rows.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
@@ -1857,14 +1361,16 @@ export default function CollectFees() {
                 <tbody>
                   {rows.map((row, rowIdx) => {
                     const rowTotal = displayMonths.reduce((sum, m) => {
-                      if (!row.applicableMonths.includes(m)) return sum;
-                      if (row.paidMonths.includes(m)) return sum;
-                      if (!row.checked) return sum;
+                      if (
+                        !row.applicableMonths.includes(m) ||
+                        row.paidMonths.includes(m) ||
+                        !row.checked
+                      )
+                        return sum;
                       return (
                         sum + (cellAmounts[row.headingId]?.[m] ?? row.amount)
                       );
                     }, 0);
-
                     return (
                       <tr
                         key={row.headingId}
@@ -1874,7 +1380,15 @@ export default function CollectFees() {
                           <input
                             type="checkbox"
                             checked={row.checked}
-                            onChange={() => toggleRowChecked(row.headingId)}
+                            onChange={() =>
+                              setRows((prev) =>
+                                prev.map((r) =>
+                                  r.headingId === row.headingId
+                                    ? { ...r, checked: !r.checked }
+                                    : r,
+                                ),
+                              )
+                            }
                             className="w-3 h-3 accent-primary"
                           />
                         </td>
@@ -1889,8 +1403,7 @@ export default function CollectFees() {
                           const isApplicable =
                             row.applicableMonths.includes(month);
                           const isPaid = row.paidMonths.includes(month);
-
-                          if (!isApplicable) {
+                          if (!isApplicable)
                             return (
                               <td
                                 key={month}
@@ -1901,8 +1414,7 @@ export default function CollectFees() {
                                 </span>
                               </td>
                             );
-                          }
-                          if (isPaid) {
+                          if (isPaid)
                             return (
                               <td
                                 key={month}
@@ -1913,8 +1425,7 @@ export default function CollectFees() {
                                 </span>
                               </td>
                             );
-                          }
-                          if (!panelMonths.includes(month)) {
+                          if (!panelMonths.includes(month))
                             return (
                               <td
                                 key={month}
@@ -1925,7 +1436,6 @@ export default function CollectFees() {
                                 </span>
                               </td>
                             );
-                          }
                           const amt =
                             cellAmounts[row.headingId]?.[month] ?? row.amount;
                           return (
@@ -1973,7 +1483,7 @@ export default function CollectFees() {
                     <td className="border border-border px-2 py-1 sticky left-8 bg-amber-50/40">
                       <input
                         type="text"
-                        placeholder="Other fee label (e.g. Tie, Belt, Book)"
+                        placeholder="Other fee label..."
                         value={otherCharge.label}
                         onChange={(e) =>
                           setOtherCharge((p) => ({
@@ -2005,7 +1515,7 @@ export default function CollectFees() {
                       colSpan={displayMonths.length}
                       className="border border-border px-2 py-1 text-[10px] text-muted-foreground italic"
                     >
-                      Other / miscellaneous charge
+                      Other / miscellaneous
                     </td>
                     <td className="border border-border px-2 py-1 text-right font-semibold sticky right-0 bg-amber-50/40 text-[11px]">
                       {otherCharge.paidAmount > 0
@@ -2014,7 +1524,6 @@ export default function CollectFees() {
                     </td>
                   </tr>
 
-                  {/* Old Balance row (dues carried forward) */}
                   {isOldDue && (
                     <tr className="bg-red-50">
                       <td
@@ -2034,8 +1543,6 @@ export default function CollectFees() {
                       </td>
                     </tr>
                   )}
-
-                  {/* Credit Balance row (advance from previous overpayment) */}
                   {isOldCredit && (
                     <tr className="bg-green-50">
                       <td
@@ -2048,7 +1555,7 @@ export default function CollectFees() {
                         colSpan={displayMonths.length}
                         className="border border-border px-2 py-1 text-green-600 text-[10px] italic"
                       >
-                        advance from previous overpayment — auto-adjusting
+                        advance auto-adjusting
                       </td>
                       <td className="border border-border px-2 py-1 text-right font-bold text-green-700 sticky right-0 bg-green-50 text-[11px]">
                         -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
@@ -2061,10 +1568,12 @@ export default function CollectFees() {
           )}
         </div>
       )}
+
+      {/* ── TOTALS + PAYMENT ── */}
       {selectedStudent && rows.length > 0 && (
         <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
           <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
-            {/* Col 1: Totals breakdown */}
+            {/* Fee Summary */}
             <div className="p-3 flex flex-col gap-1 min-w-[170px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Fee Summary
@@ -2107,7 +1616,7 @@ export default function CollectFees() {
               </div>
             </div>
 
-            {/* Col 2: Late Fees + Concession */}
+            {/* Adjustments */}
             <div className="p-3 flex flex-col gap-1.5 min-w-[180px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Adjustments
@@ -2134,27 +1643,6 @@ export default function CollectFees() {
               </div>
               <div className="flex items-center gap-2">
                 <label
-                  htmlFor="concession-pct-input"
-                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                >
-                  Concession %
-                </label>
-                <input
-                  id="concession-pct-input"
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={concessionPct || ""}
-                  placeholder="0"
-                  onChange={(e) =>
-                    handleConcessionPctChange(Number(e.target.value))
-                  }
-                  className="w-16 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  data-ocid="concession-pct-input"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label
                   htmlFor="concession-amt-input"
                   className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
                 >
@@ -2167,7 +1655,7 @@ export default function CollectFees() {
                   value={concessionAmt || ""}
                   placeholder="0"
                   onChange={(e) =>
-                    handleConcessionAmtChange(Number(e.target.value))
+                    setConcessionAmt(Math.max(0, Number(e.target.value)))
                   }
                   className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="concession-amt-input"
@@ -2175,7 +1663,7 @@ export default function CollectFees() {
               </div>
             </div>
 
-            {/* Col 3: Net + Receipt + Balance */}
+            {/* Net + Receipt + Balance */}
             <div className="p-3 flex flex-col gap-1.5 min-w-[200px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Net Fees
@@ -2208,7 +1696,6 @@ export default function CollectFees() {
                   data-ocid="receipt-amt-input"
                 />
               </div>
-              {/* Balance / Credit display */}
               <div className="flex items-center justify-between gap-2 pt-0.5">
                 <span
                   className={`text-[11px] font-semibold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
@@ -2222,20 +1709,20 @@ export default function CollectFees() {
                 </span>
               </div>
               {isDue && (
-                <div className="text-[9px] text-red-400 flex items-center gap-1">
+                <div className="text-[9px] text-red-400">
                   ↑ ₹{balanceAmt.toLocaleString("en-IN")} will carry forward as
                   Old Balance
                 </div>
               )}
               {isCredit && (
-                <div className="text-[9px] text-green-500 flex items-center gap-1">
+                <div className="text-[9px] text-green-500">
                   ✦ -₹{Math.abs(balanceAmt).toLocaleString("en-IN")} credit will
-                  adjust in next payment
+                  adjust next payment
                 </div>
               )}
             </div>
 
-            {/* Right block: Remarks + Mode + Save */}
+            {/* Remarks + Mode + Save */}
             <div className="p-3 flex flex-col gap-2 min-w-[220px]">
               <div>
                 <label
@@ -2265,11 +1752,7 @@ export default function CollectFees() {
                         key={mode}
                         type="button"
                         onClick={() => setPaymentMode(mode)}
-                        className={`px-2 py-0.5 text-[10px] rounded-full border font-semibold transition-colors ${
-                          paymentMode === mode
-                            ? "bg-primary text-primary-foreground border-primary"
-                            : "border-border hover:bg-muted/60 text-foreground"
-                        }`}
+                        className={`px-2 py-0.5 text-[10px] rounded-full border font-semibold transition-colors ${paymentMode === mode ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/60 text-foreground"}`}
                         data-ocid={`payment-mode-${mode.toLowerCase()}`}
                       >
                         {mode}
@@ -2279,14 +1762,17 @@ export default function CollectFees() {
                 </div>
               </div>
               {errorMsg && (
-                <div className="bg-red-50 border border-red-200 text-red-700 rounded px-2 py-1.5 text-[10px]">
+                <div
+                  className="bg-red-50 border border-red-200 text-red-700 rounded px-2 py-1.5 text-[10px]"
+                  data-ocid="fee-error-msg"
+                >
                   ⚠️ {errorMsg}
                 </div>
               )}
               {canEdit && (
                 <button
                   type="button"
-                  onClick={handleSave}
+                  onClick={() => void handleSave()}
                   disabled={isReadOnly || netFees === 0}
                   className="mt-auto w-full h-8 rounded font-bold text-sm bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   data-ocid="collect-fees-save-bottom"
@@ -2335,7 +1821,7 @@ export default function CollectFees() {
                       Receipt No
                     </th>
                     <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Months Covered
+                      Months
                     </th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">
                       Amount
@@ -2361,7 +1847,7 @@ export default function CollectFees() {
                       <tr
                         key={r.id}
                         className="border-t border-border hover:bg-muted/20"
-                        data-ocid="receipt-history-row"
+                        data-ocid={`receipt-history-row.item.${idx + 1}`}
                       >
                         <td className="px-2.5 py-1.5 text-muted-foreground">
                           {idx + 1}
@@ -2395,13 +1881,7 @@ export default function CollectFees() {
                           </Badge>
                         </td>
                         <td
-                          className={`px-2.5 py-1.5 text-right font-semibold whitespace-nowrap ${
-                            bal < 0
-                              ? "text-green-600"
-                              : bal > 0
-                                ? "text-red-600"
-                                : "text-muted-foreground"
-                          }`}
+                          className={`px-2.5 py-1.5 text-right font-semibold whitespace-nowrap ${bal < 0 ? "text-green-600" : bal > 0 ? "text-red-600" : "text-muted-foreground"}`}
                         >
                           {bal < 0
                             ? `-₹${Math.abs(bal).toLocaleString("en-IN")}`
@@ -2422,7 +1902,7 @@ export default function CollectFees() {
                               variant="outline"
                               className="h-5 text-[9px] px-1.5"
                               onClick={() => handlePrint(r)}
-                              data-ocid="reprint-receipt-btn"
+                              data-ocid={`reprint-receipt-btn.${idx + 1}`}
                             >
                               🖨️ Reprint
                             </Button>
@@ -2433,7 +1913,7 @@ export default function CollectFees() {
                                 variant="outline"
                                 className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
                                 onClick={() => openEditReceipt(r)}
-                                data-ocid="edit-receipt-btn"
+                                data-ocid={`edit-receipt-btn.${idx + 1}`}
                               >
                                 ✏️ Edit
                               </Button>
@@ -2443,8 +1923,8 @@ export default function CollectFees() {
                                 size="sm"
                                 variant="outline"
                                 className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
-                                onClick={() => handleDeleteReceipt(r.id)}
-                                data-ocid="delete-receipt-btn"
+                                onClick={() => void handleDeleteReceipt(r.id)}
+                                data-ocid={`delete-receipt-btn.${idx + 1}`}
                               >
                                 🗑️ Del
                               </Button>
@@ -2463,7 +1943,7 @@ export default function CollectFees() {
 
       {/* ── Post-save Dialog ── */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm" data-ocid="receipt-saved-dialog">
           <DialogHeader>
             <DialogTitle>✅ Receipt Saved Successfully</DialogTitle>
           </DialogHeader>
@@ -2473,128 +1953,87 @@ export default function CollectFees() {
                 {savedReceipt?.receiptNo}
               </p>
               <p className="text-green-700">
-                Net Fees:{" "}
-                {savedReceipt ? formatCurrency(savedReceipt.totalAmount) : ""}
-              </p>
-              <p>
-                Paid:{" "}
-                {savedReceipt?.paidAmount !== undefined
-                  ? formatCurrency(savedReceipt.paidAmount)
-                  : savedReceipt
-                    ? formatCurrency(savedReceipt.totalAmount)
-                    : ""}
-              </p>
-              {(savedReceipt?.balance ?? 0) > 0 && (
-                <p className="text-red-600 font-semibold">
-                  Balance Carry Forward:{" "}
-                  {formatCurrency(savedReceipt?.balance ?? 0)}
-                </p>
-              )}
-              {(savedReceipt?.balance ?? 0) < 0 && (
-                <p className="text-green-600 font-semibold">
-                  ✦ Credit: -₹
-                  {Math.abs(savedReceipt?.balance ?? 0).toLocaleString("en-IN")}{" "}
-                  will adjust in next payment
-                </p>
-              )}
-              <p>Student: {savedReceipt?.studentName}</p>
-              <p className="text-xs text-green-600 mt-1">
-                Mode: {savedReceipt?.paymentMode} | Class: {savedReceipt?.class}
-                -{savedReceipt?.section}
-              </p>
-              <p className="text-xs text-green-600">
-                Months:{" "}
-                {[
-                  ...new Set(
-                    savedReceipt?.items.map((i) => i.month.slice(0, 3)) ?? [],
-                  ),
-                ].join(", ")}
+                {savedReceipt?.studentName} —{" "}
+                {formatCurrency(
+                  savedReceipt?.paidAmount ?? savedReceipt?.totalAmount ?? 0,
+                )}
               </p>
             </div>
-            <Button
-              className="w-full"
-              onClick={() => savedReceipt && handlePrint(savedReceipt)}
-              variant={printDone ? "outline" : "default"}
-              data-ocid="receipt-print-btn"
-            >
-              {printDone ? "✓ Printed" : "🖨️ Print Receipt"}
-            </Button>
-            <Button
-              className="w-full"
-              variant={waDone ? "outline" : "secondary"}
-              onClick={handleWhatsApp}
-              disabled={waSending}
-              data-ocid="receipt-whatsapp-btn"
-            >
-              {waSending
-                ? "Sending..."
-                : waDone
-                  ? "✓ WhatsApp Sent"
-                  : "💬 Send WhatsApp"}
-            </Button>
-            <Button
-              className="w-full"
-              variant="ghost"
-              onClick={() => {
-                setShowDialog(false);
-                setSavedReceipt(null);
-              }}
-              data-ocid="receipt-done-btn"
-            >
-              Done
-            </Button>
+            <div className="flex gap-2 flex-wrap justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => savedReceipt && handlePrint(savedReceipt)}
+                data-ocid="receipt-print-btn"
+              >
+                {printDone ? "✓ Printed" : "🖨️ Print Receipt"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleWhatsApp()}
+                disabled={waSending || waDone}
+                data-ocid="receipt-whatsapp-btn"
+              >
+                {waSending ? "Sending…" : waDone ? "✓ Sent" : "💬 WhatsApp"}
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => setShowDialog(false)}
+                data-ocid="receipt-close-btn"
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* ── Full Edit Receipt Dialog ── */}
+      {/* ── Edit Receipt Dialog ── */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-lg max-h-[90vh] overflow-y-auto"
+          data-ocid="edit-receipt-dialog"
+        >
           <DialogHeader>
-            <DialogTitle>✏️ Edit Receipt</DialogTitle>
+            <DialogTitle>Edit Receipt</DialogTitle>
           </DialogHeader>
           {editState && (
             <div className="space-y-4 pt-1">
-              {/* Date + Payment Mode */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label
-                    htmlFor="edit-receipt-date"
-                    className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1"
+                    htmlFor="edit-date"
+                    className="text-sm font-medium block mb-1"
                   >
-                    Payment Date
+                    Date
                   </label>
                   <input
-                    id="edit-receipt-date"
+                    id="edit-date"
                     type="date"
                     value={editState.date}
                     onChange={(e) =>
-                      setEditState((s) => s && { ...s, date: e.target.value })
+                      setEditState((s) =>
+                        s ? { ...s, date: e.target.value } : s,
+                      )
                     }
-                    className="h-8 w-full px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                    data-ocid="edit-receipt-date"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                    Payment Mode
-                  </p>
-                  <div className="flex gap-1.5 flex-wrap">
+                  <p className="text-sm font-medium mb-1">Payment Mode</p>
+                  <div className="flex flex-wrap gap-1">
                     {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
                       (mode) => (
                         <button
                           key={mode}
                           type="button"
                           onClick={() =>
-                            setEditState(
-                              (s) => s && { ...s, paymentMode: mode },
+                            setEditState((s) =>
+                              s ? { ...s, paymentMode: mode } : s,
                             )
                           }
-                          className={`px-2.5 py-1 text-[11px] rounded-full border font-semibold transition-colors ${
-                            editState.paymentMode === mode
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "border-border hover:bg-muted/50"
-                          }`}
+                          className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${editState.paymentMode === mode ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
                         >
                           {mode}
                         </button>
@@ -2604,260 +2043,113 @@ export default function CollectFees() {
                 </div>
               </div>
 
-              {/* Months */}
               <div>
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                  Months Covered
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {MONTHS.map((month, idx) => {
-                    const checked = editState.selectedMonths.includes(month);
+                <p className="text-sm font-medium mb-2">Months</p>
+                <div className="flex flex-wrap gap-1">
+                  {MONTHS.map((m) => {
+                    const inState = editState.selectedMonths.includes(m);
                     return (
-                      <label
-                        key={month}
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded border cursor-pointer text-xs transition-colors ${
-                          checked
-                            ? "bg-primary/10 border-primary text-primary font-semibold"
-                            : "border-border hover:bg-muted/40"
-                        }`}
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() =>
+                          setEditState((s) =>
+                            s
+                              ? {
+                                  ...s,
+                                  selectedMonths: inState
+                                    ? s.selectedMonths.filter((x) => x !== m)
+                                    : [...s.selectedMonths, m],
+                                }
+                              : s,
+                          )
+                        }
+                        className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${inState ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
                       >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() =>
-                            setEditState((s) => {
-                              if (!s) return s;
-                              const sel = checked
-                                ? s.selectedMonths.filter((m) => m !== month)
-                                : [...s.selectedMonths, month];
-                              return { ...s, selectedMonths: sel };
-                            })
-                          }
-                          className="w-3 h-3 accent-primary"
-                        />
-                        {MONTH_SHORT[idx]}
-                      </label>
+                        {m.slice(0, 3)}
+                      </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Fee amounts per heading */}
-              {editState.headings.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                    Fee Amounts (per month)
-                  </p>
-                  <div className="border border-border rounded-lg overflow-hidden">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="bg-muted/60">
-                          <th className="px-3 py-1.5 text-left font-semibold">
-                            Fee Head
-                          </th>
-                          {editState.selectedMonths.map((m) => (
-                            <th
-                              key={m}
-                              className="px-2 py-1.5 text-center font-semibold min-w-[60px]"
-                            >
-                              {MONTH_SHORT[MONTHS.indexOf(m)] ?? m.slice(0, 3)}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {editState.headings.map((h) => (
-                          <tr
-                            key={h.headingId}
-                            className="border-t border-border"
-                          >
-                            <td className="px-3 py-1.5 font-medium">
-                              {h.headingName}
-                            </td>
-                            {editState.selectedMonths.map((m) => (
-                              <td key={m} className="px-1.5 py-1 text-center">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  value={
-                                    editState.itemAmounts[h.headingId]?.[m] ??
-                                    h.rate
-                                  }
-                                  onChange={(e) => {
-                                    const val = Math.max(
-                                      0,
-                                      Number(e.target.value),
-                                    );
-                                    setEditState((s) => {
-                                      if (!s) return s;
-                                      return {
-                                        ...s,
-                                        itemAmounts: {
-                                          ...s.itemAmounts,
-                                          [h.headingId]: {
-                                            ...(s.itemAmounts[h.headingId] ??
-                                              {}),
-                                            [m]: val,
-                                          },
-                                        },
-                                      };
-                                    });
-                                  }}
-                                  className="w-16 h-6 px-1 text-center text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                />
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Other charges + Discount */}
               <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Other Charges
-                  </p>
-                  <input
-                    type="text"
-                    placeholder="Label (e.g. Tie, Belt)"
-                    value={editState.otherLabel}
-                    onChange={(e) =>
-                      setEditState(
-                        (s) => s && { ...s, otherLabel: e.target.value },
-                      )
-                    }
-                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="Amount ₹"
-                    value={editState.otherAmount || ""}
-                    onChange={(e) =>
-                      setEditState(
-                        (s) =>
-                          s && {
-                            ...s,
-                            otherAmount: Math.max(0, Number(e.target.value)),
-                          },
-                      )
-                    }
-                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Discount / Concession ₹
-                  </p>
-                  <input
-                    type="number"
-                    min="0"
-                    placeholder="0"
-                    value={editState.discount || ""}
-                    onChange={(e) =>
-                      setEditState(
-                        (s) =>
-                          s && {
-                            ...s,
-                            discount: Math.max(0, Number(e.target.value)),
-                          },
-                      )
-                    }
-                    className="h-7 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                </div>
-              </div>
-
-              {/* Paid Amount + live total */}
-              <div className="flex items-center justify-between gap-4 bg-muted/30 rounded-lg p-3">
-                <div className="flex items-center gap-2">
+                <div>
                   <label
-                    htmlFor="edit-paid-amount"
-                    className="text-xs font-semibold text-foreground whitespace-nowrap"
+                    htmlFor="edit-paid-amt"
+                    className="text-sm font-medium block mb-1"
                   >
-                    Receipt Amount ₹
+                    Amount Paid (₹)
                   </label>
                   <input
-                    id="edit-paid-amount"
+                    id="edit-paid-amt"
                     type="number"
                     min="0"
-                    value={editState.paidAmount || ""}
+                    value={editState.paidAmount}
                     onChange={(e) =>
-                      setEditState(
-                        (s) =>
-                          s && {
-                            ...s,
-                            paidAmount: Math.max(0, Number(e.target.value)),
-                          },
+                      setEditState((s) =>
+                        s ? { ...s, paidAmount: Number(e.target.value) } : s,
                       )
                     }
-                    className="w-28 h-8 px-2 text-sm text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
-                    data-ocid="edit-receipt-amount"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-muted-foreground">
-                    Calculated Net Total
-                  </div>
-                  <div className="text-sm font-bold text-primary">
-                    ₹{computeEditTotal(editState).toLocaleString("en-IN")}
-                  </div>
-                  {(() => {
-                    const diff =
-                      editState.paidAmount - computeEditTotal(editState);
-                    if (diff < 0)
-                      return (
-                        <div className="text-[10px] text-red-500">
-                          Balance Due: ₹{Math.abs(diff).toLocaleString("en-IN")}
-                        </div>
-                      );
-                    if (diff > 0)
-                      return (
-                        <div className="text-[10px] text-green-600">
-                          Credit: -₹{diff.toLocaleString("en-IN")}
-                        </div>
-                      );
-                    return null;
-                  })()}
+                <div>
+                  <label
+                    htmlFor="edit-discount"
+                    className="text-sm font-medium block mb-1"
+                  >
+                    Discount (₹)
+                  </label>
+                  <input
+                    id="edit-discount"
+                    type="number"
+                    min="0"
+                    value={editState.discount}
+                    onChange={(e) =>
+                      setEditState((s) =>
+                        s ? { ...s, discount: Number(e.target.value) } : s,
+                      )
+                    }
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
                 </div>
               </div>
 
-              {/* Remarks */}
-              <div>
-                <label
-                  htmlFor="edit-receipt-remarks"
-                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1"
+              <div className="bg-muted/30 rounded-lg p-3 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Computed Total</span>
+                  <span className="font-bold">
+                    ₹{computeEditTotal(editState).toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div
+                  className={`flex justify-between mt-1 font-semibold ${(editState.paidAmount - computeEditTotal(editState)) < 0 ? "text-red-600" : "text-green-600"}`}
                 >
-                  Remarks
-                </label>
-                <Input
-                  id="edit-receipt-remarks"
-                  type="text"
-                  value={editState.remarks}
-                  onChange={(e) =>
-                    setEditState((s) => s && { ...s, remarks: e.target.value })
-                  }
-                  placeholder="Optional notes"
-                />
+                  <span>Balance</span>
+                  <span>
+                    ₹
+                    {(
+                      editState.paidAmount - computeEditTotal(editState)
+                    ).toLocaleString("en-IN")}
+                  </span>
+                </div>
               </div>
 
-              <div className="flex gap-2 justify-end pt-1">
+              <div className="flex gap-2 justify-end pt-2">
                 <Button
                   variant="outline"
                   onClick={() => {
                     setEditOpen(false);
                     setEditState(null);
                   }}
+                  data-ocid="edit-receipt-cancel-btn"
                 >
                   Cancel
                 </Button>
                 <Button
-                  onClick={saveEditReceipt}
-                  data-ocid="save-edit-receipt-btn"
+                  onClick={() => void saveEditReceipt()}
+                  data-ocid="edit-receipt-save-btn"
                 >
                   Save Changes
                 </Button>

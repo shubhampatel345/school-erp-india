@@ -4,50 +4,74 @@ import type { ErrorInfo, ReactNode } from "react";
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  moduleName?: string;
 }
 
 interface State {
   hasError: boolean;
   error: Error | null;
+  errorInfo: ErrorInfo | null;
 }
 
 /**
  * ErrorBoundary — catches any render error in child components
  * and shows a user-friendly recovery UI instead of a white screen.
  * Wrap every page route in App.tsx with this component.
+ *
+ * Usage:
+ *   <ErrorBoundary moduleName="Students">
+ *     <StudentsPage />
+ *   </ErrorBoundary>
  */
 export default class ErrorBoundary extends Component<Props, State> {
   constructor(props: Props) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, errorInfo: null };
   }
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error("[ErrorBoundary] Caught render error:", error, info);
+    this.setState({ errorInfo: info });
   }
 
   handleReload = () => {
-    this.setState({ hasError: false, error: null });
+    this.setState({ hasError: false, error: null, errorInfo: null });
+  };
+
+  handleRefresh = () => {
+    window.location.reload();
   };
 
   render() {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
 
+      const moduleName = this.props.moduleName;
+      const message =
+        this.state.error?.message ?? "An unexpected error occurred.";
+      const isNetworkError =
+        message.includes("Network") ||
+        message.includes("fetch") ||
+        message.includes("Failed to load");
+
       return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center">
-          <div className="w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
+        <div
+          role="alert"
+          className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center"
+        >
+          {/* Icon */}
+          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
             <svg
               aria-hidden="true"
-              className="w-7 h-7 text-destructive"
+              className="w-8 h-8 text-destructive"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
-              strokeWidth={2}
+              strokeWidth={1.75}
             >
               <path
                 strokeLinecap="round"
@@ -56,23 +80,55 @@ export default class ErrorBoundary extends Component<Props, State> {
               />
             </svg>
           </div>
-          <h2 className="text-lg font-semibold text-foreground mb-1">
-            Something went wrong
+
+          {/* Title */}
+          <h2 className="text-lg font-semibold text-foreground mb-1 font-display">
+            {moduleName
+              ? `${moduleName} — Something went wrong`
+              : "Something went wrong"}
           </h2>
-          <p className="text-sm text-muted-foreground mb-1 max-w-sm">
-            {this.state.error?.message ?? "An unexpected error occurred."}
+
+          {/* Error description */}
+          <p className="text-sm text-muted-foreground mb-2 max-w-sm">
+            {message}
           </p>
-          <p className="text-xs text-muted-foreground mb-5 max-w-sm">
-            This page encountered an error. Click Retry to try again, or
-            navigate to another section.
+
+          {/* Hint */}
+          <p className="text-xs text-muted-foreground mb-6 max-w-sm">
+            {isNetworkError
+              ? "A network error occurred. Check your server connection and try again."
+              : "This section encountered an unexpected error. Click 'Try Again' to reload it, or navigate to another module."}
           </p>
-          <button
-            type="button"
-            onClick={this.handleReload}
-            className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
-          >
-            Retry
-          </button>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={this.handleReload}
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+            >
+              Try Again
+            </button>
+            <button
+              type="button"
+              onClick={this.handleRefresh}
+              className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+            >
+              Reload Page
+            </button>
+          </div>
+
+          {/* Dev details (collapsed) */}
+          {process.env.NODE_ENV !== "production" && this.state.errorInfo && (
+            <details className="mt-6 text-left max-w-lg w-full">
+              <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+                Show technical details
+              </summary>
+              <pre className="mt-2 p-3 rounded-lg bg-muted text-xs text-muted-foreground overflow-auto max-h-40 scrollbar-thin">
+                {this.state.errorInfo.componentStack}
+              </pre>
+            </details>
+          )}
         </div>
       );
     }

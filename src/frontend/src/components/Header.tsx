@@ -2,25 +2,29 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  AlertTriangle,
   Archive,
+  CheckCircle2,
   ChevronDown,
   GraduationCap,
   KeyRound,
+  Loader2,
   LogOut,
   Menu,
   Search,
   User,
+  WifiOff,
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { useSync } from "../hooks/useSync";
 import type { Student } from "../types";
 import { ls } from "../utils/localStorage";
 import NotificationBell from "./NotificationBell";
 
 interface HeaderProps {
   onMenuToggle: () => void;
-  onNavigateToFees?: (studentId: string) => void;
   onNavigate?: (page: string) => void;
 }
 
@@ -36,12 +40,10 @@ const ROLE_LABELS: Record<string, string> = {
   librarian: "Librarian",
 };
 
-/** Get the primary mobile for family grouping */
 function getPrimaryMobile(s: Student): string {
   return (s.fatherMobile?.trim() || s.guardianMobile?.trim() || "").trim();
 }
 
-/** Get sibling count label */
 function getSiblingCount(student: Student, allStudents: Student[]): number {
   const pm = getPrimaryMobile(student);
   if (!pm) return 0;
@@ -50,11 +52,53 @@ function getSiblingCount(student: Student, allStudents: Student[]): number {
   ).length;
 }
 
-export default function Header({
-  onMenuToggle,
-  onNavigateToFees,
-  onNavigate,
-}: HeaderProps) {
+/** Small colored dot indicating sync state */
+function SyncDot() {
+  const { mode } = useSync();
+  const [tooltip, setTooltip] = useState(false);
+
+  const config = {
+    connected: { color: "bg-emerald-500", label: "Synced to MySQL server" },
+    syncing: { color: "bg-amber-400 animate-pulse", label: "Syncing data…" },
+    offline: { color: "bg-destructive", label: "Server unreachable" },
+    auth_error: {
+      color: "bg-amber-500",
+      label: "Auth required — check Settings",
+    },
+    local: { color: "bg-muted-foreground/40", label: "Local mode (no server)" },
+  };
+
+  const cfg = config[mode] ?? config.offline;
+
+  return (
+    <div
+      className="relative flex items-center"
+      onMouseEnter={() => setTooltip(true)}
+      onMouseLeave={() => setTooltip(false)}
+    >
+      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.color}`} />
+      {tooltip && (
+        <div className="absolute right-0 top-4 z-50 whitespace-nowrap bg-card border border-border shadow-elevated rounded-lg px-2.5 py-1.5 text-xs text-foreground">
+          {mode === "connected" && (
+            <CheckCircle2 className="w-3 h-3 text-emerald-500 inline mr-1" />
+          )}
+          {mode === "syncing" && (
+            <Loader2 className="w-3 h-3 text-amber-500 animate-spin inline mr-1" />
+          )}
+          {mode === "offline" && (
+            <WifiOff className="w-3 h-3 text-destructive inline mr-1" />
+          )}
+          {mode === "auth_error" && (
+            <AlertTriangle className="w-3 h-3 text-amber-500 inline mr-1" />
+          )}
+          {cfg.label}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
   const {
     currentUser,
     currentSession,
@@ -82,6 +126,7 @@ export default function Header({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
 
+  // Load students from context data or localStorage
   useEffect(() => {
     setAllStudents(
       ls.get<Student[]>("students", []).filter((s) => s.status === "active"),
@@ -96,10 +141,10 @@ export default function Header({
     }
     const q = searchQuery.toLowerCase();
     const results = allStudents
-      .filter((s) => {
-        return (
-          s.fullName.toLowerCase().includes(q) ||
-          s.admNo.toLowerCase().includes(q) ||
+      .filter(
+        (s) =>
+          s.fullName?.toLowerCase().includes(q) ||
+          s.admNo?.toLowerCase().includes(q) ||
           s.fatherMobile?.includes(q) ||
           s.motherMobile?.includes(q) ||
           s.guardianMobile?.includes(q) ||
@@ -107,9 +152,9 @@ export default function Header({
           s.fatherName?.toLowerCase().includes(q) ||
           s.motherName?.toLowerCase().includes(q) ||
           s.address?.toLowerCase().includes(q) ||
-          s.class?.toLowerCase().includes(q)
-        );
-      })
+          s.village?.toLowerCase().includes(q) ||
+          s.class?.toLowerCase().includes(q),
+      )
       .slice(0, 10);
     setSearchResults(results);
     setSearchOpen(results.length > 0);
@@ -134,12 +179,9 @@ export default function Header({
     setSearchQuery("");
     setSearchOpen(false);
     setShowSearch(false);
-    if (onNavigateToFees) {
-      onNavigateToFees(student.id);
-    } else if (onNavigate) {
-      // Store the selected student ID for CollectFees to pick up
+    if (onNavigate) {
       sessionStorage.setItem("collectFees_preload", student.id);
-      onNavigate("fees/collect");
+      onNavigate("students");
     }
   }
 
@@ -173,14 +215,14 @@ export default function Header({
 
   return (
     <>
-      {/* Header — elevated bg-card with border-b shadow */}
       <header className="h-14 bg-card border-b border-border flex items-center px-3 gap-2 shadow-subtle z-40 relative flex-shrink-0">
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — only on small screens */}
         <button
           type="button"
           onClick={onMenuToggle}
-          className="lg:hidden p-2 rounded-lg hover:bg-muted transition-colors"
+          className="md:hidden p-2 rounded-lg hover:bg-muted transition-colors flex-shrink-0"
           aria-label="Toggle menu"
+          data-ocid="header.hamburger"
         >
           <Menu className="w-5 h-5 text-foreground" />
         </button>
@@ -195,8 +237,8 @@ export default function Header({
           </span>
         </div>
 
-        {/* Current Session label + switcher */}
-        <div className="relative ml-1" ref={sessionRef}>
+        {/* Current Session + switcher */}
+        <div className="relative ml-1 flex-shrink-0" ref={sessionRef}>
           <button
             type="button"
             data-ocid="session-switcher"
@@ -204,7 +246,6 @@ export default function Header({
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/15 transition-colors"
           >
             <span className="text-xs font-semibold text-primary leading-none">
-              Current Session:{" "}
               {currentSession ? currentSession.label : "No Session"}
             </span>
             {currentSession?.isArchived && (
@@ -267,17 +308,17 @@ export default function Header({
           )}
         </div>
 
-        {/* Global Search — desktop inline, mobile icon */}
+        {/* Global Search — desktop inline */}
         <div
           ref={searchRef}
-          className={`relative flex-1 max-w-xs ml-2 ${showSearch ? "block" : "hidden sm:block"}`}
+          className={`relative flex-1 max-w-sm mx-2 ${showSearch ? "block" : "hidden sm:block"}`}
         >
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search student, mobile, name, village..."
+              placeholder="Search student by name, mobile, father, mother, village, class…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => {
@@ -303,11 +344,10 @@ export default function Header({
 
           {/* Search Results Dropdown */}
           {searchOpen && searchResults.length > 0 && (
-            <div className="absolute left-0 top-full mt-1 w-[340px] bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up max-h-80 overflow-y-auto">
+            <div className="absolute left-0 top-full mt-1 w-[360px] bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up max-h-80 overflow-y-auto">
               <div className="px-3 py-1.5 text-[10px] font-semibold text-muted-foreground border-b border-border bg-muted/30 uppercase tracking-wide">
                 {searchResults.length} student
-                {searchResults.length !== 1 ? "s" : ""} found — click to collect
-                fees
+                {searchResults.length !== 1 ? "s" : ""} found
               </div>
               {searchResults.map((s) => {
                 const siblingCount = getSiblingCount(s, allStudents);
@@ -327,7 +367,7 @@ export default function Header({
                       />
                     ) : (
                       <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                        {s.fullName[0]}
+                        {s.fullName?.[0] ?? "?"}
                       </div>
                     )}
                     <div className="flex-1 min-w-0">
@@ -337,7 +377,7 @@ export default function Header({
                         </span>
                         {siblingCount > 0 && (
                           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 flex-shrink-0">
-                            {siblingCount + 1} siblings
+                            +{siblingCount} siblings
                           </span>
                         )}
                       </div>
@@ -356,7 +396,7 @@ export default function Header({
                       </div>
                     </div>
                     <span className="text-[10px] text-muted-foreground flex-shrink-0 border border-border rounded px-1.5 py-0.5">
-                      Fees →
+                      View →
                     </span>
                   </button>
                 );
@@ -378,6 +418,9 @@ export default function Header({
         >
           <Search className="w-4 h-4 text-foreground" />
         </button>
+
+        {/* Sync status dot */}
+        <SyncDot />
 
         {/* Notification Bell */}
         <NotificationBell />
@@ -447,7 +490,10 @@ export default function Header({
       {/* Change Password Modal */}
       {pwModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4">
-          <div className="bg-card rounded-2xl shadow-elevated w-full max-w-sm border border-border animate-slide-up">
+          <div
+            className="bg-card rounded-2xl shadow-elevated w-full max-w-sm border border-border animate-slide-up"
+            data-ocid="change-password.dialog"
+          >
             <div className="flex items-center justify-between p-5 border-b border-border">
               <h2 className="font-display font-semibold text-foreground">
                 Change Password
@@ -462,8 +508,9 @@ export default function Header({
                 }}
                 className="text-muted-foreground hover:text-foreground text-lg leading-none transition-colors"
                 aria-label="Close"
+                data-ocid="change-password.close_button"
               >
-                ✕
+                <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handlePasswordChange} className="p-5 space-y-4">
@@ -493,12 +540,18 @@ export default function Header({
                 />
               </div>
               {pwError && (
-                <p className="text-destructive text-sm bg-destructive/10 px-3 py-2 rounded-lg">
+                <p
+                  className="text-destructive text-sm bg-destructive/10 px-3 py-2 rounded-lg"
+                  data-ocid="change-password.field_error"
+                >
                   {pwError}
                 </p>
               )}
               {pwSuccess && (
-                <p className="text-accent text-sm bg-accent/10 px-3 py-2 rounded-lg">
+                <p
+                  className="text-accent text-sm bg-accent/10 px-3 py-2 rounded-lg"
+                  data-ocid="change-password.success_state"
+                >
                   ✓ Password changed successfully!
                 </p>
               )}
@@ -513,13 +566,14 @@ export default function Header({
                     setConfirmPw("");
                     setPwError("");
                   }}
+                  data-ocid="change-password.cancel_button"
                 >
                   Cancel
                 </Button>
                 <Button
                   type="submit"
                   className="flex-1"
-                  data-ocid="save-password-btn"
+                  data-ocid="change-password.save_button"
                 >
                   Save Password
                 </Button>

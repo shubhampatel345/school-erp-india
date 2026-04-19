@@ -10,119 +10,51 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
+  Bluetooth,
   ChevronDown,
   ChevronUp,
   Clock,
   Download,
-  MicOff,
+  Info,
   Phone,
   PhoneCall,
   PhoneIncoming,
   PhoneMissed,
-  PhoneOff,
   PhoneOutgoing,
   Plus,
   Search,
   Settings,
   Trash2,
-  Wifi,
-  WifiOff,
-  X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useApp } from "../context/AppContext";
-import type { Staff, Student } from "../types";
-import { LS_KEYS, generateId, ls } from "../utils/localStorage";
+import type { Call, Staff, Student } from "../types";
+import { generateId, ls } from "../utils/localStorage";
 
-// ── Types ────────────────────────────────────────────────────
-interface HeyophoneSettings {
-  virtualNumber: string;
-  apiKey: string;
-  agentId: string;
-  clickToCallUrl: string;
-  callerId: string;
-  webhookUrl: string;
-  businessName: string;
-  enabled: boolean;
+// ── Local types ───────────────────────────────────────────────
+
+interface MsPhoneSettings {
+  tenantId: string;
+  acsEndpoint: string;
+  acsConnectionString: string;
+  phoneNumber: string;
+  displayName: string;
 }
 
-interface CallLog {
-  id: string;
-  contactName: string;
-  number: string;
-  type: "inbound" | "outbound" | "missed";
-  duration: number; // seconds
-  status: "answered" | "missed" | "voicemail";
-  timestamp: number;
-  recording?: string;
-}
+const MS_PHONE_KEY = "ms_phone_settings";
 
-interface IVROption {
-  id: string;
-  key: string;
-  description: string;
-  action: string;
-  staffId?: string;
-}
-
-interface IVRConfig {
-  welcomeMessage: string;
-  businessHoursFrom: string;
-  businessHoursTo: string;
-  afterHoursMessage: string;
-  options: IVROption[];
-}
-
-const STORAGE_KEY = "heyophone_settings";
-const CALL_LOGS_KEY = "heyophone_call_logs";
-const IVR_KEY = "heyophone_ivr_config";
-
-const DEFAULT_SETTINGS: HeyophoneSettings = {
-  virtualNumber: "",
-  apiKey: "",
-  agentId: "",
-  clickToCallUrl: "https://api.heyophone.com/v1/click-to-call",
-  callerId: "",
-  webhookUrl: `${window.location.origin}/api/heyophone/webhook`,
-  businessName: "SHUBH SCHOOL",
-  enabled: false,
+const DEFAULT_MS_SETTINGS: MsPhoneSettings = {
+  tenantId: "",
+  acsEndpoint: "",
+  acsConnectionString: "",
+  phoneNumber: "",
+  displayName: "SHUBH SCHOOL",
 };
 
-const DEFAULT_IVR: IVRConfig = {
-  welcomeMessage:
-    "Welcome to SHUBH SCHOOL. For student information press 1, for fees press 2, to speak to the office press 0.",
-  businessHoursFrom: "08:00",
-  businessHoursTo: "17:00",
-  afterHoursMessage:
-    "Our office is currently closed. Please call back during business hours.",
-  options: [
-    {
-      id: "opt-1",
-      key: "1",
-      description: "Student Information",
-      action: "staff",
-      staffId: "",
-    },
-    {
-      id: "opt-2",
-      key: "2",
-      description: "Fees Department",
-      action: "staff",
-      staffId: "",
-    },
-    {
-      id: "opt-0",
-      key: "0",
-      description: "Reception",
-      action: "staff",
-      staffId: "",
-    },
-  ],
-};
+// ── Utility ───────────────────────────────────────────────────
 
-// ── Utility functions ────────────────────────────────────────
 function formatDuration(secs: number): string {
   if (secs < 60) return `${secs}s`;
   const m = Math.floor(secs / 60);
@@ -130,9 +62,8 @@ function formatDuration(secs: number): string {
   return `${m}m ${s}s`;
 }
 
-function formatTime(ts: number): string {
-  const d = new Date(ts);
-  return d.toLocaleString("en-IN", {
+function formatTime(ts: string | number): string {
+  return new Date(ts).toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     hour: "2-digit",
@@ -141,84 +72,97 @@ function formatTime(ts: number): string {
   });
 }
 
-// ── Dashboard Tab ────────────────────────────────────────────
-function DashboardTab({
-  logs,
-  settings,
-}: {
-  logs: CallLog[];
-  settings: HeyophoneSettings;
-}) {
+function toE164(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (digits.startsWith("91") && digits.length === 12) return `+${digits}`;
+  if (digits.length === 10) return `+91${digits}`;
+  return `+${digits}`;
+}
+
+function teamsCallUrl(phoneNumber: string): string {
+  const e164 = toE164(phoneNumber);
+  return `https://teams.microsoft.com/l/call/0/0?users=4:${encodeURIComponent(e164)}`;
+}
+
+// ── InfoBanner ────────────────────────────────────────────────
+
+function InfoBanner({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
+      <Info className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
+      <div>{children}</div>
+    </div>
+  );
+}
+
+// ── Dashboard Tab ─────────────────────────────────────────────
+
+function DashboardTab({ calls }: { calls: Call[] }) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const todayLogs = logs.filter((l) => l.timestamp >= today.getTime());
-  const answered = todayLogs.filter((l) => l.status === "answered");
-  const missed = todayLogs.filter((l) => l.status === "missed");
-  const totalDuration =
-    answered.reduce((sum, l) => sum + l.duration, 0) /
+
+  const todayCalls = calls.filter(
+    (c) => new Date(c.timestamp).getTime() >= today.getTime(),
+  );
+  const answered = todayCalls.filter((c) => c.status === "completed");
+  const missed = todayCalls.filter((c) => c.status === "missed");
+  const avgDuration =
+    answered.reduce((sum, c) => sum + c.duration, 0) /
     Math.max(1, answered.length);
 
-  const recentLogs = [...logs]
-    .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 8);
+  const recent = [...calls]
+    .sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    )
+    .slice(0, 10);
 
-  const isConfigured = settings.apiKey && settings.virtualNumber;
+  const stats = [
+    {
+      label: "Total Calls Today",
+      value: todayCalls.length,
+      icon: Phone,
+      color: "text-primary",
+      bg: "bg-primary/10",
+    },
+    {
+      label: "Answered",
+      value: answered.length,
+      icon: PhoneCall,
+      color: "text-green-600",
+      bg: "bg-green-50",
+    },
+    {
+      label: "Missed",
+      value: missed.length,
+      icon: PhoneMissed,
+      color: "text-destructive",
+      bg: "bg-destructive/10",
+    },
+    {
+      label: "Avg Duration",
+      value: `${Math.round(avgDuration)}s`,
+      icon: Clock,
+      color: "text-accent",
+      bg: "bg-accent/10",
+    },
+  ];
 
   return (
     <div className="space-y-6">
-      {/* Connection status */}
-      <div
-        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium ${
-          isConfigured
-            ? "bg-green-50 text-green-700 border border-green-200"
-            : "bg-amber-50 text-amber-700 border border-amber-200"
-        }`}
-      >
-        {isConfigured ? (
-          <Wifi className="w-4 h-4" />
-        ) : (
-          <WifiOff className="w-4 h-4" />
-        )}
-        {isConfigured
-          ? `Connected · Virtual Number: ${settings.virtualNumber}`
-          : "Heyophone not configured. Go to Settings tab to add your API credentials."}
-      </div>
-
-      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[
-          {
-            label: "Total Calls Today",
-            value: todayLogs.length,
-            icon: Phone,
-            color: "text-primary",
-          },
-          {
-            label: "Answered",
-            value: answered.length,
-            icon: PhoneCall,
-            color: "text-green-600",
-          },
-          {
-            label: "Missed",
-            value: missed.length,
-            icon: PhoneMissed,
-            color: "text-destructive",
-          },
-          {
-            label: "Avg Duration",
-            value: `${Math.round(totalDuration)}s`,
-            icon: Clock,
-            color: "text-accent",
-          },
-        ].map((stat) => {
+        {stats.map((stat) => {
           const Icon = stat.icon;
           return (
             <Card key={stat.label} className="border border-border">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between mb-2">
                   <p className="text-xs text-muted-foreground">{stat.label}</p>
-                  <Icon className={`w-4 h-4 ${stat.color}`} />
+                  <div
+                    className={`w-7 h-7 rounded-lg ${stat.bg} flex items-center justify-center`}
+                  >
+                    <Icon className={`w-4 h-4 ${stat.color}`} />
+                  </div>
                 </div>
                 <p className={`text-2xl font-bold font-display ${stat.color}`}>
                   {stat.value}
@@ -229,13 +173,12 @@ function DashboardTab({
         })}
       </div>
 
-      {/* Recent calls */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Recent Calls</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
-          {recentLogs.length === 0 ? (
+          {recent.length === 0 ? (
             <div
               className="flex flex-col items-center justify-center py-12 text-muted-foreground"
               data-ocid="calling.empty_state"
@@ -248,24 +191,24 @@ function DashboardTab({
             </div>
           ) : (
             <div className="divide-y divide-border">
-              {recentLogs.map((log, i) => (
+              {recent.map((call, i) => (
                 <div
-                  key={log.id}
+                  key={call.id}
                   className="flex items-center gap-3 px-4 py-3"
                   data-ocid={`calling.log.item.${i + 1}`}
                 >
                   <div
                     className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
-                      log.type === "missed"
+                      call.status === "missed"
                         ? "bg-destructive/10"
-                        : log.type === "inbound"
+                        : call.direction === "inbound"
                           ? "bg-green-50"
                           : "bg-primary/10"
                     }`}
                   >
-                    {log.type === "missed" ? (
+                    {call.status === "missed" ? (
                       <PhoneMissed className="w-4 h-4 text-destructive" />
-                    ) : log.type === "inbound" ? (
+                    ) : call.direction === "inbound" ? (
                       <PhoneIncoming className="w-4 h-4 text-green-600" />
                     ) : (
                       <PhoneOutgoing className="w-4 h-4 text-primary" />
@@ -273,27 +216,20 @@ function DashboardTab({
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">
-                      {log.contactName}
+                      {call.direction === "outbound" ? call.to : call.from}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {log.number}
-                    </p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-xs text-muted-foreground">
-                      {formatTime(log.timestamp)}
-                    </p>
-                    <p className="text-xs font-medium">
-                      {formatDuration(log.duration)}
+                      {formatTime(call.timestamp)} ·{" "}
+                      {formatDuration(call.duration)}
                     </p>
                   </div>
                   <Badge
                     variant={
-                      log.status === "answered" ? "default" : "destructive"
+                      call.status === "completed" ? "default" : "destructive"
                     }
-                    className="text-[10px] px-1.5 py-0.5 flex-shrink-0"
+                    className="text-[10px] px-1.5 py-0.5 flex-shrink-0 capitalize"
                   >
-                    {log.status}
+                    {call.status}
                   </Badge>
                 </div>
               ))}
@@ -305,86 +241,15 @@ function DashboardTab({
   );
 }
 
-// ── Dial Pad ─────────────────────────────────────────────────
-function DialPad({ onDial }: { onDial: (num: string) => void }) {
-  const [number, setNumber] = useState("");
-  const keys = [
-    ["1", "2", "3"],
-    ["4", "5", "6"],
-    ["7", "8", "9"],
-    ["*", "0", "#"],
-  ];
+// ── Click-to-Call Tab ─────────────────────────────────────────
 
-  return (
-    <div className="space-y-3 max-w-xs">
-      <div className="relative">
-        <input
-          type="tel"
-          value={number}
-          onChange={(e) => setNumber(e.target.value)}
-          placeholder="Enter number..."
-          className="w-full text-center text-xl font-mono px-4 py-3 border border-input rounded-xl bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-          data-ocid="calling.dialpad_input"
-        />
-        {number && (
-          <button
-            type="button"
-            onClick={() => setNumber((n) => n.slice(0, -1))}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        {keys.flat().map((k) => (
-          <button
-            key={k}
-            type="button"
-            onClick={() => setNumber((n) => n + k)}
-            className="aspect-square rounded-xl text-lg font-semibold bg-muted/60 hover:bg-muted text-foreground transition-colors"
-          >
-            {k}
-          </button>
-        ))}
-      </div>
-      <Button
-        className="w-full gap-2"
-        disabled={!number}
-        onClick={() => {
-          if (number) onDial(number);
-        }}
-        data-ocid="calling.dialpad_call_button"
-      >
-        <Phone className="w-4 h-4" />
-        Call {number || "…"}
-      </Button>
-    </div>
-  );
-}
-
-// ── Click-to-Call Tab ────────────────────────────────────────
-function ClickToCallTab({
-  settings,
-  onCallMade,
-}: {
-  settings: HeyophoneSettings;
-  onCallMade: (log: CallLog) => void;
-}) {
-  const { currentUser: _ } = useApp();
+function ClickToCallTab({ onCallMade }: { onCallMade: (c: Call) => void }) {
+  const { getData } = useApp();
   const [query, setQuery] = useState("");
-  const [calling, setCalling] = useState<{
-    name: string;
-    number: string;
-  } | null>(null);
-  const [callStatus, setCallStatus] = useState<
-    "idle" | "dialing" | "connected" | "ended"
-  >("idle");
-  const [duration, setDuration] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [manualNumber, setManualNumber] = useState("");
 
-  const students: Student[] = ls.get<Student[]>(LS_KEYS.students, []);
-  const staff: Staff[] = ls.get<Staff[]>(LS_KEYS.staff, []);
+  const students = getData("students") as Student[];
+  const staff = getData("staff") as Staff[];
 
   const results =
     query.length >= 2
@@ -394,20 +259,17 @@ function ClickToCallTab({
               (s) =>
                 s.fullName?.toLowerCase().includes(query.toLowerCase()) ||
                 s.fatherName?.toLowerCase().includes(query.toLowerCase()) ||
-                s.mobile?.includes(query) ||
                 s.admNo?.includes(query),
             )
             .map((s) => ({
               id: s.id,
               name: s.fullName ?? "",
-              role: `Class ${s.class} ${s.section ?? ""} · Student`,
+              role: `Class ${s.class ?? ""} ${s.section ?? ""}`.trim(),
               mobile: s.mobile ?? "",
             })),
           ...staff
-            .filter(
-              (st) =>
-                st.name?.toLowerCase().includes(query.toLowerCase()) ||
-                st.mobile?.includes(query),
+            .filter((st) =>
+              st.name?.toLowerCase().includes(query.toLowerCase()),
             )
             .map((st) => ({
               id: st.id,
@@ -418,64 +280,78 @@ function ClickToCallTab({
         ].slice(0, 12)
       : [];
 
-  const startCall = (name: string, number: string) => {
-    if (!number) return;
-    setCalling({ name, number });
-    setCallStatus("dialing");
-    setDuration(0);
-
-    // Simulate dial → connected after 3s
-    setTimeout(() => {
-      setCallStatus("connected");
-      timerRef.current = setInterval(() => setDuration((d) => d + 1), 1000);
-    }, 3000);
-  };
-
-  const endCall = () => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    setCallStatus("ended");
-    const d = duration;
-    setTimeout(() => {
-      if (calling) {
-        onCallMade({
-          id: generateId(),
-          contactName: calling.name,
-          number: calling.number,
-          type: "outbound",
-          duration: d,
-          status: d > 0 ? "answered" : "missed",
-          timestamp: Date.now(),
-        });
-      }
-      setCalling(null);
-      setCallStatus("idle");
-      setDuration(0);
-    }, 1500);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+  const logCall = (to: string, contactName: string) => {
+    const call: Call = {
+      id: generateId(),
+      from: "ERP User",
+      to: contactName,
+      duration: 0,
+      timestamp: new Date().toISOString(),
+      status: "completed",
+      direction: "outbound",
     };
-  }, []);
+    onCallMade(call);
+    const url = to.match(/^\+?\d+$/) ? teamsCallUrl(to) : teamsCallUrl(to);
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleManualCall = () => {
+    if (!manualNumber.trim()) return;
+    logCall(manualNumber, manualNumber);
+    setManualNumber("");
+  };
 
   return (
-    <div className="grid md:grid-cols-2 gap-6">
-      {/* Search */}
+    <div className="space-y-6 max-w-3xl">
+      <InfoBanner>
+        <strong>Calls are placed through Microsoft Teams.</strong> Make sure
+        Microsoft Teams is installed and signed in on this device. For
+        mobile-to-PC Bluetooth calling, pair your phone via Bluetooth, open
+        Teams on both devices, and use Teams' built-in call transfer feature.
+      </InfoBanner>
+
+      {/* Manual number entry */}
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Manual Number Dial</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-3">
+            <Input
+              type="tel"
+              placeholder="Enter phone number (e.g. +91XXXXXXXXXX)"
+              value={manualNumber}
+              onChange={(e) => setManualNumber(e.target.value)}
+              className="flex-1"
+              data-ocid="calling.manual_number_input"
+            />
+            <Button
+              onClick={handleManualCall}
+              disabled={!manualNumber.trim()}
+              className="gap-2 bg-primary hover:bg-primary/90"
+              data-ocid="calling.manual_call_button"
+            >
+              <Phone className="w-4 h-4" /> Call via Teams
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Search contacts */}
       <div className="space-y-4">
         <div>
           <h3 className="font-semibold text-foreground mb-1">
             Search Contacts
           </h3>
           <p className="text-xs text-muted-foreground">
-            Find students, parents, or staff to call
+            Find students or staff by name or admission number
           </p>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Name, mobile, admission no..."
+            placeholder="Name or admission no..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             data-ocid="calling.search_input"
@@ -485,7 +361,10 @@ function ClickToCallTab({
         {query.length >= 2 && (
           <div className="space-y-2">
             {results.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-4">
+              <p
+                className="text-sm text-muted-foreground text-center py-8"
+                data-ocid="calling.contacts.empty_state"
+              >
                 No contacts found
               </p>
             ) : (
@@ -497,7 +376,7 @@ function ClickToCallTab({
                 >
                   <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
                     <span className="text-xs font-bold text-primary">
-                      {r.name.charAt(0)}
+                      {r.name.charAt(0).toUpperCase()}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
@@ -505,179 +384,106 @@ function ClickToCallTab({
                     <p className="text-xs text-muted-foreground truncate">
                       {r.role}
                     </p>
-                    <p className="text-xs font-mono text-muted-foreground">
-                      {r.mobile || "No mobile"}
-                    </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!r.mobile || !!calling}
-                    onClick={() => startCall(r.name, r.mobile)}
-                    data-ocid={`calling.call_button.${i + 1}`}
-                  >
-                    <Phone className="w-3.5 h-3.5 mr-1" /> Call
-                  </Button>
+                  {r.mobile ? (
+                    <Button
+                      size="sm"
+                      className="gap-1.5 bg-primary hover:bg-primary/90"
+                      onClick={() => logCall(r.mobile, r.name)}
+                      data-ocid={`calling.call_button.${i + 1}`}
+                    >
+                      <Phone className="w-3.5 h-3.5" /> Call
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">
+                      No number
+                    </span>
+                  )}
                 </div>
               ))
             )}
           </div>
         )}
       </div>
-
-      {/* Dial Pad */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="font-semibold text-foreground mb-1">
-            Manual Dial Pad
-          </h3>
-          <p className="text-xs text-muted-foreground">
-            Type or tap to dial any number
-          </p>
-        </div>
-        <DialPad onDial={(num) => startCall(num, num)} />
-      </div>
-
-      {/* Active call overlay */}
-      {calling && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="bg-card rounded-2xl p-8 w-full max-w-sm text-center shadow-strong animate-slide-up">
-            <div
-              className={`w-20 h-20 mx-auto rounded-full flex items-center justify-center mb-4 ${
-                callStatus === "dialing"
-                  ? "bg-primary/10 animate-pulse-soft"
-                  : callStatus === "connected"
-                    ? "bg-green-100"
-                    : "bg-muted"
-              }`}
-            >
-              <Phone
-                className={`w-8 h-8 ${
-                  callStatus === "dialing"
-                    ? "text-primary"
-                    : callStatus === "connected"
-                      ? "text-green-600"
-                      : "text-muted-foreground"
-                }`}
-              />
-            </div>
-            <p className="text-xl font-bold font-display mb-1">
-              {calling.name}
-            </p>
-            <p className="text-sm text-muted-foreground font-mono mb-1">
-              {calling.number}
-            </p>
-            <p
-              className={`text-sm font-medium mb-6 ${
-                callStatus === "dialing"
-                  ? "text-primary"
-                  : callStatus === "connected"
-                    ? "text-green-600"
-                    : "text-muted-foreground"
-              }`}
-            >
-              {callStatus === "dialing"
-                ? "Calling…"
-                : callStatus === "connected"
-                  ? `Connected · ${formatDuration(duration)}`
-                  : "Call Ended"}
-            </p>
-            <div className="flex items-center justify-center gap-4">
-              <button
-                type="button"
-                className="w-12 h-12 rounded-full bg-muted flex items-center justify-center hover:bg-muted/80 transition-colors"
-                aria-label="Mute"
-              >
-                <MicOff className="w-5 h-5 text-foreground" />
-              </button>
-              <button
-                type="button"
-                onClick={endCall}
-                className="w-14 h-14 rounded-full bg-destructive flex items-center justify-center hover:bg-destructive/90 transition-colors"
-                aria-label="End call"
-                data-ocid="calling.end_call_button"
-              >
-                <PhoneOff className="w-6 h-6 text-white" />
-              </button>
-            </div>
-
-            {!settings.apiKey && (
-              <p className="text-xs text-muted-foreground mt-4 border-t border-border pt-3">
-                ⚠️ Heyophone API not configured — this is a simulated call.
-              </p>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-// ── Call Logs Tab ────────────────────────────────────────────
+// ── Call Logs Tab ─────────────────────────────────────────────
+
 function CallLogsTab({
-  logs,
-  setLogs,
+  calls,
+  onDelete,
+  onAdd,
 }: {
-  logs: CallLog[];
-  setLogs: (l: CallLog[]) => void;
+  calls: Call[];
+  onDelete: (id: string) => void;
+  onAdd: (c: Call) => void;
 }) {
   const [filter, setFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
-  const [newLog, setNewLog] = useState<Partial<CallLog>>({
-    type: "outbound",
-    status: "answered",
+  const [newEntry, setNewEntry] = useState<{
+    contact: string;
+    number: string;
+    direction: "inbound" | "outbound";
+    status: "completed" | "missed" | "rejected";
+    duration: number;
+  }>({
+    contact: "",
+    number: "",
+    direction: "outbound",
+    status: "completed",
     duration: 0,
   });
 
-  const filtered = logs.filter((l) => {
-    if (filter !== "all" && l.type !== filter) return false;
-    if (statusFilter !== "all" && l.status !== statusFilter) return false;
-    if (
-      search &&
-      !l.contactName.toLowerCase().includes(search.toLowerCase()) &&
-      !l.number.includes(search)
-    )
-      return false;
+  const filtered = calls.filter((c) => {
+    if (filter === "inbound" && c.direction !== "inbound") return false;
+    if (filter === "outbound" && c.direction !== "outbound") return false;
+    if (filter === "missed" && c.status !== "missed") return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const contact =
+        c.direction === "outbound" ? c.to.toLowerCase() : c.from.toLowerCase();
+      if (!contact.includes(q)) return false;
+    }
     return true;
   });
 
-  const sorted = [...filtered].sort((a, b) => b.timestamp - a.timestamp);
+  const sorted = [...filtered].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
 
-  const addLog = () => {
-    const log: CallLog = {
+  const addEntry = () => {
+    const call: Call = {
       id: generateId(),
-      contactName: newLog.contactName ?? "Unknown",
-      number: newLog.number ?? "",
-      type: (newLog.type as CallLog["type"]) ?? "outbound",
-      duration: Number(newLog.duration) || 0,
-      status: (newLog.status as CallLog["status"]) ?? "answered",
-      timestamp: newLog.timestamp ?? Date.now(),
+      from: newEntry.direction === "inbound" ? newEntry.contact : "ERP User",
+      to: newEntry.direction === "outbound" ? newEntry.contact : "ERP User",
+      duration: Number(newEntry.duration) || 0,
+      timestamp: new Date().toISOString(),
+      status: newEntry.status,
+      direction: newEntry.direction,
     };
-    const updated = [log, ...logs];
-    setLogs(updated);
-    ls.set(CALL_LOGS_KEY, updated);
+    onAdd(call);
     setShowAdd(false);
-    setNewLog({ type: "outbound", status: "answered", duration: 0 });
-  };
-
-  const deleteLog = (id: string) => {
-    const updated = logs.filter((l) => l.id !== id);
-    setLogs(updated);
-    ls.set(CALL_LOGS_KEY, updated);
+    setNewEntry({
+      contact: "",
+      number: "",
+      direction: "outbound",
+      status: "completed",
+      duration: 0,
+    });
   };
 
   const exportCsv = () => {
     const rows = [
-      ["Date/Time", "Contact", "Number", "Type", "Duration", "Status"],
-      ...sorted.map((l) => [
-        formatTime(l.timestamp),
-        l.contactName,
-        l.number,
-        l.type,
-        formatDuration(l.duration),
-        l.status,
+      ["Date/Time", "Contact", "Direction", "Duration", "Status"],
+      ...sorted.map((c) => [
+        formatTime(c.timestamp),
+        c.direction === "outbound" ? c.to : c.from,
+        c.direction,
+        formatDuration(c.duration),
+        c.status,
       ]),
     ];
     const csv = rows.map((r) => r.join(",")).join("\n");
@@ -692,13 +498,12 @@ function CallLogsTab({
 
   return (
     <div className="space-y-4">
-      {/* Toolbar */}
       <div className="flex flex-wrap gap-3 items-center">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <Input
             className="pl-9"
-            placeholder="Search name or number…"
+            placeholder="Search contact…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             data-ocid="calling.logs_search_input"
@@ -709,21 +514,10 @@ function CallLogsTab({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="all">All Calls</SelectItem>
             <SelectItem value="inbound">Inbound</SelectItem>
             <SelectItem value="outbound">Outbound</SelectItem>
             <SelectItem value="missed">Missed</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-36">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="answered">Answered</SelectItem>
-            <SelectItem value="missed">Missed</SelectItem>
-            <SelectItem value="voicemail">Voicemail</SelectItem>
           </SelectContent>
         </Select>
         <Button
@@ -743,75 +537,74 @@ function CallLogsTab({
         </Button>
       </div>
 
-      {/* Add entry form */}
       {showAdd && (
         <Card className="border border-primary/30 bg-primary/5">
           <CardContent className="p-4 space-y-3">
-            <h4 className="font-semibold text-sm">Add Call Entry</h4>
+            <h4 className="font-semibold text-sm">Add Manual Call Entry</h4>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
               <div>
                 <Label className="text-xs">Contact Name</Label>
                 <Input
-                  value={newLog.contactName ?? ""}
+                  value={newEntry.contact}
                   onChange={(e) =>
-                    setNewLog({ ...newLog, contactName: e.target.value })
+                    setNewEntry({ ...newEntry, contact: e.target.value })
                   }
-                  placeholder="Name"
-                />
-              </div>
-              <div>
-                <Label className="text-xs">Number</Label>
-                <Input
-                  value={newLog.number ?? ""}
-                  onChange={(e) =>
-                    setNewLog({ ...newLog, number: e.target.value })
-                  }
-                  placeholder="+91..."
+                  placeholder="Name or number"
+                  data-ocid="calling.add_entry_contact_input"
                 />
               </div>
               <div>
                 <Label className="text-xs">Duration (seconds)</Label>
                 <Input
                   type="number"
-                  value={newLog.duration ?? 0}
+                  value={newEntry.duration}
                   onChange={(e) =>
-                    setNewLog({ ...newLog, duration: Number(e.target.value) })
+                    setNewEntry({
+                      ...newEntry,
+                      duration: Number(e.target.value),
+                    })
                   }
+                  data-ocid="calling.add_entry_duration_input"
                 />
               </div>
               <div>
-                <Label className="text-xs">Type</Label>
+                <Label className="text-xs">Direction</Label>
                 <Select
-                  value={newLog.type}
+                  value={newEntry.direction}
                   onValueChange={(v) =>
-                    setNewLog({ ...newLog, type: v as CallLog["type"] })
+                    setNewEntry({
+                      ...newEntry,
+                      direction: v as "inbound" | "outbound",
+                    })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger data-ocid="calling.add_entry_direction_select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="outbound">Outbound</SelectItem>
                     <SelectItem value="inbound">Inbound</SelectItem>
-                    <SelectItem value="missed">Missed</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div>
                 <Label className="text-xs">Status</Label>
                 <Select
-                  value={newLog.status}
+                  value={newEntry.status}
                   onValueChange={(v) =>
-                    setNewLog({ ...newLog, status: v as CallLog["status"] })
+                    setNewEntry({
+                      ...newEntry,
+                      status: v as "completed" | "missed" | "rejected",
+                    })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger data-ocid="calling.add_entry_status_select">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="answered">Answered</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
                     <SelectItem value="missed">Missed</SelectItem>
-                    <SelectItem value="voicemail">Voicemail</SelectItem>
+                    <SelectItem value="rejected">Rejected</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -819,10 +612,10 @@ function CallLogsTab({
             <div className="flex gap-2">
               <Button
                 size="sm"
-                onClick={addLog}
+                onClick={addEntry}
                 data-ocid="calling.logs_save_button"
               >
-                Save
+                Save Entry
               </Button>
               <Button
                 size="sm"
@@ -837,7 +630,6 @@ function CallLogsTab({
         </Card>
       )}
 
-      {/* Table */}
       {sorted.length === 0 ? (
         <div
           className="flex flex-col items-center justify-center py-12 text-muted-foreground"
@@ -857,11 +649,8 @@ function CallLogsTab({
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground">
                   Contact
                 </th>
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground hidden sm:table-cell">
-                  Number
-                </th>
                 <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground hidden md:table-cell">
-                  Type
+                  Direction
                 </th>
                 <th className="text-right px-4 py-2.5 text-xs font-semibold text-muted-foreground hidden md:table-cell">
                   Duration
@@ -873,57 +662,64 @@ function CallLogsTab({
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {sorted.map((log, i) => (
-                <tr
-                  key={log.id}
-                  className="hover:bg-muted/30 transition-colors"
-                  data-ocid={`calling.log.row.${i + 1}`}
-                >
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
-                    {formatTime(log.timestamp)}
-                  </td>
-                  <td className="px-4 py-2.5 font-medium">{log.contactName}</td>
-                  <td className="px-4 py-2.5 font-mono text-xs hidden sm:table-cell">
-                    {log.number}
-                  </td>
-                  <td className="px-4 py-2.5 hidden md:table-cell">
-                    <span className="flex items-center gap-1">
-                      {log.type === "missed" ? (
-                        <PhoneMissed className="w-3 h-3 text-destructive" />
-                      ) : log.type === "inbound" ? (
-                        <PhoneIncoming className="w-3 h-3 text-green-600" />
-                      ) : (
-                        <PhoneOutgoing className="w-3 h-3 text-primary" />
-                      )}
-                      <span className="capitalize text-xs">{log.type}</span>
-                    </span>
-                  </td>
-                  <td className="px-4 py-2.5 text-right text-xs hidden md:table-cell">
-                    {formatDuration(log.duration)}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge
-                      variant={
-                        log.status === "answered" ? "default" : "destructive"
-                      }
-                      className="text-[10px]"
-                    >
-                      {log.status}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <button
-                      type="button"
-                      onClick={() => deleteLog(log.id)}
-                      className="text-muted-foreground hover:text-destructive transition-colors"
-                      aria-label="Delete log"
-                      data-ocid={`calling.log.delete_button.${i + 1}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {sorted.map((call, i) => {
+                const contact =
+                  call.direction === "outbound" ? call.to : call.from;
+                return (
+                  <tr
+                    key={call.id}
+                    className="hover:bg-muted/30 transition-colors"
+                    data-ocid={`calling.log.row.${i + 1}`}
+                  >
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {formatTime(call.timestamp)}
+                    </td>
+                    <td className="px-4 py-2.5 font-medium truncate max-w-[140px]">
+                      {contact}
+                    </td>
+                    <td className="px-4 py-2.5 hidden md:table-cell">
+                      <span className="flex items-center gap-1">
+                        {call.status === "missed" ? (
+                          <PhoneMissed className="w-3 h-3 text-destructive" />
+                        ) : call.direction === "inbound" ? (
+                          <PhoneIncoming className="w-3 h-3 text-green-600" />
+                        ) : (
+                          <PhoneOutgoing className="w-3 h-3 text-primary" />
+                        )}
+                        <span className="capitalize text-xs">
+                          {call.direction}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-xs hidden md:table-cell">
+                      {formatDuration(call.duration)}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <Badge
+                        variant={
+                          call.status === "completed"
+                            ? "default"
+                            : "destructive"
+                        }
+                        className="text-[10px] capitalize"
+                      >
+                        {call.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => onDelete(call.id)}
+                        className="text-muted-foreground hover:text-destructive transition-colors"
+                        aria-label="Delete log"
+                        data-ocid={`calling.log.delete_button.${i + 1}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -932,483 +728,179 @@ function CallLogsTab({
   );
 }
 
-// ── IVR Settings Tab ─────────────────────────────────────────
-function IVRSettingsTab() {
-  const [config, setConfig] = useState<IVRConfig>(() => {
-    return ls.get<IVRConfig>(IVR_KEY, DEFAULT_IVR);
-  });
-  const [showFlow, setShowFlow] = useState(false);
-  const [saved, setSaved] = useState(false);
+// ── Settings Tab ──────────────────────────────────────────────
 
-  const saveConfig = () => {
-    ls.set(IVR_KEY, config);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const addOption = () => {
-    setConfig((c) => ({
-      ...c,
-      options: [
-        ...c.options,
-        {
-          id: generateId(),
-          key: "",
-          description: "",
-          action: "staff",
-          staffId: "",
-        },
-      ],
-    }));
-  };
-
-  const removeOption = (id: string) => {
-    setConfig((c) => ({ ...c, options: c.options.filter((o) => o.id !== id) }));
-  };
-
-  const updateOption = (id: string, patch: Partial<IVROption>) => {
-    setConfig((c) => ({
-      ...c,
-      options: c.options.map((o) => (o.id === id ? { ...o, ...patch } : o)),
-    }));
-  };
-
-  return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Info banner */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-        <strong>Note:</strong> IVR configuration here is stored locally. To
-        apply changes to your phone system, log into your{" "}
-        <a
-          href="https://heyophone.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          className="underline"
-        >
-          Heyophone admin panel
-        </a>{" "}
-        and update the IVR settings there.
-      </div>
-
-      {/* Welcome message */}
-      <div className="space-y-2">
-        <Label className="font-semibold">Welcome Message</Label>
-        <Textarea
-          value={config.welcomeMessage}
-          onChange={(e) =>
-            setConfig((c) => ({ ...c, welcomeMessage: e.target.value }))
-          }
-          rows={3}
-          data-ocid="calling.ivr_welcome_message"
-        />
-      </div>
-
-      {/* Business hours */}
-      <div className="space-y-2">
-        <Label className="font-semibold">Business Hours</Label>
-        <div className="flex items-center gap-3">
-          <Input
-            type="time"
-            value={config.businessHoursFrom}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, businessHoursFrom: e.target.value }))
-            }
-            className="w-36"
-            data-ocid="calling.ivr_hours_from"
-          />
-          <span className="text-muted-foreground text-sm">to</span>
-          <Input
-            type="time"
-            value={config.businessHoursTo}
-            onChange={(e) =>
-              setConfig((c) => ({ ...c, businessHoursTo: e.target.value }))
-            }
-            className="w-36"
-            data-ocid="calling.ivr_hours_to"
-          />
-        </div>
-      </div>
-
-      {/* After hours message */}
-      <div className="space-y-2">
-        <Label className="font-semibold">After-Hours Message</Label>
-        <Textarea
-          value={config.afterHoursMessage}
-          onChange={(e) =>
-            setConfig((c) => ({ ...c, afterHoursMessage: e.target.value }))
-          }
-          rows={2}
-          data-ocid="calling.ivr_after_hours_message"
-        />
-      </div>
-
-      {/* IVR Menu Options */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="font-semibold">IVR Menu Options</Label>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={addOption}
-            data-ocid="calling.ivr_add_option_button"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1" /> Add Option
-          </Button>
-        </div>
-        {config.options.map((opt, i) => (
-          <div
-            key={opt.id}
-            className="flex items-center gap-3 bg-muted/30 rounded-xl px-4 py-3"
-            data-ocid={`calling.ivr_option.${i + 1}`}
-          >
-            <div>
-              <Label className="text-[10px] text-muted-foreground uppercase">
-                Key
-              </Label>
-              <Input
-                value={opt.key}
-                onChange={(e) => updateOption(opt.id, { key: e.target.value })}
-                className="w-14 text-center font-mono"
-                maxLength={1}
-              />
-            </div>
-            <div className="flex-1">
-              <Label className="text-[10px] text-muted-foreground uppercase">
-                Description
-              </Label>
-              <Input
-                value={opt.description}
-                onChange={(e) =>
-                  updateOption(opt.id, { description: e.target.value })
-                }
-                placeholder="e.g. Student Information"
-              />
-            </div>
-            <div>
-              <Label className="text-[10px] text-muted-foreground uppercase">
-                Action
-              </Label>
-              <Select
-                value={opt.action}
-                onValueChange={(v) => updateOption(opt.id, { action: v })}
-              >
-                <SelectTrigger className="w-32">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="staff">Connect Staff</SelectItem>
-                  <SelectItem value="voicemail">Voicemail</SelectItem>
-                  <SelectItem value="repeat">Repeat Menu</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <button
-              type="button"
-              onClick={() => removeOption(opt.id)}
-              className="mt-4 text-muted-foreground hover:text-destructive"
-              aria-label="Remove option"
-              data-ocid={`calling.ivr_remove_option.${i + 1}`}
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* IVR Flow Preview */}
-      <div className="border border-border rounded-xl overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setShowFlow((v) => !v)}
-          className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors text-sm font-medium"
-          data-ocid="calling.ivr_flow_toggle"
-        >
-          IVR Flow Preview
-          {showFlow ? (
-            <ChevronUp className="w-4 h-4" />
-          ) : (
-            <ChevronDown className="w-4 h-4" />
-          )}
-        </button>
-        {showFlow && (
-          <div className="p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold">
-                IN
-              </div>
-              <div className="h-px bg-border flex-1" />
-              <div className="bg-card border border-border rounded-lg px-3 py-1.5 text-xs max-w-sm">
-                {config.welcomeMessage.slice(0, 80)}…
-              </div>
-            </div>
-            <div className="ml-4 space-y-2">
-              {config.options.map((opt) => (
-                <div key={opt.key} className="flex items-center gap-2">
-                  <div className="w-6 h-6 rounded-full bg-accent/20 text-accent flex items-center justify-center text-xs font-bold">
-                    {opt.key}
-                  </div>
-                  <div className="h-px bg-border w-4" />
-                  <div className="bg-muted rounded px-2 py-1 text-xs">
-                    {opt.description}
-                  </div>
-                  <div className="text-muted-foreground text-[10px]">
-                    → {opt.action}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <Button onClick={saveConfig} data-ocid="calling.ivr_save_button">
-        {saved ? "✓ Saved!" : "Save IVR Configuration"}
-      </Button>
-    </div>
+function MsSettingsTab() {
+  const [form, setForm] = useState<MsPhoneSettings>(() =>
+    ls.get<MsPhoneSettings>(MS_PHONE_KEY, DEFAULT_MS_SETTINGS),
   );
-}
+  const [saved, setSaved] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
-// ── Settings Tab ─────────────────────────────────────────────
-function SettingsTab({
-  settings,
-  setSettings,
-}: {
-  settings: HeyophoneSettings;
-  setSettings: (s: HeyophoneSettings) => void;
-}) {
-  const [form, setForm] = useState(settings);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    ok: boolean;
-    msg: string;
-  } | null>(null);
-  const [showSetup, setShowSetup] = useState(false);
-
-  const save = () => {
-    setSettings(form);
-    ls.set(STORAGE_KEY, form);
+  const saveSettings = () => {
+    ls.set(MS_PHONE_KEY, form);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2500);
   };
 
-  const testConnection = async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      if (!form.apiKey || !form.virtualNumber) {
-        setTestResult({
-          ok: false,
-          msg: "Please fill in your Virtual Number and API Key first.",
-        });
-        return;
-      }
-      // Simulate an API test
-      await new Promise((r) => setTimeout(r, 1200));
-      setTestResult({
-        ok: true,
-        msg: "Connection successful! Heyophone API is reachable.",
-      });
-    } catch {
-      setTestResult({
-        ok: false,
-        msg: "Could not reach Heyophone API. Check your API key and network.",
-      });
-    } finally {
-      setTesting(false);
-    }
-  };
+  const steps = [
+    "Get Microsoft 365 Business Voice or Teams Phone license from your IT admin.",
+    "In Azure Portal → Azure Communication Services, create a resource and copy the Connection String.",
+    "Assign a phone number to your Teams account in Teams Admin Center.",
+    "Install Microsoft Teams on this PC and on your mobile phone.",
+    "To answer PC calls on mobile via Bluetooth: pair your phone via Bluetooth settings, open Teams on both devices — Teams will automatically route calls to all signed-in devices.",
+    "Enter your Tenant ID, ACS endpoint, and phone number in the fields above and click Save.",
+    'Test by clicking "Call" on any student/staff in the Click-to-Call tab.',
+  ];
 
   return (
     <div className="space-y-6 max-w-2xl">
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
-            <Settings className="w-4 h-4" /> Heyophone Account Settings
+            <Settings className="w-4 h-4" /> Microsoft Phone System Settings
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <Label className="text-xs font-semibold">Virtual Number</Label>
+              <Label className="text-xs font-semibold">
+                Microsoft Teams Tenant ID
+              </Label>
               <Input
-                value={form.virtualNumber}
-                onChange={(e) =>
-                  setForm({ ...form, virtualNumber: e.target.value })
-                }
-                placeholder="+91 XXXXX XXXXX"
-                data-ocid="calling.settings_virtual_number"
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">API Key</Label>
-              <Input
-                type="password"
-                value={form.apiKey}
-                onChange={(e) => setForm({ ...form, apiKey: e.target.value })}
-                placeholder="Your Heyophone API key"
-                data-ocid="calling.settings_api_key"
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Agent ID</Label>
-              <Input
-                value={form.agentId}
-                onChange={(e) => setForm({ ...form, agentId: e.target.value })}
-                placeholder="Optional Agent ID"
-                data-ocid="calling.settings_agent_id"
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Caller ID</Label>
-              <Input
-                value={form.callerId}
-                onChange={(e) => setForm({ ...form, callerId: e.target.value })}
-                placeholder="Shown to recipients"
-                data-ocid="calling.settings_caller_id"
-              />
-            </div>
-            <div>
-              <Label className="text-xs font-semibold">Business Name</Label>
-              <Input
-                value={form.businessName}
-                onChange={(e) =>
-                  setForm({ ...form, businessName: e.target.value })
-                }
-                data-ocid="calling.settings_business_name"
+                value={form.tenantId}
+                onChange={(e) => setForm({ ...form, tenantId: e.target.value })}
+                placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+                data-ocid="calling.settings_tenant_id"
               />
             </div>
             <div>
               <Label className="text-xs font-semibold">
-                Click-to-Call API URL
+                Your Teams Phone Number
               </Label>
               <Input
-                value={form.clickToCallUrl}
+                value={form.phoneNumber}
                 onChange={(e) =>
-                  setForm({ ...form, clickToCallUrl: e.target.value })
+                  setForm({ ...form, phoneNumber: e.target.value })
                 }
-                data-ocid="calling.settings_api_url"
+                placeholder="+91XXXXXXXXXX"
+                data-ocid="calling.settings_phone_number"
               />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                E.164 format, e.g. +91XXXXXXXXXX
+              </p>
             </div>
-          </div>
-
-          <div>
-            <Label className="text-xs font-semibold">
-              Webhook URL (for call events)
-            </Label>
-            <div className="flex gap-2">
+            <div>
+              <Label className="text-xs font-semibold">
+                ACS Resource Endpoint URL
+              </Label>
               <Input
-                value={form.webhookUrl}
-                readOnly
-                className="font-mono text-xs bg-muted/50"
+                value={form.acsEndpoint}
+                onChange={(e) =>
+                  setForm({ ...form, acsEndpoint: e.target.value })
+                }
+                placeholder="https://your-resource.communication.azure.com"
+                data-ocid="calling.settings_acs_endpoint"
               />
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => navigator.clipboard.writeText(form.webhookUrl)}
-              >
-                Copy
-              </Button>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-1">
-              Add this webhook URL in your Heyophone dashboard to receive call
-              events.
-            </p>
+            <div>
+              <Label className="text-xs font-semibold">Display Name</Label>
+              <Input
+                value={form.displayName}
+                onChange={(e) =>
+                  setForm({ ...form, displayName: e.target.value })
+                }
+                placeholder="Shown in Teams caller ID"
+                data-ocid="calling.settings_display_name"
+              />
+            </div>
+            <div className="sm:col-span-2">
+              <Label className="text-xs font-semibold">
+                ACS Connection String
+              </Label>
+              <Input
+                type="password"
+                value={form.acsConnectionString}
+                onChange={(e) =>
+                  setForm({ ...form, acsConnectionString: e.target.value })
+                }
+                placeholder="endpoint=https://...;accesskey=..."
+                data-ocid="calling.settings_acs_connection_string"
+              />
+            </div>
           </div>
 
-          {testResult && (
+          {saved && (
             <div
-              className={`px-4 py-3 rounded-xl text-sm ${
-                testResult.ok
-                  ? "bg-green-50 text-green-700 border border-green-200"
-                  : "bg-destructive/10 text-destructive border border-destructive/20"
-              }`}
-              data-ocid="calling.settings_test_result"
+              className="px-4 py-3 rounded-xl text-sm bg-green-50 text-green-700 border border-green-200"
+              data-ocid="calling.settings_save_success"
             >
-              {testResult.msg}
+              ✓ Settings saved successfully.
             </div>
           )}
 
-          <div className="flex gap-3 flex-wrap">
-            <Button onClick={save} data-ocid="calling.settings_save_button">
-              Save Settings
-            </Button>
-            <Button
-              variant="outline"
-              onClick={testConnection}
-              disabled={testing}
-              data-ocid="calling.settings_test_button"
-            >
-              {testing ? "Testing…" : "Test Connection"}
-            </Button>
+          <Button
+            onClick={saveSettings}
+            data-ocid="calling.settings_save_button"
+          >
+            Save Settings
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Bluetooth Bridge Info Card */}
+      <Card className="border border-border bg-muted/20">
+        <CardContent className="p-5">
+          <div className="flex items-start gap-4">
+            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
+              <Bluetooth className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-sm mb-1.5">
+                Bluetooth Call Bridge Setup
+              </h3>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Microsoft Teams automatically rings all your signed-in devices
+                (PC and mobile) simultaneously. When your mobile is paired via
+                Bluetooth to your PC, you can answer a call on your PC and it
+                will transfer audio through the Bluetooth connection. No
+                additional software required.
+              </p>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* Setup Instructions */}
+      {/* Setup Guide */}
       <div className="border border-border rounded-xl overflow-hidden">
         <button
           type="button"
-          onClick={() => setShowSetup((v) => !v)}
+          onClick={() => setShowGuide((v) => !v)}
           className="w-full flex items-center justify-between px-4 py-3 bg-muted/40 hover:bg-muted/60 transition-colors text-sm font-semibold"
-          data-ocid="calling.settings_setup_toggle"
+          data-ocid="calling.settings_guide_toggle"
         >
-          📋 How to get your Heyophone API credentials
-          {showSetup ? (
+          <span className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            Setup Guide — Step-by-step Microsoft Phone System
+          </span>
+          {showGuide ? (
             <ChevronUp className="w-4 h-4" />
           ) : (
             <ChevronDown className="w-4 h-4" />
           )}
         </button>
-        {showSetup && (
-          <div className="p-4 space-y-3 text-sm text-foreground">
-            <ol className="list-decimal list-inside space-y-2 text-sm">
-              <li>
-                Visit{" "}
-                <a
-                  href="https://heyophone.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-primary underline"
-                >
-                  heyophone.com
-                </a>{" "}
-                and sign up / log in to your account.
-              </li>
-              <li>
-                Go to <strong>Dashboard → Integrations → API Keys</strong>.
-              </li>
-              <li>
-                Generate a new API key and copy it into the <em>API Key</em>{" "}
-                field above.
-              </li>
-              <li>
-                Your <strong>Virtual Number</strong> is shown on the main
-                dashboard under "My Numbers".
-              </li>
-              <li>
-                Optionally set your <strong>Agent ID</strong> if you are routing
-                to a specific agent.
-              </li>
-              <li>
-                Add the <strong>Webhook URL</strong> shown above in Heyophone's{" "}
-                <em>Settings → Webhooks</em> to receive real-time call events in
-                this ERP.
-              </li>
-              <li>
-                Click <strong>Save Settings</strong> then{" "}
-                <strong>Test Connection</strong> to verify.
-              </li>
+        {showGuide && (
+          <div className="p-4">
+            <ol className="list-decimal list-inside space-y-3 text-sm text-foreground">
+              {steps.map((step, i) => (
+                <li key={step} className="leading-relaxed">
+                  <span className="font-medium text-primary mr-1">
+                    Step {i + 1}:
+                  </span>
+                  {step}
+                </li>
+              ))}
             </ol>
-            <p className="text-xs text-muted-foreground border-t border-border pt-2">
-              For support, visit the{" "}
-              <a
-                href="https://heyophone.com"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                Heyophone website
-              </a>{" "}
-              or contact their support team directly.
-            </p>
           </div>
         )}
       </div>
@@ -1416,25 +908,7 @@ function SettingsTab({
   );
 }
 
-// ── Main Calling Page ────────────────────────────────────────
-type CallingTab =
-  | "dashboard"
-  | "click-to-call"
-  | "call-logs"
-  | "ivr"
-  | "settings";
-
-const TABS: {
-  id: CallingTab;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "click-to-call", label: "Click-to-Call", icon: PhoneCall },
-  { id: "call-logs", label: "Call Logs", icon: Clock },
-  { id: "ivr", label: "IVR Settings", icon: PhoneIncoming },
-  { id: "settings", label: "Settings", icon: Settings },
-];
+// ── Dashboard icon (inline SVG) ───────────────────────────────
 
 function LayoutDashboard({ className }: { className?: string }) {
   return (
@@ -1455,19 +929,38 @@ function LayoutDashboard({ className }: { className?: string }) {
   );
 }
 
-export default function Calling() {
-  const [activeTab, setActiveTab] = useState<CallingTab>("dashboard");
-  const [settings, setSettings] = useState<HeyophoneSettings>(() => {
-    return ls.get<HeyophoneSettings>(STORAGE_KEY, DEFAULT_SETTINGS);
-  });
-  const [logs, setLogs] = useState<CallLog[]>(() => {
-    return ls.get<CallLog[]>(CALL_LOGS_KEY, []);
-  });
+// ── Main Calling Page ─────────────────────────────────────────
 
-  const handleCallMade = (log: CallLog) => {
-    const updated = [log, ...logs];
-    setLogs(updated);
-    ls.set(CALL_LOGS_KEY, updated);
+type CallingTab = "dashboard" | "click-to-call" | "call-logs" | "settings";
+
+const TABS: {
+  id: CallingTab;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "click-to-call", label: "Click-to-Call", icon: PhoneCall },
+  { id: "call-logs", label: "Call Logs", icon: Clock },
+  { id: "settings", label: "Settings", icon: Settings },
+];
+
+export default function Calling() {
+  const { getData, saveData, deleteData } = useApp();
+  const [activeTab, setActiveTab] = useState<CallingTab>("dashboard");
+
+  const rawCalls = getData("calls") as Call[];
+  const calls = rawCalls;
+
+  const handleCallMade = async (call: Call) => {
+    await saveData("calls", call as unknown as Record<string, unknown>);
+  };
+
+  const handleDeleteCall = async (id: string) => {
+    await deleteData("calls", id);
+  };
+
+  const handleAddCall = async (call: Call) => {
+    await saveData("calls", call as unknown as Record<string, unknown>);
   };
 
   return (
@@ -1479,21 +972,20 @@ export default function Calling() {
         </div>
         <div>
           <h1 className="text-lg font-display font-semibold text-foreground">
-            Calling · Heyophone
+            Calling · Microsoft Phone System
           </h1>
           <p className="text-xs text-muted-foreground">
-            India's business phone system — Virtual Number, IVR, Click-to-Call,
-            Call Logs
+            Click-to-Call via Teams, Call Logs, Bluetooth Bridge
           </p>
         </div>
         <div className="ml-auto">
           <a
-            href="https://heyophone.com"
+            href="https://teams.microsoft.com"
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-primary underline hover:no-underline"
           >
-            heyophone.com ↗
+            Open Teams ↗
           </a>
         </div>
       </div>
@@ -1523,19 +1015,26 @@ export default function Calling() {
 
       {/* Content */}
       <div className="flex-1 overflow-auto bg-background p-4 lg:p-6">
-        {activeTab === "dashboard" && (
-          <DashboardTab logs={logs} settings={settings} />
-        )}
+        {activeTab === "dashboard" && <DashboardTab calls={calls} />}
         {activeTab === "click-to-call" && (
-          <ClickToCallTab settings={settings} onCallMade={handleCallMade} />
+          <ClickToCallTab
+            onCallMade={(c) => {
+              void handleCallMade(c);
+            }}
+          />
         )}
         {activeTab === "call-logs" && (
-          <CallLogsTab logs={logs} setLogs={setLogs} />
+          <CallLogsTab
+            calls={calls}
+            onDelete={(id) => {
+              void handleDeleteCall(id);
+            }}
+            onAdd={(c) => {
+              void handleAddCall(c);
+            }}
+          />
         )}
-        {activeTab === "ivr" && <IVRSettingsTab />}
-        {activeTab === "settings" && (
-          <SettingsTab settings={settings} setSettings={setSettings} />
-        )}
+        {activeTab === "settings" && <MsSettingsTab />}
       </div>
     </div>
   );

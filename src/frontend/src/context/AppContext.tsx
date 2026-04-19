@@ -1,78 +1,231 @@
+/**
+ * SHUBH SCHOOL ERP — AppContext
+ *
+ * WhatsApp-style sync:
+ * - On login: show loading screen → fetch ALL data from MySQL → render
+ * - On any change: update local state + push ONLY changed record to server
+ * - Token stored in sessionStorage (not localStorage)
+ * - If server unreachable: show error with Retry — never show stale data
+ */
+
 import {
   type ReactNode,
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useReducer,
+  useRef,
   useState,
-  useSyncExternalStore,
 } from "react";
-import type { AppUser, Notification, Session, UserRole } from "../types";
-import { backendLogin, clearTokens, isApiConfigured } from "../utils/api";
-import { dataService } from "../utils/dataService";
+import type {
+  AppUser,
+  Notification,
+  Permission,
+  PermissionMatrix,
+  Session,
+  SyncStatus,
+  UserRole,
+} from "../types";
+import {
+  backendLogin,
+  clearTokens,
+  getJwt,
+  getStoredServerPassword,
+  getStoredServerUsername,
+  isApiConfigured,
+  setJwt,
+} from "../utils/api";
 import { generateId, ls } from "../utils/localStorage";
+import { syncEngine } from "../utils/syncEngine";
 
-interface AppContextValue {
-  currentUser: AppUser | null;
-  currentSession: Session | null;
-  sessions: Session[];
-  notifications: Notification[];
-  unreadCount: number;
-  isReadOnly: boolean;
-  /** Super Admin can always write, even in archived sessions */
-  canWrite: boolean;
-  /** Whether data is loading from server on initial sync */
-  isSyncLoading: boolean;
-  /** Counts from last server sync e.g. {students: 142, fee_receipts: 890} */
-  syncCounts: Record<string, number>;
-  login: (username: string, password: string) => boolean;
-  logout: () => void;
-  changePassword: (userId: string, newPassword: string) => boolean;
-  switchSession: (sessionId: string) => void;
-  addNotification: (
-    message: string,
-    type?: Notification["type"],
-    icon?: string,
-  ) => void;
-  markAllRead: () => void;
-  clearNotifications: () => void;
-  createSession: (label: string) => Session;
-  /** Get all records from a collection (server-synced) */
-  getData: (collection: string) => unknown[];
-  /** Save a record to a collection (API + cache) */
-  saveData: (
-    collection: string,
-    item: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
-  /** Update a record in a collection (API + cache) */
-  updateData: (
-    collection: string,
-    id: string,
-    changes: Record<string, unknown>,
-  ) => Promise<void>;
-  /** Delete a record from a collection (API + cache) */
-  deleteData: (collection: string, id: string) => Promise<void>;
-  /** Force refresh a single collection from the server */
-  refreshCollection: (collection: string) => Promise<void>;
-}
-
-const AppContext = createContext<AppContextValue | null>(null);
-
-// Super Admin is hard-coded only — all other credentials are dynamic from localStorage
-const SUPER_ADMIN: AppUser = {
-  id: "su1",
-  username: "superadmin",
-  role: "superadmin",
-  name: "Super Admin",
+// ── Default permissions per role ─────────────────────────────────────────────
+const ROLE_DEFAULTS: Record<UserRole, PermissionMatrix> = {
+  superadmin: {} as PermissionMatrix, // unrestricted — hasPermission always true
+  admin: buildMatrix(true, true, true, true),
+  teacher: buildMatrix(true, false, false, false),
+  receptionist: buildMatrix(true, true, false, false),
+  accountant: buildMatrix(true, true, false, false),
+  librarian: buildMatrix(true, true, false, false),
+  driver: buildMatrix(true, false, false, false),
+  parent: buildMatrix(true, false, false, false),
+  student: buildMatrix(true, false, false, false),
 };
 
-function initDefaultSession(): Session {
-  const existing = ls.get<Session[]>("sessions", []);
-  if (existing.length > 0) {
-    const active = existing.find((s) => s.isActive);
-    return active ?? existing[0];
+function buildMatrix(
+  canView: boolean,
+  canAdd: boolean,
+  canEdit: boolean,
+  canDelete: boolean,
+): PermissionMatrix {
+  const modules = [
+    "dashboard",
+    "students",
+    "fees",
+    "attendance",
+    "hr",
+    "academics",
+    "transport",
+    "inventory",
+    "expenses",
+    "homework",
+    "communication",
+    "examinations",
+    "certificates",
+    "alumni",
+    "reports",
+    "settings",
+    "chat",
+    "calling",
+  ];
+  const matrix: PermissionMatrix = {};
+  for (const m of modules) {
+    matrix[m] = { module: m, canView, canAdd, canEdit, canDelete };
   }
-  const session: Session = {
+  return matrix;
+}
+
+// ── App state ─────────────────────────────────────────────────────────────────
+
+interface AppState {
+  // Auth
+  currentUser: AppUser | null;
+  token: string | null;
+  // Init
+  isInitializing: boolean;
+  initError: string | null;
+  // Session
+  currentSession: Session | null;
+  sessions: Session[];
+  // Sync
+  syncStatus: SyncStatus;
+  // Permissions
+  permissions: PermissionMatrix;
+  // All data in memory (loaded from server on login)
+  data: Record<string, unknown[]>;
+  // Notifications (in-memory only)
+  notifications: Notification[];
+}
+
+type AppAction =
+  | { type: "SET_USER"; user: AppUser; token: string | null }
+  | { type: "LOGOUT" }
+  | { type: "SET_INIT_START" }
+  | {
+      type: "SET_INIT_DONE";
+      data: Record<string, unknown[]>;
+      sessions: Session[];
+    }
+  | { type: "SET_INIT_ERROR"; error: string }
+  | { type: "SET_SESSION"; sessionId: string }
+  | { type: "ADD_SESSION"; session: Session }
+  | { type: "SET_SYNC_STATUS"; status: SyncStatus }
+  | { type: "SET_PERMISSIONS"; permissions: PermissionMatrix }
+  | { type: "UPDATE_COLLECTION"; collection: string; records: unknown[] }
+  | { type: "ADD_NOTIFICATION"; notification: Notification }
+  | { type: "MARK_ALL_READ" }
+  | { type: "CLEAR_NOTIFICATIONS" };
+
+function appReducer(state: AppState, action: AppAction): AppState {
+  switch (action.type) {
+    case "SET_USER":
+      return {
+        ...state,
+        currentUser: action.user,
+        token: action.token,
+        isInitializing: true,
+        initError: null,
+        permissions:
+          ROLE_DEFAULTS[action.user.role] ??
+          buildMatrix(true, false, false, false),
+      };
+
+    case "LOGOUT":
+      return {
+        ...INITIAL_STATE,
+        notifications: [],
+      };
+
+    case "SET_INIT_START":
+      return { ...state, isInitializing: true, initError: null };
+
+    case "SET_INIT_DONE": {
+      const serverSessions =
+        action.sessions.length > 0
+          ? action.sessions
+          : state.sessions.length > 0
+            ? state.sessions
+            : [makeDefaultSession()];
+      const activeSession =
+        serverSessions.find((s) => s.isActive) ?? serverSessions[0];
+      return {
+        ...state,
+        isInitializing: false,
+        initError: null,
+        data: action.data,
+        sessions: serverSessions,
+        currentSession: activeSession ?? null,
+      };
+    }
+
+    case "SET_INIT_ERROR":
+      return { ...state, isInitializing: false, initError: action.error };
+
+    case "SET_SESSION": {
+      const session = state.sessions.find((s) => s.id === action.sessionId);
+      return { ...state, currentSession: session ?? state.currentSession };
+    }
+
+    case "ADD_SESSION": {
+      const updated = state.sessions.map((s) => ({
+        ...s,
+        isActive: false,
+        isArchived: true,
+      }));
+      return {
+        ...state,
+        sessions: [...updated, action.session],
+        currentSession: action.session,
+      };
+    }
+
+    case "SET_SYNC_STATUS":
+      return { ...state, syncStatus: action.status };
+
+    case "SET_PERMISSIONS":
+      return { ...state, permissions: action.permissions };
+
+    case "UPDATE_COLLECTION":
+      return {
+        ...state,
+        data: { ...state.data, [action.collection]: action.records },
+      };
+
+    case "ADD_NOTIFICATION":
+      return {
+        ...state,
+        notifications: [action.notification, ...state.notifications].slice(
+          0,
+          50,
+        ),
+      };
+
+    case "MARK_ALL_READ":
+      return {
+        ...state,
+        notifications: state.notifications.map((n) => ({ ...n, isRead: true })),
+      };
+
+    case "CLEAR_NOTIFICATIONS":
+      return { ...state, notifications: [] };
+
+    default:
+      return state;
+  }
+}
+
+function makeDefaultSession(): Session {
+  return {
     id: "sess_2025",
     label: "2025-26",
     startYear: 2025,
@@ -81,174 +234,274 @@ function initDefaultSession(): Session {
     isActive: true,
     createdAt: new Date().toISOString(),
   };
-  ls.set("sessions", [session]);
-  ls.set("current_session", session.id);
-  return session;
 }
 
+const INITIAL_STATE: AppState = {
+  currentUser: null,
+  token: null,
+  isInitializing: false,
+  initError: null,
+  currentSession: null,
+  sessions: [],
+  syncStatus: {
+    state: "idle",
+    lastSyncTime: null,
+    lastError: null,
+    pendingCount: 0,
+    serverCounts: {},
+  },
+  permissions: {} as PermissionMatrix,
+  data: {},
+  notifications: [],
+};
+
+// ── Context value interface ────────────────────────────────────────────────────
+
+interface AppContextValue {
+  currentUser: AppUser | null;
+  currentSession: Session | null;
+  sessions: Session[];
+  notifications: Notification[];
+  unreadCount: number;
+  isReadOnly: boolean;
+  canWrite: boolean;
+  isSyncLoading: boolean;
+  syncStatus: SyncStatus;
+  /** Real server counts (from MySQL COUNT(*)) for dashboard stat cards */
+  serverCounts: Record<string, number>;
+  /** Legacy compatibility: counts from dataService cache */
+  syncCounts: Record<string, number>;
+  // Auth
+  login: (username: string, password: string) => boolean;
+  logout: () => void;
+  changePassword: (userId: string, newPassword: string) => boolean;
+  // Session
+  switchSession: (sessionId: string) => void;
+  createSession: (label: string) => Session;
+  // Notifications
+  addNotification: (
+    message: string,
+    type?: Notification["type"],
+    icon?: string,
+  ) => void;
+  markAllRead: () => void;
+  clearNotifications: () => void;
+  // Permissions
+  hasPermission: (
+    module: string,
+    action?: keyof Omit<Permission, "module">,
+  ) => boolean;
+  // Data access (server-synced)
+  getData: (collection: string) => unknown[];
+  saveData: (
+    collection: string,
+    item: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  updateData: (
+    collection: string,
+    id: string,
+    changes: Record<string, unknown>,
+  ) => Promise<void>;
+  deleteData: (collection: string, id: string) => Promise<void>;
+  refreshCollection: (collection: string) => Promise<void>;
+}
+
+const AppContext = createContext<AppContextValue | null>(null);
+
+// ── Hardcoded Super Admin ─────────────────────────────────────────────────────
+const SUPER_ADMIN: AppUser = {
+  id: "su1",
+  username: "superadmin",
+  role: "superadmin",
+  name: "Super Admin",
+};
+
+// ── App Loading Screen ────────────────────────────────────────────────────────
+
+function AppLoading({
+  error,
+  onRetry,
+}: { error: string | null; onRetry: () => void }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-background">
+      <div className="flex flex-col items-center gap-4">
+        <div
+          className="w-16 h-16 rounded-2xl flex items-center justify-center"
+          style={{ background: "oklch(0.45 0.18 260)" }}
+        >
+          <svg
+            width="36"
+            height="36"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2"
+            role="img"
+          >
+            <title>School logo</title>
+            <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
+            <path d="M6 12v5c3 3 9 3 12 0v-5" />
+          </svg>
+        </div>
+        <div className="text-center">
+          <p className="text-xl font-bold text-foreground font-display tracking-tight">
+            SHUBH SCHOOL ERP
+          </p>
+          {error ? (
+            <>
+              <p className="text-sm text-destructive mt-2 max-w-xs">{error}</p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-3 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground mt-1">
+                Loading school data…
+              </p>
+              <div className="flex items-center gap-1.5 justify-center mt-3">
+                {[0, 1, 2].map((i) => (
+                  <div
+                    key={i}
+                    className="w-2 h-2 rounded-full bg-primary animate-pulse"
+                    style={{ animationDelay: `${i * 200}ms` }}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── AppProvider ────────────────────────────────────────────────────────────────
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  // Ensure the app is marked as initialized
-  if (!ls.get<string>("initialized", "")) {
-    ls.set("initialized", "true");
-  }
+  const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const initStartedRef = useRef(false);
 
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(() =>
-    ls.get<AppUser | null>("current_user", null),
-  );
-  const [sessions, setSessions] = useState<Session[]>(() => {
-    initDefaultSession();
-    return ls.get<Session[]>("sessions", []);
-  });
-  const [currentSessionId, setCurrentSessionId] = useState<string>(() =>
-    ls.get<string>("current_session", "sess_2025"),
-  );
-  const [notifications, setNotifications] = useState<Notification[]>(() =>
-    ls.get<Notification[]>("notifications", []),
-  );
-
-  // ── DataService state ────────────────────────────────────────────────────
-  // Subscribe to DataService so components re-render on cache changes
-  const dsVersion = useSyncExternalStore(
-    dataService.subscribe.bind(dataService),
-    () => dataService.getMode(),
-  );
-  const isSyncLoading = dsVersion === "loading";
-  const syncCounts = dataService.getCounts();
-
-  // Initialize DataService when user is logged in and API is configured.
-  // force=true ensures fresh MySQL data is fetched on every login,
-  // not just on the first load — this is critical for cross-device sync.
-  // ── ISSUE 4 FIX: After init completes, re-read sessions from server cache ──
+  // ── Subscribe to SyncEngine status changes ─────────────────────────────────
   useEffect(() => {
-    if (currentUser && isApiConfigured()) {
-      void dataService.init(true).then(() => {
-        // Re-read sessions from the server-fetched cache
-        const serverSessions = dataService.get<Session>("sessions");
-        if (serverSessions.length > 0) {
-          setSessions(serverSessions);
-          // Prefer the currently active session, fall back to first
-          const activeSession =
-            serverSessions.find((s) => s.isActive) ?? serverSessions[0];
-          if (activeSession) {
-            setCurrentSessionId(activeSession.id);
-            ls.set("current_session", activeSession.id);
-          }
-        } else {
-          // Sessions table is empty on server — seed the default session to MySQL
-          const defaultSession: Session = {
-            id: "sess_2025",
-            label: "2025-26",
-            startYear: 2025,
-            endYear: 2026,
-            isArchived: false,
-            isActive: true,
-            createdAt: new Date().toISOString(),
-          };
-          void dataService.save(
-            "sessions",
-            defaultSession as unknown as Record<string, unknown>,
-          );
-          setSessions([defaultSession]);
-          setCurrentSessionId(defaultSession.id);
-          ls.set("sessions", [defaultSession]);
-          ls.set("current_session", defaultSession.id);
-        }
-      });
-    }
-  }, [currentUser]);
-
-  // ── Data access helpers ────────────────────────────────────────────────
-  // getData re-runs on dsVersion change (triggered by DataService.notify())
-  // so consumers always get fresh data after any server write.
-  const getData = (collection: string) => dataService.get<unknown>(collection);
-
-  const saveData = useCallback(
-    (
-      collection: string,
-      item: Record<string, unknown>,
-    ): Promise<Record<string, unknown>> => {
-      return dataService.save(collection, item);
-    },
-    [],
-  );
-
-  const updateData = useCallback(
-    (
-      collection: string,
-      id: string,
-      changes: Record<string, unknown>,
-    ): Promise<void> => {
-      return dataService.update(collection, id, changes);
-    },
-    [],
-  );
-
-  const deleteData = useCallback(
-    (collection: string, id: string): Promise<void> => {
-      return dataService.delete(collection, id);
-    },
-    [],
-  );
-
-  const refreshCollection = useCallback((collection: string): Promise<void> => {
-    return dataService.refresh(collection);
+    const unsub = syncEngine.subscribe(() => {
+      dispatch({ type: "SET_SYNC_STATUS", status: syncEngine.getSyncStatus() });
+      // Also sync collection updates from SyncEngine cache to state
+      const cache = syncEngine.getAllCache();
+      for (const [collection, records] of Object.entries(cache)) {
+        dispatch({ type: "UPDATE_COLLECTION", collection, records });
+      }
+    });
+    return unsub;
   }, []);
 
-  const currentSession =
-    sessions.find((s) => s.id === currentSessionId) ?? sessions[0] ?? null;
-  const isReadOnly = currentSession?.isArchived ?? false;
-  /** Super Admin bypasses read-only — they can always write in any session */
-  const canWrite = !isReadOnly || currentUser?.role === "superadmin";
-  const unreadCount = notifications.filter((n) => !n.isRead).length;
-
-  // Expose addNotification globally for non-React code
-  const addNotification = useCallback(
-    (message: string, type: Notification["type"] = "info", icon?: string) => {
-      const notif: Notification = {
-        id: generateId(),
-        message,
-        type,
-        timestamp: Date.now(),
-        isRead: false,
-        icon,
-      };
-      setNotifications((prev) => {
-        const updated = [notif, ...prev].slice(0, 50);
-        ls.set("notifications", updated);
-        return updated;
-      });
-    },
-    [],
-  );
-
+  // ── Restore token from sessionStorage on page reload ──────────────────────
+  // Note: sessionStorage is per-tab — on page reload within same tab, it persists.
+  // This lets us re-initialize data without requiring re-login.
   useEffect(() => {
-    (window as unknown as Record<string, unknown>).addErpNotification = (
-      msg: string,
-      type?: string,
-      icon?: string,
-    ) => {
-      addNotification(msg, (type as Notification["type"]) ?? "info", icon);
-    };
-  }, [addNotification]);
+    const storedToken = getJwt();
+    const storedUserRaw = sessionStorage.getItem("shubh_current_user");
+    if (storedToken && storedUserRaw) {
+      try {
+        const user = JSON.parse(storedUserRaw) as AppUser;
+        dispatch({ type: "SET_USER", user, token: storedToken });
+      } catch {
+        // corrupt storage — ignore, user will re-login
+      }
+    }
+  }, []);
 
+  // ── Initialize: fetch ALL data from server after login ─────────────────────
+  useEffect(() => {
+    if (!state.currentUser || !state.isInitializing) return;
+    if (initStartedRef.current) return;
+    initStartedRef.current = true;
+
+    void (async () => {
+      dispatch({ type: "SET_INIT_START" });
+
+      const token = state.token ?? getJwt();
+
+      if (!isApiConfigured() || !token) {
+        // Offline mode — use empty data or localStorage fallback
+        const localSessions = ls.get<Session[]>("sessions", []);
+        const defaultSessions =
+          localSessions.length > 0 ? localSessions : [makeDefaultSession()];
+        dispatch({
+          type: "SET_INIT_DONE",
+          data: {},
+          sessions: defaultSessions,
+        });
+        syncEngine.setToken(null);
+        return;
+      }
+
+      try {
+        const allData = await syncEngine.initialize(token);
+
+        // Extract sessions from data
+        const serverSessions = (allData.sessions ?? []) as Session[];
+
+        // If sessions table is empty, seed default session
+        if (serverSessions.length === 0) {
+          const defaultSession = makeDefaultSession();
+          try {
+            await syncEngine.saveRecord(
+              "sessions",
+              defaultSession as unknown as Record<string, unknown>,
+              "create",
+            );
+          } catch {
+            // ignore — continue with default in memory
+          }
+          serverSessions.push(defaultSession);
+        }
+
+        dispatch({
+          type: "SET_INIT_DONE",
+          data: allData,
+          sessions: serverSessions,
+        });
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to connect to server";
+        dispatch({ type: "SET_INIT_ERROR", error: msg });
+        initStartedRef.current = false;
+      }
+    })();
+  }, [state.currentUser, state.isInitializing, state.token]);
+
+  // ── Login ──────────────────────────────────────────────────────────────────
   const login = useCallback((username: string, password: string): boolean => {
     // 1. Super Admin
     if (username === "superadmin") {
-      const storedPw = ls.get<Record<string, string>>("user_passwords", {})[
-        username
-      ];
-      const validPw = storedPw ?? "admin123";
+      const passwords = ls.get<Record<string, string>>("user_passwords", {});
+      const validPw = passwords[username] ?? "admin123";
       if (password !== validPw) return false;
-      setCurrentUser(SUPER_ADMIN);
-      ls.set("current_user", SUPER_ADMIN);
-      // Attempt backend JWT login in background — failure is silent, local auth still works
+
+      let token = getJwt();
+      // Try backend login in background to get JWT
       if (isApiConfigured()) {
-        void backendLogin(username, password);
+        void backendLogin(username, password).then((res) => {
+          if (res.success && res.token) {
+            setJwt(res.token);
+            syncEngine.setToken(res.token);
+          }
+        });
+        token = token ?? null;
       }
+
+      sessionStorage.setItem("shubh_current_user", JSON.stringify(SUPER_ADMIN));
+      initStartedRef.current = false;
+      dispatch({ type: "SET_USER", user: SUPER_ADMIN, token });
       return true;
     }
 
-    // 2. Custom staff users (Admin, Receptionist, Accountant, Librarian, Driver added via User Management)
+    // 2. Custom staff users
     const customUsers = ls.get<Array<AppUser & { password?: string }>>(
       "custom_users",
       [],
@@ -256,8 +509,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const customUser = customUsers.find((u) => u.username === username);
     if (customUser) {
       const passwords = ls.get<Record<string, string>>("user_passwords", {});
-      const storedPw = passwords[username];
-      if (storedPw && storedPw === password) {
+      if (passwords[username] === password) {
         const user: AppUser = {
           id: customUser.id,
           username: customUser.username,
@@ -265,8 +517,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           name: customUser.name,
           position: customUser.position,
         };
-        setCurrentUser(user);
-        ls.set("current_user", user);
+        sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+        initStartedRef.current = false;
+        dispatch({ type: "SET_USER", user, token: null });
         return true;
       }
     }
@@ -279,7 +532,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         mobile: string;
         dob: string;
         designation: string;
-        credentials: { username: string; password: string };
+        credentials: Credentials;
       }>
     >("staff", []);
     const staffMember = staffList.find(
@@ -307,8 +560,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         staffId: staffMember.id,
         mobile: staffMember.mobile,
       };
-      setCurrentUser(user);
-      ls.set("current_user", user);
+      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+      initStartedRef.current = false;
+      dispatch({ type: "SET_USER", user, token: null });
       return true;
     }
 
@@ -318,7 +572,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         id: string;
         fullName: string;
         admNo: string;
-        credentials: { username: string; password: string };
+        credentials: Credentials;
       }>
     >("students", []);
     const student = students.find(
@@ -334,8 +588,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         name: student.fullName,
         studentId: student.id,
       };
-      setCurrentUser(user);
-      ls.set("current_user", user);
+      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+      initStartedRef.current = false;
+      dispatch({ type: "SET_USER", user, token: null });
       return true;
     }
 
@@ -363,8 +618,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         name: raw.guardianName ?? raw.fatherName ?? "Parent",
         mobile: mob,
       };
-      setCurrentUser(user);
-      ls.set("current_user", user);
+      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+      initStartedRef.current = false;
+      dispatch({ type: "SET_USER", user, token: null });
       return true;
     }
 
@@ -372,10 +628,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
-    setCurrentUser(null);
-    ls.remove("current_user");
+    sessionStorage.removeItem("shubh_current_user");
     clearTokens();
+    syncEngine.reset();
+    initStartedRef.current = false;
+    dispatch({ type: "LOGOUT" });
   }, []);
+
+  // ── Retry init (when server was unreachable) ───────────────────────────────
+  const retryInit = useCallback(() => {
+    initStartedRef.current = false;
+    dispatch({ type: "SET_INIT_START" });
+  }, []);
+
+  // Expose addNotification globally for non-React code
+  const addNotification = useCallback(
+    (message: string, type: Notification["type"] = "info", icon?: string) => {
+      const notif: Notification = {
+        id: generateId(),
+        message,
+        type,
+        timestamp: Date.now(),
+        isRead: false,
+        icon,
+      };
+      dispatch({ type: "ADD_NOTIFICATION", notification: notif });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    (window as unknown as Record<string, unknown>).addErpNotification = (
+      msg: string,
+      type?: string,
+      icon?: string,
+    ) => addNotification(msg, (type as Notification["type"]) ?? "info", icon);
+  }, [addNotification]);
 
   const changePassword = useCallback(
     (userId: string, newPassword: string): boolean => {
@@ -420,21 +708,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const switchSession = useCallback((sessionId: string) => {
-    setCurrentSessionId(sessionId);
+    dispatch({ type: "SET_SESSION", sessionId });
     ls.set("current_session", sessionId);
-  }, []);
-
-  const markAllRead = useCallback(() => {
-    setNotifications((prev) => {
-      const updated = prev.map((n) => ({ ...n, isRead: true }));
-      ls.set("notifications", updated);
-      return updated;
-    });
-  }, []);
-
-  const clearNotifications = useCallback(() => {
-    setNotifications([]);
-    ls.set("notifications", []);
   }, []);
 
   const createSession = useCallback((label: string): Session => {
@@ -449,41 +724,155 @@ export function AppProvider({ children }: { children: ReactNode }) {
       isActive: true,
       createdAt: new Date().toISOString(),
     };
-    setSessions((prev) => {
-      const updated = prev.map((s) => ({
-        ...s,
-        isActive: false,
-        isArchived: true,
-      }));
-      const all = [...updated, session];
-      ls.set("sessions", all);
-      return all;
-    });
-    setCurrentSessionId(session.id);
+    dispatch({ type: "ADD_SESSION", session });
+    // Save to server
+    void syncEngine.saveRecord(
+      "sessions",
+      session as unknown as Record<string, unknown>,
+      "create",
+    );
     ls.set("current_session", session.id);
     return session;
   }, []);
 
+  const markAllRead = useCallback(
+    () => dispatch({ type: "MARK_ALL_READ" }),
+    [],
+  );
+  const clearNotifications = useCallback(
+    () => dispatch({ type: "CLEAR_NOTIFICATIONS" }),
+    [],
+  );
+
+  const hasPermission = useCallback(
+    (
+      module: string,
+      action: keyof Omit<Permission, "module"> = "canView",
+    ): boolean => {
+      if (!state.currentUser) return false;
+      if (state.currentUser.role === "superadmin") return true;
+      const perm = state.permissions[module];
+      if (!perm) return false;
+      return perm[action] === true;
+    },
+    [state.currentUser, state.permissions],
+  );
+
+  // ── Data access (server-synced) ────────────────────────────────────────────
+
+  const getData = useCallback(
+    (collection: string): unknown[] => {
+      // Prefer state.data (loaded from server), fall back to SyncEngine cache
+      const fromState = state.data[collection];
+      if (fromState && fromState.length > 0) return fromState;
+      return syncEngine.getCache(collection);
+    },
+    [state.data],
+  );
+
+  const saveData = useCallback(
+    async (
+      collection: string,
+      item: Record<string, unknown>,
+    ): Promise<Record<string, unknown>> => {
+      const token = state.token ?? getJwt();
+      syncEngine.setToken(token);
+      const saved = await syncEngine.saveRecord(collection, item, "create");
+      const records = syncEngine.getCache(collection) as unknown[];
+      dispatch({ type: "UPDATE_COLLECTION", collection, records });
+      return saved;
+    },
+    [state.token],
+  );
+
+  const updateData = useCallback(
+    async (
+      collection: string,
+      id: string,
+      changes: Record<string, unknown>,
+    ): Promise<void> => {
+      const token = state.token ?? getJwt();
+      syncEngine.setToken(token);
+      const existing = getData(collection) as Array<Record<string, unknown>>;
+      const current = existing.find((r) => r.id === id);
+      const merged = { ...(current ?? {}), ...changes, id };
+      await syncEngine.saveRecord(collection, merged, "update");
+      const records = syncEngine.getCache(collection) as unknown[];
+      dispatch({ type: "UPDATE_COLLECTION", collection, records });
+    },
+    [state.token, getData],
+  );
+
+  const deleteData = useCallback(
+    async (collection: string, id: string): Promise<void> => {
+      const token = state.token ?? getJwt();
+      syncEngine.setToken(token);
+      await syncEngine.saveRecord(collection, { id }, "delete");
+      const records = syncEngine.getCache(collection) as unknown[];
+      dispatch({ type: "UPDATE_COLLECTION", collection, records });
+    },
+    [state.token],
+  );
+
+  const refreshCollection = useCallback(
+    async (collection: string): Promise<void> => {
+      const token = state.token ?? getJwt();
+      syncEngine.setToken(token);
+      const rows = await syncEngine.refreshCollection(collection);
+      dispatch({
+        type: "UPDATE_COLLECTION",
+        collection,
+        records: rows as unknown[],
+      });
+    },
+    [state.token],
+  );
+
+  // ── Computed values ────────────────────────────────────────────────────────
+  const isReadOnly = state.currentSession?.isArchived ?? false;
+  const canWrite = !isReadOnly || state.currentUser?.role === "superadmin";
+  const unreadCount = state.notifications.filter((n) => !n.isRead).length;
+  const isSyncLoading = state.syncStatus.state === "loading";
+  const serverCounts = state.syncStatus.serverCounts;
+  // Legacy compat: build syncCounts from data keys
+  const syncCounts: Record<string, number> = {};
+  for (const [k, v] of Object.entries(state.data)) {
+    syncCounts[k] = v.length;
+  }
+
+  // ── Render loading screen during initial server fetch ──────────────────────
+  // Only block render when we have a logged-in user but data hasn't loaded yet
+  const showLoading =
+    state.currentUser !== null &&
+    (state.isInitializing || state.syncStatus.state === "loading");
+  const showError =
+    state.currentUser !== null &&
+    state.initError !== null &&
+    !state.isInitializing;
+
   return (
     <AppContext.Provider
       value={{
-        currentUser,
-        currentSession,
-        sessions,
-        notifications,
+        currentUser: state.currentUser,
+        currentSession: state.currentSession,
+        sessions: state.sessions,
+        notifications: state.notifications,
         unreadCount,
         isReadOnly,
         canWrite,
         isSyncLoading,
+        syncStatus: state.syncStatus,
+        serverCounts,
         syncCounts,
         login,
         logout,
         changePassword,
         switchSession,
+        createSession,
         addNotification,
         markAllRead,
         clearNotifications,
-        createSession,
+        hasPermission,
         getData,
         saveData,
         updateData,
@@ -491,7 +880,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         refreshCollection,
       }}
     >
-      {children}
+      {showLoading || showError ? (
+        <AppLoading
+          error={showError ? state.initError : null}
+          onRetry={retryInit}
+        />
+      ) : (
+        children
+      )}
     </AppContext.Provider>
   );
 }
@@ -500,4 +896,10 @@ export function useApp() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
+}
+
+// ── Type alias for credentials used in login checks ──────────────────────────
+interface Credentials {
+  username: string;
+  password: string;
 }

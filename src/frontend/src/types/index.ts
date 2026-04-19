@@ -1,12 +1,8 @@
 // ──────────────────────────────────────────────────────────
 // SHUBH SCHOOL ERP — Complete Type Definitions
+// All field names match PHP API camelCase MySQL columns
 // ──────────────────────────────────────────────────────────
 
-/**
- * Optional MySQL numeric primary key alongside the existing string id.
- * Populated when the app is connected to a cPanel MySQL server via api.ts.
- * Undefined in local-only (localStorage) mode.
- */
 export interface MySQLRecord {
   /** Numeric auto-increment PK from MySQL. Undefined in local mode. */
   dbId?: number;
@@ -64,6 +60,7 @@ export interface Student extends MySQLRecord {
   guardianMobile: string;
   mobile: string;
   address: string;
+  village?: string;
   aadhaarNo?: string;
   srNo?: string;
   penNo?: string;
@@ -79,6 +76,7 @@ export interface Student extends MySQLRecord {
   transportBusNo?: string;
   transportRoute?: string;
   transportPickup?: string;
+  transportMonths?: string[];
   createdAt?: string;
   credentials: Credentials;
   remarks?: string;
@@ -97,6 +95,7 @@ export interface Staff extends MySQLRecord {
   id: string;
   empId: string;
   name: string;
+  fullName?: string; // alias kept for compatibility
   designation: string;
   department?: string;
   mobile: string;
@@ -250,7 +249,7 @@ export interface Notification {
 }
 
 // ──────────────────────────────────────────────────────────
-// Users
+// Users & Permissions
 // ──────────────────────────────────────────────────────────
 export interface AppUser {
   id: string;
@@ -263,13 +262,85 @@ export interface AppUser {
   position?: string;
 }
 
+/** Alias used by AppContext and SyncEngine */
+export type User = AppUser;
+
+export interface Permission {
+  module: string;
+  canView: boolean;
+  canAdd: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export type PermissionMatrix = Record<string, Permission>;
+
+// ──────────────────────────────────────────────────────────
+// Sync Engine
+// ──────────────────────────────────────────────────────────
+export interface SyncStatus {
+  state: "idle" | "loading" | "synced" | "error" | "offline";
+  lastSyncTime: Date | null;
+  lastError: string | null;
+  pendingCount: number;
+  serverCounts: Record<string, number>;
+}
+
+export interface ChangelogEntry {
+  id: string;
+  collection: string;
+  recordId: string;
+  action: "create" | "update" | "delete";
+  changedBy: string;
+  changedByRole: string;
+  timestamp: string;
+  before?: Record<string, unknown>;
+  after?: Record<string, unknown>;
+}
+
+// ──────────────────────────────────────────────────────────
+// App Config
+// ──────────────────────────────────────────────────────────
+export interface AppConfig {
+  apiBaseUrl: string;
+  schoolId: string;
+  defaultSession: string;
+  syncIntervalMs: number;
+  offlineMode: boolean;
+}
+
+// ──────────────────────────────────────────────────────────
+// All data loaded from server in one call
+// ──────────────────────────────────────────────────────────
+export interface AllData {
+  students: Student[];
+  staff: Staff[];
+  attendance: AttendanceRecord[];
+  fee_receipts: FeeReceipt[];
+  fees_plan: FeesPlan[];
+  fee_headings: FeeHeading[];
+  sessions: Session[];
+  classes: ClassSection[];
+  subjects: Subject[];
+  transport_routes: TransportRoute[];
+  inventory_items: InventoryItem[];
+  expenses: Expense[];
+  homework: Homework[];
+  alumni: Alumni[];
+  notifications: Notification[];
+  [key: string]: unknown[];
+}
+
 // ──────────────────────────────────────────────────────────
 // Academics
 // ──────────────────────────────────────────────────────────
 export interface ClassSection {
   id: string;
   className: string;
+  /** Legacy field — some server records may use 'name' instead of 'className' */
+  name?: string;
   sections: string[];
+  session?: string;
 }
 
 export interface Subject {
@@ -282,6 +353,16 @@ export interface Subject {
 // ──────────────────────────────────────────────────────────
 // Transport
 // ──────────────────────────────────────────────────────────
+export interface Route {
+  id: string;
+  busNo: string;
+  routeName: string;
+  driverName: string;
+  driverMobile: string;
+  pickupPoints: RoutePickupPoint[];
+  studentIds: string[];
+}
+
 export interface TransportRoute {
   id: string;
   busNo: string;
@@ -298,6 +379,7 @@ export interface StudentTransport {
   busNo: string;
   routeName: string;
   pickupPoint: string;
+  months?: string[];
 }
 
 export interface RoutePickupPoint {
@@ -519,13 +601,7 @@ export interface SchoolProfile {
   state: string;
   pincode: string;
   bank?: BankDetails;
-}
-
-export interface Permission {
-  module: string;
-  canView: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
+  backgroundImage?: string;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -551,6 +627,8 @@ export interface ChatMessage {
   content: string;
   sent_at: string;
   is_mine: boolean;
+  file_url?: string;
+  file_name?: string;
 }
 
 export interface ChatUser {
@@ -558,4 +636,26 @@ export interface ChatUser {
   name: string;
   role: string;
   mobile?: string;
+}
+
+export interface ChatGroup {
+  id: string;
+  name: string;
+  type: "class" | "route" | "custom";
+  members: string[];
+  createdAt: string;
+  sessionId?: string;
+}
+
+// ──────────────────────────────────────────────────────────
+// Calls
+// ──────────────────────────────────────────────────────────
+export interface Call {
+  id: string;
+  from: string;
+  to: string;
+  duration: number; // seconds
+  timestamp: string;
+  status: "completed" | "missed" | "rejected";
+  direction: "inbound" | "outbound";
 }

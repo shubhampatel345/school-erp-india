@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  File,
   MessageCircle,
   Paperclip,
   Plus,
@@ -9,34 +10,36 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import type { ChatConversation, ChatMessage, ChatUser } from "../types";
+import type { ClassSection, Staff, Student, TransportRoute } from "../types";
+import { generateId } from "../utils/localStorage";
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+// ── Local types ───────────────────────────────────────────────────────────────
 
-function getToken(): string {
-  return localStorage.getItem("shubh_erp_auth_token") ?? "";
+interface LocalChatGroup {
+  id: string;
+  name: string;
+  type: "dm" | "class" | "route" | "custom";
+  members: string[]; // user display names (no mobile)
+  memberIds: string[]; // internal IDs
+  createdAt: string;
 }
 
-async function apiChat<T>(
-  method: string,
-  path: string,
-  body?: Record<string, unknown>,
-): Promise<T> {
-  const apiBase =
-    localStorage.getItem("shubh_erp_api_url") ?? "https://shubh.psmkgs.com/api";
-  const res = await fetch(`${apiBase}${path}`, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${getToken()}`,
-    },
-    ...(body ? { body: JSON.stringify(body) } : {}),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json() as T;
+interface LocalChatMessage {
+  id: string;
+  groupId: string;
+  senderId: string;
+  senderName: string;
+  senderRole: string;
+  content: string;
+  type: "text" | "file";
+  fileUrl?: string;
+  fileName?: string;
+  createdAt: string;
 }
+
+// ── Utility helpers ───────────────────────────────────────────────────────────
 
 function formatTime(iso: string): string {
   if (!iso) return "";
@@ -44,7 +47,7 @@ function formatTime(iso: string): string {
   const now = new Date();
   const diff = (now.getTime() - d.getTime()) / 1000;
   if (diff < 60) return "now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`;
   if (diff < 86400)
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const yesterday = new Date(now);
@@ -65,212 +68,104 @@ function getInitials(name: string): string {
   return name
     .split(" ")
     .slice(0, 2)
-    .map((w) => w[0])
+    .map((w) => w[0] ?? "")
     .join("")
     .toUpperCase();
 }
 
-const ROLE_COLORS: Record<string, string> = {
+const ROLE_BG: Record<string, string> = {
   superadmin: "bg-purple-600",
   admin: "bg-blue-600",
   teacher: "bg-teal-600",
   student: "bg-green-600",
   parent: "bg-orange-500",
   driver: "bg-yellow-600",
-  default: "bg-gray-500",
 };
 
-function avatarColor(role?: string, type?: string): string {
-  if (type === "class_group") return "bg-teal-600";
-  if (type === "route_group") return "bg-orange-500";
-  return ROLE_COLORS[role ?? "default"] ?? ROLE_COLORS.default;
+function avatarBg(role?: string, type?: string): string {
+  if (type === "class") return "bg-teal-600";
+  if (type === "route") return "bg-orange-500";
+  if (type === "dm") return ROLE_BG[role ?? ""] ?? "bg-primary";
+  return "bg-primary";
 }
 
-const ROLE_BADGE: Record<string, string> = {
-  superadmin: "bg-purple-100 text-purple-700",
-  admin: "bg-blue-100 text-blue-700",
-  teacher: "bg-teal-100 text-teal-700",
-  student: "bg-green-100 text-green-700",
-  parent: "bg-orange-100 text-orange-700",
-  driver: "bg-yellow-100 text-yellow-700",
-};
+// ── FileToBase64 helper ───────────────────────────────────────────────────────
 
-// ── UserPickerModal ────────────────────────────────────────────────────────────
-
-interface UserPickerProps {
-  onClose: () => void;
-  onStartDM: (userId: number) => void;
-}
-
-function UserPickerModal({ onClose, onStartDM }: UserPickerProps) {
-  const [users, setUsers] = useState<ChatUser[]>([]);
-  const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    apiChat<{ data: ChatUser[] }>("GET", "/chat/users")
-      .then((r) => setUsers(r.data ?? []))
-      .catch(() => setUsers([]))
-      .finally(() => {
-        setLoading(false);
-        setTimeout(() => inputRef.current?.focus(), 50);
-      });
-  }, []);
-
-  const filtered = users.filter(
-    (u) =>
-      u.name.toLowerCase().includes(query.toLowerCase()) ||
-      u.role.toLowerCase().includes(query.toLowerCase()),
-  );
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
-      data-ocid="chat.user_picker.dialog"
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0"
-        role="button"
-        tabIndex={0}
-        aria-label="Close"
-        onClick={onClose}
-        onKeyDown={(e) => e.key === "Escape" && onClose()}
-      />
-      {/* Panel */}
-      <div className="relative bg-card rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border">
-          <h2 className="font-semibold text-foreground text-base">
-            New Message
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close"
-            data-ocid="chat.user_picker.close_button"
-            className="p-1.5 rounded-full hover:bg-muted transition-colors"
-          >
-            <X className="w-5 h-5 text-muted-foreground" />
-          </button>
-        </div>
-        <div className="px-4 py-2 border-b border-border">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              type="text"
-              placeholder="Search by name or role…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              data-ocid="chat.user_picker.search_input"
-              className="w-full pl-9 pr-3 py-2 rounded-lg bg-muted text-sm text-foreground placeholder:text-muted-foreground border-0 outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-        </div>
-        <div className="overflow-y-auto flex-1">
-          {loading && (
-            <div className="flex items-center justify-center py-10 text-muted-foreground text-sm">
-              Loading users…
-            </div>
-          )}
-          {!loading && filtered.length === 0 && (
-            <div
-              className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground text-sm"
-              data-ocid="chat.user_picker.empty_state"
-            >
-              <Users className="w-8 h-8 opacity-40" />
-              No users found
-            </div>
-          )}
-          {filtered.map((u, i) => (
-            <button
-              type="button"
-              key={u.id}
-              data-ocid={`chat.user_picker.item.${i + 1}`}
-              onClick={() => onStartDM(u.id)}
-              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted transition-colors text-left"
-            >
-              <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarColor(u.role)}`}
-              >
-                {getInitials(u.name)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-sm text-foreground truncate">
-                  {u.name}
-                </p>
-              </div>
-              <span
-                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize ${
-                  ROLE_BADGE[u.role] ?? "bg-muted text-muted-foreground"
-                }`}
-              >
-                {u.role}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 // ── MessageBubble ─────────────────────────────────────────────────────────────
 
 interface BubbleProps {
-  msg: ChatMessage;
+  msg: LocalChatMessage;
+  isMine: boolean;
   showSender: boolean;
   isGroup: boolean;
 }
 
-function MessageBubble({ msg, showSender, isGroup }: BubbleProps) {
-  // Detect file URL in content (server may return a URL for uploaded files)
-  const fileUrlMatch = msg.content.match(
-    /https?:\/\/\S+\.(pdf|docx?|xlsx?|png|jpe?g|gif|zip|csv)/i,
-  );
-  const isFileMsg = !!fileUrlMatch;
+function MessageBubble({ msg, isMine, showSender, isGroup }: BubbleProps) {
+  const isFile = msg.type === "file";
+  const isImage = isFile && msg.fileUrl?.startsWith("data:image");
 
   return (
     <div
-      className={`flex flex-col mb-1 ${msg.is_mine ? "items-end" : "items-start"}`}
+      className={`flex flex-col mb-1 ${isMine ? "items-end" : "items-start"}`}
     >
-      {isGroup && !msg.is_mine && showSender && (
+      {isGroup && !isMine && showSender && (
         <span className="text-[11px] text-muted-foreground px-3 mb-0.5 font-medium">
-          {msg.sender_name}
+          {msg.senderName}
         </span>
       )}
       <div
-        className={`max-w-xs lg:max-w-md px-4 py-2 text-sm ${
-          msg.is_mine
-            ? "bg-blue-600 text-white rounded-2xl rounded-br-sm ml-auto"
-            : "bg-gray-100 dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-2xl rounded-bl-sm mr-auto"
+        className={`max-w-xs lg:max-w-md px-3 py-2 text-sm rounded-2xl ${
+          isMine
+            ? "bg-primary text-primary-foreground rounded-br-sm ml-auto"
+            : "bg-muted text-foreground rounded-bl-sm mr-auto"
         }`}
       >
-        {isFileMsg && fileUrlMatch ? (
-          <a
-            href={fileUrlMatch[0]}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`flex items-center gap-2 underline text-sm ${msg.is_mine ? "text-blue-100" : "text-blue-600"}`}
-          >
-            <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">
-              {msg.content.replace(fileUrlMatch[0], "").trim() ||
-                fileUrlMatch[0].split("/").pop()}
-            </span>
-          </a>
+        {isFile ? (
+          isImage && msg.fileUrl ? (
+            <div className="space-y-1">
+              <img
+                src={msg.fileUrl}
+                alt={msg.fileName ?? "attachment"}
+                className="rounded-xl max-w-full max-h-48 object-cover"
+              />
+              {msg.fileName && (
+                <p
+                  className={`text-[11px] ${isMine ? "text-primary-foreground/70" : "text-muted-foreground"}`}
+                >
+                  {msg.fileName}
+                </p>
+              )}
+            </div>
+          ) : (
+            <a
+              href={msg.fileUrl}
+              download={msg.fileName}
+              className={`flex items-center gap-2 ${isMine ? "text-primary-foreground/90" : "text-primary"}`}
+            >
+              <File className="w-4 h-4 flex-shrink-0" />
+              <span className="truncate text-xs underline">
+                {msg.fileName ?? "Attachment"}
+              </span>
+            </a>
+          )
         ) : (
           <p className="whitespace-pre-wrap break-words leading-relaxed">
             {msg.content}
           </p>
         )}
         <p
-          className={`text-[10px] mt-1 text-right ${
-            msg.is_mine ? "text-blue-200" : "text-gray-400 dark:text-gray-500"
-          }`}
+          className={`text-[10px] mt-0.5 text-right ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}
         >
-          {formatHHMM(msg.sent_at)}
+          {formatHHMM(msg.createdAt)}
         </p>
       </div>
     </div>
@@ -280,89 +175,70 @@ function MessageBubble({ msg, showSender, isGroup }: BubbleProps) {
 // ── ConversationView ──────────────────────────────────────────────────────────
 
 interface ConversationViewProps {
-  conv: ChatConversation;
+  group: LocalChatGroup;
+  messages: LocalChatMessage[];
+  currentUser: { id: string; name: string; role: string };
   onBack?: () => void;
   isMobile: boolean;
+  onSend: (
+    groupId: string,
+    content: string,
+    type: "text" | "file",
+    fileUrl?: string,
+    fileName?: string,
+  ) => Promise<void>;
 }
 
-function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+function ConversationView({
+  group,
+  messages,
+  currentUser,
+  onBack,
+  isMobile,
+  onSend,
+}: ConversationViewProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [attachFile, setAttachFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevLenRef = useRef(0);
+  const isGroup = group.type !== "dm";
 
-  const loadMessages = useCallback(async () => {
-    try {
-      const res = await apiChat<{ data: ChatMessage[] }>(
-        "GET",
-        `/chat/messages?conversation_id=${conv.id}&page=1`,
-      );
-      setMessages(res.data ?? []);
-    } catch {
-      // silent
-    }
-  }, [conv.id]);
-
+  // Auto-scroll when messages change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setMessages([]);
-    prevLenRef.current = 0;
-    loadMessages().then(() => {
-      setTimeout(() => bottomRef.current?.scrollIntoView(), 50);
-    });
-    apiChat("POST", "/chat/messages/read", { conversation_id: conv.id }).catch(
-      () => {},
+    setTimeout(
+      () => bottomRef.current?.scrollIntoView({ behavior: "smooth" }),
+      50,
     );
-    intervalRef.current = setInterval(loadMessages, 5000);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [conv.id, loadMessages]);
-
-  // Auto-scroll when new messages arrive
-  useEffect(() => {
-    if (messages.length > prevLenRef.current) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      prevLenRef.current = messages.length;
-    }
   });
 
   const sendMessage = async () => {
     const content = input.trim();
     if ((!content && !attachFile) || sending) return;
     setSending(true);
-    const savedInput = input;
     setInput("");
 
     try {
       if (attachFile) {
-        // Send file via multipart form
-        const apiBase =
-          localStorage.getItem("shubh_erp_api_url") ??
-          "https://shubh.psmkgs.com/api";
-        const form = new FormData();
-        form.append("conversation_id", String(conv.id));
-        form.append("content", content || `📎 ${attachFile.name}`);
-        form.append("file", attachFile);
-        const res = await fetch(`${apiBase}/chat/messages/send`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${getToken()}` },
-          body: form,
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        let fileUrl: string | undefined;
+        let fileName = attachFile.name;
+        if (attachFile.size < 1_000_000) {
+          fileUrl = await fileToBase64(attachFile);
+        } else {
+          fileUrl = undefined; // large file — store filename only
+        }
+        await onSend(
+          group.id,
+          content || `📎 ${fileName}`,
+          "file",
+          fileUrl,
+          fileName,
+        );
         setAttachFile(null);
       } else {
-        await apiChat("POST", "/chat/messages/send", {
-          conversation_id: conv.id,
-          content,
-        });
+        await onSend(group.id, content, "text");
       }
-      await loadMessages();
-    } catch {
-      setInput(savedInput);
     } finally {
       setSending(false);
     }
@@ -371,21 +247,19 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      sendMessage();
+      void sendMessage();
     }
   };
-
-  const isGroup = conv.type !== "direct";
 
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center gap-3 px-3 py-3 border-b border-border bg-card sticky top-0 z-10 shadow-sm">
+      <div className="flex items-center gap-3 px-3 py-3 border-b border-border bg-card sticky top-0 z-10 shadow-subtle">
         {isMobile && onBack && (
           <button
             type="button"
             onClick={onBack}
-            aria-label="Back to chat list"
+            aria-label="Back"
             data-ocid="chat.conversation.back_button"
             className="p-1.5 rounded-full hover:bg-muted transition-colors flex-shrink-0"
           >
@@ -393,24 +267,24 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
           </button>
         )}
         <div
-          className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avatarColor(undefined, conv.type)}`}
+          className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${avatarBg(undefined, group.type)}`}
         >
-          {isGroup ? <Users className="w-4 h-4" /> : getInitials(conv.name)}
+          {isGroup ? <Users className="w-4 h-4" /> : getInitials(group.name)}
         </div>
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-sm text-foreground truncate">
-            {conv.name}
+            {group.name}
           </p>
-          {isGroup && conv.member_count > 0 && (
+          {isGroup && (
             <p className="text-xs text-muted-foreground">
-              {conv.member_count} members
+              {group.members.length} members
             </p>
           )}
         </div>
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-24">
+      <div className="flex-1 overflow-y-auto px-3 pt-3 pb-24 scrollbar-thin">
         {messages.length === 0 && (
           <div
             className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground"
@@ -421,13 +295,14 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
           </div>
         )}
         {messages.map((msg, i) => {
+          const isMine = msg.senderId === currentUser.id;
           const prev = messages[i - 1];
-          const showSender =
-            !prev || prev.sender_user_id !== msg.sender_user_id;
+          const showSender = !prev || prev.senderId !== msg.senderId;
           return (
             <MessageBubble
-              key={`${msg.id}-${msg.sent_at}`}
+              key={msg.id}
               msg={msg}
+              isMine={isMine}
               showSender={showSender}
               isGroup={isGroup}
             />
@@ -437,7 +312,7 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
       </div>
 
       {/* Input Bar */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 px-3 py-2 bg-card border-t border-border flex flex-col gap-1.5 lg:static lg:px-3 lg:py-2">
+      <div className="absolute bottom-0 left-0 right-0 z-20 px-3 py-2 bg-card border-t border-border flex flex-col gap-1.5 lg:static">
         {attachFile && (
           <div className="flex items-center gap-2 bg-primary/10 border border-primary/20 rounded-xl px-3 py-2 text-xs">
             <Paperclip className="w-3.5 h-3.5 text-primary flex-shrink-0" />
@@ -485,11 +360,11 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
           />
           <button
             type="button"
-            onClick={sendMessage}
+            onClick={() => void sendMessage()}
             disabled={(!input.trim() && !attachFile) || sending}
             data-ocid="chat.message.send_button"
             aria-label="Send message"
-            className="w-10 h-10 rounded-full bg-blue-600 flex items-center justify-center text-white flex-shrink-0 disabled:opacity-40 hover:bg-blue-700 active:scale-95 transition-all"
+            className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-primary-foreground flex-shrink-0 disabled:opacity-40 hover:opacity-90 active:scale-95 transition-all"
           >
             <Send className="w-4 h-4" />
           </button>
@@ -499,92 +374,202 @@ function ConversationView({ conv, onBack, isMobile }: ConversationViewProps) {
   );
 }
 
+// ── UserPickerModal ────────────────────────────────────────────────────────────
+
+interface PickerContact {
+  id: string;
+  name: string;
+  role: string;
+}
+
+interface UserPickerProps {
+  contacts: PickerContact[];
+  onClose: () => void;
+  onSelect: (contact: PickerContact) => void;
+}
+
+function UserPickerModal({ contacts, onClose, onSelect }: UserPickerProps) {
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setTimeout(() => inputRef.current?.focus(), 80);
+  }, []);
+
+  const filtered = contacts.filter(
+    (c) =>
+      c.name.toLowerCase().includes(query.toLowerCase()) ||
+      c.role.toLowerCase().includes(query.toLowerCase()),
+  );
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50"
+      data-ocid="chat.user_picker.dialog"
+    >
+      <div
+        className="absolute inset-0"
+        role="button"
+        tabIndex={0}
+        aria-label="Close"
+        onClick={onClose}
+        onKeyDown={(e) => e.key === "Escape" && onClose()}
+      />
+      <div className="relative bg-card rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col shadow-strong">
+        <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border">
+          <h2 className="font-semibold text-foreground text-base">
+            New Message
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            data-ocid="chat.user_picker.close_button"
+            className="p-1.5 rounded-full hover:bg-muted transition-colors"
+          >
+            <X className="w-5 h-5 text-muted-foreground" />
+          </button>
+        </div>
+        <div className="px-4 py-2 border-b border-border">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <input
+              ref={inputRef}
+              type="text"
+              placeholder="Search by name or role…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              data-ocid="chat.user_picker.search_input"
+              className="w-full pl-9 pr-3 py-2 rounded-lg bg-muted text-sm text-foreground placeholder:text-muted-foreground border-0 outline-none focus:ring-2 focus:ring-primary/30"
+            />
+          </div>
+        </div>
+        <div className="overflow-y-auto flex-1 scrollbar-thin">
+          {filtered.length === 0 && (
+            <div
+              className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground text-sm"
+              data-ocid="chat.user_picker.empty_state"
+            >
+              <Users className="w-8 h-8 opacity-40" />
+              No users found
+            </div>
+          )}
+          {filtered.map((u, i) => (
+            <button
+              type="button"
+              key={u.id}
+              data-ocid={`chat.user_picker.item.${i + 1}`}
+              onClick={() => onSelect(u)}
+              className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted transition-colors text-left"
+            >
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(u.role)}`}
+              >
+                {getInitials(u.name)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm text-foreground truncate">
+                  {u.name}
+                </p>
+                <p className="text-xs text-muted-foreground capitalize">
+                  {u.role}
+                </p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── ChatList ──────────────────────────────────────────────────────────────────
 
 interface ChatListProps {
-  conversations: ChatConversation[];
-  selectedId: number | null;
+  groups: LocalChatGroup[];
+  messages: LocalChatMessage[];
+  selectedId: string | null;
   search: string;
   onSearch: (v: string) => void;
-  onSelect: (c: ChatConversation) => void;
+  onSelect: (g: LocalChatGroup) => void;
   onNewDM: () => void;
-  isSuperAdmin?: boolean;
+  isSuperAdmin: boolean;
 }
 
 function ChatList({
-  conversations,
+  groups,
+  messages,
   selectedId,
   search,
   onSearch,
   onSelect,
   onNewDM,
-  isSuperAdmin = false,
+  isSuperAdmin,
 }: ChatListProps) {
-  const filtered = conversations.filter((c) =>
-    c.name.toLowerCase().includes(search.toLowerCase()),
+  const filtered = groups.filter((g) =>
+    g.name.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const dms = filtered.filter((c) => c.type === "direct");
-  const classGroups = filtered.filter((c) => c.type === "class_group");
-  const routeGroups = filtered.filter((c) => c.type === "route_group");
+  const dms = filtered.filter((g) => g.type === "dm");
+  const classGroups = filtered.filter((g) => g.type === "class");
+  const routeGroups = filtered.filter((g) => g.type === "route");
+  const customGroups = filtered.filter((g) => g.type === "custom");
 
-  const renderItem = (c: ChatConversation, globalIdx: number) => {
-    const isActive = selectedId === c.id;
-    const isGroup = c.type !== "direct";
+  const getLastMessage = (groupId: string) => {
+    const msgs = messages.filter((m) => m.groupId === groupId);
+    return msgs[msgs.length - 1];
+  };
+
+  const renderItem = (g: LocalChatGroup, idx: number) => {
+    const isActive = selectedId === g.id;
+    const isGroupChat = g.type !== "dm";
+    const last = getLastMessage(g.id);
+
     return (
       <button
         type="button"
-        key={c.id}
-        data-ocid={`chat.conversation.item.${globalIdx + 1}`}
-        onClick={() => onSelect(c)}
-        className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
-          isActive ? "bg-primary/10" : "hover:bg-muted"
-        }`}
+        key={g.id}
+        data-ocid={`chat.conversation.item.${idx + 1}`}
+        onClick={() => onSelect(g)}
+        className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted"}`}
       >
         <div
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarColor(undefined, c.type)}`}
+          className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(undefined, g.type)}`}
         >
-          {isGroup ? <Users className="w-4 h-4" /> : getInitials(c.name)}
+          {isGroupChat ? <Users className="w-4 h-4" /> : getInitials(g.name)}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-1">
             <p className="font-semibold text-sm text-foreground truncate">
-              {c.name}
+              {g.name}
             </p>
             <span className="text-[10px] text-muted-foreground flex-shrink-0">
-              {c.last_message_at ? formatTime(c.last_message_at) : ""}
+              {last ? formatTime(last.createdAt) : ""}
             </span>
           </div>
-          <div className="flex items-center justify-between gap-1 mt-0.5">
-            <p className="text-xs text-muted-foreground truncate">
-              {c.last_message
-                ? c.last_message.length > 40
-                  ? `${c.last_message.slice(0, 40)}…`
-                  : c.last_message
-                : isGroup
-                  ? `${c.member_count} members`
-                  : "Start a conversation"}
-            </p>
-            {c.unread_count > 0 && (
-              <span
-                className="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1 flex-shrink-0"
-                data-ocid={`chat.unread_badge.${globalIdx + 1}`}
-              >
-                {c.unread_count > 99 ? "99+" : c.unread_count}
-              </span>
-            )}
-          </div>
+          <p className="text-xs text-muted-foreground truncate mt-0.5">
+            {last
+              ? last.type === "file"
+                ? `📎 ${last.fileName ?? "File"}`
+                : last.content.length > 40
+                  ? `${last.content.slice(0, 40)}…`
+                  : last.content
+              : isGroupChat
+                ? `${g.members.length} members`
+                : "Start a conversation"}
+          </p>
         </div>
       </button>
     );
   };
 
+  let idx = 0;
+
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="px-4 pt-4 pb-2">
         {isSuperAdmin && (
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-600 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 mb-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 mb-2">
             <Shield className="w-3 h-3" />
             Super Admin View — All School Conversations
           </div>
@@ -616,8 +601,7 @@ function ChatList({
         </div>
       </div>
 
-      {/* Conversation List */}
-      <div className="overflow-y-auto flex-1 px-2 pb-4">
+      <div className="overflow-y-auto flex-1 px-2 pb-4 scrollbar-thin">
         {filtered.length === 0 && (
           <div
             className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground"
@@ -637,7 +621,12 @@ function ChatList({
         )}
 
         {dms.length > 0 && (
-          <div className="mb-1">{dms.map((c, i) => renderItem(c, i))}</div>
+          <div className="mb-1">
+            {dms.map((g) => {
+              const i = idx++;
+              return renderItem(g, i);
+            })}
+          </div>
         )}
 
         {classGroups.length > 0 && (
@@ -645,7 +634,10 @@ function ChatList({
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
               Class Groups
             </p>
-            {classGroups.map((c, i) => renderItem(c, dms.length + i))}
+            {classGroups.map((g) => {
+              const i = idx++;
+              return renderItem(g, i);
+            })}
           </div>
         )}
 
@@ -654,10 +646,100 @@ function ChatList({
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
               Route Groups
             </p>
-            {routeGroups.map((c, i) =>
-              renderItem(c, dms.length + classGroups.length + i),
-            )}
+            {routeGroups.map((g) => {
+              const i = idx++;
+              return renderItem(g, i);
+            })}
           </div>
+        )}
+
+        {customGroups.length > 0 && (
+          <div className="mb-1">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
+              Other Groups
+            </p>
+            {customGroups.map((g) => {
+              const i = idx++;
+              return renderItem(g, i);
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Admin Oversight Panel ─────────────────────────────────────────────────────
+
+interface OversightProps {
+  groups: LocalChatGroup[];
+  messages: LocalChatMessage[];
+  onSelectGroup: (g: LocalChatGroup) => void;
+}
+
+function AdminOversightPanel({
+  groups,
+  messages,
+  onSelectGroup,
+}: OversightProps) {
+  const [query, setQuery] = useState("");
+  const dms = groups.filter((g) => g.type === "dm");
+  const filtered = dms.filter((g) =>
+    g.name.toLowerCase().includes(query.toLowerCase()),
+  );
+
+  return (
+    <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-4 mt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Shield className="w-4 h-4 text-purple-600" />
+        <h3 className="text-sm font-semibold text-purple-700">
+          Admin Oversight — Direct Messages
+        </h3>
+      </div>
+      <div className="relative mb-3">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+        <input
+          type="text"
+          placeholder="Search by participant name…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          data-ocid="chat.oversight.search_input"
+          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-card border border-border text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-purple-300"
+        />
+      </div>
+      <div className="space-y-1 max-h-48 overflow-y-auto scrollbar-thin">
+        {filtered.map((g, i) => {
+          const lastMsg = messages
+            .filter((m) => m.groupId === g.id)
+            .slice(-1)[0];
+          return (
+            <button
+              type="button"
+              key={g.id}
+              data-ocid={`chat.oversight.item.${i + 1}`}
+              onClick={() => onSelectGroup(g)}
+              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-purple-100 transition-colors text-left"
+            >
+              <div className="w-7 h-7 rounded-full bg-purple-200 flex items-center justify-center text-purple-700 text-[11px] font-bold flex-shrink-0">
+                {getInitials(g.name)}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">
+                  {g.name}
+                </p>
+                {lastMsg && (
+                  <p className="text-[10px] text-muted-foreground truncate">
+                    {lastMsg.senderName}: {lastMsg.content.slice(0, 30)}
+                  </p>
+                )}
+              </div>
+            </button>
+          );
+        })}
+        {filtered.length === 0 && (
+          <p className="text-xs text-muted-foreground text-center py-3">
+            No direct messages
+          </p>
         )}
       </div>
     </div>
@@ -671,138 +753,228 @@ interface ChatProps {
 }
 
 export default function Chat({ onTotalUnread }: ChatProps) {
-  const { currentUser } = useApp();
+  const { currentUser, getData, saveData } = useApp();
   const isSuperAdmin = currentUser?.role === "superadmin";
 
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
-  const [selected, setSelected] = useState<ChatConversation | null>(null);
+  const [selected, setSelected] = useState<LocalChatGroup | null>(null);
   const [search, setSearch] = useState("");
   const [showPicker, setShowPicker] = useState(false);
-  const [loading, setLoading] = useState(true);
-
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
+  const [pollTick, setPollTick] = useState(0);
+
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 1024);
     window.addEventListener("resize", handler);
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  const loadConversations = useCallback(async () => {
-    try {
-      apiChat("POST", "/chat/groups/generate", {}).catch(() => {});
-      // Super Admin fetches all conversations with ?all=1
-      const endpoint = isSuperAdmin
-        ? "/chat/conversations?all=1"
-        : "/chat/conversations";
-      const res = await apiChat<{ data: ChatConversation[] }>("GET", endpoint);
-      const sorted = (res.data ?? []).sort((a, b) => {
-        const ta = a.last_message_at
-          ? new Date(a.last_message_at).getTime()
-          : 0;
-        const tb = b.last_message_at
-          ? new Date(b.last_message_at).getTime()
-          : 0;
-        return tb - ta;
-      });
-      setConversations(sorted);
-      const total = sorted.reduce((s, c) => s + (c.unread_count ?? 0), 0);
-      onTotalUnread?.(total);
-      // Persist unread count for sidebar badge
-      localStorage.setItem("shubh_chat_unread", String(total));
-    } catch {
-      // silent — server may not have chat endpoints yet
-    } finally {
-      setLoading(false);
-    }
-  }, [onTotalUnread, isSuperAdmin]);
-
+  // Poll for new messages every 10 seconds
   useEffect(() => {
-    loadConversations();
-    const interval = setInterval(loadConversations, 15000);
+    const interval = setInterval(() => setPollTick((t) => t + 1), 10000);
     return () => clearInterval(interval);
-  }, [loadConversations]);
+  }, []);
 
-  const handleStartDM = async (userId: number) => {
-    setShowPicker(false);
-    try {
-      const res = await apiChat<{ data: { id: number; name: string } }>(
-        "POST",
-        "/chat/conversations/start",
-        { recipient_user_id: userId },
+  // ── Load all data from context ───────────────────────────────────────────────
+  const rawGroups = getData("chatGroups") as LocalChatGroup[];
+  const rawMessages = getData("chatMessages") as LocalChatMessage[];
+
+  // Re-read on poll tick (getData returns latest from context)
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pollTick intentionally triggers re-memo
+  const groups: LocalChatGroup[] = useMemo(
+    () => rawGroups,
+    [rawGroups, pollTick],
+  );
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pollTick intentionally triggers re-memo
+  const messages: LocalChatMessage[] = useMemo(
+    () => rawMessages,
+    [rawMessages, pollTick],
+  );
+
+  // ── Auto-generate class and route groups ─────────────────────────────────────
+  useEffect(() => {
+    const classes = getData("classes") as ClassSection[];
+    const students = getData("students") as Student[];
+    const staff = getData("staff") as Staff[];
+    const routes = getData("transport_routes") as TransportRoute[];
+    const existingGroups = getData("chatGroups") as LocalChatGroup[];
+
+    const toCreate: LocalChatGroup[] = [];
+
+    // Class groups
+    for (const cls of classes) {
+      const sectionList: string[] = cls.sections ?? [];
+      for (const section of sectionList) {
+        const groupName = `${cls.className}-${section} Group`;
+        const exists = existingGroups.some(
+          (g) => g.name === groupName && g.type === "class",
+        );
+        if (!exists) {
+          const classStudents = students
+            .filter((s) => s.class === cls.className && s.section === section)
+            .map((s) => s.fullName);
+          const classTeachers = staff
+            .filter((st) =>
+              st.subjects?.some(
+                (sub) =>
+                  sub.classFrom <= cls.className &&
+                  cls.className <= sub.classTo,
+              ),
+            )
+            .map((st) => st.name);
+          const members = [...new Set([...classStudents, ...classTeachers])];
+          toCreate.push({
+            id: generateId(),
+            name: groupName,
+            type: "class",
+            members,
+            memberIds: [],
+            createdAt: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
+    // Route groups
+    for (const route of routes) {
+      const groupName = `${route.routeName} Group`;
+      const exists = existingGroups.some(
+        (g) => g.name === groupName && g.type === "route",
       );
-      await loadConversations();
-      const convId = res.data?.id;
-      if (convId) {
-        // Try to find the loaded conversation
-        setConversations((prev) => {
-          const found = prev.find((c) => c.id === convId);
-          if (found) {
-            setSelected(found);
-          } else {
-            const minimal: ChatConversation = {
-              id: convId,
-              type: "direct",
-              name: res.data?.name ?? "User",
-              unread_count: 0,
-              member_count: 2,
-            };
-            setSelected(minimal);
-          }
-          return prev;
+      if (!exists) {
+        const routeStudents = students
+          .filter((s) => s.transportRoute === route.routeName)
+          .map((s) => s.fullName);
+        const members = [...routeStudents];
+        if (route.driverName) members.push(route.driverName);
+        toCreate.push({
+          id: generateId(),
+          name: groupName,
+          type: "route",
+          members,
+          memberIds: [],
+          createdAt: new Date().toISOString(),
         });
       }
-    } catch {
-      // silent
     }
-  };
 
-  const handleSelectConv = (c: ChatConversation) => {
-    setSelected(c);
-    setConversations((prev) =>
-      prev.map((x) => (x.id === c.id ? { ...x, unread_count: 0 } : x)),
-    );
-  };
+    // Save new groups
+    for (const g of toCreate) {
+      void saveData("chatGroups", g as unknown as Record<string, unknown>);
+    }
+  }, [getData, saveData]);
 
+  // ── Build contacts list for new DM picker ────────────────────────────────────
+  const contacts: PickerContact[] = useMemo(() => {
+    const staffList = getData("staff") as Staff[];
+    return staffList
+      .filter((s) => s.id !== currentUser?.id)
+      .map((s) => ({ id: s.id, name: s.name, role: s.designation ?? "Staff" }));
+  }, [getData, currentUser?.id]);
+
+  // ── Unread count (messages not from current user since last seen) ────────────
+  useEffect(() => {
+    const total = groups.reduce((sum, g) => {
+      const groupMsgs = messages.filter((m) => m.groupId === g.id);
+      const unread = groupMsgs.filter(
+        (m) => m.senderId !== currentUser?.id,
+      ).length;
+      return sum + unread;
+    }, 0);
+    onTotalUnread?.(total);
+  }, [groups, messages, currentUser?.id, onTotalUnread]);
+
+  // ── Send message handler ──────────────────────────────────────────────────────
+  const handleSend = useCallback(
+    async (
+      groupId: string,
+      content: string,
+      type: "text" | "file",
+      fileUrl?: string,
+      fileName?: string,
+    ) => {
+      const msg: LocalChatMessage = {
+        id: generateId(),
+        groupId,
+        senderId: currentUser?.id ?? "unknown",
+        senderName: currentUser?.name ?? "Unknown",
+        senderRole: currentUser?.role ?? "unknown",
+        content,
+        type,
+        fileUrl,
+        fileName,
+        createdAt: new Date().toISOString(),
+      };
+      await saveData("chatMessages", msg as unknown as Record<string, unknown>);
+    },
+    [currentUser, saveData],
+  );
+
+  // ── Start DM with a contact ───────────────────────────────────────────────────
+  const handleStartDM = useCallback(
+    async (contact: PickerContact) => {
+      setShowPicker(false);
+      const myName = currentUser?.name ?? "Me";
+      const dmName = `${myName} & ${contact.name}`;
+      const existing = groups.find((g) => g.type === "dm" && g.name === dmName);
+      if (existing) {
+        setSelected(existing);
+        return;
+      }
+      const newGroup: LocalChatGroup = {
+        id: generateId(),
+        name: dmName,
+        type: "dm",
+        members: [myName, contact.name],
+        memberIds: [currentUser?.id ?? "", contact.id],
+        createdAt: new Date().toISOString(),
+      };
+      await saveData(
+        "chatGroups",
+        newGroup as unknown as Record<string, unknown>,
+      );
+      setSelected(newGroup);
+    },
+    [currentUser, groups, saveData],
+  );
+
+  const handleSelectConv = (g: LocalChatGroup) => setSelected(g);
+
+  const groupMessages = selected
+    ? messages.filter((m) => m.groupId === selected.id)
+    : [];
   const showList = !isMobile || !selected;
   const showConv = !isMobile || !!selected;
 
   return (
     <div
-      className="flex h-full bg-background overflow-hidden"
+      className="flex bg-background overflow-hidden relative"
       style={{ height: "calc(100vh - 112px)" }}
       data-ocid="chat.page"
     >
       {/* LIST PANEL */}
       {showList && (
         <div
-          className={`${
-            isMobile ? "w-full" : "w-80 flex-shrink-0 border-r border-border"
-          } h-full flex flex-col bg-card overflow-hidden`}
+          className={`${isMobile ? "w-full" : "w-80 flex-shrink-0 border-r border-border"} h-full flex flex-col bg-card overflow-hidden`}
           data-ocid="chat.list.panel"
         >
-          {loading ? (
-            <div className="flex flex-col gap-3 p-4">
-              {[...Array(6)].map((_, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: skeleton only
-                <div key={i} className="flex items-center gap-3 animate-pulse">
-                  <div className="w-10 h-10 rounded-full bg-muted" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-3 bg-muted rounded w-2/3" />
-                    <div className="h-2.5 bg-muted rounded w-1/2" />
-                  </div>
-                </div>
-              ))}
+          <ChatList
+            groups={groups}
+            messages={messages}
+            selectedId={selected?.id ?? null}
+            search={search}
+            onSearch={setSearch}
+            onSelect={handleSelectConv}
+            onNewDM={() => setShowPicker(true)}
+            isSuperAdmin={isSuperAdmin}
+          />
+          {isSuperAdmin && !isMobile && (
+            <div className="px-3 pb-4">
+              <AdminOversightPanel
+                groups={groups}
+                messages={messages}
+                onSelectGroup={handleSelectConv}
+              />
             </div>
-          ) : (
-            <ChatList
-              conversations={conversations}
-              selectedId={selected?.id ?? null}
-              search={search}
-              onSearch={setSearch}
-              onSelect={handleSelectConv}
-              onNewDM={() => setShowPicker(true)}
-              isSuperAdmin={isSuperAdmin}
-            />
           )}
         </div>
       )}
@@ -810,14 +982,21 @@ export default function Chat({ onTotalUnread }: ChatProps) {
       {/* CONVERSATION PANEL */}
       {showConv && (
         <div
-          className={`${isMobile ? "w-full" : "flex-1"} h-full flex flex-col overflow-hidden bg-background`}
+          className={`${isMobile ? "w-full" : "flex-1"} h-full flex flex-col overflow-hidden bg-background relative`}
           data-ocid="chat.conversation.panel"
         >
           {selected ? (
             <ConversationView
-              conv={selected}
+              group={selected}
+              messages={groupMessages}
+              currentUser={{
+                id: currentUser?.id ?? "",
+                name: currentUser?.name ?? "",
+                role: currentUser?.role ?? "",
+              }}
               onBack={isMobile ? () => setSelected(null) : undefined}
               isMobile={isMobile}
+              onSend={handleSend}
             />
           ) : (
             <div
@@ -837,6 +1016,15 @@ export default function Chat({ onTotalUnread }: ChatProps) {
                 <Plus className="w-4 h-4" />
                 New Message
               </button>
+              {isSuperAdmin && (
+                <div className="w-full max-w-sm px-4">
+                  <AdminOversightPanel
+                    groups={groups}
+                    messages={messages}
+                    onSelectGroup={handleSelectConv}
+                  />
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -845,8 +1033,9 @@ export default function Chat({ onTotalUnread }: ChatProps) {
       {/* User Picker Modal */}
       {showPicker && (
         <UserPickerModal
+          contacts={contacts}
           onClose={() => setShowPicker(false)}
-          onStartDM={handleStartDM}
+          onSelect={(c) => void handleStartDM(c)}
         />
       )}
     </div>

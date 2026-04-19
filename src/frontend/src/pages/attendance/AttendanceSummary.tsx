@@ -13,8 +13,13 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Student, TransportRoute } from "../../types";
-import { CLASSES, SECTIONS, ls } from "../../utils/localStorage";
+import type {
+  AttendanceRecord,
+  ClassSection,
+  Student,
+  TransportRoute,
+} from "../../types";
+import { CLASSES, SECTIONS } from "../../utils/localStorage";
 
 interface AttendanceSummaryProps {
   date: string;
@@ -68,7 +73,6 @@ interface DrillDownModalProps {
   row: ClassSectionRow;
   date: string;
   students: Student[];
-  presentIds: Set<string | undefined>;
   records: AttendanceRecord[];
   onClose: () => void;
 }
@@ -107,13 +111,13 @@ function DrillDownModal({
       style={{ background: "rgba(0,0,0,0.6)" }}
       onKeyDown={(e) => e.key === "Escape" && onClose()}
       onClick={onClose}
+      data-ocid="summary.detail-modal.dialog"
     >
       <div
         className="bg-card rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div>
             <h3 className="font-display font-bold text-foreground text-lg">
@@ -128,12 +132,12 @@ function DrillDownModal({
             onClick={onClose}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
             aria-label="Close"
+            data-ocid="summary.detail-modal.close-button"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Summary badges */}
         <div className="flex gap-2 px-4 py-3 border-b border-border flex-wrap">
           <Badge variant="secondary" className="text-accent">
             {row.present} Present
@@ -162,7 +166,6 @@ function DrillDownModal({
           )}
         </div>
 
-        {/* Student list */}
         <div className="overflow-y-auto flex-1">
           <table className="w-full text-sm">
             <thead className="bg-muted/60 sticky top-0">
@@ -198,6 +201,7 @@ function DrillDownModal({
                     <tr
                       key={s.id}
                       className="border-t border-border hover:bg-muted/20 transition-colors"
+                      data-ocid={`summary.detail-row.${idx + 1}`}
                     >
                       <td className="p-3 text-muted-foreground text-xs">
                         {idx + 1}
@@ -244,32 +248,41 @@ export default function AttendanceSummary({
   date,
   onDateChange,
 }: AttendanceSummaryProps) {
-  const { currentSession } = useApp();
+  const { getData, currentSession } = useApp();
   const [drillDown, setDrillDown] = useState<ClassSectionRow | null>(null);
 
   const students = useMemo(
     () =>
-      ls
-        .get<Student[]>("students", [])
-        .filter(
-          (s) =>
-            s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-        ),
-    [currentSession],
+      (getData("students") as Student[]).filter(
+        (s) =>
+          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
+      ),
+    [getData, currentSession],
   );
 
   const records = useMemo(
     () =>
-      ls
-        .get<AttendanceRecord[]>("attendance", [])
-        .filter((r) => r.date === date && r.type === "student"),
-    [date],
+      (getData("attendance") as AttendanceRecord[]).filter(
+        (r) => r.date === date && r.type === "student",
+      ),
+    [getData, date],
+  );
+
+  const classSections = useMemo(
+    () => getData("classes") as ClassSection[],
+    [getData],
   );
 
   const routes = useMemo(
-    () => ls.get<TransportRoute[]>("transport_routes", []),
-    [],
+    () => getData("transport_routes") as TransportRoute[],
+    [getData],
   );
+
+  // Build sorted class list
+  const sortedClasses = useMemo(() => {
+    if (classSections.length > 0) return classSections.map((c) => c.className);
+    return CLASSES;
+  }, [classSections]);
 
   const presentIds = useMemo(
     () =>
@@ -284,7 +297,6 @@ export default function AttendanceSummary({
   const absent = total - present;
   const pct = total > 0 ? Math.round((present / total) * 100) : 0;
 
-  // Class-section breakdown
   const classSectionData = useMemo(() => {
     const map: Record<string, ClassSectionRow> = {};
     for (const s of students) {
@@ -314,31 +326,32 @@ export default function AttendanceSummary({
       }
     }
     return Object.values(map).sort((a, b) => {
-      const ai = CLASSES.indexOf(a.cls);
-      const bi = CLASSES.indexOf(b.cls);
+      const ai = sortedClasses.indexOf(a.cls);
+      const bi = sortedClasses.indexOf(b.cls);
       if (ai !== bi) return ai - bi;
       return SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section);
     });
-  }, [students, records]);
+  }, [students, records, sortedClasses]);
 
-  // Route-wise breakdown
-  const routeData = useMemo(() => {
-    return routes.map((route) => {
-      const routeStudents = students.filter((s) =>
-        route.students.includes(s.id),
-      );
-      const routePresent = routeStudents.filter((s) =>
-        presentIds.has(s.id),
-      ).length;
-      return {
-        route: route.routeName,
-        bus: route.busNo,
-        total: routeStudents.length,
-        present: routePresent,
-        absent: routeStudents.length - routePresent,
-      };
-    });
-  }, [routes, students, presentIds]);
+  const routeData = useMemo(
+    () =>
+      routes.map((route) => {
+        const routeStudents = students.filter((s) =>
+          route.students.includes(s.id),
+        );
+        const routePresent = routeStudents.filter((s) =>
+          presentIds.has(s.id),
+        ).length;
+        return {
+          route: route.routeName,
+          bus: route.busNo,
+          total: routeStudents.length,
+          present: routePresent,
+          absent: routeStudents.length - routePresent,
+        };
+      }),
+    [routes, students, presentIds],
+  );
 
   function exportCSV() {
     const rows = [
@@ -388,7 +401,7 @@ export default function AttendanceSummary({
           value={date}
           onChange={(e) => onDateChange(e.target.value)}
           className="w-40"
-          data-ocid="summary-date-picker"
+          data-ocid="summary.date-picker"
         />
         {date !== new Date().toISOString().split("T")[0] && (
           <Badge variant="outline">Historical View</Badge>
@@ -398,7 +411,7 @@ export default function AttendanceSummary({
           variant="outline"
           size="sm"
           onClick={exportCSV}
-          data-ocid="summary-export-csv"
+          data-ocid="summary.export-csv.button"
         >
           <Download className="w-4 h-4 mr-1.5" /> Export CSV
         </Button>
@@ -441,14 +454,17 @@ export default function AttendanceSummary({
         <div className="p-4 border-b border-border flex items-center gap-2">
           <Users className="w-4 h-4 text-primary" />
           <h3 className="font-display font-semibold text-foreground">
-            Class & Section Wise Attendance
+            Class &amp; Section Wise Attendance
           </h3>
           <span className="text-xs text-muted-foreground ml-1">
             (click a row for student-wise detail)
           </span>
         </div>
         {classSectionData.length === 0 ? (
-          <div className="py-10 text-center text-muted-foreground">
+          <div
+            className="py-10 text-center text-muted-foreground"
+            data-ocid="summary.class-table.empty-state"
+          >
             <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
             <p className="text-sm">No student data available</p>
           </div>
@@ -481,7 +497,7 @@ export default function AttendanceSummary({
                 </tr>
               </thead>
               <tbody>
-                {classSectionData.map((row) => {
+                {classSectionData.map((row, idx) => {
                   const rowPct =
                     row.total > 0
                       ? Math.round((row.present / row.total) * 100)
@@ -493,7 +509,7 @@ export default function AttendanceSummary({
                       onClick={() => setDrillDown(row)}
                       onKeyDown={(e) => e.key === "Enter" && setDrillDown(row)}
                       tabIndex={0}
-                      data-ocid={`class-row-${row.cls}-${row.section}`}
+                      data-ocid={`summary.class-row.${idx + 1}`}
                     >
                       <td className="p-3 font-medium text-foreground">
                         Class {row.cls}
@@ -569,7 +585,7 @@ export default function AttendanceSummary({
                 </tr>
               </thead>
               <tbody>
-                {routeData.map((row) => {
+                {routeData.map((row, idx) => {
                   const rowPct =
                     row.total > 0
                       ? Math.round((row.present / row.total) * 100)
@@ -578,7 +594,7 @@ export default function AttendanceSummary({
                     <tr
                       key={row.route}
                       className="border-t border-border hover:bg-muted/30 transition-colors"
-                      data-ocid={`route-row-${row.route}`}
+                      data-ocid={`summary.route-row.${idx + 1}`}
                     >
                       <td className="p-3 font-medium text-foreground">
                         {row.route}
@@ -631,7 +647,6 @@ export default function AttendanceSummary({
           row={drillDown}
           date={date}
           students={students}
-          presentIds={presentIds}
           records={records}
           onClose={() => setDrillDown(null)}
         />

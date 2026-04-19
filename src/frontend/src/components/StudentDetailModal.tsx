@@ -53,6 +53,14 @@ interface Props {
   onClose: () => void;
   onUpdate: (s: Student) => void;
   onNavigate?: (page: string) => void;
+  updateData?: (
+    collection: string,
+    id: string,
+    changes: Record<string, unknown>,
+  ) => Promise<void>;
+  deleteData?: (collection: string, id: string) => Promise<void>;
+  /** All students in context — used to find family members by mobile */
+  allStudents?: Student[];
 }
 
 function parseDobToParts(dob: string): [string, string, string] {
@@ -70,8 +78,11 @@ export default function StudentDetailModal({
   onClose,
   onUpdate,
   onNavigate,
+  updateData,
+  deleteData,
+  allStudents = [],
 }: Props) {
-  const { currentUser, currentSession } = useApp();
+  const { currentUser, currentSession, getData } = useApp();
   const isSuperAdmin = currentUser?.role === "superadmin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const canChat =
@@ -81,6 +92,43 @@ export default function StudentDetailModal({
 
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({ ...student });
+
+  // Context classes for edit dropdowns (placed after form is initialized)
+  const CLASS_ORDER_DETAIL = [
+    "Nursery",
+    "LKG",
+    "UKG",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+  ];
+  const contextClassList = getData("classes") as Array<{
+    id: string;
+    className: string;
+    sections: string[];
+  }>;
+  const sortedContextClasses = [...contextClassList].sort((a, b) => {
+    const ai = CLASS_ORDER_DETAIL.indexOf(a.className ?? "");
+    const bi = CLASS_ORDER_DETAIL.indexOf(b.className ?? "");
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
+  const classNamesForEdit =
+    sortedContextClasses.length > 0
+      ? sortedContextClasses.map((c) => c.className)
+      : CLASSES;
+  const sectionsForEdit = (() => {
+    const found = sortedContextClasses.find((c) => c.className === form.class);
+    return found?.sections ?? SECTIONS;
+  })();
   const [dobParts, setDobParts] = useState<[string, string, string]>(
     parseDobToParts(student.dob),
   );
@@ -328,10 +376,23 @@ export default function StudentDetailModal({
       dob,
       credentials: { username: form.admNo, password: dobForPwd },
     };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
+    if (updateData) {
+      void updateData("students", updated.id, {
+        ...updated,
+        name: updated.fullName,
+      } as unknown as Record<string, unknown>).catch(() => {
+        // Fallback to localStorage if server fails
+        const all = ls.get<Student[]>("students", []);
+        const idx = all.findIndex((s) => s.id === updated.id);
+        if (idx >= 0) all[idx] = updated;
+        ls.set("students", all);
+      });
+    } else {
+      const all = ls.get<Student[]>("students", []);
+      const idx = all.findIndex((s) => s.id === updated.id);
+      if (idx >= 0) all[idx] = updated;
+      ls.set("students", all);
+    }
     onUpdate(updated);
     setEditing(false);
   }
@@ -344,10 +405,22 @@ export default function StudentDetailModal({
       leavingReason: leaveReason,
       leavingRemarks: leaveRemarks,
     };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
+    if (updateData) {
+      void updateData("students", updated.id, {
+        ...updated,
+        name: updated.fullName,
+      } as unknown as Record<string, unknown>).catch(() => {
+        const all = ls.get<Student[]>("students", []);
+        const idx = all.findIndex((s) => s.id === updated.id);
+        if (idx >= 0) all[idx] = updated;
+        ls.set("students", all);
+      });
+    } else {
+      const all = ls.get<Student[]>("students", []);
+      const idx = all.findIndex((s) => s.id === updated.id);
+      if (idx >= 0) all[idx] = updated;
+      ls.set("students", all);
+    }
     onUpdate(updated);
     setShowDiscontinue(false);
   }
@@ -360,10 +433,22 @@ export default function StudentDetailModal({
       leavingReason: undefined,
       leavingRemarks: undefined,
     };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
+    if (updateData) {
+      void updateData("students", updated.id, {
+        ...updated,
+        name: updated.fullName,
+      } as unknown as Record<string, unknown>).catch(() => {
+        const all = ls.get<Student[]>("students", []);
+        const idx = all.findIndex((s) => s.id === updated.id);
+        if (idx >= 0) all[idx] = updated;
+        ls.set("students", all);
+      });
+    } else {
+      const all = ls.get<Student[]>("students", []);
+      const idx = all.findIndex((s) => s.id === updated.id);
+      if (idx >= 0) all[idx] = updated;
+      ls.set("students", all);
+    }
     onUpdate(updated);
   }
 
@@ -862,7 +947,7 @@ export default function StudentDetailModal({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {CLASSES.map((c) => (
+                        {classNamesForEdit.map((c) => (
                           <SelectItem key={c} value={c}>
                             {c}
                           </SelectItem>
@@ -880,7 +965,7 @@ export default function StudentDetailModal({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {SECTIONS.map((s) => (
+                        {sectionsForEdit.map((s) => (
                           <SelectItem key={s} value={s}>
                             {s}
                           </SelectItem>
@@ -1079,6 +1164,7 @@ export default function StudentDetailModal({
                     size="sm"
                     variant="destructive"
                     onClick={() => setShowDiscontinue(true)}
+                    data-ocid="student-detail.discontinue_button"
                   >
                     Discontinue
                   </Button>
@@ -1087,7 +1173,83 @@ export default function StudentDetailModal({
                     <UserCheck className="w-3 h-3 mr-1" /> Reinstate
                   </Button>
                 )}
+                {isSuperAdmin && deleteData && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Delete ${student.fullName}? This cannot be undone.`,
+                        )
+                      ) {
+                        void deleteData("students", student.id).then(() =>
+                          onClose(),
+                        );
+                      }
+                    }}
+                    data-ocid="student-detail.delete_button"
+                  >
+                    <Trash2 className="w-3 h-3 mr-1" /> Delete
+                  </Button>
+                )}
               </div>
+
+              {/* Family Members (same primary mobile) */}
+              {(() => {
+                const primaryMobile =
+                  student.mobile ||
+                  student.guardianMobile ||
+                  student.fatherMobile;
+                if (!primaryMobile || allStudents.length === 0) return null;
+                const siblings = allStudents.filter(
+                  (s) =>
+                    s.id !== student.id &&
+                    (s.mobile === primaryMobile ||
+                      s.guardianMobile === primaryMobile ||
+                      s.fatherMobile === primaryMobile),
+                );
+                if (siblings.length === 0) return null;
+                return (
+                  <div className="mt-3 border border-primary/20 rounded-lg overflow-hidden">
+                    <div className="bg-primary/5 px-3 py-2 border-b border-primary/20">
+                      <p className="text-xs font-semibold text-primary">
+                        👨‍👩‍👧‍👦 Family Members ({siblings.length})
+                      </p>
+                    </div>
+                    <div className="divide-y divide-border">
+                      {siblings.map((s) => (
+                        <div
+                          key={s.id}
+                          className="px-3 py-2 flex items-center gap-3 text-xs"
+                        >
+                          <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                            {s.photo ? (
+                              <img
+                                src={s.photo}
+                                alt={s.fullName}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              <span className="text-[9px] font-bold text-primary">
+                                {(s.fullName ?? "?").charAt(0).toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-foreground truncate">
+                              {s.fullName}
+                            </p>
+                            <p className="text-muted-foreground">
+                              Adm: {s.admNo} · Cl.{s.class}-{s.section}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
             </TabsContent>
 
             {/* Fees Details Tab */}

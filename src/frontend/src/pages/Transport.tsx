@@ -10,622 +10,431 @@ import {
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useApp } from "../context/AppContext";
-import type { Staff, Student } from "../types";
-import { dataService } from "../utils/dataService";
-import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
+import type { Student } from "../types";
+import { generateId } from "../utils/localStorage";
 
-// ── Types ──────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────
+interface Stop {
+  id: string;
+  name: string;
+  fare: number;
+}
+
 interface RouteRecord {
   id: string;
-  busNo: string;
-  routeName: string;
-  driverStaffId: string;
-  driverName: string;
-  driverMobile: string;
-  monthlyFare: number;
-  pickupPoints: PickupPoint[];
+  name: string;
+  driver: string;
+  stops: Stop[];
 }
 
-interface PickupPoint {
-  id: string;
-  stopName: string;
-  order: number;
-  distance: string;
-  fare: number; // monthly fare for this pickup point (₹)
-}
+type Tab = "routes" | "assign" | "fees";
 
-interface StudentTransport {
-  studentId: string;
-  studentName: string;
-  admNo: string;
-  class: string;
-  section: string;
-  routeId: string;
-  busNo: string;
-  routeName: string;
-  pickupPointId: string;
-  pickupPointName: string;
-}
-
-type TransportTab = "routes" | "pickup" | "students" | "dashboard";
-
-const TABS: { id: TransportTab; label: string; icon: string }[] = [
-  { id: "routes", label: "Routes & Buses", icon: "🚌" },
-  { id: "pickup", label: "Pickup Points", icon: "📍" },
-  { id: "students", label: "Student Assignments", icon: "👥" },
-  { id: "dashboard", label: "Dashboard", icon: "📊" },
+const TABS: { id: Tab; label: string; icon: string }[] = [
+  { id: "routes", label: "Routes & Stops", icon: "🚌" },
+  { id: "assign", label: "Student Assignment", icon: "👥" },
+  { id: "fees", label: "Transport Fees", icon: "₹" },
 ];
 
-const EMPTY_ROUTE: Omit<RouteRecord, "id" | "pickupPoints"> = {
-  busNo: "",
-  routeName: "",
-  driverStaffId: "",
-  driverName: "",
-  driverMobile: "",
-  monthlyFare: 0, // kept in type for backward compat with saved data; not shown in UI
-};
+// 11 months (June auto-deselected)
+const ALL_MONTHS = [
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];
+const DEFAULT_MONTHS = ALL_MONTHS.filter((m) => m !== "Jun");
 
-// ── Component ──────────────────────────────────────────────
+const EMPTY_ROUTE_FORM = { name: "", driver: "" };
+const EMPTY_STOP_FORM = { name: "", fare: 0 };
+
+// ── Component ───────────────────────────────────────────────
 export default function Transport() {
-  const { addNotification, isReadOnly } = useApp();
-  const [activeTab, setActiveTab] = useState<TransportTab>("routes");
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    addNotification,
+    isReadOnly,
+  } = useApp();
 
-  const [routes, setRoutes] = useState<RouteRecord[]>(() =>
-    ls.get<RouteRecord[]>("transport_routes_v2", []),
-  );
-  const [studentTransports, setStudentTransports] = useState<
-    StudentTransport[]
-  >(() => ls.get<StudentTransport[]>("student_transport_v2", []));
+  const [tab, setTab] = useState<Tab>("routes");
 
-  // ── Modals / forms ────────────────────────────────────────
-  const [showRouteModal, setShowRouteModal] = useState(false);
-  const [routeForm, setRouteForm] =
-    useState<Omit<RouteRecord, "id" | "pickupPoints">>(EMPTY_ROUTE);
-  const [editRouteId, setEditRouteId] = useState<string | null>(null);
+  // ── Routes state ──────────────────────────────────────────
+  const [routes, setRoutes] = useState<RouteRecord[]>([]);
 
-  const [showPickupModal, setShowPickupModal] = useState(false);
-  const [pickupRouteId, setPickupRouteId] = useState("");
-  const [pickupForm, setPickupForm] = useState({
-    stopName: "",
-    order: 1,
-    distance: "",
-    fare: 0,
-  });
-  const [editPickupId, setEditPickupId] = useState<string | null>(null);
-
-  const [studentSearch, setStudentSearch] = useState("");
-  const [filterClass, setFilterClass] = useState("");
-  const [filterSection, setFilterSection] = useState("");
-  const [assignForm, setAssignForm] = useState({
-    studentId: "",
-    routeId: "",
-    pickupPointId: "",
-  });
-
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-
-  // ── Data ──────────────────────────────────────────────────
-  const [allStudents, setAllStudents] = useState<Student[]>([]);
-
-  // Server-first: load students from MySQL on mount
   useEffect(() => {
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => setAllStudents(rows))
-      .catch(() => setAllStudents(dataService.get<Student>("students")));
-  }, []);
+    const raw = getData("routes") as RouteRecord[];
+    setRoutes(raw);
+  }, [getData]);
 
-  const allStaff = ls.get<Staff[]>("staff", []);
-  const drivers = allStaff.filter(
-    (s) => s.designation?.toLowerCase() === "driver",
-  );
+  // ── Students state ────────────────────────────────────────
+  const [students, setStudents] = useState<Student[]>([]);
 
-  const activeStudents = allStudents.filter((s) => s.status !== "discontinued");
-  const filteredStudents = activeStudents.filter((s) => {
-    const q = studentSearch.toLowerCase();
-    const matchSearch =
-      !q ||
-      s.fullName.toLowerCase().includes(q) ||
-      s.admNo.toLowerCase().includes(q);
-    const matchClass = !filterClass || s.class === filterClass;
-    const matchSection = !filterSection || s.section === filterSection;
-    return matchSearch && matchClass && matchSection;
-  });
+  useEffect(() => {
+    const raw = getData("students") as Student[];
+    setStudents(raw);
+  }, [getData]);
 
-  // ── Persist helpers ───────────────────────────────────────
-  const saveRoutes = useCallback((data: RouteRecord[]) => {
-    setRoutes(data);
-    ls.set("transport_routes_v2", data);
-  }, []);
+  // ── Route form ────────────────────────────────────────────
+  const [showRouteModal, setShowRouteModal] = useState(false);
+  const [editRouteId, setEditRouteId] = useState<string | null>(null);
+  const [routeForm, setRouteForm] = useState(EMPTY_ROUTE_FORM);
 
-  const saveStudentTransports = useCallback(
-    (data: StudentTransport[]) => {
-      setStudentTransports(data);
-      ls.set("student_transport_v2", data);
-      // Also sync to student records so StudentDetail auto-populates
-      const students = ls.get<Student[]>("students", []);
-      const updated = students.map((st) => {
-        const found = data.find((d) => d.studentId === st.id);
-        if (found) {
-          return {
-            ...st,
-            transportBusNo: found.busNo,
-            transportRoute: found.routeName,
-            transportPickup: found.pickupPointName,
-            transportId: found.routeId,
-          };
-        }
-        // Remove if unassigned
-        const wasAssigned = studentTransports.some(
-          (d) => d.studentId === st.id,
-        );
-        if (wasAssigned && !found) {
-          return {
-            ...st,
-            transportBusNo: undefined,
-            transportRoute: undefined,
-            transportPickup: undefined,
-            transportId: undefined,
-          };
-        }
-        return st;
-      });
-      ls.set("students", updated);
-    },
-    [studentTransports],
-  );
-
-  // ── Route CRUD ────────────────────────────────────────────
-  const handleSaveRoute = useCallback(() => {
-    if (!routeForm.busNo.trim() || !routeForm.routeName.trim()) return;
-    const driverStaff = drivers.find((d) => d.id === routeForm.driverStaffId);
-    const entry = {
-      ...routeForm,
-      driverName: driverStaff?.name || routeForm.driverName,
-      driverMobile: driverStaff?.mobile || routeForm.driverMobile,
-    };
-    if (editRouteId) {
-      saveRoutes(
-        routes.map((r) =>
-          r.id === editRouteId
-            ? { ...entry, id: editRouteId, pickupPoints: r.pickupPoints }
-            : r,
-        ),
-      );
-    } else {
-      saveRoutes([...routes, { ...entry, id: generateId(), pickupPoints: [] }]);
-      addNotification(`Route "${routeForm.routeName}" added`, "success", "🚌");
-    }
-    setRouteForm(EMPTY_ROUTE);
+  const openAddRoute = () => {
+    setRouteForm(EMPTY_ROUTE_FORM);
     setEditRouteId(null);
+    setShowRouteModal(true);
+  };
+
+  const openEditRoute = (r: RouteRecord) => {
+    setRouteForm({ name: r.name, driver: r.driver });
+    setEditRouteId(r.id);
+    setShowRouteModal(true);
+  };
+
+  const handleSaveRoute = useCallback(async () => {
+    if (!routeForm.name.trim()) return;
+    if (editRouteId) {
+      const existing = routes.find((r) => r.id === editRouteId);
+      const updated: RouteRecord = {
+        id: editRouteId,
+        name: routeForm.name,
+        driver: routeForm.driver,
+        stops: existing?.stops ?? [],
+      };
+      await updateData(
+        "routes",
+        editRouteId,
+        updated as unknown as Record<string, unknown>,
+      );
+      setRoutes((prev) =>
+        prev.map((r) => (r.id === editRouteId ? updated : r)),
+      );
+      addNotification(`Route "${routeForm.name}" updated`, "success", "🚌");
+    } else {
+      const newRoute: RouteRecord = {
+        id: generateId(),
+        name: routeForm.name,
+        driver: routeForm.driver,
+        stops: [],
+      };
+      await saveData("routes", newRoute as unknown as Record<string, unknown>);
+      setRoutes((prev) => [...prev, newRoute]);
+      addNotification(`Route "${routeForm.name}" added`, "success", "🚌");
+    }
     setShowRouteModal(false);
-  }, [routeForm, editRouteId, routes, saveRoutes, drivers, addNotification]);
+    setEditRouteId(null);
+    setRouteForm(EMPTY_ROUTE_FORM);
+  }, [routeForm, editRouteId, routes, saveData, updateData, addNotification]);
 
   const handleDeleteRoute = useCallback(
-    (id: string) => {
-      const assignedCount = studentTransports.filter(
-        (s) => s.routeId === id,
-      ).length;
-      if (assignedCount > 0) {
-        setConfirmDelete(id);
-      } else {
-        saveRoutes(routes.filter((r) => r.id !== id));
-      }
+    async (id: string) => {
+      await deleteData("routes", id);
+      setRoutes((prev) => prev.filter((r) => r.id !== id));
+      addNotification("Route deleted", "info", "🚌");
     },
-    [routes, saveRoutes, studentTransports],
+    [deleteData, addNotification],
   );
 
-  const handleConfirmDelete = useCallback(() => {
-    if (!confirmDelete) return;
-    saveRoutes(routes.filter((r) => r.id !== confirmDelete));
-    saveStudentTransports(
-      studentTransports.filter((s) => s.routeId !== confirmDelete),
+  // ── Stop form ─────────────────────────────────────────────
+  const [stopRouteId, setStopRouteId] = useState<string | null>(null);
+  const [showStopModal, setShowStopModal] = useState(false);
+  const [editStopId, setEditStopId] = useState<string | null>(null);
+  const [stopForm, setStopForm] = useState(EMPTY_STOP_FORM);
+
+  const openAddStop = (routeId: string) => {
+    setStopRouteId(routeId);
+    setStopForm(EMPTY_STOP_FORM);
+    setEditStopId(null);
+    setShowStopModal(true);
+  };
+
+  const openEditStop = (routeId: string, stop: Stop) => {
+    setStopRouteId(routeId);
+    setStopForm({ name: stop.name, fare: stop.fare });
+    setEditStopId(stop.id);
+    setShowStopModal(true);
+  };
+
+  const handleSaveStop = useCallback(async () => {
+    if (!stopRouteId || !stopForm.name.trim()) return;
+    const route = routes.find((r) => r.id === stopRouteId);
+    if (!route) return;
+
+    let updatedStops: Stop[];
+    if (editStopId) {
+      updatedStops = route.stops.map((s) =>
+        s.id === editStopId
+          ? { id: editStopId, name: stopForm.name, fare: stopForm.fare }
+          : s,
+      );
+    } else {
+      updatedStops = [
+        ...route.stops,
+        { id: generateId(), name: stopForm.name, fare: stopForm.fare },
+      ];
+    }
+
+    const updatedRoute: RouteRecord = { ...route, stops: updatedStops };
+    await updateData(
+      "routes",
+      stopRouteId,
+      updatedRoute as unknown as Record<string, unknown>,
     );
-    setConfirmDelete(null);
-  }, [
-    confirmDelete,
-    routes,
-    saveRoutes,
-    studentTransports,
-    saveStudentTransports,
-  ]);
+    setRoutes((prev) =>
+      prev.map((r) => (r.id === stopRouteId ? updatedRoute : r)),
+    );
+    setShowStopModal(false);
+    setEditStopId(null);
+    setStopForm(EMPTY_STOP_FORM);
+  }, [stopRouteId, stopForm, editStopId, routes, updateData]);
 
-  // ── Pickup Point CRUD ─────────────────────────────────────
-  const handleSavePickup = useCallback(() => {
-    if (!pickupRouteId || !pickupForm.stopName.trim()) return;
-    const updatedRoutes = routes.map((r) => {
-      if (r.id !== pickupRouteId) return r;
-      if (editPickupId) {
-        return {
-          ...r,
-          pickupPoints: r.pickupPoints.map((p) =>
-            p.id === editPickupId ? { ...pickupForm, id: editPickupId } : p,
-          ),
-        };
-      }
-      const newPp: PickupPoint = { ...pickupForm, id: generateId() };
-      return { ...r, pickupPoints: [...r.pickupPoints, newPp] };
-    });
-    saveRoutes(updatedRoutes);
-    setPickupForm({ stopName: "", order: 1, distance: "", fare: 0 });
-    setEditPickupId(null);
-    setShowPickupModal(false);
-  }, [pickupRouteId, pickupForm, editPickupId, routes, saveRoutes]);
-
-  const handleDeletePickup = useCallback(
-    (routeId: string, ppId: string) => {
-      saveRoutes(
-        routes.map((r) =>
-          r.id === routeId
-            ? {
-                ...r,
-                pickupPoints: r.pickupPoints.filter((p) => p.id !== ppId),
-              }
-            : r,
-        ),
+  const handleDeleteStop = useCallback(
+    async (routeId: string, stopId: string) => {
+      const route = routes.find((r) => r.id === routeId);
+      if (!route) return;
+      const updatedRoute: RouteRecord = {
+        ...route,
+        stops: route.stops.filter((s) => s.id !== stopId),
+      };
+      await updateData(
+        "routes",
+        routeId,
+        updatedRoute as unknown as Record<string, unknown>,
+      );
+      setRoutes((prev) =>
+        prev.map((r) => (r.id === routeId ? updatedRoute : r)),
       );
     },
-    [routes, saveRoutes],
-  );
-
-  // Move pickup point up/down
-  const movePickup = useCallback(
-    (routeId: string, ppId: string, dir: "up" | "down") => {
-      saveRoutes(
-        routes.map((r) => {
-          if (r.id !== routeId) return r;
-          const pts = [...r.pickupPoints];
-          const idx = pts.findIndex((p) => p.id === ppId);
-          if (dir === "up" && idx > 0)
-            [pts[idx - 1], pts[idx]] = [pts[idx], pts[idx - 1]];
-          if (dir === "down" && idx < pts.length - 1)
-            [pts[idx], pts[idx + 1]] = [pts[idx + 1], pts[idx]];
-          return {
-            ...r,
-            pickupPoints: pts.map((p, i) => ({ ...p, order: i + 1 })),
-          };
-        }),
-      );
-    },
-    [routes, saveRoutes],
+    [routes, updateData],
   );
 
   // ── Student Assignment ────────────────────────────────────
-  const selectedRoute = routes.find((r) => r.id === assignForm.routeId);
+  const [filterClass, setFilterClass] = useState("");
+  const [filterSection, setFilterSection] = useState("");
+  const [assignRouteId, setAssignRouteId] = useState("");
+  const [assignStopId, setAssignStopId] = useState("");
+  const [assignMonths, setAssignMonths] = useState<string[]>(DEFAULT_MONTHS);
+  const [assignStudentId, setAssignStudentId] = useState("");
 
-  const handleAssignStudent = useCallback(() => {
-    if (!assignForm.studentId || !assignForm.routeId) return;
-    const student = activeStudents.find((s) => s.id === assignForm.studentId);
-    const route = routes.find((r) => r.id === assignForm.routeId);
-    const pp = route?.pickupPoints.find(
-      (p) => p.id === assignForm.pickupPointId,
+  const activeStudents = students.filter((s) => s.status !== "discontinued");
+  const classOptions = [...new Set(activeStudents.map((s) => s.class))].sort();
+  const sectionOptions = filterClass
+    ? [
+        ...new Set(
+          activeStudents
+            .filter((s) => s.class === filterClass)
+            .map((s) => s.section),
+        ),
+      ].sort()
+    : [...new Set(activeStudents.map((s) => s.section))].sort();
+
+  const filteredStudents = activeStudents.filter(
+    (s) =>
+      (!filterClass || s.class === filterClass) &&
+      (!filterSection || s.section === filterSection),
+  );
+
+  const selectedAssignRoute = routes.find((r) => r.id === assignRouteId);
+
+  const toggleMonth = (m: string) =>
+    setAssignMonths((prev) =>
+      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m],
     );
+
+  const handleAssign = useCallback(async () => {
+    if (!assignStudentId || !assignRouteId) return;
+    const student = activeStudents.find((s) => s.id === assignStudentId);
+    const route = routes.find((r) => r.id === assignRouteId);
+    const stop = route?.stops.find((s) => s.id === assignStopId);
     if (!student || !route) return;
-    const entry: StudentTransport = {
-      studentId: student.id,
-      studentName: student.fullName,
-      admNo: student.admNo,
-      class: student.class,
-      section: student.section,
-      routeId: route.id,
-      busNo: route.busNo,
-      routeName: route.routeName,
-      pickupPointId: pp?.id || "",
-      pickupPointName: pp?.stopName || "",
+
+    const updates = {
+      transportId: route.id,
+      transportRoute: route.name,
+      transportBusNo: route.driver,
+      transportPickup: stop?.name ?? "",
+      transportMonths: assignMonths,
     };
-    const rest = studentTransports.filter((s) => s.studentId !== student.id);
-    saveStudentTransports([...rest, entry]);
+    await updateData("students", student.id, updates);
+    setStudents((prev) =>
+      prev.map((s) => (s.id === student.id ? { ...s, ...updates } : s)),
+    );
     addNotification(
-      `${student.fullName} assigned to Bus ${route.busNo}`,
+      `${student.fullName} assigned to route "${route.name}"`,
       "success",
       "🚌",
     );
-    setAssignForm({ studentId: "", routeId: "", pickupPointId: "" });
-    setStudentSearch("");
+    setAssignStudentId("");
+    setAssignRouteId("");
+    setAssignStopId("");
+    setAssignMonths(DEFAULT_MONTHS);
   }, [
-    assignForm,
+    assignStudentId,
+    assignRouteId,
+    assignStopId,
+    assignMonths,
     activeStudents,
     routes,
-    studentTransports,
-    saveStudentTransports,
+    updateData,
     addNotification,
   ]);
 
   const handleRemoveAssignment = useCallback(
-    (studentId: string) => {
-      saveStudentTransports(
-        studentTransports.filter((s) => s.studentId !== studentId),
+    async (studentId: string) => {
+      await updateData("students", studentId, {
+        transportId: "",
+        transportRoute: "",
+        transportBusNo: "",
+        transportPickup: "",
+        transportMonths: [],
+      });
+      setStudents((prev) =>
+        prev.map((s) =>
+          s.id === studentId
+            ? {
+                ...s,
+                transportId: "",
+                transportRoute: "",
+                transportBusNo: "",
+                transportPickup: "",
+                transportMonths: [],
+              }
+            : s,
+        ),
       );
       addNotification("Transport assignment removed", "info", "🚌");
     },
-    [studentTransports, saveStudentTransports, addNotification],
+    [updateData, addNotification],
   );
 
-  // ── Dashboard stats ───────────────────────────────────────
-  const totalAssigned = studentTransports.length;
-  const routeStats = routes.map((r) => ({
-    ...r,
-    count: studentTransports.filter((s) => s.routeId === r.id).length,
-  }));
+  const assignedStudents = activeStudents.filter((s) => s.transportId);
 
-  // ── Tab content renderers ─────────────────────────────────
+  // ── Transport Fees ────────────────────────────────────────
+  const feesStudents = activeStudents.filter(
+    (s) => s.transportId && (s.transportMonths?.length ?? 0) > 0,
+  );
+
+  const getMonthlyFare = (student: Student): number => {
+    if (!student.transportId) return 0;
+    const route = routes.find((r) => r.id === student.transportId);
+    if (!route) return 0;
+    const stop = route.stops.find((s) => s.name === student.transportPickup);
+    return stop?.fare ?? 0;
+  };
+
+  // ── Renders ───────────────────────────────────────────────
   const renderRoutesTab = () => (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            Routes & Buses
+            Routes & Stops
           </h2>
           <p className="text-sm text-muted-foreground">
             {routes.length} routes configured
           </p>
         </div>
         {!isReadOnly && (
-          <Button
-            onClick={() => {
-              setRouteForm(EMPTY_ROUTE);
-              setEditRouteId(null);
-              setShowRouteModal(true);
-            }}
-            data-ocid="add-route-btn"
-          >
+          <Button onClick={openAddRoute} data-ocid="transport.add-route_button">
             + Add Route
           </Button>
         )}
       </div>
 
       {routes.length === 0 ? (
-        <Card>
+        <Card data-ocid="transport.routes_empty_state">
           <CardContent className="py-16 text-center">
             <div className="text-4xl mb-3">🚌</div>
             <p className="font-semibold text-foreground">No routes yet</p>
             <p className="text-sm text-muted-foreground mt-1">
-              Add a bus route to get started.
+              Add a route to get started.
             </p>
           </CardContent>
         </Card>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                {[
-                  "Bus No.",
-                  "Route Name",
-                  "Driver",
-                  "Stops / Fare Range",
-                  "Students",
-                  "Actions",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {routes.map((route) => {
-                const count = studentTransports.filter(
-                  (s) => s.routeId === route.id,
-                ).length;
-                // Compute fare range from pickup points (not route-level)
-                const fares = route.pickupPoints
-                  .map((p) => p.fare ?? 0)
-                  .filter((f) => f > 0);
-                const fareDisplay =
-                  fares.length === 0
-                    ? "—"
-                    : fares.length === 1
-                      ? `₹${fares[0].toLocaleString("en-IN")}`
-                      : `₹${Math.min(...fares).toLocaleString("en-IN")}–₹${Math.max(...fares).toLocaleString("en-IN")}`;
-                return (
-                  <tr
-                    key={route.id}
-                    className="border-t border-border hover:bg-muted/30"
-                  >
-                    <td className="px-4 py-3">
-                      <Badge variant="outline" className="font-mono">
-                        {route.busNo}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {route.routeName}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div>{route.driverName || "—"}</div>
-                      {route.driverMobile && (
-                        <div className="text-xs text-muted-foreground">
-                          {route.driverMobile}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-medium">
-                      <div className="text-sm">{fareDisplay}</div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {route.pickupPoints.length} stop
-                        {route.pickupPoints.length !== 1 ? "s" : ""}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant={count > 0 ? "secondary" : "outline"}>
-                        {count} students
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            setRouteForm({
-                              busNo: route.busNo,
-                              routeName: route.routeName,
-                              driverStaffId: route.driverStaffId,
-                              driverName: route.driverName,
-                              driverMobile: route.driverMobile,
-                              monthlyFare: route.monthlyFare,
-                            });
-                            setEditRouteId(route.id);
-                            setShowRouteModal(true);
-                          }}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDeleteRoute(route.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-
-  const renderPickupTab = () => (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">
-            Pickup Points
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Manage stops for each route
-          </p>
-        </div>
-        {!isReadOnly && (
-          <Button
-            onClick={() => {
-              setPickupForm({ stopName: "", order: 1, distance: "", fare: 0 });
-              setEditPickupId(null);
-              setPickupRouteId(routes[0]?.id || "");
-              setShowPickupModal(true);
-            }}
-            data-ocid="add-pickup-btn"
-          >
-            + Add Stop
-          </Button>
-        )}
-      </div>
-
-      {routes.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Add routes first before managing pickup points.
-          </CardContent>
-        </Card>
-      ) : (
         <div className="space-y-4">
-          {routes.map((route) => (
-            <Card key={route.id}>
+          {routes.map((route, idx) => (
+            <Card key={route.id} data-ocid={`transport.route_card.${idx + 1}`}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
-                    <Badge variant="outline" className="font-mono">
-                      {route.busNo}
-                    </Badge>
-                    {route.routeName}
+                    🚌 {route.name}
+                    {route.driver && (
+                      <span className="text-sm font-normal text-muted-foreground">
+                        — Driver: {route.driver}
+                      </span>
+                    )}
                     <Badge variant="secondary">
-                      {route.pickupPoints.length} stops
+                      {route.stops.length} stops
                     </Badge>
                   </CardTitle>
                   {!isReadOnly && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setPickupRouteId(route.id);
-                        setPickupForm({
-                          stopName: "",
-                          order: route.pickupPoints.length + 1,
-                          distance: "",
-                          fare: 0,
-                        });
-                        setEditPickupId(null);
-                        setShowPickupModal(true);
-                      }}
-                    >
-                      + Add Stop
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openAddStop(route.id)}
+                        data-ocid={`transport.add-stop_button.${idx + 1}`}
+                      >
+                        + Add Stop
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openEditRoute(route)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => handleDeleteRoute(route.id)}
+                        data-ocid={`transport.delete-route_button.${idx + 1}`}
+                      >
+                        Delete
+                      </Button>
+                    </div>
                   )}
                 </div>
               </CardHeader>
               <CardContent>
-                {route.pickupPoints.length === 0 ? (
+                {route.stops.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-2">
                     No stops added yet.
                   </p>
                 ) : (
                   <div className="space-y-2">
-                    {[...route.pickupPoints]
-                      .sort((a, b) => a.order - b.order)
-                      .map((pp, idx) => (
-                        <div
-                          key={pp.id}
-                          className="flex items-center gap-3 bg-muted/30 rounded-lg px-3 py-2"
-                        >
-                          <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center shrink-0">
-                            {idx + 1}
-                          </span>
-                          <span className="flex-1 font-medium text-foreground">
-                            {pp.stopName}
-                          </span>
-                          {pp.distance && (
-                            <span className="text-xs text-muted-foreground">
-                              {pp.distance} km
-                            </span>
-                          )}
-                          {pp.fare > 0 && (
-                            <span className="text-xs font-semibold text-primary bg-primary/10 px-1.5 py-0.5 rounded-full">
-                              ₹{pp.fare.toLocaleString("en-IN")}/mo
-                            </span>
-                          )}
+                    {route.stops.map((stop, si) => (
+                      <div
+                        key={stop.id}
+                        className="flex items-center gap-3 bg-muted/30 rounded-lg px-3 py-2"
+                        data-ocid={`transport.stop_item.${si + 1}`}
+                      >
+                        <span className="w-6 h-6 rounded-full bg-primary/20 text-primary text-xs font-bold flex items-center justify-center shrink-0">
+                          {si + 1}
+                        </span>
+                        <span className="flex-1 font-medium text-foreground">
+                          {stop.name}
+                        </span>
+                        <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                          ₹{stop.fare.toLocaleString("en-IN")}/mo
+                        </span>
+                        {!isReadOnly && (
                           <div className="flex gap-1">
-                            <button
-                              type="button"
-                              onClick={() => movePickup(route.id, pp.id, "up")}
-                              disabled={idx === 0}
-                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                              aria-label="Move up"
-                            >
-                              ▲
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                movePickup(route.id, pp.id, "down")
-                              }
-                              disabled={idx === route.pickupPoints.length - 1}
-                              className="p-1 text-muted-foreground hover:text-foreground disabled:opacity-30"
-                              aria-label="Move down"
-                            >
-                              ▼
-                            </button>
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => {
-                                setPickupRouteId(route.id);
-                                setPickupForm({
-                                  stopName: pp.stopName,
-                                  order: pp.order,
-                                  distance: pp.distance,
-                                  fare: pp.fare ?? 0,
-                                });
-                                setEditPickupId(pp.id);
-                                setShowPickupModal(true);
-                              }}
+                              onClick={() => openEditStop(route.id, stop)}
                             >
                               Edit
                             </Button>
@@ -633,14 +442,15 @@ export default function Transport() {
                               variant="destructive"
                               size="sm"
                               onClick={() =>
-                                handleDeletePickup(route.id, pp.id)
+                                handleDeleteStop(route.id, stop.id)
                               }
                             >
                               ✕
                             </Button>
                           </div>
-                        </div>
-                      ))}
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </CardContent>
@@ -651,10 +461,10 @@ export default function Transport() {
     </div>
   );
 
-  const renderStudentsTab = () => (
+  const renderAssignTab = () => (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-foreground">
-        Student Transport Assignment
+        Student Assignment
       </h2>
 
       {!isReadOnly && (
@@ -662,58 +472,55 @@ export default function Transport() {
           <CardHeader>
             <CardTitle className="text-base">Assign Student to Route</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <CardContent className="space-y-4">
+            {/* Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <Label>Filter Class</Label>
+                <Label>Filter by Class</Label>
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
                   value={filterClass}
-                  onChange={(e) => setFilterClass(e.target.value)}
+                  onChange={(e) => {
+                    setFilterClass(e.target.value);
+                    setFilterSection("");
+                  }}
+                  data-ocid="transport.filter-class_select"
                 >
                   <option value="">All Classes</option>
-                  {CLASSES.map((c) => (
+                  {classOptions.map((c) => (
                     <option key={c} value={c}>
-                      Class {c}
+                      {c}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <Label>Filter Section</Label>
+                <Label>Filter by Section</Label>
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
                   value={filterSection}
                   onChange={(e) => setFilterSection(e.target.value)}
+                  data-ocid="transport.filter-section_select"
                 >
                   <option value="">All Sections</option>
-                  {SECTIONS.map((s) => (
+                  {sectionOptions.map((s) => (
                     <option key={s} value={s}>
                       {s}
                     </option>
                   ))}
                 </select>
               </div>
-              <div>
-                <Label>Search Student</Label>
-                <Input
-                  value={studentSearch}
-                  onChange={(e) => setStudentSearch(e.target.value)}
-                  placeholder="Name or Adm. No."
-                  data-ocid="student-transport-search"
-                />
-              </div>
             </div>
+
+            {/* Assignment form */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
                 <Label>Select Student *</Label>
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
-                  value={assignForm.studentId}
-                  onChange={(e) =>
-                    setAssignForm((p) => ({ ...p, studentId: e.target.value }))
-                  }
-                  data-ocid="student-transport-select"
+                  value={assignStudentId}
+                  onChange={(e) => setAssignStudentId(e.target.value)}
+                  data-ocid="transport.assign-student_select"
                 >
                   <option value="">— Select Student —</option>
                   {filteredStudents.map((s) => (
@@ -724,70 +531,85 @@ export default function Transport() {
                 </select>
               </div>
               <div>
-                <Label>Route / Bus *</Label>
+                <Label>Route *</Label>
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
-                  value={assignForm.routeId}
-                  onChange={(e) =>
-                    setAssignForm((p) => ({
-                      ...p,
-                      routeId: e.target.value,
-                      pickupPointId: "",
-                    }))
-                  }
-                  data-ocid="assign-route-select"
+                  value={assignRouteId}
+                  onChange={(e) => {
+                    setAssignRouteId(e.target.value);
+                    setAssignStopId("");
+                  }}
+                  data-ocid="transport.assign-route_select"
                 >
                   <option value="">— Select Route —</option>
                   {routes.map((r) => (
                     <option key={r.id} value={r.id}>
-                      Bus {r.busNo} — {r.routeName}
+                      {r.name}
                     </option>
                   ))}
                 </select>
               </div>
               <div>
-                <Label>Pickup Point</Label>
+                <Label>Pickup Stop</Label>
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
-                  value={assignForm.pickupPointId}
-                  onChange={(e) =>
-                    setAssignForm((p) => ({
-                      ...p,
-                      pickupPointId: e.target.value,
-                    }))
-                  }
-                  data-ocid="assign-pickup-select"
+                  value={assignStopId}
+                  onChange={(e) => setAssignStopId(e.target.value)}
+                  data-ocid="transport.assign-stop_select"
                 >
                   <option value="">— Select Stop —</option>
-                  {(selectedRoute?.pickupPoints || []).map((pp) => (
-                    <option key={pp.id} value={pp.id}>
-                      {pp.stopName}
+                  {(selectedAssignRoute?.stops ?? []).map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} — ₹{s.fare.toLocaleString("en-IN")}/mo
                     </option>
                   ))}
                 </select>
               </div>
             </div>
-            <Button
-              onClick={handleAssignStudent}
-              data-ocid="assign-student-btn"
-            >
+
+            {/* Month selection */}
+            <div>
+              <Label className="mb-2 block">
+                Transport Months (Jun auto-deselected)
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {ALL_MONTHS.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => toggleMonth(m)}
+                    className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                      assignMonths.includes(m)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border hover:border-primary/50"
+                    }`}
+                    data-ocid={`transport.month-toggle.${m}`}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button onClick={handleAssign} data-ocid="transport.assign_button">
               Assign to Transport
             </Button>
           </CardContent>
         </Card>
       )}
 
+      {/* Assigned students table */}
       <div className="overflow-x-auto rounded-xl border border-border">
         <table className="w-full text-sm">
           <thead className="bg-muted/50">
             <tr>
               {[
-                "Student Name",
+                "Student",
                 "Adm. No.",
                 "Class",
-                "Bus No.",
                 "Route",
-                "Pickup Point",
+                "Stop",
+                "Months",
                 "Action",
               ].map((h) => (
                 <th
@@ -800,43 +622,53 @@ export default function Transport() {
             </tr>
           </thead>
           <tbody>
-            {studentTransports.length === 0 ? (
+            {assignedStudents.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}
                   className="px-4 py-10 text-center text-muted-foreground"
+                  data-ocid="transport.assign_empty_state"
                 >
+                  <div className="text-3xl mb-1">👥</div>
                   No students assigned to transport yet.
                 </td>
               </tr>
             ) : (
-              studentTransports.map((st) => (
+              assignedStudents.map((s, idx) => (
                 <tr
-                  key={st.studentId}
+                  key={s.id}
                   className="border-t border-border hover:bg-muted/30"
+                  data-ocid={`transport.assign_item.${idx + 1}`}
                 >
                   <td className="px-4 py-3 font-medium text-foreground">
-                    {st.studentName}
+                    {s.fullName}
                   </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {st.admNo}
-                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{s.admNo}</td>
                   <td className="px-4 py-3">
-                    {st.class} {st.section}
+                    {s.class} {s.section}
                   </td>
+                  <td className="px-4 py-3">{s.transportRoute || "—"}</td>
+                  <td className="px-4 py-3">{s.transportPickup || "—"}</td>
                   <td className="px-4 py-3">
-                    <Badge variant="outline" className="font-mono">
-                      {st.busNo}
-                    </Badge>
+                    <div className="flex flex-wrap gap-1">
+                      {(s.transportMonths ?? []).map((m) => (
+                        <Badge
+                          key={m}
+                          variant="secondary"
+                          className="text-[10px]"
+                        >
+                          {m}
+                        </Badge>
+                      ))}
+                    </div>
                   </td>
-                  <td className="px-4 py-3">{st.routeName}</td>
-                  <td className="px-4 py-3">{st.pickupPointName || "—"}</td>
                   <td className="px-4 py-3">
                     {!isReadOnly && (
                       <Button
                         variant="destructive"
                         size="sm"
-                        onClick={() => handleRemoveAssignment(st.studentId)}
+                        onClick={() => handleRemoveAssignment(s.id)}
+                        data-ocid={`transport.remove-assign_button.${idx + 1}`}
                       >
                         Remove
                       </Button>
@@ -851,156 +683,99 @@ export default function Transport() {
     </div>
   );
 
-  const renderDashboardTab = () => (
-    <div className="space-y-6">
-      <h2 className="text-lg font-semibold text-foreground">
-        Transport Dashboard
-      </h2>
+  const renderFeesTab = () => (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-foreground">Transport Fees</h2>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <Card className="bg-primary/5 border-primary/20">
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-3xl font-bold text-primary">
-              {routes.length}
-            </div>
-            <div className="text-sm text-muted-foreground mt-1">
-              Total Routes
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-accent/10 border-accent/20">
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-3xl font-bold text-accent">
-              {totalAssigned}
-            </div>
-            <div className="text-sm text-muted-foreground mt-1">
-              Students on Transport
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="bg-secondary border-border">
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-3xl font-bold text-foreground">
-              {drivers.length}
-            </div>
-            <div className="text-sm text-muted-foreground mt-1">Drivers</div>
-          </CardContent>
-        </Card>
-        <Card className="bg-secondary border-border">
-          <CardContent className="pt-4 pb-3 text-center">
-            <div className="text-3xl font-bold text-foreground">
-              {routes.reduce((s, r) => s + r.pickupPoints.length, 0)}
-            </div>
-            <div className="text-sm text-muted-foreground mt-1">
-              Pickup Stops
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Route-wise student count */}
-      <div>
-        <h3 className="font-semibold text-foreground mb-3">Route-wise Count</h3>
-        <div className="grid gap-3 md:grid-cols-2">
-          {routeStats.length === 0 ? (
-            <p className="text-sm text-muted-foreground col-span-2">
-              No routes configured.
+      {feesStudents.length === 0 ? (
+        <Card data-ocid="transport.fees_empty_state">
+          <CardContent className="py-16 text-center">
+            <div className="text-4xl mb-3">₹</div>
+            <p className="font-semibold text-foreground">
+              No transport fees to show
             </p>
-          ) : (
-            routeStats.map((r) => (
-              <Card key={r.id}>
-                <CardContent className="py-3 flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                    🚌
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-foreground truncate">
-                      {r.routeName}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      Bus {r.busNo} • Driver: {r.driverName || "Not assigned"}
-                    </div>
-                  </div>
-                  <Badge
-                    variant={r.count > 0 ? "default" : "outline"}
-                    className="shrink-0"
+            <p className="text-sm text-muted-foreground mt-1">
+              Assign students to routes with stops that have monthly fares.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                {[
+                  "Student",
+                  "Class",
+                  "Route",
+                  "Stop",
+                  "Monthly Fare",
+                  "Active Months",
+                  "Total Fee",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
                   >
-                    {r.count} students
-                  </Badge>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
-
-      {/* Driver list */}
-      {drivers.length > 0 && (
-        <div>
-          <h3 className="font-semibold text-foreground mb-3">Drivers</h3>
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  {[
-                    "Driver Name",
-                    "Mobile",
-                    "Assigned Bus",
-                    "Route",
-                    "Students",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left font-semibold text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {drivers.map((driver) => {
-                  const assignedRoute = routes.find(
-                    (r) =>
-                      r.driverStaffId === driver.id ||
-                      r.driverName === driver.name,
-                  );
-                  const count = assignedRoute
-                    ? studentTransports.filter(
-                        (s) => s.routeId === assignedRoute.id,
-                      ).length
-                    : 0;
-                  return (
-                    <tr
-                      key={driver.id}
-                      className="border-t border-border hover:bg-muted/30"
-                    >
-                      <td className="px-4 py-3 font-medium">{driver.name}</td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {driver.mobile}
-                      </td>
-                      <td className="px-4 py-3">
-                        {assignedRoute ? (
-                          <Badge variant="outline" className="font-mono">
-                            {assignedRoute.busNo}
-                          </Badge>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        {assignedRoute?.routeName || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary">{count}</Badge>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {feesStudents.map((s, idx) => {
+                const fare = getMonthlyFare(s);
+                const months = s.transportMonths?.length ?? 0;
+                const total = fare * months;
+                return (
+                  <tr
+                    key={s.id}
+                    className="border-t border-border hover:bg-muted/30"
+                    data-ocid={`transport.fees_item.${idx + 1}`}
+                  >
+                    <td className="px-4 py-3 font-medium text-foreground">
+                      {s.fullName}
+                    </td>
+                    <td className="px-4 py-3">
+                      {s.class} {s.section}
+                    </td>
+                    <td className="px-4 py-3">{s.transportRoute || "—"}</td>
+                    <td className="px-4 py-3">{s.transportPickup || "—"}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {fare > 0 ? `₹${fare.toLocaleString("en-IN")}` : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <Badge variant="secondary">{months}</Badge>
+                    </td>
+                    <td className="px-4 py-3 font-semibold text-primary">
+                      {total > 0 ? `₹${total.toLocaleString("en-IN")}` : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="bg-muted/40">
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-4 py-3 text-right font-semibold text-foreground"
+                >
+                  Total Transport Revenue:
+                </td>
+                <td className="px-4 py-3 font-bold text-primary">
+                  ₹
+                  {feesStudents
+                    .reduce(
+                      (sum, s) =>
+                        sum +
+                        getMonthlyFare(s) * (s.transportMonths?.length ?? 0),
+                      0,
+                    )
+                    .toLocaleString("en-IN")}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
     </div>
@@ -1010,33 +785,35 @@ export default function Transport() {
     <div className="space-y-4">
       {/* Tab Nav */}
       <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
-        {TABS.map((tab) => (
+        {TABS.map((t) => (
           <button
-            key={tab.id}
+            key={t.id}
             type="button"
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => setTab(t.id)}
             className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              activeTab === tab.id
+              tab === t.id
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
-            data-ocid={`transport-tab-${tab.id}`}
+            data-ocid={`transport.tab-${t.id}_tab`}
           >
-            <span>{tab.icon}</span>
-            {tab.label}
+            <span>{t.icon}</span>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {activeTab === "routes" && renderRoutesTab()}
-      {activeTab === "pickup" && renderPickupTab()}
-      {activeTab === "students" && renderStudentsTab()}
-      {activeTab === "dashboard" && renderDashboardTab()}
+      {tab === "routes" && renderRoutesTab()}
+      {tab === "assign" && renderAssignTab()}
+      {tab === "fees" && renderFeesTab()}
 
       {/* Route Modal */}
       {showRouteModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-lg shadow-elevated">
+          <Card
+            className="w-full max-w-md shadow-elevated"
+            data-ocid="transport.route_dialog"
+          >
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-base">
                 {editRouteId ? "Edit Route" : "Add Route"}
@@ -1047,97 +824,44 @@ export default function Transport() {
                   setShowRouteModal(false);
                   setEditRouteId(null);
                 }}
-                className="text-muted-foreground hover:text-foreground text-xl leading-none"
+                className="text-muted-foreground hover:text-foreground text-xl"
                 aria-label="Close"
+                data-ocid="transport.route_close_button"
               >
                 ×
               </button>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Bus No. *</Label>
-                  <Input
-                    value={routeForm.busNo}
-                    onChange={(e) =>
-                      setRouteForm((p) => ({ ...p, busNo: e.target.value }))
-                    }
-                    placeholder="e.g. MP-09-AB-1234"
-                    data-ocid="route-busno-input"
-                  />
-                </div>
-                <div>
-                  <Label>Route Name *</Label>
-                  <Input
-                    value={routeForm.routeName}
-                    onChange={(e) =>
-                      setRouteForm((p) => ({ ...p, routeName: e.target.value }))
-                    }
-                    placeholder="e.g. North Route"
-                    data-ocid="route-name-input"
-                  />
-                </div>
+              <div>
+                <Label>Route Name *</Label>
+                <Input
+                  value={routeForm.name}
+                  onChange={(e) =>
+                    setRouteForm((p) => ({ ...p, name: e.target.value }))
+                  }
+                  placeholder="e.g. North Route"
+                  data-ocid="transport.route-name_input"
+                />
               </div>
               <div>
-                <Label>Driver (from Staff)</Label>
-                <select
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
-                  value={routeForm.driverStaffId}
-                  onChange={(e) => {
-                    const driver = drivers.find((d) => d.id === e.target.value);
-                    setRouteForm((p) => ({
-                      ...p,
-                      driverStaffId: e.target.value,
-                      driverName: driver?.name || p.driverName,
-                      driverMobile: driver?.mobile || p.driverMobile,
-                    }));
-                  }}
-                  data-ocid="route-driver-select"
-                >
-                  <option value="">— Select Driver —</option>
-                  {drivers.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name} ({d.mobile})
-                    </option>
-                  ))}
-                </select>
+                <Label>Driver Name</Label>
+                <Input
+                  value={routeForm.driver}
+                  onChange={(e) =>
+                    setRouteForm((p) => ({ ...p, driver: e.target.value }))
+                  }
+                  placeholder="Driver's full name"
+                  data-ocid="transport.route-driver_input"
+                />
               </div>
-              {!routeForm.driverStaffId && (
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label>Driver Name (Manual)</Label>
-                    <Input
-                      value={routeForm.driverName}
-                      onChange={(e) =>
-                        setRouteForm((p) => ({
-                          ...p,
-                          driverName: e.target.value,
-                        }))
-                      }
-                      placeholder="Driver name"
-                    />
-                  </div>
-                  <div>
-                    <Label>Driver Mobile</Label>
-                    <Input
-                      value={routeForm.driverMobile}
-                      onChange={(e) =>
-                        setRouteForm((p) => ({
-                          ...p,
-                          driverMobile: e.target.value,
-                        }))
-                      }
-                      placeholder="Mobile number"
-                    />
-                  </div>
-                </div>
-              )}
               <p className="text-xs text-muted-foreground bg-muted/40 px-3 py-2 rounded-lg">
-                💡 Monthly fares are set per pickup point in the{" "}
-                <strong>Pickup Points</strong> tab.
+                💡 Monthly fares are set per stop after creating the route.
               </p>
               <div className="flex gap-2 pt-1">
-                <Button onClick={handleSaveRoute} data-ocid="save-route-btn">
+                <Button
+                  onClick={handleSaveRoute}
+                  data-ocid="transport.route_save_button"
+                >
                   Save Route
                 </Button>
                 <Button
@@ -1146,6 +870,7 @@ export default function Transport() {
                     setShowRouteModal(false);
                     setEditRouteId(null);
                   }}
+                  data-ocid="transport.route_cancel_button"
                 >
                   Cancel
                 </Button>
@@ -1155,137 +880,75 @@ export default function Transport() {
         </div>
       )}
 
-      {/* Pickup Modal */}
-      {showPickupModal && (
+      {/* Stop Modal */}
+      {showStopModal && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-md shadow-elevated">
+          <Card
+            className="w-full max-w-sm shadow-elevated"
+            data-ocid="transport.stop_dialog"
+          >
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-base">
-                {editPickupId ? "Edit Stop" : "Add Pickup Stop"}
+                {editStopId ? "Edit Stop" : "Add Stop"}
               </CardTitle>
               <button
                 type="button"
                 onClick={() => {
-                  setShowPickupModal(false);
-                  setEditPickupId(null);
+                  setShowStopModal(false);
+                  setEditStopId(null);
                 }}
-                className="text-muted-foreground hover:text-foreground text-xl leading-none"
+                className="text-muted-foreground hover:text-foreground text-xl"
                 aria-label="Close"
+                data-ocid="transport.stop_close_button"
               >
                 ×
               </button>
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
-                <Label>Route</Label>
-                <select
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
-                  value={pickupRouteId}
-                  onChange={(e) => setPickupRouteId(e.target.value)}
-                >
-                  {routes.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      Bus {r.busNo} — {r.routeName}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
                 <Label>Stop Name *</Label>
                 <Input
-                  value={pickupForm.stopName}
+                  value={stopForm.name}
                   onChange={(e) =>
-                    setPickupForm((p) => ({ ...p, stopName: e.target.value }))
+                    setStopForm((p) => ({ ...p, name: e.target.value }))
                   }
-                  placeholder="e.g. Main Gate, Railway Station"
-                  data-ocid="pickup-name-input"
+                  placeholder="e.g. Main Gate"
+                  data-ocid="transport.stop-name_input"
                 />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Order</Label>
-                  <Input
-                    type="number"
-                    min={1}
-                    value={pickupForm.order}
-                    onChange={(e) =>
-                      setPickupForm((p) => ({
-                        ...p,
-                        order: Number(e.target.value),
-                      }))
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Distance (km)</Label>
-                  <Input
-                    value={pickupForm.distance}
-                    onChange={(e) =>
-                      setPickupForm((p) => ({ ...p, distance: e.target.value }))
-                    }
-                    placeholder="e.g. 5.2"
-                  />
-                </div>
               </div>
               <div>
                 <Label>Monthly Fare (₹) *</Label>
                 <Input
                   type="number"
                   min={0}
-                  value={pickupForm.fare || ""}
+                  value={stopForm.fare || ""}
                   onChange={(e) =>
-                    setPickupForm((p) => ({
+                    setStopForm((p) => ({
                       ...p,
                       fare: Math.max(0, Number(e.target.value)),
                     }))
                   }
                   placeholder="e.g. 500"
-                  data-ocid="pickup-fare-input"
+                  data-ocid="transport.stop-fare_input"
                 />
                 <p className="text-[10px] text-muted-foreground mt-0.5">
-                  Students at this stop will be charged this amount each month
+                  Students at this stop pay this per active month
                 </p>
               </div>
               <div className="flex gap-2 pt-1">
-                <Button onClick={handleSavePickup} data-ocid="save-pickup-btn">
+                <Button
+                  onClick={handleSaveStop}
+                  data-ocid="transport.stop_save_button"
+                >
                   Save Stop
                 </Button>
                 <Button
                   variant="outline"
                   onClick={() => {
-                    setShowPickupModal(false);
-                    setEditPickupId(null);
+                    setShowStopModal(false);
+                    setEditStopId(null);
                   }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
-
-      {/* Confirm delete modal */}
-      {confirmDelete && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <Card className="w-full max-w-sm shadow-elevated">
-            <CardHeader>
-              <CardTitle className="text-base text-destructive">
-                ⚠️ Delete Route?
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">
-                This route has students assigned. Deleting it will remove all
-                student transport assignments for this route.
-              </p>
-              <div className="flex gap-2">
-                <Button variant="destructive" onClick={handleConfirmDelete}>
-                  Yes, Delete
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setConfirmDelete(null)}
+                  data-ocid="transport.stop_cancel_button"
                 >
                   Cancel
                 </Button>

@@ -1,11 +1,15 @@
-import { BookOpen, CalendarDays } from "lucide-react";
+import { BookOpen, CalendarDays, FileText, UserCheck } from "lucide-react";
 import { useState } from "react";
+import AdmitCards from "./examinations/AdmitCards";
 import ExamResults from "./examinations/ExamResults";
 import ExamTimetableMaker from "./examinations/ExamTimetableMaker";
+import TeacherTimetable from "./examinations/TeacherTimetable";
 
 const TABS = [
-  { id: "timetable", label: "Exam Timetable Maker", icon: CalendarDays },
+  { id: "timetable", label: "Exam Timetable", icon: CalendarDays },
+  { id: "teacher", label: "Teacher Timetable", icon: UserCheck },
   { id: "results", label: "Exam Results", icon: BookOpen },
+  { id: "admitcards", label: "Admit Cards", icon: FileText },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -26,7 +30,7 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
           Examinations
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">
-          Create exam timetables, record results and generate marksheets
+          Exam timetables, teacher schedules, results and admit cards
         </p>
       </div>
 
@@ -49,7 +53,7 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
                   ? "bg-card text-foreground shadow-card"
                   : "text-muted-foreground hover:text-foreground"
               }`}
-              data-ocid={`exam-tab-${tab.id}`}
+              data-ocid={`exam.tab.${tab.id}`}
             >
               <Icon size={15} />
               {tab.label}
@@ -60,7 +64,9 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
 
       <div>
         {activeTab === "timetable" && <ExamTimetableMaker />}
+        {activeTab === "teacher" && <TeacherTimetable />}
         {activeTab === "results" && <ExamResults />}
+        {activeTab === "admitcards" && <AdmitCards />}
       </div>
     </div>
   );

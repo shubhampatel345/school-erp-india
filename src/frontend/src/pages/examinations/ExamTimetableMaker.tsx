@@ -4,6 +4,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
 import { useApp } from "../../context/AppContext";
+import type { Subject } from "../../types";
 import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -27,13 +28,8 @@ export interface SavedTimetable {
   startTime: string;
   endTime: string;
   tables: ClassTimetable[];
+  sessionId: string;
   savedAt: string;
-}
-
-interface AcademicSubject {
-  id: string;
-  name: string;
-  classes: string[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -61,8 +57,7 @@ const DAYS = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function getDayName(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  return DAYS[d.getDay()];
+  return DAYS[new Date(`${dateStr}T12:00:00`).getDay()];
 }
 
 function getExamDates(start: string, end: string): string[] {
@@ -88,7 +83,7 @@ function shuffle<T>(arr: T[]): T[] {
 
 function getSubjectsForClass(
   className: string,
-  acSubjects: AcademicSubject[],
+  acSubjects: Subject[],
 ): string[] {
   const classNum = className
     .replace("Class ", "")
@@ -102,8 +97,7 @@ function getSubjectsForClass(
 
 function formatDate(dateStr: string): string {
   if (!dateStr) return "";
-  const d = new Date(`${dateStr}T12:00:00`);
-  return d.toLocaleDateString("en-IN", {
+  return new Date(`${dateStr}T12:00:00`).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -116,13 +110,11 @@ function exportCSV(tables: ClassTimetable[], examName: string) {
     ...new Set(tables.flatMap((t) => t.rows.map((r) => r.date))),
   ].sort();
   const headers = ["Date", "Day", ...tables.map((t) => t.classKey)];
-  const rows = allDates.map((date) => {
-    const dayName = getDayName(date);
-    const subjects = tables.map(
-      (t) => t.rows.find((r) => r.date === date)?.subject ?? "",
-    );
-    return [formatDate(date), dayName, ...subjects];
-  });
+  const rows = allDates.map((date) => [
+    formatDate(date),
+    getDayName(date),
+    ...tables.map((t) => t.rows.find((r) => r.date === date)?.subject ?? ""),
+  ]);
   const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
   const url = URL.createObjectURL(blob);
@@ -133,7 +125,7 @@ function exportCSV(tables: ClassTimetable[], examName: string) {
   URL.revokeObjectURL(url);
 }
 
-// ── Class Card with drag-only-subjects ────────────────────────────────────────
+// ── ClassCard ─────────────────────────────────────────────────────────────────
 function ClassCard({
   table,
   onReorder,
@@ -146,11 +138,6 @@ function ClassCard({
   const dragIdx = useRef<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
 
-  const handleDragStart = (idx: number) => {
-    if (saved) return;
-    dragIdx.current = idx;
-  };
-
   const handleDrop = (idx: number) => {
     setDragOver(null);
     if (saved || dragIdx.current === null || dragIdx.current === idx) return;
@@ -160,12 +147,10 @@ function ClassCard({
     newRows.splice(idx, 0, dragged);
     const dates = table.rows.map((r) => r.date);
     const days = table.rows.map((r) => r.day);
-    const reordered = newRows.map((r, i) => ({
-      ...r,
-      date: dates[i],
-      day: days[i],
-    }));
-    onReorder(table.classKey, reordered);
+    onReorder(
+      table.classKey,
+      newRows.map((r, i) => ({ ...r, date: dates[i], day: days[i] })),
+    );
     dragIdx.current = null;
   };
 
@@ -177,7 +162,7 @@ function ClassCard({
         </span>
         {!saved && (
           <span className="text-xs text-muted-foreground italic">
-            ↕ Drag subject to reorder
+            ↕ Drag to reorder
           </span>
         )}
       </div>
@@ -199,15 +184,11 @@ function ClassCard({
           {table.rows.map((row, idx) => (
             <tr
               key={row.id}
-              className={`border-t border-border/50 transition-colors ${
-                dragOver === idx && !saved
-                  ? "bg-accent/10"
-                  : !saved
-                    ? "hover:bg-muted/20"
-                    : ""
-              }`}
+              className={`border-t border-border/50 transition-colors ${dragOver === idx && !saved ? "bg-accent/10" : !saved ? "hover:bg-muted/20" : ""}`}
               draggable={!saved}
-              onDragStart={() => handleDragStart(idx)}
+              onDragStart={() => {
+                dragIdx.current = idx;
+              }}
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragOver(idx);
@@ -225,7 +206,7 @@ function ClassCard({
                 <div className="flex items-center gap-2">
                   {!saved && (
                     <span
-                      className="text-muted-foreground cursor-grab select-none text-base leading-none"
+                      className="text-muted-foreground cursor-grab select-none text-base"
                       aria-hidden="true"
                     >
                       ⠿
@@ -242,16 +223,12 @@ function ClassCard({
   );
 }
 
-// ── Combined Excel View ───────────────────────────────────────────────────────
+// ── Combined View ─────────────────────────────────────────────────────────────
 function CombinedView({
   tables,
   examName,
   examTime,
-}: {
-  tables: ClassTimetable[];
-  examName: string;
-  examTime?: string;
-}) {
+}: { tables: ClassTimetable[]; examName: string; examTime?: string }) {
   if (tables.length === 0) return null;
   const allDates = [
     ...new Set(tables.flatMap((t) => t.rows.map((r) => r.date))),
@@ -282,8 +259,6 @@ function CombinedView({
           </Button>
         </div>
       </div>
-
-      {/* Print header (hidden on screen) */}
       <div className="hidden print:block text-center mb-4">
         <h1 className="text-xl font-bold">
           {
@@ -295,21 +270,20 @@ function CombinedView({
         <h2 className="text-base font-semibold mt-1">{examName} — Timetable</h2>
         {examTime && <p className="text-sm">Time: {examTime}</p>}
       </div>
-
       <div className="overflow-x-auto rounded-xl border border-border bg-card print:border-0">
         <table className="w-full text-sm min-w-max">
           <thead>
             <tr className="bg-primary/10 border-b border-border">
-              <th className="px-3 py-2.5 text-left text-foreground font-semibold border-r border-border sticky left-0 bg-primary/10 whitespace-nowrap">
+              <th className="px-3 py-2.5 text-left font-semibold border-r border-border sticky left-0 bg-primary/10 whitespace-nowrap">
                 Date
               </th>
-              <th className="px-3 py-2.5 text-left text-foreground font-semibold border-r border-border whitespace-nowrap">
+              <th className="px-3 py-2.5 text-left font-semibold border-r border-border whitespace-nowrap">
                 Day
               </th>
               {tables.map((t) => (
                 <th
                   key={t.classKey}
-                  className="px-3 py-2.5 text-center text-foreground font-semibold border-r border-border last:border-r-0 whitespace-nowrap"
+                  className="px-3 py-2.5 text-center font-semibold border-r border-border last:border-r-0 whitespace-nowrap"
                 >
                   {t.classKey}
                 </th>
@@ -328,24 +302,19 @@ function CombinedView({
                 <td className="px-3 py-2 text-muted-foreground border-r border-border text-xs">
                   {getDayName(date)}
                 </td>
-                {tables.map((t) => {
-                  const row = t.rows.find((r) => r.date === date);
-                  return (
-                    <td
-                      key={t.classKey}
-                      className="px-3 py-2 text-center font-medium text-foreground border-r border-border last:border-r-0 whitespace-nowrap"
-                    >
-                      {row?.subject ?? "—"}
-                    </td>
-                  );
-                })}
+                {tables.map((t) => (
+                  <td
+                    key={t.classKey}
+                    className="px-3 py-2 text-center font-medium border-r border-border last:border-r-0 whitespace-nowrap"
+                  >
+                    {t.rows.find((r) => r.date === date)?.subject ?? "—"}
+                  </td>
+                ))}
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
-      {/* Print signature line */}
       <div className="hidden print:flex justify-between mt-8 text-sm">
         <span>Class Teacher Signature: _______________</span>
         <span>Principal Signature: _______________</span>
@@ -356,45 +325,39 @@ function CombinedView({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ExamTimetableMaker() {
-  const { addNotification } = useApp();
+  const { currentSession, getData, saveData, deleteData, addNotification } =
+    useApp();
+  const sessionId = currentSession?.id ?? "sess_2025";
 
-  // Step 1 state
   const [examName, setExamName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
-
-  // Step 2 state
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const [classSubjects, setClassSubjects] = useState<Record<string, string[]>>(
     {},
   );
-
-  // Generated timetables
   const [generated, setGenerated] = useState<ClassTimetable[]>([]);
   const [isSaved, setIsSaved] = useState(false);
-
-  // Saved list
-  const [savedList, setSavedList] = useState<SavedTimetable[]>(() =>
-    ls.get<SavedTimetable[]>("exam_timetables", []),
-  );
   const [viewSaved, setViewSaved] = useState<SavedTimetable | null>(null);
 
-  // Academic subjects
-  const [acSubjects, setAcSubjects] = useState<AcademicSubject[]>([]);
+  // Load saved timetables from context (server) or localStorage fallback
+  const contextTimetables = getData("examTimetables") as SavedTimetable[];
+  const [savedList, setSavedList] = useState<SavedTimetable[]>([]);
+
   useEffect(() => {
-    setAcSubjects(ls.get<AcademicSubject[]>("academics_subjects", []));
-  }, []);
+    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
+    const merged = contextTimetables.length > 0 ? contextTimetables : local;
+    setSavedList(merged);
+  }, [contextTimetables]);
+
+  const acSubjects = getData("subjects") as Subject[];
 
   const examDates = getExamDates(startDate, endDate);
-
-  const allClassKeys: string[] = [];
-  for (const cls of CLASSES) {
-    for (const sec of SECTIONS.slice(0, 3)) {
-      allClassKeys.push(`Class ${cls}${sec}`);
-    }
-  }
+  const allClassKeys = CLASSES.flatMap((c) =>
+    SECTIONS.slice(0, 3).map((s) => `Class ${c}${s}`),
+  );
 
   const toggleClass = (key: string) => {
     setSelectedClasses((prev) =>
@@ -408,10 +371,12 @@ export default function ExamTimetableMaker() {
     setClassSubjects((prev) => {
       const current =
         prev[classKey] ?? getSubjectsForClass(classKey, acSubjects);
-      const updated = current.includes(subject)
-        ? current.filter((s) => s !== subject)
-        : [...current, subject];
-      return { ...prev, [classKey]: updated };
+      return {
+        ...prev,
+        [classKey]: current.includes(subject)
+          ? current.filter((s) => s !== subject)
+          : [...current, subject],
+      };
     });
   };
 
@@ -428,16 +393,17 @@ export default function ExamTimetableMaker() {
       selectedClasses.length === 0
     )
       return;
-    const tables: ClassTimetable[] = selectedClasses.map((classKey) => {
-      const subjects = getSubjectsFor(classKey);
-      const shuffled = shuffle(subjects);
-      const rows: SubjectRow[] = examDates.map((date, i) => ({
-        id: generateId(),
-        date,
-        day: getDayName(date),
-        subject: shuffled[i % shuffled.length],
-      }));
-      return { classKey, rows };
+    const tables = selectedClasses.map((classKey) => {
+      const shuffled = shuffle(getSubjectsFor(classKey));
+      return {
+        classKey,
+        rows: examDates.map((date, i) => ({
+          id: generateId(),
+          date,
+          day: getDayName(date),
+          subject: shuffled[i % shuffled.length],
+        })),
+      };
     });
     setGenerated(tables);
     setIsSaved(false);
@@ -454,7 +420,7 @@ export default function ExamTimetableMaker() {
     [],
   );
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (generated.length === 0) return;
     const entry: SavedTimetable = {
       id: generateId(),
@@ -464,11 +430,18 @@ export default function ExamTimetableMaker() {
       startTime,
       endTime,
       tables: generated,
+      sessionId,
       savedAt: new Date().toISOString(),
     };
-    const updated = [entry, ...savedList];
-    ls.set("exam_timetables", updated);
-    setSavedList(updated);
+    // Save to server via context
+    await saveData(
+      "examTimetables",
+      entry as unknown as Record<string, unknown>,
+    );
+    // Also save locally for offline / ExamResults cross-reference
+    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
+    ls.set("exam_timetables", [entry, ...local]);
+    setSavedList((prev) => [entry, ...prev]);
     setIsSaved(true);
     addNotification(`Exam timetable saved: ${examName}`, "success", "📅");
   }, [
@@ -478,20 +451,32 @@ export default function ExamTimetableMaker() {
     endDate,
     startTime,
     endTime,
-    savedList,
+    sessionId,
+    saveData,
     addNotification,
   ]);
 
+  const handleDeleteSaved = async (id: string) => {
+    await deleteData("examTimetables", id);
+    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
+    ls.set(
+      "exam_timetables",
+      local.filter((e) => e.id !== id),
+    );
+    setSavedList((prev) => prev.filter((e) => e.id !== id));
+    if (viewSaved?.id === id) setViewSaved(null);
+  };
+
   const canGenerate =
     examName.trim().length > 0 &&
-    startDate.length > 0 &&
-    endDate.length > 0 &&
+    startDate &&
+    endDate &&
     selectedClasses.length > 0 &&
     examDates.length > 0;
 
   return (
     <div className="space-y-6">
-      {/* ── Step 1: Exam Details ──────────────────────────────────── */}
+      {/* Step 1: Exam Details */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-5">
         <div className="flex items-center gap-3">
           <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
@@ -504,7 +489,6 @@ export default function ExamTimetableMaker() {
             </p>
           </div>
         </div>
-
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div className="space-y-1.5 sm:col-span-2 lg:col-span-1">
             <Label>Exam Name</Label>
@@ -560,9 +544,9 @@ export default function ExamTimetableMaker() {
             />
           </div>
           {examDates.length > 0 && (
-            <div className="space-y-1.5 flex flex-col justify-end">
+            <div className="flex flex-col justify-end space-y-1.5">
               <Label>Exam Schedule</Label>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
                 <Badge variant="secondary">{examDates.length} days</Badge>
                 <span className="text-xs text-muted-foreground">
                   (Sundays excluded)
@@ -571,8 +555,6 @@ export default function ExamTimetableMaker() {
             </div>
           )}
         </div>
-
-        {/* Dates preview strip */}
         {examDates.length > 0 && (
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">
@@ -592,7 +574,7 @@ export default function ExamTimetableMaker() {
         )}
       </div>
 
-      {/* ── Step 2: Classes & Subjects ────────────────────────────── */}
+      {/* Step 2: Classes & Subjects */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-5">
         <div className="flex items-center gap-3">
           <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
@@ -607,18 +589,13 @@ export default function ExamTimetableMaker() {
             </p>
           </div>
         </div>
-
         <div className="space-y-2">
           <Label>Select Classes</Label>
           <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-10 gap-1.5">
             {allClassKeys.map((key) => (
               <label
                 key={key}
-                className={`flex items-center justify-center p-2 rounded-lg border cursor-pointer text-xs font-medium transition-smooth select-none ${
-                  selectedClasses.includes(key)
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"
-                }`}
+                className={`flex items-center justify-center p-2 rounded-lg border cursor-pointer text-xs font-medium transition-smooth select-none ${selectedClasses.includes(key) ? "border-primary bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}
               >
                 <input
                   type="checkbox"
@@ -632,7 +609,6 @@ export default function ExamTimetableMaker() {
             ))}
           </div>
         </div>
-
         {selectedClasses.length > 0 && (
           <div className="space-y-3">
             <Label>Subjects per Class</Label>
@@ -646,11 +622,9 @@ export default function ExamTimetableMaker() {
                     className="bg-muted/30 rounded-lg p-3 space-y-2"
                   >
                     <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold text-foreground">
-                        {classKey}
-                      </p>
+                      <p className="text-xs font-semibold">{classKey}</p>
                       <span className="text-xs text-muted-foreground">
-                        {selected.length} subjects selected
+                        {selected.length} selected
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
@@ -659,11 +633,7 @@ export default function ExamTimetableMaker() {
                           key={subj}
                           type="button"
                           onClick={() => toggleSubject(classKey, subj)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-smooth ${
-                            selected.includes(subj)
-                              ? "bg-primary text-primary-foreground border-primary"
-                              : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
-                          }`}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-smooth ${selected.includes(subj) ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border hover:border-primary/50"}`}
                         >
                           {subj}
                         </button>
@@ -677,7 +647,7 @@ export default function ExamTimetableMaker() {
         )}
       </div>
 
-      {/* ── Step 3: Generate ─────────────────────────────────────── */}
+      {/* Step 3: Generate */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
@@ -713,19 +683,17 @@ export default function ExamTimetableMaker() {
             )}
             {isSaved && (
               <Badge className="bg-accent/20 text-accent border border-accent/30 px-3 py-1.5">
-                ✓ Saved
+                ✓ Saved to Server
               </Badge>
             )}
           </div>
         </div>
-
         {!canGenerate && (
           <p className="text-muted-foreground text-sm bg-muted/30 rounded-lg px-4 py-3">
             Complete Steps 1 and 2 — enter exam name, select dates, and pick at
             least one class.
           </p>
         )}
-
         {generated.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {generated.map((table) => (
@@ -740,7 +708,7 @@ export default function ExamTimetableMaker() {
         )}
       </div>
 
-      {/* ── Step 4: Combined View (after save) ───────────────────── */}
+      {/* Step 4: Combined View */}
       {isSaved && generated.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-4">
           <div className="flex items-center gap-3">
@@ -764,7 +732,7 @@ export default function ExamTimetableMaker() {
         </div>
       )}
 
-      {/* ── Saved Timetables ─────────────────────────────────────── */}
+      {/* Saved list */}
       {savedList.length > 0 && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-3">
           <h2 className="font-semibold text-foreground">
@@ -775,14 +743,11 @@ export default function ExamTimetableMaker() {
               <div key={entry.id} className="space-y-3">
                 <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-smooth">
                   <div className="min-w-0">
-                    <p className="font-medium text-foreground truncate">
-                      {entry.examName}
-                    </p>
+                    <p className="font-medium truncate">{entry.examName}</p>
                     <p className="text-xs text-muted-foreground">
                       {formatDate(entry.startDate)} →{" "}
-                      {formatDate(entry.endDate)}
-                      &nbsp;·&nbsp;{entry.startTime}–{entry.endTime}
-                      &nbsp;·&nbsp;{entry.tables.length} classes
+                      {formatDate(entry.endDate)} · {entry.startTime}–
+                      {entry.endTime} · {entry.tables.length} classes
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0 ml-3">
@@ -807,20 +772,12 @@ export default function ExamTimetableMaker() {
                       size="sm"
                       variant="ghost"
                       className="text-destructive hover:text-destructive"
-                      onClick={() => {
-                        const updated = savedList.filter(
-                          (e) => e.id !== entry.id,
-                        );
-                        ls.set("exam_timetables", updated);
-                        setSavedList(updated);
-                        if (viewSaved?.id === entry.id) setViewSaved(null);
-                      }}
+                      onClick={() => handleDeleteSaved(entry.id)}
                     >
                       Delete
                     </Button>
                   </div>
                 </div>
-
                 {viewSaved?.id === entry.id && (
                   <div className="pl-4 border-l-2 border-primary/30">
                     <CombinedView

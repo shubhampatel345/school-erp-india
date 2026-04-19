@@ -1,107 +1,75 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
-import { Skeleton } from "../../components/ui/skeleton";
 import { useApp } from "../../context/AppContext";
 import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
-import { dataService } from "../../utils/dataService";
 import { CLASSES, generateId, ls } from "../../utils/localStorage";
 
+function safeArray<T>(v: T[] | string | undefined): T[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string" && v) {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export default function FeesPlanPage() {
-  const { currentUser, isReadOnly } = useApp();
-  const [classSections, setClassSections] = useState<ClassSection[]>([]);
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    currentUser,
+    isReadOnly,
+    addNotification,
+  } = useApp();
+
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [editValues, setEditValues] = useState<
     Record<string, Record<string, string>>
   >({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [loadingHeadings, setLoadingHeadings] = useState(true);
-  const [headings, setHeadings] = useState<FeeHeading[]>([]);
-  const [plans, setPlans] = useState<FeesPlan[]>([]);
 
   const isSuperAdmin = currentUser?.role === "superadmin";
 
-  // ── Fetch headings and plans from server on mount ──────────────────────────
-  useEffect(() => {
-    async function loadData() {
-      setLoadingHeadings(true);
-      try {
-        // Load in parallel
-        const [fetchedHeadings, fetchedPlans] = await Promise.all([
-          dataService.getAsync<FeeHeading>("fee_headings"),
-          dataService.getAsync<FeesPlan>("fees_plan"),
-        ]);
+  // Read from context (already loaded from server)
+  const rawHeadings = getData("feeHeadings") as FeeHeading[];
+  const headings = rawHeadings.map((h) => ({
+    ...h,
+    months: safeArray<string>(h.months as unknown as string[]),
+    applicableClasses: h.applicableClasses
+      ? safeArray<string>(h.applicableClasses as unknown as string[])
+      : undefined,
+  }));
 
-        // If fee_headings is empty, try fee_heads alias
-        if (fetchedHeadings.length === 0) {
-          const alt = await dataService.getAsync<FeeHeading>("fee_heads");
-          setHeadings(alt);
-        } else {
-          setHeadings(fetchedHeadings);
-        }
-        setPlans(fetchedPlans);
-      } catch {
-        // Fall back to cached data
-        setHeadings(dataService.get<FeeHeading>("fee_headings"));
-        setPlans(dataService.get<FeesPlan>("fees_plan"));
-      } finally {
-        setLoadingHeadings(false);
-      }
+  const plans = getData("feesPlans") as FeesPlan[];
 
-      // Load class sections
-      const cs = ls.get<ClassSection[]>("class_sections", []);
-      if (cs.length > 0) {
-        setClassSections(cs);
-      } else {
-        const built: ClassSection[] = CLASSES.map((c) => ({
-          id: c,
-          className: c,
-          sections: ["A", "B", "C"],
-        }));
-        setClassSections(built);
-      }
-    }
-    void loadData();
-  }, []);
+  // Class sections: prefer context/server, fallback to localStorage
+  const classSections: ClassSection[] = (() => {
+    const cs = getData("classSections") as ClassSection[];
+    if (cs.length > 0) return cs;
+    const lsCs = ls.get<ClassSection[]>("class_sections", []);
+    if (lsCs.length > 0) return lsCs;
+    return CLASSES.map((c) => ({
+      id: c,
+      className: c,
+      sections: ["A", "B", "C"],
+    }));
+  })();
 
-  // When class changes, initialize edit values from plans
+  // When class changes, initialize edit values from existing plans
   useEffect(() => {
     if (!selectedClass || headings.length === 0) return;
     const cs = classSections.find((c) => c.className === selectedClass);
     if (!cs) return;
 
-    // Normalize months field — may be JSON string from MySQL
-    const normalizeHeading = (h: FeeHeading): FeeHeading => ({
-      ...h,
-      months: Array.isArray(h.months)
-        ? h.months
-        : typeof h.months === "string"
-          ? (() => {
-              try {
-                return JSON.parse(h.months as unknown as string);
-              } catch {
-                return [];
-              }
-            })()
-          : [],
-      applicableClasses: Array.isArray(h.applicableClasses)
-        ? h.applicableClasses
-        : typeof h.applicableClasses === "string" && h.applicableClasses
-          ? (() => {
-              try {
-                return JSON.parse(h.applicableClasses as unknown as string);
-              } catch {
-                return [];
-              }
-            })()
-          : undefined,
-    });
-
-    const normalizedHeadings = headings.map(normalizeHeading);
-
-    // Filter headings applicable to this class
-    const applicableHeadings = normalizedHeadings.filter(
+    const applicableHeadings = headings.filter(
       (h) =>
         !h.applicableClasses ||
         h.applicableClasses.length === 0 ||
@@ -109,7 +77,8 @@ export default function FeesPlanPage() {
     );
 
     const vals: Record<string, Record<string, string>> = {};
-    for (const section of cs.sections) {
+    const sectionList = safeArray<string>(cs.sections as unknown as string[]);
+    for (const section of sectionList) {
       vals[section] = {};
       for (const heading of applicableHeadings) {
         const plan = plans.find(
@@ -123,6 +92,7 @@ export default function FeesPlanPage() {
     }
     setEditValues(vals);
     setSaved(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedClass, headings, plans, classSections]);
 
   function handleAmountChange(
@@ -146,60 +116,34 @@ export default function FeesPlanPage() {
       return;
     }
 
-    // Normalize headings for comparison
-    const normalizeHeading = (h: FeeHeading): FeeHeading => ({
-      ...h,
-      months: Array.isArray(h.months) ? h.months : [],
-      applicableClasses: Array.isArray(h.applicableClasses)
-        ? h.applicableClasses
-        : typeof h.applicableClasses === "string" && h.applicableClasses
-          ? (() => {
-              try {
-                return JSON.parse(h.applicableClasses as unknown as string);
-              } catch {
-                return [];
-              }
-            })()
-          : undefined,
-    });
+    const applicableHeadings = headings.filter(
+      (h) =>
+        !h.applicableClasses ||
+        h.applicableClasses.length === 0 ||
+        h.applicableClasses.includes(selectedClass),
+    );
 
-    const applicableHeadings = headings
-      .map(normalizeHeading)
-      .filter(
-        (h) =>
-          !h.applicableClasses ||
-          h.applicableClasses.length === 0 ||
-          h.applicableClasses.includes(selectedClass),
-      );
-
-    let allPlans = ls.get<FeesPlan[]>("fees_plan", []);
+    const sectionList = safeArray<string>(cs.sections as unknown as string[]);
     const savePromises: Promise<unknown>[] = [];
 
-    for (const section of cs.sections) {
+    for (const section of sectionList) {
       for (const heading of applicableHeadings) {
         const rawVal = editValues[section]?.[heading.id] ?? "";
         const amount = rawVal === "" ? 0 : Number(rawVal);
-        const existingIdx = allPlans.findIndex(
+        const existingPlan = plans.find(
           (p) =>
             p.classId === selectedClass &&
             p.sectionId === section &&
             p.headingId === heading.id,
         );
-        if (existingIdx >= 0) {
+
+        if (existingPlan) {
           if (amount > 0) {
-            const updated = { ...allPlans[existingIdx], amount };
-            allPlans[existingIdx] = updated;
             savePromises.push(
-              dataService.update(
-                "fees_plan",
-                updated.id,
-                updated as unknown as Record<string, unknown>,
-              ),
+              updateData("feesPlans", existingPlan.id, { amount }),
             );
           } else {
-            const id = allPlans[existingIdx].id;
-            allPlans.splice(existingIdx, 1);
-            savePromises.push(dataService.delete("fees_plan", id));
+            savePromises.push(deleteData("feesPlans", existingPlan.id));
           }
         } else if (amount > 0) {
           const newPlan: FeesPlan = {
@@ -210,10 +154,9 @@ export default function FeesPlanPage() {
             headingName: heading.name,
             amount,
           };
-          allPlans.push(newPlan);
           savePromises.push(
-            dataService.save(
-              "fees_plan",
+            saveData(
+              "feesPlans",
               newPlan as unknown as Record<string, unknown>,
             ),
           );
@@ -221,51 +164,27 @@ export default function FeesPlanPage() {
       }
     }
 
-    ls.set("fees_plan", allPlans);
-
-    // Await all server saves (not fire-and-forget)
     await Promise.allSettled(savePromises);
-
-    // Re-fetch plans from server to confirm saved state
-    const freshPlans = await dataService.getAsync<FeesPlan>("fees_plan");
-    setPlans(freshPlans);
-
     setSaving(false);
     setSaved(true);
+    addNotification(`Fee plan saved for Class ${selectedClass}`, "success");
     setTimeout(() => setSaved(false), 2500);
   }
 
-  const activeSections =
-    classSections.find((c) => c.className === selectedClass)?.sections ?? [];
+  const activeSections = (() => {
+    const cs = classSections.find((c) => c.className === selectedClass);
+    if (!cs) return [];
+    return safeArray<string>(cs.sections as unknown as string[]);
+  })();
 
-  // Normalize headings for display
-  const normalizeHeading = (h: FeeHeading): FeeHeading => ({
-    ...h,
-    months: Array.isArray(h.months) ? h.months : [],
-    applicableClasses: Array.isArray(h.applicableClasses)
-      ? h.applicableClasses
-      : typeof h.applicableClasses === "string" && h.applicableClasses
-        ? (() => {
-            try {
-              return JSON.parse(h.applicableClasses as unknown as string);
-            } catch {
-              return [];
-            }
-          })()
-        : undefined,
-  });
-
-  // Filter headings applicable to selected class
   const activeHeadings = selectedClass
-    ? headings
-        .map(normalizeHeading)
-        .filter(
-          (h) =>
-            !h.applicableClasses ||
-            h.applicableClasses.length === 0 ||
-            h.applicableClasses.includes(selectedClass),
-        )
-    : headings.map(normalizeHeading);
+    ? headings.filter(
+        (h) =>
+          !h.applicableClasses ||
+          h.applicableClasses.length === 0 ||
+          h.applicableClasses.includes(selectedClass),
+      )
+    : headings;
 
   return (
     <div className="space-y-4">
@@ -276,21 +195,14 @@ export default function FeesPlanPage() {
         </p>
       </div>
 
-      {loadingHeadings ? (
-        <div className="bg-card border border-border rounded-xl p-6 space-y-3">
-          <Skeleton className="h-4 w-48" />
-          <div className="flex gap-2 flex-wrap">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-8 w-20 rounded-lg" />
-            ))}
-          </div>
-        </div>
-      ) : headings.length === 0 ? (
+      {headings.length === 0 ? (
         <div
           className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground"
           data-ocid="fees-plan.empty_state"
         >
-          <p>No fee headings found. Add headings in "Fee Heading" tab first.</p>
+          <p>
+            No fee headings found. Add headings in "Fee Headings" tab first.
+          </p>
         </div>
       ) : (
         <>
@@ -308,7 +220,7 @@ export default function FeesPlanPage() {
                 }`}
                 data-ocid="fees-plan-class-tab"
               >
-                Class {cls}
+                {cls}
               </button>
             ))}
           </div>
@@ -322,8 +234,7 @@ export default function FeesPlanPage() {
                   </h4>
                   {activeHeadings.length === 0 && (
                     <p className="text-sm text-amber-600 mt-0.5">
-                      No fee headings configured for Class {selectedClass}. Add
-                      applicable headings in Fee Heading tab.
+                      No fee headings configured for Class {selectedClass}.
                     </p>
                   )}
                 </div>
@@ -417,7 +328,7 @@ export default function FeesPlanPage() {
             </div>
           ) : (
             <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">
-              Select a class to view/edit fee amounts.
+              Select a class above to view and edit fee amounts.
             </div>
           )}
         </>

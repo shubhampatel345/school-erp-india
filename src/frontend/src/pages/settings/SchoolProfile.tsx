@@ -7,20 +7,23 @@ import {
   Building2,
   CreditCard,
   ImageIcon,
+  Loader2,
   Save,
   Trash2,
   Upload,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { toast } from "sonner";
+import { useApp } from "../../context/AppContext";
 import type {
   BankDetails,
   SchoolProfile as SchoolProfileType,
 } from "../../types";
-import { ls } from "../../utils/localStorage";
 
 interface FullProfile extends SchoolProfileType {
   bank: BankDetails;
   dashboardBackground?: string;
+  affiliatedBoard?: string;
 }
 
 const DEFAULT_PROFILE: FullProfile = {
@@ -32,37 +35,41 @@ const DEFAULT_PROFILE: FullProfile = {
   logo: "",
   principalName: "",
   affiliationNo: "",
+  affiliatedBoard: "",
   schoolCode: "",
   city: "",
   state: "",
   pincode: "",
-  bank: {
-    bankName: "",
-    accountNumber: "",
-    ifscCode: "",
-    branchName: "",
-  },
+  bank: { bankName: "", accountNumber: "", ifscCode: "", branchName: "" },
   dashboardBackground: "",
 };
 
 export default function SchoolProfile() {
+  const { getData, saveData } = useApp();
+
   const [profile, setProfile] = useState<FullProfile>(() => {
-    const saved = ls.get<FullProfile>("school_profile", DEFAULT_PROFILE);
-    if (!saved.bank) saved.bank = DEFAULT_PROFILE.bank;
-    return saved;
+    const saved = getData("schoolProfile") as FullProfile[];
+    const existing = saved[0] as FullProfile | undefined;
+    if (existing) {
+      return {
+        ...DEFAULT_PROFILE,
+        ...existing,
+        bank: existing.bank ?? DEFAULT_PROFILE.bank,
+      };
+    }
+    return DEFAULT_PROFILE;
   });
-  const [saved, setSaved] = useState(false);
+
+  const [saving, setSaving] = useState(false);
   const logoRef = useRef<HTMLInputElement>(null);
   const bgRef = useRef<HTMLInputElement>(null);
 
-  function handleChange(field: keyof SchoolProfileType, value: string) {
+  function handleChange(field: keyof FullProfile, value: string) {
     setProfile((p) => ({ ...p, [field]: value }));
-    setSaved(false);
   }
 
   function handleBankChange(field: keyof BankDetails, value: string) {
     setProfile((p) => ({ ...p, bank: { ...p.bank, [field]: value } }));
-    setSaved(false);
   }
 
   function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
@@ -70,9 +77,7 @@ export default function SchoolProfile() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      setProfile((p) => ({ ...p, logo: base64 }));
-      setSaved(false);
+      setProfile((p) => ({ ...p, logo: ev.target?.result as string }));
     };
     reader.readAsDataURL(file);
   }
@@ -82,21 +87,34 @@ export default function SchoolProfile() {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (ev) => {
-      const base64 = ev.target?.result as string;
-      setProfile((p) => ({ ...p, dashboardBackground: base64 }));
-      setSaved(false);
+      setProfile((p) => ({
+        ...p,
+        dashboardBackground: ev.target?.result as string,
+      }));
     };
     reader.readAsDataURL(file);
   }
 
-  function handleSave() {
-    ls.set("school_profile", profile);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+  async function handleSave() {
+    setSaving(true);
+    try {
+      const record = { ...profile, id: "school_profile_1" } as Record<
+        string,
+        unknown
+      >;
+      await saveData("schoolProfile", record);
+      toast.success("School profile saved to server.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save profile.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   const field = (
-    id: keyof SchoolProfileType,
+    id: keyof FullProfile,
     label: string,
     placeholder?: string,
     type = "text",
@@ -109,7 +127,7 @@ export default function SchoolProfile() {
         value={(profile[id] as string) ?? ""}
         onChange={(e) => handleChange(id, e.target.value)}
         placeholder={placeholder}
-        data-ocid={`school-profile-${id}`}
+        data-ocid={`school-profile.${id}.input`}
       />
     </div>
   );
@@ -123,10 +141,10 @@ export default function SchoolProfile() {
       <Label htmlFor={`bank-${id}`}>{label}</Label>
       <Input
         id={`bank-${id}`}
-        value={profile.bank[id]}
+        value={profile.bank[id] ?? ""}
         onChange={(e) => handleBankChange(id, e.target.value)}
         placeholder={placeholder}
-        data-ocid={`bank-${id}`}
+        data-ocid={`school-profile.bank.${id}.input`}
       />
     </div>
   );
@@ -169,14 +187,27 @@ export default function SchoolProfile() {
               className="hidden"
               onChange={handleLogoUpload}
             />
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => logoRef.current?.click()}
-              data-ocid="school-profile-logo-upload"
-            >
-              <Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Logo
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => logoRef.current?.click()}
+                data-ocid="school-profile.logo.upload_button"
+              >
+                <Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Logo
+              </Button>
+              {profile.logo && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="text-destructive border-destructive/30"
+                  onClick={() => setProfile((p) => ({ ...p, logo: "" }))}
+                  data-ocid="school-profile.logo.delete_button"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </Button>
+              )}
+            </div>
           </div>
         </div>
 
@@ -187,9 +218,14 @@ export default function SchoolProfile() {
           {field("email", "Email", "school@example.com", "email")}
           {field("website", "Website", "www.schoolname.com")}
           {field(
+            "affiliatedBoard",
+            "Affiliated Board",
+            "e.g. CBSE, ICSE, State Board",
+          )}
+          {field(
             "affiliationNo",
             "Affiliation / Board No.",
-            "CBSE / State Board affiliation number",
+            "Board affiliation number",
           )}
           {field("schoolCode", "UDISE Code", "11-digit UDISE code")}
           {field("city", "City", "City")}
@@ -204,7 +240,7 @@ export default function SchoolProfile() {
             value={profile.address}
             onChange={(e) => handleChange("address", e.target.value)}
             placeholder="Full school address (shown on receipts)"
-            data-ocid="school-profile-address"
+            data-ocid="school-profile.address.input"
           />
         </div>
       </Card>
@@ -212,7 +248,7 @@ export default function SchoolProfile() {
       {/* Dashboard Background Image */}
       <Card className="p-6 space-y-5">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-violet-100 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-lg bg-violet-100 dark:bg-violet-900/30 flex items-center justify-center">
             <ImageIcon className="w-5 h-5 text-violet-600" />
           </div>
           <div>
@@ -229,7 +265,6 @@ export default function SchoolProfile() {
         <Separator />
 
         <div className="flex items-start gap-4 flex-wrap">
-          {/* Preview */}
           <div className="w-48 h-24 rounded-xl border-2 border-border overflow-hidden flex-shrink-0 relative bg-muted">
             {profile.dashboardBackground ? (
               <>
@@ -250,9 +285,6 @@ export default function SchoolProfile() {
                 <span className="text-[10px] text-muted-foreground/60">
                   No image set
                 </span>
-                <span className="text-[9px] text-muted-foreground/40">
-                  Uses gradient fallback
-                </span>
               </div>
             )}
           </div>
@@ -264,8 +296,8 @@ export default function SchoolProfile() {
                 : "No background image"}
             </p>
             <p className="text-xs text-muted-foreground max-w-xs">
-              Upload a school building photo, campus view, or any image. A dark
-              overlay will keep text readable. Recommended: 1600×500px or wider.
+              Upload a school building photo or campus view. Recommended:
+              1600×500px or wider.
             </p>
             <div className="flex gap-2 mt-1">
               <input
@@ -279,7 +311,7 @@ export default function SchoolProfile() {
                 size="sm"
                 variant="outline"
                 onClick={() => bgRef.current?.click()}
-                data-ocid="dashboard-bg-upload"
+                data-ocid="school-profile.bg.upload_button"
               >
                 <Upload className="w-3.5 h-3.5 mr-1.5" />
                 {profile.dashboardBackground ? "Change Image" : "Upload Image"}
@@ -289,14 +321,12 @@ export default function SchoolProfile() {
                   size="sm"
                   variant="outline"
                   className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                  onClick={() => {
-                    setProfile((p) => ({ ...p, dashboardBackground: "" }));
-                    setSaved(false);
-                  }}
-                  data-ocid="dashboard-bg-remove"
+                  onClick={() =>
+                    setProfile((p) => ({ ...p, dashboardBackground: "" }))
+                  }
+                  data-ocid="school-profile.bg.delete_button"
                 >
-                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
-                  Remove
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" /> Remove
                 </Button>
               )}
             </div>
@@ -336,7 +366,7 @@ export default function SchoolProfile() {
         <div className="bg-muted/40 rounded-lg p-3">
           <p className="text-xs text-muted-foreground">
             💡 These bank details will auto-populate on fee receipts and online
-            payment challans. Keep them accurate.
+            payment challans.
           </p>
         </div>
       </Card>
@@ -344,13 +374,22 @@ export default function SchoolProfile() {
       {/* Save */}
       <div className="flex justify-end">
         <Button
-          onClick={handleSave}
-          data-ocid="school-profile-save"
-          className={saved ? "bg-accent text-accent-foreground" : ""}
+          onClick={() => void handleSave()}
+          data-ocid="school-profile.save_button"
           size="lg"
+          disabled={saving}
         >
-          <Save className="w-4 h-4 mr-2" />
-          {saved ? "✓ Profile Saved!" : "Save School Profile"}
+          {saving ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4 mr-2" />
+              Save School Profile
+            </>
+          )}
         </Button>
       </div>
     </div>

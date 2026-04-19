@@ -30,22 +30,13 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
-import type { Student } from "../types";
-import { dataService } from "../utils/dataService";
-import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
-// CLASSES and SECTIONS are still used for the filter bar dropdowns (all possible values)
+import type { ClassSection, Student } from "../types";
+import { ls } from "../utils/localStorage";
 
 // ── Column definitions ────────────────────────────────────────────────────────
 interface ColDef {
@@ -96,6 +87,8 @@ const ALL_COLUMNS: ColDef[] = [
     defaultVisible: false,
     width: 120,
   },
+  { key: "mobile", label: "Mobile", defaultVisible: false, width: 120 },
+  { key: "village", label: "Village", defaultVisible: false, width: 100 },
   { key: "category", label: "Category", defaultVisible: false, width: 90 },
   { key: "address", label: "Address", defaultVisible: false, width: 180 },
   { key: "aadhaarNo", label: "Aadhaar No.", defaultVisible: false, width: 130 },
@@ -130,7 +123,6 @@ const DEFAULT_VISIBLE = ALL_COLUMNS.filter((c) => c.defaultVisible).map(
 );
 const LS_COL_KEY = "student_grid_columns";
 
-// ── Print column list ─────────────────────────────────────────────────────────
 const PRINT_COLS = [
   { key: "admNo", label: "Adm.No" },
   { key: "fullName", label: "Name" },
@@ -155,52 +147,67 @@ const PRINT_COLS = [
   { key: "status", label: "Status" },
 ];
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function getCellValue(student: Student, key: string): string {
   const s = student as unknown as Record<string, string | undefined>;
   return s[key] ?? "";
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
 interface StudentsProps {
   onNavigate?: (page: string) => void;
 }
 
 export default function Students({ onNavigate }: StudentsProps) {
-  const { currentSession, canWrite, currentUser } = useApp();
+  const {
+    currentSession,
+    canWrite,
+    currentUser,
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    refreshCollection,
+    addNotification,
+  } = useApp();
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  const [students, setStudents] = useState<Student[]>([]);
-  const [loadingStudents, setLoadingStudents] = useState(true);
+  // ── Students from context (server-synced) ─────────────────────────────────
+  // getData is stable (useCallback), but its return value changes — we pull
+  // it outside useMemo and just reference the function directly.
+  const rawStudents = getData("students") as Student[];
+  const students = useMemo(
+    () => rawStudents.filter(Boolean),
+    // rawStudents reference changes when context updates — this is intentional
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawStudents],
+  );
 
-  // ── Reload: fetch fresh data from server ──────────────────────────────────
-  const reload = useCallback(() => {
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => setStudents(rows))
-      .catch(() => setStudents(dataService.get<Student>("students")));
+  // ── Classes from context ───────────────────────────────────────────────────
+  const rawClasses = getData("classes") as ClassSection[];
+  const contextClasses = useMemo(
+    () => rawClasses,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawClasses],
+  );
+
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshCollection("students");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [refreshCollection]);
+
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+
+  // Refresh once on mount
+  useEffect(() => {
+    void refreshRef.current();
   }, []);
 
-  // ── Fetch fresh data from MySQL on mount ───────────────────────────────────
-  useEffect(() => {
-    setLoadingStudents(true);
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => {
-        setStudents(rows);
-      })
-      .catch(() => {
-        setStudents(dataService.get<Student>("students"));
-      })
-      .finally(() => setLoadingStudents(false));
-  }, []); // runs once on mount — reload() is called explicitly after saves
-
-  // Subscribe to DataService notifications (after a save/delete from any component)
-  // but DO NOT automatically re-fetch on every notify — that causes an infinite loop.
-  // Instead, each write operation calls reload() explicitly after completing.
-  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
-    dataService.getMode(),
-  );
+  // ── UI state ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
@@ -240,7 +247,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     currentUser?.role === "admin" ||
     currentUser?.role === "receptionist";
 
-  // ── Save column prefs ──────────────────────────────────────────────────────
+  // Save column prefs to localStorage (UI preference only)
   useEffect(() => {
     ls.set(LS_COL_KEY, visibleCols);
   }, [visibleCols]);
@@ -253,6 +260,64 @@ export default function Students({ onNavigate }: StudentsProps) {
     }
     return Array.from(routes).sort();
   }, [students]);
+
+  // Class names for filter (from context.classes first, fallback to student data)
+  const classNames = useMemo(() => {
+    if (contextClasses.length > 0) {
+      const CLASS_ORDER = [
+        "Nursery",
+        "LKG",
+        "UKG",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "10",
+        "11",
+        "12",
+      ];
+      return [...contextClasses]
+        .sort((a, b) => {
+          const an =
+            a.className ?? (a as unknown as { name?: string }).name ?? "";
+          const bn =
+            b.className ?? (b as unknown as { name?: string }).name ?? "";
+          const ai = CLASS_ORDER.indexOf(an);
+          const bi = CLASS_ORDER.indexOf(bn);
+          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+        })
+        .map(
+          (c) => c.className ?? (c as unknown as { name?: string }).name ?? "",
+        );
+    }
+    // Fallback to unique values from student data
+    const seen = new Set<string>();
+    return students
+      .map((s) => s.class)
+      .filter((c) => c && !seen.has(c) && seen.add(c));
+  }, [contextClasses, students]);
+
+  // Sections for selected class filter
+  const sectionsForFilter = useMemo(() => {
+    if (filterClass === "all") return [];
+    const cls = contextClasses.find(
+      (c) =>
+        (c.className ?? (c as unknown as { name?: string }).name ?? "") ===
+        filterClass,
+    );
+    if (cls?.sections) return cls.sections;
+    // Fallback from student data
+    const seen = new Set<string>();
+    return students
+      .filter((s) => s.class === filterClass)
+      .map((s) => s.section)
+      .filter((sec) => sec && !seen.has(sec) && seen.add(sec));
+  }, [filterClass, contextClasses, students]);
 
   const stats = useMemo(() => {
     const active = students.filter((s) => s.status === "active");
@@ -284,7 +349,8 @@ export default function Students({ onNavigate }: StudentsProps) {
           s.motherName,
           s.mobile,
           s.fatherMobile ?? "",
-          s.address,
+          s.address ?? "",
+          s.village ?? "",
           `${s.class}${s.section}`,
           s.class,
           s.section,
@@ -323,7 +389,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     [visibleCols],
   );
 
-  // ── Birthdays ──────────────────────────────────────────────────────────────
+  // Birthdays
   const today = new Date();
   const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
   const birthdayStudents = students.filter((s) => {
@@ -351,11 +417,8 @@ export default function Students({ onNavigate }: StudentsProps) {
     filtered.length > 0 && filtered.every((s) => selectedIds.has(s.id));
 
   function toggleAll() {
-    if (allVisibleSelected) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(filtered.map((s) => s.id)));
-    }
+    if (allVisibleSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filtered.map((s) => s.id)));
   }
 
   function toggleRow(id: string) {
@@ -368,30 +431,34 @@ export default function Students({ onNavigate }: StudentsProps) {
   }
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  function handleSaved(_student: Student) {
-    // Re-fetch from server so newly added / edited student appears immediately
-    // on all devices (not just from the in-memory cache snapshot).
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => setStudents(rows))
-      .catch(() => reload());
+  function handleSaved() {
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);
   }
 
-  function handleDelete(student: Student) {
-    // Delete from DataService (API + cache), then reload from server
-    void dataService.delete("students", student.id).then(() => reload());
+  async function handleDelete(student: Student) {
+    try {
+      await deleteData("students", student.id);
+      addNotification(`Student ${student.fullName} deleted`, "success");
+    } catch {
+      addNotification("Failed to delete student", "error");
+    }
     setDeleteConfirm(null);
   }
 
-  function handleBulkDelete() {
-    // Delete each from server, then reload once all are done
-    const deletePromises = Array.from(selectedIds).map((id) =>
-      dataService.delete("students", id),
-    );
-    void Promise.all(deletePromises).then(() => reload());
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedIds);
+    let deleted = 0;
+    for (const id of ids) {
+      try {
+        await deleteData("students", id);
+        deleted++;
+      } catch {
+        /* continue */
+      }
+    }
+    addNotification(`Deleted ${deleted} students`, "success");
     setSelectedIds(new Set());
     setBulkDeleteConfirm(false);
   }
@@ -457,19 +524,16 @@ export default function Students({ onNavigate }: StudentsProps) {
     URL.revokeObjectURL(url);
   }
 
-  // ── Column toggle ──────────────────────────────────────────────────────────
   function toggleCol(key: string) {
     setVisibleCols((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
     );
   }
 
-  // ── Cell renderer ──────────────────────────────────────────────────────────
   const tableRef = useRef<HTMLDivElement>(null);
 
   function renderCell(student: Student, colKey: string) {
     const isDiscontinued = student.status === "discontinued";
-    // Safe accessors — guard against undefined/null from MySQL rows
     const safeName = student.fullName ?? student.admNo ?? "–";
     const safeAdmNo = student.admNo ?? "–";
 
@@ -490,7 +554,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       );
     }
-
     if (colKey === "admNo") {
       return (
         <span
@@ -500,7 +563,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </span>
       );
     }
-
     if (colKey === "fullName") {
       return (
         <span
@@ -510,7 +572,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </span>
       );
     }
-
     if (colKey === "class") {
       return (
         <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded font-medium">
@@ -518,7 +579,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </span>
       );
     }
-
     if (colKey === "section") {
       return (
         <span className="text-xs text-foreground">
@@ -526,7 +586,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </span>
       );
     }
-
     if (colKey === "status") {
       return (
         <Badge
@@ -537,7 +596,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </Badge>
       );
     }
-
     if (colKey === "category" && student.category) {
       return (
         <Badge variant="outline" className="text-[9px] px-1 py-0">
@@ -545,7 +603,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         </Badge>
       );
     }
-
     return (
       <span className="text-xs text-muted-foreground truncate max-w-[140px] block">
         {getCellValue(student, colKey) || "—"}
@@ -553,7 +610,6 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
   }
 
-  // ── Sort icon ──────────────────────────────────────────────────────────────
   function SortIcon({ colKey }: { colKey: string }) {
     if (!ALL_COLUMNS.find((c) => c.key === colKey)?.sortable) return null;
     if (sortKey !== colKey)
@@ -565,10 +621,9 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
   }
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* ── Page Header ───────────────────────────────────────────────── */}
+      {/* Page Header */}
       <div className="px-4 md:px-6 pt-4 pb-2 bg-card border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
           <div>
@@ -579,6 +634,11 @@ export default function Students({ onNavigate }: StudentsProps) {
             <p className="text-xs text-muted-foreground mt-0.5">
               {currentSession && `Session ${currentSession.label} · `}
               Showing {filtered.length} of {students.length} students
+              {isRefreshing && (
+                <span className="ml-2 text-primary animate-pulse">
+                  Syncing…
+                </span>
+              )}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -630,7 +690,7 @@ export default function Students({ onNavigate }: StudentsProps) {
           </div>
         </div>
 
-        {/* ── Stats Bar ───────────────────────────────────────────────── */}
+        {/* Stats Bar */}
         <div className="flex gap-3 flex-wrap text-xs mb-3">
           {[
             { label: "Total", value: stats.total, color: "text-foreground" },
@@ -653,9 +713,8 @@ export default function Students({ onNavigate }: StudentsProps) {
           ))}
         </div>
 
-        {/* ── Filter Bar ──────────────────────────────────────────────── */}
+        {/* Filter Bar */}
         <div className="flex gap-2 flex-wrap items-center">
-          {/* Search */}
           <div className="relative flex-1 min-w-[180px] max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input
@@ -667,7 +726,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             />
           </div>
 
-          {/* Class */}
+          {/* Class filter from context */}
           <Select
             value={filterClass}
             onValueChange={(v) => {
@@ -683,7 +742,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All Classes</SelectItem>
-              {CLASSES.map((c) => (
+              {classNames.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -691,7 +750,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Section */}
+          {/* Section filter */}
           <Select
             value={filterSection}
             onValueChange={setFilterSection}
@@ -705,7 +764,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All</SelectItem>
-              {SECTIONS.map((s) => (
+              {sectionsForFilter.map((s) => (
                 <SelectItem key={s} value={s}>
                   {s}
                 </SelectItem>
@@ -713,7 +772,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Status */}
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-28 h-8 text-xs">
               <SelectValue placeholder="Status" />
@@ -725,7 +783,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Gender */}
           <Select value={filterGender} onValueChange={setFilterGender}>
             <SelectTrigger className="w-24 h-8 text-xs">
               <SelectValue placeholder="Gender" />
@@ -738,7 +795,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Category */}
           <Select value={filterCategory} onValueChange={setFilterCategory}>
             <SelectTrigger className="w-28 h-8 text-xs">
               <SelectValue placeholder="Category" />
@@ -753,7 +809,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Route */}
           {uniqueRoutes.length > 0 && (
             <Select value={filterRoute} onValueChange={setFilterRoute}>
               <SelectTrigger className="w-28 h-8 text-xs">
@@ -770,7 +825,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </Select>
           )}
 
-          {/* Clear */}
           <Button
             variant="ghost"
             size="sm"
@@ -780,7 +834,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             <X className="w-3 h-3 mr-1" /> Clear
           </Button>
 
-          {/* Column Visibility */}
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -836,7 +889,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       </div>
 
-      {/* ── Bulk Actions Bar ────────────────────────────────────────────── */}
+      {/* Bulk Actions Bar */}
       {selectedIds.size > 0 && (
         <div className="flex-shrink-0 bg-primary/5 border-b border-primary/20 px-4 py-2 flex items-center gap-3 flex-wrap">
           <span className="text-xs font-semibold text-primary">
@@ -882,7 +935,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* ── Birthdays Panel ──────────────────────────────────────────────── */}
+      {/* Birthdays Panel */}
       {showBirthdays && birthdayStudents.length > 0 && (
         <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-3">
           <h3 className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1">
@@ -907,16 +960,14 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* ── Grid ──────────────────────────────────────────────────────────── */}
+      {/* Grid */}
       <div ref={tableRef} className="flex-1 overflow-auto">
         <table
           className="w-full text-xs border-collapse"
           style={{ minWidth: "600px" }}
         >
-          {/* Sticky Header */}
           <thead className="sticky top-0 z-10 bg-muted border-b border-border shadow-sm">
             <tr>
-              {/* Checkbox */}
               <th className="w-8 px-2 py-2 border-r border-border">
                 <Checkbox
                   checked={allVisibleSelected}
@@ -944,7 +995,6 @@ export default function Students({ onNavigate }: StudentsProps) {
                   <SortIcon colKey={col.key} />
                 </th>
               ))}
-              {/* Actions */}
               {canWrite && canManage && (
                 <th className="px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-16">
                   Actions
@@ -955,7 +1005,7 @@ export default function Students({ onNavigate }: StudentsProps) {
 
           <tbody>
             {/* Loading skeleton */}
-            {loadingStudents && students.length === 0 && (
+            {isRefreshing && students.length === 0 && (
               <tr>
                 <td
                   colSpan={activeVisibleCols.length + 2}
@@ -970,17 +1020,31 @@ export default function Students({ onNavigate }: StudentsProps) {
                 </td>
               </tr>
             )}
-            {!loadingStudents && filtered.length === 0 && (
+
+            {!isRefreshing && filtered.length === 0 && (
               <tr>
                 <td
                   colSpan={activeVisibleCols.length + 2}
                   className="py-16 text-center text-muted-foreground"
+                  data-ocid="students.empty_state"
                 >
                   <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
                   <p className="font-medium text-sm">No students found</p>
                   <p className="text-xs mt-1 opacity-60">
                     Adjust your filters or add students
                   </p>
+                  {canWrite && canManage && (
+                    <Button
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => {
+                        setEditStudent(null);
+                        setShowForm(true);
+                      }}
+                    >
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Add First Student
+                    </Button>
+                  )}
                 </td>
               </tr>
             )}
@@ -1004,10 +1068,9 @@ export default function Students({ onNavigate }: StudentsProps) {
                           : "bg-muted/10 hover:bg-muted/30",
                   ].join(" ")}
                   style={{ height: "36px" }}
-                  data-ocid={`student-row-${student.id}`}
+                  data-ocid={`students.item.${idx + 1}`}
                   onDoubleClick={() => setSelectedStudent(student)}
                 >
-                  {/* Checkbox */}
                   <td className="w-8 px-2 border-r border-border/40">
                     <Checkbox
                       checked={isChecked}
@@ -1018,7 +1081,6 @@ export default function Students({ onNavigate }: StudentsProps) {
                     />
                   </td>
 
-                  {/* Data cells */}
                   {activeVisibleCols.map((col) => (
                     <td
                       key={col.key}
@@ -1029,7 +1091,6 @@ export default function Students({ onNavigate }: StudentsProps) {
                     </td>
                   ))}
 
-                  {/* Actions */}
                   {canWrite && canManage && (
                     <td className="px-1 py-1">
                       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1038,7 +1099,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                           size="icon"
                           className="w-6 h-6 text-muted-foreground hover:text-primary"
                           aria-label="Edit student"
-                          data-ocid={`student-edit-${student.id}`}
+                          data-ocid={`students.edit_button.${idx + 1}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditStudent(student);
@@ -1062,7 +1123,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                           size="icon"
                           className="w-6 h-6 text-muted-foreground hover:text-destructive"
                           aria-label="Delete student"
-                          data-ocid={`student-delete-${student.id}`}
+                          data-ocid={`students.delete_button.${idx + 1}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setDeleteConfirm(student);
@@ -1080,10 +1141,13 @@ export default function Students({ onNavigate }: StudentsProps) {
         </table>
       </div>
 
-      {/* ── Print Dialog ──────────────────────────────────────────────────── */}
+      {/* Print Dialog */}
       {showPrintDialog && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
+          <div
+            className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4"
+            data-ocid="students-print.dialog"
+          >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-semibold font-display text-foreground flex items-center gap-2">
                 <List className="w-4 h-4" /> Print Student List
@@ -1093,6 +1157,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                 size="icon"
                 className="w-7 h-7"
                 onClick={() => setShowPrintDialog(false)}
+                data-ocid="students-print.close_button"
               >
                 <X className="w-4 h-4" />
               </Button>
@@ -1128,6 +1193,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => setShowPrintDialog(false)}
+                data-ocid="students-print.cancel_button"
               >
                 Cancel
               </Button>
@@ -1137,7 +1203,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                   handlePrint();
                   setShowPrintDialog(false);
                 }}
-                data-ocid="students-print-btn"
+                data-ocid="students-print.submit_button"
               >
                 <Download className="w-3.5 h-3.5 mr-1" /> Print
               </Button>
@@ -1146,10 +1212,13 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* ── Delete Confirm ────────────────────────────────────────────────── */}
+      {/* Delete Confirm */}
       {deleteConfirm && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4">
+          <div
+            className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4"
+            data-ocid="students-delete.dialog"
+          >
             <div className="flex items-start gap-3">
               <div className="w-9 h-9 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
                 <Trash2 className="w-4 h-4 text-destructive" />
@@ -1169,14 +1238,15 @@ export default function Students({ onNavigate }: StudentsProps) {
                 variant="outline"
                 size="sm"
                 onClick={() => setDeleteConfirm(null)}
+                data-ocid="students-delete.cancel_button"
               >
                 Cancel
               </Button>
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={() => handleDelete(deleteConfirm)}
-                data-ocid="confirm-delete-student-btn"
+                onClick={() => void handleDelete(deleteConfirm)}
+                data-ocid="students-delete.confirm_button"
               >
                 Delete
               </Button>
@@ -1185,7 +1255,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* ── Bulk Delete Confirm ───────────────────────────────────────────── */}
+      {/* Bulk Delete Confirm */}
       {bulkDeleteConfirm && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <div className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4">
@@ -1214,7 +1284,7 @@ export default function Students({ onNavigate }: StudentsProps) {
               <Button
                 variant="destructive"
                 size="sm"
-                onClick={handleBulkDelete}
+                onClick={() => void handleBulkDelete()}
               >
                 Delete All
               </Button>
@@ -1223,7 +1293,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* ── Add/Edit Student Form ─────────────────────────────────────────── */}
+      {/* Add/Edit Student Form */}
       {showForm && canWrite && (
         <StudentForm
           student={editStudent ?? undefined}
@@ -1232,27 +1302,32 @@ export default function Students({ onNavigate }: StudentsProps) {
             setShowForm(false);
             setEditStudent(null);
           }}
+          saveData={saveData}
+          updateData={updateData}
         />
       )}
 
-      {/* ── Import/Export ─────────────────────────────────────────────────── */}
+      {/* Import/Export */}
       {showImportExport && (
         <StudentImportExport
           onClose={() => setShowImportExport(false)}
-          onImported={reload}
+          onImported={() => void refresh()}
+          saveData={saveData}
         />
       )}
 
-      {/* ── Student Detail Modal ──────────────────────────────────────────── */}
+      {/* Student Detail Modal */}
       {selectedStudent && (
         <StudentDetailModal
           student={selectedStudent}
           onClose={() => setSelectedStudent(null)}
           onUpdate={(updated) => {
-            reload();
             setSelectedStudent(updated);
           }}
           onNavigate={onNavigate}
+          updateData={updateData}
+          deleteData={deleteData}
+          allStudents={students}
         />
       )}
     </div>

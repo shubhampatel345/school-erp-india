@@ -1,9 +1,9 @@
 <?php
 /**
- * SHUBH SCHOOL ERP — Database Configuration & Helpers
+ * SHUBH SCHOOL ERP — Database Configuration & Helpers v4.0
  *
  * NO .htaccess dependency. Works on any cPanel server regardless of mod_rewrite.
- * Upload api/index.php + api/config.php to cPanel public_html/api/ — that's it.
+ * Upload api/index.php + api/config.php to cPanel public_html/api/
  *
  * DB credentials for psmkgsco hosting account:
  *   Database : psmkgsco_shubherp_db
@@ -13,7 +13,6 @@
  *   DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASS, JWT_SECRET
  */
 
-// Silence all PHP notices/warnings — they corrupt JSON output
 @error_reporting(0);
 @ini_set('display_errors', '0');
 @ini_set('log_errors', '1');
@@ -27,7 +26,7 @@ define('DB_CHARSET',  'utf8mb4');
 define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'shubh_erp_jwt_secret_2024_psmkgs');
 define('JWT_EXPIRY',  86400);     // 24 hours
 define('JWT_REFRESH', 604800);    // 7 days
-define('API_VERSION', '3.0');
+define('API_VERSION', '4.0');
 
 // ── PDO singleton ─────────────────────────────────────────────────────────────
 function getDB(): PDO {
@@ -134,8 +133,38 @@ function require_superadmin(): array {
     return $p;
 }
 
+function is_superadmin(?array $auth): bool {
+    return $auth && in_array($auth['role'] ?? '', ['superadmin', 'super_admin'], true);
+}
+
+// ── Password helpers ──────────────────────────────────────────────────────────
+function hash_password(string $pw): string {
+    return password_hash($pw, PASSWORD_BCRYPT);
+}
+
+function verify_password(string $pw, string $hash): bool {
+    // Support bcrypt, SHA-256 hex (legacy), and plain text (legacy)
+    if (strpos($hash, '$2') === 0) {
+        return password_verify($pw, $hash);
+    }
+    if (strlen($hash) === 64 && ctype_xdigit($hash)) {
+        return hash('sha256', $pw) === $hash;
+    }
+    return $pw === $hash;
+}
+
 // ── Misc helpers ──────────────────────────────────────────────────────────────
 function now_str(): string { return gmdate('Y-m-d H:i:s'); }
+
+function gen_uuid(): string {
+    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff),
+        mt_rand(0, 0xffff),
+        mt_rand(0, 0x0fff) | 0x4000,
+        mt_rand(0, 0x3fff) | 0x8000,
+        mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
+    );
+}
 
 function school_id_from_auth(?array $auth): int {
     if ($auth && !empty($auth['school_id'])) return (int)$auth['school_id'];

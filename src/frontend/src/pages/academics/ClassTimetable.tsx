@@ -1,9 +1,15 @@
+/**
+ * ClassTimetable — rebuild using useApp() context
+ * Saves timetable records via saveData
+ */
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { CalendarCheck, Printer, Save } from "lucide-react";
+import { CalendarCheck, Loader2, Printer, Save } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useApp } from "../../context/AppContext";
 import type { ClassSection, Staff, Subject } from "../../types";
-import { generateId, ls } from "../../utils/localStorage";
+import { generateId } from "../../utils/localStorage";
 
 const DAYS = [
   "Monday",
@@ -51,16 +57,13 @@ function calcPeriodTimes(
 }
 
 export default function ClassTimetable() {
-  const [classes] = useState<ClassSection[]>(() =>
-    ls.get<ClassSection[]>("classes", []),
-  );
-  const [subjects] = useState<Subject[]>(() =>
-    ls.get<Subject[]>("academics_subjects", []),
-  );
-  const [staff] = useState<Staff[]>(() => ls.get<Staff[]>("staff", []));
-  const [saved, setSaved] = useState<SavedClassTimetable[]>(() =>
-    ls.get<SavedClassTimetable[]>("class_timetables", []),
-  );
+  const { getData, saveData, deleteData } = useApp();
+  const [saving, setSaving] = useState(false);
+
+  const classesData = getData("classes") as ClassSection[];
+  const subjectsData = getData("subjects") as Subject[];
+  const staffData = getData("staff") as Staff[];
+  const savedTimetables = getData("class_timetables") as SavedClassTimetable[];
 
   const [selClass, setSelClass] = useState("");
   const [selSection, setSelSection] = useState("");
@@ -76,10 +79,12 @@ export default function ClassTimetable() {
   >({});
 
   const availableSections =
-    classes.find((c) => c.className === selClass)?.sections ?? [];
+    classesData.find((c) => (c.name ?? c.className ?? "") === selClass)
+      ?.sections ?? [];
+
   const classSubjects = selClass
-    ? subjects.filter((s) => s.classes.includes(selClass))
-    : subjects;
+    ? subjectsData.filter((s) => s.classes.includes(selClass))
+    : subjectsData;
 
   function handlePeriodsChange(n: number) {
     const clamped = Math.max(1, Math.min(10, n));
@@ -114,11 +119,11 @@ export default function ClassTimetable() {
         }),
       };
       if (field === "subjectId") {
-        const subj = subjects.find((s) => s.id === value);
+        const subj = subjectsData.find((s) => s.id === value);
         cell.subjectId = value;
         cell.subjectName = subj?.name ?? "";
       } else {
-        const member = staff.find((s) => s.id === value);
+        const member = staffData.find((s) => s.id === value);
         cell.staffId = value;
         cell.staffName = member?.name ?? "";
       }
@@ -127,33 +132,38 @@ export default function ClassTimetable() {
     });
   }
 
-  function handleSave() {
-    if (!selClass || !selSection) return alert("Select class and section");
-    const entry: SavedClassTimetable = {
-      id: generateId(),
-      className: selClass,
-      section: selSection,
-      days: selDays,
-      periods,
-      startTime,
-      periodDurations: periodDurations.slice(0, periods),
-      breakDuration,
-      grid,
-      savedAt: new Date().toISOString(),
-    };
-    const updated = [
-      ...saved.filter(
-        (s) => !(s.className === selClass && s.section === selSection),
-      ),
-      entry,
-    ];
-    setSaved(updated);
-    ls.set("class_timetables", updated);
-    alert(`Timetable for ${selClass}-${selSection} saved!`);
+  async function handleSave() {
+    if (!selClass || !selSection) {
+      toast.error("Select class and section first");
+      return;
+    }
+    setSaving(true);
+    try {
+      const entry: Record<string, unknown> = {
+        id: generateId(),
+        className: selClass,
+        section: selSection,
+        days: selDays,
+        periods,
+        startTime,
+        periodDurations: periodDurations.slice(0, periods),
+        breakDuration,
+        grid,
+        savedAt: new Date().toISOString(),
+      };
+      await saveData("class_timetables", entry);
+      toast.success(`Timetable for ${selClass}-${selSection} saved!`);
+    } catch {
+      toast.error("Failed to save timetable");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function handlePrint() {
-    window.print();
+  async function handleDeleteTimetable(id: string) {
+    if (!confirm("Delete this timetable?")) return;
+    await deleteData("class_timetables", id);
+    toast.success("Timetable deleted");
   }
 
   const periodTimes = calcPeriodTimes(
@@ -164,6 +174,7 @@ export default function ClassTimetable() {
 
   return (
     <div className="p-4 lg:p-6 space-y-5">
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
@@ -192,13 +203,19 @@ export default function ClassTimetable() {
                 setSelSection("");
                 setGrid({});
               }}
+              data-ocid="classtimetable.class-select"
             >
-              <option value="">Select</option>
-              {classes.map((c) => (
-                <option key={c.id} value={c.className}>
-                  Class {c.className}
-                </option>
-              ))}
+              <option value="">Select class</option>
+              {classesData.map((c) => {
+                const n = c.name ?? c.className ?? "";
+                return (
+                  <option key={c.id} value={n}>
+                    {n === "Nursery" || n === "LKG" || n === "UKG"
+                      ? n
+                      : `Class ${n}`}
+                  </option>
+                );
+              })}
             </select>
           </div>
           <div className="space-y-1">
@@ -210,6 +227,7 @@ export default function ClassTimetable() {
               value={selSection}
               onChange={(e) => setSelSection(e.target.value)}
               disabled={!selClass}
+              data-ocid="classtimetable.section-select"
             >
               <option value="">Select</option>
               {availableSections.map((s) => (
@@ -230,6 +248,7 @@ export default function ClassTimetable() {
               value={periods}
               onChange={(e) => handlePeriodsChange(Number(e.target.value))}
               className="w-full border border-input rounded-md px-3 py-2 text-sm bg-card"
+              data-ocid="classtimetable.periods-input"
             />
           </div>
           <div className="space-y-1">
@@ -245,6 +264,7 @@ export default function ClassTimetable() {
           </div>
         </div>
 
+        {/* Days */}
         <div className="space-y-2">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
             Days
@@ -271,6 +291,7 @@ export default function ClassTimetable() {
           </div>
         </div>
 
+        {/* Period durations */}
         <div className="space-y-2">
           <div className="flex items-center gap-4">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -281,7 +302,7 @@ export default function ClassTimetable() {
                 htmlFor="break-duration"
                 className="text-xs text-muted-foreground"
               >
-                Break between periods:
+                Break:
               </label>
               <input
                 id="break-duration"
@@ -290,7 +311,7 @@ export default function ClassTimetable() {
                 max={30}
                 value={breakDuration}
                 onChange={(e) => setBreakDuration(Number(e.target.value))}
-                className="w-16 border border-input rounded px-2 py-1 text-xs bg-card"
+                className="w-14 border border-input rounded px-2 py-1 text-xs bg-card"
               />
               <span className="text-xs text-muted-foreground">min</span>
             </div>
@@ -299,7 +320,7 @@ export default function ClassTimetable() {
             {periodDurations.slice(0, periods).map((dur, i) => (
               <div
                 // biome-ignore lint/suspicious/noArrayIndexKey: period index is stable positional key
-                key={`period-${i}`}
+                key={`pd-${i}`}
                 className="flex flex-col items-center gap-1"
               >
                 <span className="text-xs text-muted-foreground">P{i + 1}</span>
@@ -321,8 +342,8 @@ export default function ClassTimetable() {
           <div className="flex flex-wrap gap-2 pt-1">
             {periodTimes.map((pt, i) => (
               <span
-                // biome-ignore lint/suspicious/noArrayIndexKey: period time index is stable positional key
-                key={`time-${i}`}
+                // biome-ignore lint/suspicious/noArrayIndexKey: stable positional key
+                key={`pt-${i}`}
                 className="text-xs bg-muted text-muted-foreground px-2 py-1 rounded"
               >
                 P{i + 1}: {pt.from}–{pt.to}
@@ -337,19 +358,28 @@ export default function ClassTimetable() {
         <Card className="p-4 overflow-x-auto">
           <div className="flex items-center justify-between mb-4">
             <p className="font-semibold text-foreground">
-              Timetable: Class {selClass}-{selSection}
+              Timetable: {selClass}-{selSection}
             </p>
             <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={handlePrint}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.print()}
+              >
                 <Printer className="w-4 h-4 mr-1" />
                 Print
               </Button>
               <Button
                 size="sm"
                 onClick={handleSave}
-                data-ocid="save-class-tt-btn"
+                disabled={saving}
+                data-ocid="classtimetable.save_button"
               >
-                <Save className="w-4 h-4 mr-1" />
+                {saving ? (
+                  <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                ) : (
+                  <Save className="w-4 h-4 mr-1" />
+                )}
                 Save
               </Button>
             </div>
@@ -362,7 +392,7 @@ export default function ClassTimetable() {
                 </th>
                 {Array.from({ length: periods }, (_, i) => (
                   <th
-                    // biome-ignore lint/suspicious/noArrayIndexKey: header column index is stable positional key
+                    // biome-ignore lint/suspicious/noArrayIndexKey: stable positional key
                     key={`header-${i}`}
                     className="border border-border px-2 py-2 bg-muted/50 text-center font-semibold text-muted-foreground min-w-[120px]"
                   >
@@ -385,7 +415,7 @@ export default function ClassTimetable() {
                     const cell = grid[day]?.[pi];
                     return (
                       <td
-                        // biome-ignore lint/suspicious/noArrayIndexKey: cell column index is stable positional key
+                        // biome-ignore lint/suspicious/noArrayIndexKey: stable positional key
                         key={`cell-${pi}`}
                         className="border border-border px-1 py-1"
                       >
@@ -412,7 +442,7 @@ export default function ClassTimetable() {
                             }
                           >
                             <option value="">Teacher</option>
-                            {staff.map((s) => (
+                            {staffData.map((s) => (
                               <option key={s.id} value={s.id}>
                                 {s.name}
                               </option>
@@ -429,28 +459,44 @@ export default function ClassTimetable() {
         </Card>
       )}
 
-      {saved.length > 0 && (
+      {/* Saved Timetables */}
+      {savedTimetables.length > 0 && (
         <div className="space-y-3">
           <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">
-            Saved Timetables ({saved.length})
+            Saved Timetables ({savedTimetables.length})
           </p>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {saved.map((tt) => (
+            {savedTimetables.map((tt, idx) => (
               <Card
                 key={tt.id}
                 className="p-4 flex items-center justify-between"
+                data-ocid={`classtimetable.item.${idx + 1}`}
               >
                 <div>
                   <p className="font-semibold text-foreground">
-                    Class {tt.className}-{tt.section}
+                    {tt.className}-{tt.section}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {tt.days.length} days · {tt.periods} periods
                   </p>
                 </div>
-                <Button size="sm" variant="outline" onClick={handlePrint}>
-                  <Printer className="w-4 h-4" />
-                </Button>
+                <div className="flex gap-1">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => window.print()}
+                  >
+                    <Printer className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => handleDeleteTimetable(tt.id)}
+                  >
+                    ×
+                  </Button>
+                </div>
               </Card>
             ))}
           </div>

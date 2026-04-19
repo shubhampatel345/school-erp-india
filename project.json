@@ -1,26 +1,30 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular, web-based School Management ERP for Indian schools with full cPanel MySQL backend. Supports multi-school/branch operations, all user roles (Super Admin, Admin, Teacher, Parent, Student, Driver), and real-time data sync across all devices. Includes Student Information, Fees Collection, Attendance, HR/Payroll, Transport, Inventory, Communication, Template Studio, and more.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, fully working School Management System for Indian schools. All modules (Students, Fees, Attendance, HR/Payroll, Academics, Transport, Inventory, Examinations, Communication, Chat, Calling, Reports) work end-to-end with real MySQL data sync — every change saves immediately to the server like WhatsApp Web, with a changelog tracking who changed what.",
   "features": [
-    "MySQL database backend via PHP REST API on cPanel",
-    "Real-time data sync across all devices",
-    "JWT authentication with role-based access",
-    "30+ modules: Students, Fees, Attendance, HR, Academics, Transport, Inventory",
-    "PWA installable on Android/iOS",
-    "WhatsApp integration via wacoder.in",
-    "Complete cPanel deployment guide and documentation",
-    "Backup and restore with SQL dumps"
+    "WhatsApp-style real-time data sync — all data loads from MySQL on open, every change saves instantly to server",
+    "Role-based permissions — Super Admin controls what each role (Teacher, Admin, Principal, Parent, Student) can read/write/add/delete",
+    "Student Information — Excel-style grid with 20+ columns, rich filters, bulk import/export, family grouping",
+    "Fees Module — fee headings, class-wise plans, collect fees, receipt with QR, balance carry-forward, dues tracking",
+    "Attendance — QR scanner, RFID, ESSL/IP biometric, welcome display, summary reports",
+    "HR & Payroll — staff directory, attendance-based salary calculation, payslip generation",
+    "Academics — classes/sections CRUD, subjects, timetables, syllabus tracker",
+    "Chat System — direct messages + class/section/route group chats with file sharing (WhatsApp-style mobile UI)",
+    "Calling System — Heyophone VoIP integration, click-to-call from profiles, call logs",
+    "Changelog audit trail — every change tracked with who/what/when for sync and compliance",
+    "PWA — installable, mobile-optimized, bottom navigation",
+    "Backup & Restore — export/import all data, factory reset"
   ],
   "category": "productivity",
   "tags": [
     "school-erp",
     "education",
     "india",
-    "mysql",
-    "cpanel",
     "pwa",
-    "multi-role",
+    "mysql",
+    "role-based-access",
+    "fees-management",
     "attendance",
-    "fees-management"
+    "payroll"
   ],
-  "last_updated": "2026-04-14T16:00:49.324Z"
+  "last_updated": "2026-04-19T14:19:24.427Z"
 }

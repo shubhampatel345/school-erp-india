@@ -14,7 +14,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type {
   AttendanceRecord,
@@ -24,11 +24,7 @@ import type {
   Student,
   TransportRoute,
 } from "../types";
-import { CLASSES, MONTHS, formatCurrency, ls } from "../utils/localStorage";
-
-// ─────────────────────────────────────────────
-// Report Card definitions
-// ─────────────────────────────────────────────
+import { CLASSES, MONTHS, formatCurrency } from "../utils/localStorage";
 
 type ReportKey =
   | "students"
@@ -38,1253 +34,813 @@ type ReportKey =
   | "hr"
   | "transport"
   | "inventory"
-  | "fees-due";
+  | "feesdue";
 
-interface ReportCardDef {
+interface ReportCard {
   key: ReportKey;
   title: string;
+  icon: React.ComponentType<{ className?: string }>;
   description: string;
-  icon: React.ReactNode;
   color: string;
 }
 
-const REPORT_CARDS: ReportCardDef[] = [
+const REPORT_CARDS: ReportCard[] = [
   {
     key: "students",
     title: "Students Report",
-    description: "Class-wise count, gender breakdown, active vs discontinued",
-    icon: <Users className="w-6 h-6" />,
-    color: "bg-primary/10 text-primary",
+    icon: Users,
+    description: "Total, gender breakdown, class-wise count",
+    color: "bg-blue-50 border-blue-200 text-blue-700",
   },
   {
     key: "finance",
     title: "Finance Report",
-    description: "Total fees collected, month-wise collection, pending dues",
-    icon: <IndianRupee className="w-6 h-6" />,
-    color: "bg-accent/10 text-accent",
+    icon: IndianRupee,
+    description: "Fees collected this month/session, dues",
+    color: "bg-green-50 border-green-200 text-green-700",
   },
   {
     key: "attendance",
     title: "Attendance Report",
-    description: "Class-wise attendance, monthly trend, top absentees",
-    icon: <ClipboardList className="w-6 h-6" />,
-    color: "bg-blue-100 text-blue-700",
+    icon: ClipboardList,
+    description: "Present/absent rates by class",
+    color: "bg-purple-50 border-purple-200 text-purple-700",
   },
   {
     key: "examinations",
     title: "Examinations Report",
-    description: "Saved exam timetables and schedule summary",
-    icon: <BookOpen className="w-6 h-6" />,
-    color: "bg-purple-100 text-purple-700",
+    icon: BookOpen,
+    description: "Pass/fail rates, top performers",
+    color: "bg-yellow-50 border-yellow-200 text-yellow-700",
   },
   {
     key: "hr",
     title: "HR Report",
-    description: "Total staff, designation-wise count, active vs inactive",
-    icon: <GraduationCap className="w-6 h-6" />,
-    color: "bg-orange-100 text-orange-700",
+    icon: GraduationCap,
+    description: "Staff count by designation, payroll summary",
+    color: "bg-pink-50 border-pink-200 text-pink-700",
   },
   {
     key: "transport",
     title: "Transport Report",
-    description: "Routes, student count, driver-wise assignments",
-    icon: <Bus className="w-6 h-6" />,
-    color: "bg-teal-100 text-teal-700",
+    icon: Bus,
+    description: "Route-wise student count, fees collected",
+    color: "bg-orange-50 border-orange-200 text-orange-700",
   },
   {
     key: "inventory",
     title: "Inventory Report",
-    description: "Stock levels, low stock alerts, category-wise value",
-    icon: <Package className="w-6 h-6" />,
-    color: "bg-yellow-100 text-yellow-700",
+    icon: Package,
+    description: "Stock levels, items below reorder",
+    color: "bg-teal-50 border-teal-200 text-teal-700",
   },
   {
-    key: "fees-due",
+    key: "feesdue",
     title: "Fees Due Report",
-    description: "Month-wise outstanding, class-wise dues, student details",
-    icon: <IndianRupee className="w-6 h-6" />,
-    color: "bg-red-100 text-red-700",
+    icon: IndianRupee,
+    description: "Students with outstanding balance",
+    color: "bg-red-50 border-red-200 text-red-700",
   },
 ];
 
-// ─────────────────────────────────────────────
-// Data readers
-// ─────────────────────────────────────────────
-
-function useReportData(key: ReportKey, sessionId: string) {
-  const students = ls
-    .get<Student[]>("students", [])
-    .filter((s) => s.sessionId === sessionId);
-  const staff = ls.get<Staff[]>("staff", []);
-  const receipts = ls
-    .get<FeeReceipt[]>("fee_receipts", [])
-    .filter((r) => r.sessionId === sessionId && !r.isDeleted);
-  const attendance = ls
-    .get<AttendanceRecord[]>("attendance", [])
-    .filter((r) => r.sessionId === sessionId);
-  const transport = ls.get<TransportRoute[]>("transport", []);
-  const inventory = ls.get<InventoryItem[]>("inventory_items", []);
-
-  switch (key) {
-    case "students": {
-      const active = students.filter((s) => s.status === "active");
-      const discontinued = students.filter((s) => s.status === "discontinued");
-      const byClass: Record<string, number> = {};
-      for (const cls of CLASSES) {
-        const count = active.filter((s) => s.class === cls).length;
-        if (count > 0) byClass[cls] = count;
-      }
-      const byGender = {
-        Male: active.filter((s) => s.gender === "Male").length,
-        Female: active.filter((s) => s.gender === "Female").length,
-        Other: active.filter((s) => s.gender === "Other").length,
-      };
-      return {
-        total: students.length,
-        active: active.length,
-        discontinued: discontinued.length,
-        byClass,
-        byGender,
-      };
-    }
-    case "finance": {
-      const totalCollected = receipts.reduce(
-        (sum, r) => sum + r.totalAmount,
-        0,
-      );
-      const byMonth: Record<string, number> = {};
-      for (const r of receipts) {
-        const m = new Date(r.date).toLocaleString("en-IN", {
-          month: "short",
-          year: "numeric",
-        });
-        byMonth[m] = (byMonth[m] ?? 0) + r.totalAmount;
-      }
-      const modes: Record<string, number> = {};
-      for (const r of receipts) {
-        modes[r.paymentMode] = (modes[r.paymentMode] ?? 0) + r.totalAmount;
-      }
-      return { totalCollected, byMonth, modes, receiptCount: receipts.length };
-    }
-    case "attendance": {
-      const studentRecords = attendance.filter((r) => r.type === "student");
-      const presentCount = studentRecords.filter(
-        (r) => r.status === "Present",
-      ).length;
-      const absentCount = studentRecords.filter(
-        (r) => r.status === "Absent",
-      ).length;
-      const totalRecords = studentRecords.length;
-      const pct =
-        totalRecords > 0 ? Math.round((presentCount / totalRecords) * 100) : 0;
-      const byClass: Record<string, { present: number; absent: number }> = {};
-      for (const r of studentRecords) {
-        if (!r.class) continue;
-        if (!byClass[r.class]) byClass[r.class] = { present: 0, absent: 0 };
-        if (r.status === "Present") byClass[r.class].present++;
-        else byClass[r.class].absent++;
-      }
-      // Top 5 absentees
-      const absenteeMap: Record<string, number> = {};
-      for (const r of studentRecords.filter(
-        (r) => r.status === "Absent" && r.studentId,
-      )) {
-        absenteeMap[r.studentId!] = (absenteeMap[r.studentId!] ?? 0) + 1;
-      }
-      const topAbsentees = Object.entries(absenteeMap)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 5)
-        .map(([id, count]) => ({
-          name: students.find((s) => s.id === id)?.fullName ?? id,
-          count,
-        }));
-      return {
-        presentCount,
-        absentCount,
-        totalRecords,
-        pct,
-        byClass,
-        topAbsentees,
-      };
-    }
-    case "examinations": {
-      const timetables = ls.get<
-        {
-          id: string;
-          name: string;
-          startDate: string;
-          endDate: string;
-          classes: string[];
-          isSaved: boolean;
-        }[]
-      >("exam_timetables", []);
-      return {
-        timetables,
-        total: timetables.length,
-        saved: timetables.filter((t) => t.isSaved).length,
-      };
-    }
-    case "hr": {
-      const active = staff.filter((s) => s.status !== "inactive");
-      const inactive = staff.filter((s) => s.status === "inactive");
-      const byDesig: Record<string, number> = {};
-      for (const s of staff) {
-        const d = s.designation || "Unknown";
-        byDesig[d] = (byDesig[d] ?? 0) + 1;
-      }
-      return {
-        total: staff.length,
-        active: active.length,
-        inactive: inactive.length,
-        byDesig,
-      };
-    }
-    case "transport": {
-      const totalStudentsWithTransport = students.filter(
-        (s) => s.transportId || s.transportRoute || s.transportBusNo,
-      ).length;
-      const byRoute: Record<string, number> = {};
-      for (const r of transport) {
-        byRoute[r.routeName] = (r.students ?? []).length;
-      }
-      return {
-        totalRoutes: transport.length,
-        totalStudentsWithTransport,
-        byRoute,
-        transport,
-      };
-    }
-    case "inventory": {
-      const totalItems = inventory.length;
-      const lowStock = inventory.filter((i) => i.quantity <= 5);
-      const byCategory: Record<string, { count: number; value: number }> = {};
-      for (const item of inventory) {
-        const cat = item.category || "Uncategorized";
-        if (!byCategory[cat]) byCategory[cat] = { count: 0, value: 0 };
-        byCategory[cat].count++;
-        byCategory[cat].value += item.quantity * item.purchasePrice;
-      }
-      const totalValue = inventory.reduce(
-        (s, i) => s + i.quantity * i.purchasePrice,
-        0,
-      );
-      return { totalItems, lowStock, byCategory, totalValue };
-    }
-    case "fees-due": {
-      const paidByStudent: Record<string, Set<string>> = {};
-      for (const r of receipts) {
-        if (!paidByStudent[r.studentId]) paidByStudent[r.studentId] = new Set();
-        for (const item of r.items) paidByStudent[r.studentId].add(item.month);
-      }
-      const dueStudents = students
-        .filter((s) => s.status === "active")
-        .map((s) => {
-          const paid = paidByStudent[s.id] ?? new Set<string>();
-          const unpaid = MONTHS.filter((m) => !paid.has(m));
-          return { ...s, unpaidMonths: unpaid };
-        })
-        .filter((s) => s.unpaidMonths.length > 0);
-
-      const byMonth: Record<string, number> = {};
-      for (const s of dueStudents) {
-        for (const m of s.unpaidMonths) {
-          byMonth[m] = (byMonth[m] ?? 0) + 1;
-        }
-      }
-      const byClass: Record<string, number> = {};
-      for (const s of dueStudents) {
-        byClass[s.class] = (byClass[s.class] ?? 0) + 1;
-      }
-      return {
-        dueStudents,
-        byMonth,
-        byClass,
-        totalDueStudents: dueStudents.length,
-      };
-    }
-    default:
-      return {};
-  }
-}
-
-// ─────────────────────────────────────────────
-// Report views
-// ─────────────────────────────────────────────
-
-function StatCard({
-  label,
-  value,
-  sub,
-}: { label: string; value: string | number; sub?: string }) {
+// ── Simple Bar Chart ──────────────────────────────────────────────────────────
+function BarChart({
+  data,
+  color = "#3b82f6",
+}: { data: { label: string; value: number }[]; color?: string }) {
+  const max = Math.max(...data.map((d) => d.value), 1);
   return (
-    <div className="p-4 bg-muted/30 rounded-xl space-y-0.5">
-      <p className="text-2xl font-bold text-foreground">{value}</p>
-      <p className="text-sm font-medium text-foreground">{label}</p>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
+    <div className="flex items-end gap-2 h-32">
+      {data.map((d) => (
+        <div
+          key={d.label}
+          className="flex flex-col items-center gap-1 flex-1 min-w-0"
+        >
+          <span className="text-xs text-muted-foreground font-mono">
+            {d.value}
+          </span>
+          <div
+            className="w-full rounded-t transition-all"
+            style={{ height: `${(d.value / max) * 80}px`, background: color }}
+          />
+          <span className="text-xs text-muted-foreground truncate w-full text-center">
+            {d.label}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }
 
-function ReportView({
-  reportKey,
-  sessionId,
-}: { reportKey: ReportKey; sessionId: string }) {
-  const data = useReportData(reportKey, sessionId);
-
-  function exportCSV(rows: string[][], filename: string) {
-    const csv = rows.map((r) => r.join(",")).join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-  }
-
-  function printReport() {
-    window.print();
-  }
-
-  if (reportKey === "students") {
-    const d = data as ReturnType<typeof useReportData> & {
-      total: number;
-      active: number;
-      discontinued: number;
-      byClass: Record<string, number>;
-      byGender: Record<string, number>;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <StatCard label="Total Students" value={d.total} />
-          <StatCard label="Active" value={d.active} sub="Currently enrolled" />
-          <StatCard
-            label="Discontinued"
-            value={d.discontinued}
-            sub="Left / Passed Out"
-          />
-          <StatCard label="Male" value={d.byGender?.Male ?? 0} />
-          <StatCard label="Female" value={d.byGender?.Female ?? 0} />
-          <StatCard label="Other" value={d.byGender?.Other ?? 0} />
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Class
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                  Students
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(d.byClass ?? {}).map(([cls, count]) => (
-                <tr
-                  key={cls}
-                  className="border-t border-border hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2.5 font-medium">Class {cls}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Badge variant="secondary">{count}</Badge>
-                  </td>
-                </tr>
-              ))}
-              {Object.keys(d.byClass ?? {}).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={2}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    No student data
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={printReport}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" /> Print
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              exportCSV(
-                [
-                  ["Class", "Count"],
-                  ...Object.entries(d.byClass ?? {}).map(([k, v]) => [
-                    k,
-                    String(v),
-                  ]),
-                ],
-                "students-report.csv",
-              )
-            }
-            className="gap-1.5"
-          >
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "finance") {
-    const d = data as {
-      totalCollected: number;
-      byMonth: Record<string, number>;
-      modes: Record<string, number>;
-      receiptCount: number;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <StatCard
-            label="Total Collected"
-            value={formatCurrency(d.totalCollected ?? 0)}
-            sub="This session"
-          />
-          <StatCard label="Total Receipts" value={d.receiptCount ?? 0} />
-        </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                    Month
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Collected
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(d.byMonth ?? {}).map(([m, amt]) => (
-                  <tr
-                    key={m}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5">{m}</td>
-                    <td className="px-4 py-2.5 text-right font-medium text-accent">
-                      {formatCurrency(amt)}
-                    </td>
-                  </tr>
-                ))}
-                {Object.keys(d.byMonth ?? {}).length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      No receipts yet
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                    Payment Mode
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Amount
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(d.modes ?? {}).map(([mode, amt]) => (
-                  <tr
-                    key={mode}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5">{mode}</td>
-                    <td className="px-4 py-2.5 text-right font-medium">
-                      {formatCurrency(amt)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={printReport}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" /> Print
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              exportCSV(
-                [
-                  ["Month", "Amount"],
-                  ...Object.entries(d.byMonth ?? {}).map(([k, v]) => [
-                    k,
-                    String(v),
-                  ]),
-                ],
-                "finance-report.csv",
-              )
-            }
-            className="gap-1.5"
-          >
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "attendance") {
-    const d = data as {
-      presentCount: number;
-      absentCount: number;
-      totalRecords: number;
-      pct: number;
-      byClass: Record<string, { present: number; absent: number }>;
-      topAbsentees: { name: string; count: number }[];
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <StatCard label="Overall Attendance" value={`${d.pct ?? 0}%`} />
-          <StatCard label="Present Records" value={d.presentCount ?? 0} />
-          <StatCard label="Absent Records" value={d.absentCount ?? 0} />
-          <StatCard label="Total Records" value={d.totalRecords ?? 0} />
-        </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                    Class
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Present
-                  </th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                    Absent
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {Object.entries(d.byClass ?? {}).map(
-                  ([cls, { present, absent }]) => (
-                    <tr
-                      key={cls}
-                      className="border-t border-border hover:bg-muted/20"
-                    >
-                      <td className="px-4 py-2.5 font-medium">Class {cls}</td>
-                      <td className="px-4 py-2.5 text-right text-accent">
-                        {present}
-                      </td>
-                      <td className="px-4 py-2.5 text-right text-destructive">
-                        {absent}
-                      </td>
-                    </tr>
-                  ),
-                )}
-                {Object.keys(d.byClass ?? {}).length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={3}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      No attendance records
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <p className="px-4 py-2.5 font-semibold text-sm text-muted-foreground border-b border-border">
-              Top Absentees
-            </p>
-            <table className="w-full text-sm">
-              <tbody>
-                {(d.topAbsentees ?? []).map(({ name, count }) => (
-                  <tr
-                    key={name}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5">{name}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Badge
-                        variant="secondary"
-                        className="bg-red-100 text-red-700"
-                      >
-                        {count} absent
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-                {(d.topAbsentees ?? []).length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-8 text-center text-muted-foreground"
-                    >
-                      No absences recorded
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={printReport}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" /> Print
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              exportCSV(
-                [
-                  ["Class", "Present", "Absent"],
-                  ...Object.entries(d.byClass ?? {}).map(([k, v]) => [
-                    k,
-                    String(v.present),
-                    String(v.absent),
-                  ]),
-                ],
-                "attendance-report.csv",
-              )
-            }
-            className="gap-1.5"
-          >
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "examinations") {
-    const d = data as {
-      timetables: {
-        id: string;
-        name: string;
-        startDate: string;
-        endDate: string;
-        classes: string[];
-        isSaved: boolean;
-      }[];
-      total: number;
-      saved: number;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard label="Total Exams" value={d.total ?? 0} />
-          <StatCard label="Saved Timetables" value={d.saved ?? 0} />
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Exam Name
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Start
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  End
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Classes
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(d.timetables ?? []).map((t) => (
-                <tr
-                  key={t.id}
-                  className="border-t border-border hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2.5 font-medium">{t.name}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {t.startDate || "—"}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {t.endDate || "—"}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {(t.classes ?? []).join(", ") || "—"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge variant={t.isSaved ? "default" : "secondary"}>
-                      {t.isSaved ? "Saved" : "Draft"}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-              {(d.timetables ?? []).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    No exam timetables created
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "hr") {
-    const d = data as {
-      total: number;
-      active: number;
-      inactive: number;
-      byDesig: Record<string, number>;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <StatCard label="Total Staff" value={d.total ?? 0} />
-          <StatCard label="Active" value={d.active ?? 0} />
-          <StatCard label="Inactive" value={d.inactive ?? 0} />
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Designation
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                  Count
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(d.byDesig ?? {}).map(([des, count]) => (
-                <tr
-                  key={des}
-                  className="border-t border-border hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2.5 font-medium">{des}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Badge variant="secondary">{count}</Badge>
-                  </td>
-                </tr>
-              ))}
-              {Object.keys(d.byDesig ?? {}).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={2}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    No staff records
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={printReport}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" /> Print
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              exportCSV(
-                [
-                  ["Designation", "Count"],
-                  ...Object.entries(d.byDesig ?? {}).map(([k, v]) => [
-                    k,
-                    String(v),
-                  ]),
-                ],
-                "hr-report.csv",
-              )
-            }
-            className="gap-1.5"
-          >
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "transport") {
-    const d = data as {
-      totalRoutes: number;
-      totalStudentsWithTransport: number;
-      byRoute: Record<string, number>;
-      transport: TransportRoute[];
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard label="Total Routes" value={d.totalRoutes ?? 0} />
-          <StatCard
-            label="Students Using Transport"
-            value={d.totalStudentsWithTransport ?? 0}
-          />
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Route
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Bus No.
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Driver
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                  Students
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(d.transport ?? []).map((r) => (
-                <tr
-                  key={r.id}
-                  className="border-t border-border hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2.5 font-medium">{r.routeName}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {r.busNo}
-                  </td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {r.driverName}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Badge variant="secondary">
-                      {(r.students ?? []).length}
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-              {(d.transport ?? []).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    No transport routes configured
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "inventory") {
-    const d = data as {
-      totalItems: number;
-      lowStock: InventoryItem[];
-      byCategory: Record<string, { count: number; value: number }>;
-      totalValue: number;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <StatCard label="Total Items" value={d.totalItems ?? 0} />
-          <StatCard
-            label="Total Stock Value"
-            value={formatCurrency(d.totalValue ?? 0)}
-          />
-          <StatCard
-            label="Low Stock Items"
-            value={(d.lowStock ?? []).length}
-            sub="≤ 5 units"
-          />
-        </div>
-        {(d.lowStock ?? []).length > 0 && (
-          <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-xl">
-            <p className="text-sm font-semibold text-destructive mb-2">
-              ⚠️ Low Stock Alert
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {(d.lowStock ?? []).map((item) => (
-                <Badge key={item.id} variant="destructive" className="text-xs">
-                  {item.name} ({item.quantity} {item.unit})
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Category
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                  Items
-                </th>
-                <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
-                  Stock Value
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(d.byCategory ?? {}).map(
-                ([cat, { count, value }]) => (
-                  <tr
-                    key={cat}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5 font-medium">{cat}</td>
-                    <td className="px-4 py-2.5 text-right">{count}</td>
-                    <td className="px-4 py-2.5 text-right font-medium">
-                      {formatCurrency(value)}
-                    </td>
-                  </tr>
-                ),
-              )}
-              {Object.keys(d.byCategory ?? {}).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={3}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    No inventory items
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
-
-  if (reportKey === "fees-due") {
-    const d = data as {
-      dueStudents: (Student & { unpaidMonths: string[] })[];
-      byMonth: Record<string, number>;
-      byClass: Record<string, number>;
-      totalDueStudents: number;
-    };
-    return (
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-          <StatCard
-            label="Students with Dues"
-            value={d.totalDueStudents ?? 0}
-          />
-          <StatCard
-            label="Months Tracked"
-            value={Object.keys(d.byMonth ?? {}).length}
-          />
-        </div>
-        <div className="grid md:grid-cols-2 gap-4">
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <p className="px-4 py-2.5 font-semibold text-sm text-muted-foreground border-b border-border">
-              Month-wise Dues Count
-            </p>
-            <table className="w-full text-sm">
-              <tbody>
-                {MONTHS.filter((m) => (d.byMonth?.[m] ?? 0) > 0).map((m) => (
-                  <tr
-                    key={m}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5">{m}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Badge
-                        variant="secondary"
-                        className="bg-red-100 text-red-700"
-                      >
-                        {d.byMonth?.[m]} students due
-                      </Badge>
-                    </td>
-                  </tr>
-                ))}
-                {Object.keys(d.byMonth ?? {}).length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-8 text-center text-muted-foreground text-xs"
-                    >
-                      No dues pending
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <p className="px-4 py-2.5 font-semibold text-sm text-muted-foreground border-b border-border">
-              Class-wise Dues
-            </p>
-            <table className="w-full text-sm">
-              <tbody>
-                {Object.entries(d.byClass ?? {}).map(([cls, count]) => (
-                  <tr
-                    key={cls}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="px-4 py-2.5 font-medium">Class {cls}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Badge variant="secondary">{count} students</Badge>
-                    </td>
-                  </tr>
-                ))}
-                {Object.keys(d.byClass ?? {}).length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-8 text-center text-muted-foreground text-xs"
-                    >
-                      No dues pending
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-border max-h-72 overflow-y-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 sticky top-0">
-              <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Student
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Class
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Adm. No.
-                </th>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
-                  Unpaid Months
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {(d.dueStudents ?? []).map((s) => (
-                <tr
-                  key={s.id}
-                  className="border-t border-border hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2.5 font-medium">{s.fullName}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    {s.class}-{s.section}
-                  </td>
-                  <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">
-                    {s.admNo}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap gap-1">
-                      {s.unpaidMonths.map((m) => (
-                        <Badge
-                          key={m}
-                          variant="secondary"
-                          className="text-xs bg-red-50 text-red-700 border-red-200"
-                        >
-                          {m.slice(0, 3)}
-                        </Badge>
-                      ))}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {(d.dueStudents ?? []).length === 0 && (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
-                    All fees are cleared 🎉
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.print()}
-            className="gap-1.5"
-          >
-            <Printer className="w-4 h-4" /> Print
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              const rows = [["Student", "Class", "Adm.No", "Unpaid Months"]];
-              for (const s of d.dueStudents ?? []) {
-                rows.push([
-                  s.fullName,
-                  `${s.class}-${s.section}`,
-                  s.admNo,
-                  s.unpaidMonths.join("|"),
-                ]);
-              }
-              const csv = rows.map((r) => r.join(",")).join("\n");
-              const a = document.createElement("a");
-              a.href = URL.createObjectURL(
-                new Blob([csv], { type: "text/csv" }),
-              );
-              a.download = "fees-due-report.csv";
-              a.click();
-            }}
-            className="gap-1.5"
-          >
-            <Download className="w-4 h-4" /> Export CSV
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  return null;
+// ── CSV Export ─────────────────────────────────────────────────────────────────
+function downloadCSV(filename: string, rows: string[][]): void {
+  const csv = rows
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
-// ─────────────────────────────────────────────
-// Main Page
-// ─────────────────────────────────────────────
+// ── Report Detail Panels ───────────────────────────────────────────────────────
 
-export default function Reports() {
-  const { currentSession } = useApp();
-  const [openReport, setOpenReport] = useState<ReportKey | null>(null);
-  const sessionId = currentSession?.id ?? "";
+function StudentsReport({ students }: { students: Student[] }) {
+  const male = students.filter((s) => s.gender === "Male").length;
+  const female = students.filter((s) => s.gender === "Female").length;
+  const other = students.length - male - female;
+  const classCounts = CLASSES.map((c) => ({
+    label: c,
+    value: students.filter((s) => s.class === c).length,
+  })).filter((d) => d.value > 0);
 
-  const openDef = REPORT_CARDS.find((r) => r.key === openReport);
-
-  if (openReport && openDef) {
-    return (
-      <div className="p-4 lg:p-6 space-y-4">
-        <div className="flex items-center gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setOpenReport(null)}
-            className="gap-1"
-          >
-            <ChevronRight className="w-4 h-4 rotate-180" /> Back
-          </Button>
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center ${openDef.color}`}
-          >
-            {openDef.icon}
-          </div>
-          <div>
-            <h1 className="text-xl font-display font-bold text-foreground">
-              {openDef.title}
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              {openDef.description}
-            </p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="ml-auto"
-            onClick={() => setOpenReport(null)}
-          >
-            <X className="w-4 h-4" />
-          </Button>
-        </div>
-        <ReportView reportKey={openReport} sessionId={sessionId} />
-      </div>
-    );
-  }
+  const doExport = () => {
+    const rows = [
+      ["Class", "Count"],
+      ...classCounts.map((d) => [d.label, String(d.value)]),
+    ];
+    downloadCSV("students_report.csv", rows);
+  };
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-          <ClipboardList className="w-5 h-5 text-primary" />
-        </div>
-        <div>
-          <h1 className="text-xl font-display font-bold text-foreground">
-            Reports
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Session: {currentSession?.label ?? "—"} — Click any report to view
-            live data
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {REPORT_CARDS.map((card) => (
-          <Card
-            key={card.key}
-            className="hover:shadow-lg transition-all cursor-pointer group border-border hover:border-primary/30"
-            onClick={() => setOpenReport(card.key)}
-            data-ocid={`report-card-${card.key}`}
-          >
-            <CardHeader className="pb-2">
-              <div className="flex items-start justify-between">
-                <div
-                  className={`w-12 h-12 rounded-xl flex items-center justify-center ${card.color}`}
-                >
-                  {card.icon}
-                </div>
-                <ChevronRight className="w-5 h-5 text-muted-foreground/40 group-hover:text-primary group-hover:translate-x-0.5 transition-all mt-1" />
-              </div>
-            </CardHeader>
-            <CardContent>
-              <p className="font-semibold text-foreground text-sm group-hover:text-primary transition-colors mb-1">
-                {card.title}
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          {
+            label: "Total Students",
+            value: students.length,
+            color: "text-primary",
+          },
+          { label: "Male", value: male, color: "text-blue-600" },
+          { label: "Female", value: female, color: "text-pink-600" },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="pt-4 pb-3 text-center">
+              <p className={`text-2xl font-bold font-mono ${s.color}`}>
+                {s.value}
               </p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {card.description}
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
             </CardContent>
           </Card>
         ))}
       </div>
+      {other > 0 && (
+        <p className="text-xs text-muted-foreground">
+          Other/Not specified: {other}
+        </p>
+      )}
+      <div>
+        <p className="text-sm font-semibold mb-2 text-foreground">
+          Class-wise Count
+        </p>
+        <BarChart data={classCounts} color="oklch(0.55 0.14 200)" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.students.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.students.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FinanceReport({ receipts }: { receipts: FeeReceipt[] }) {
+  const now = new Date();
+  const currentMonth = now.toLocaleString("en-IN", { month: "long" });
+  const thisMonthReceipts = receipts.filter((r) => {
+    const d = new Date(r.date);
+    return (
+      d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
+    );
+  });
+  const thisMonthTotal = thisMonthReceipts.reduce(
+    (s, r) => s + (r.paidAmount ?? r.totalAmount ?? 0),
+    0,
+  );
+  const sessionTotal = receipts.reduce(
+    (s, r) => s + (r.paidAmount ?? r.totalAmount ?? 0),
+    0,
+  );
+  const monthData = MONTHS.map((m) => ({
+    label: m.slice(0, 3),
+    value: Math.round(
+      receipts
+        .filter((r) => {
+          const d = new Date(r.date);
+          const mn = d.toLocaleString("en-US", { month: "long" });
+          return mn === m;
+        })
+        .reduce((s, r) => s + (r.paidAmount ?? r.totalAmount ?? 0), 0),
+    ),
+  }));
+
+  const doExport = () => {
+    const rows = [
+      ["Month", "Amount (₹)"],
+      ...monthData.map((d) => [d.label, String(d.value)]),
+    ];
+    downloadCSV("finance_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        {[
+          {
+            label: `This Month (${currentMonth})`,
+            value: formatCurrency(thisMonthTotal),
+          },
+          { label: "This Session Total", value: formatCurrency(sessionTotal) },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="pt-4 pb-3 text-center">
+              <p className="text-xl font-bold font-mono text-green-700">
+                {s.value}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div>
+        <p className="text-sm font-semibold mb-2 text-foreground">
+          Monthly Collection
+        </p>
+        <BarChart data={monthData} color="oklch(0.6 0.18 145)" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.finance.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.finance.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function AttendanceReport({
+  attendance,
+  students,
+}: { attendance: AttendanceRecord[]; students: Student[] }) {
+  const stdAtt = attendance.filter((a) => a.type === "student");
+  const present = stdAtt.filter((a) => a.status === "Present").length;
+  const total = stdAtt.length;
+  const presentPct = total > 0 ? Math.round((present / total) * 100) : 0;
+  const classCounts = CLASSES.map((c) => {
+    const classStudents = students
+      .filter((s) => s.class === c)
+      .map((s) => s.id);
+    const classAtt = stdAtt.filter((a) =>
+      classStudents.includes(a.studentId ?? ""),
+    );
+    const p = classAtt.filter((a) => a.status === "Present").length;
+    return {
+      label: c,
+      value: classAtt.length > 0 ? Math.round((p / classAtt.length) * 100) : 0,
+    };
+  }).filter((d) => d.value > 0);
+
+  const doExport = () => {
+    const rows = [
+      ["Class", "Attendance %"],
+      ...classCounts.map((d) => [d.label, String(d.value)]),
+    ];
+    downloadCSV("attendance_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
+        {[
+          { label: "Total Records", value: total },
+          { label: "Present", value: present },
+          { label: "Attendance %", value: `${presentPct}%` },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="pt-4 pb-3 text-center">
+              <p className="text-2xl font-bold font-mono text-purple-700">
+                {s.value}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+      <div>
+        <p className="text-sm font-semibold mb-2 text-foreground">
+          Class-wise Attendance %
+        </p>
+        <BarChart data={classCounts} color="oklch(0.6 0.18 290)" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.attendance.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.attendance.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ExaminationsReport() {
+  const doExport = () => {
+    downloadCSV("examinations_report.csv", [
+      ["Message"],
+      ["No exam results data available yet."],
+    ]);
+  };
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">
+        Examination results will appear here once exam marks are entered.
+      </p>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.examinations.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.examinations.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function HRReport({ staff }: { staff: Staff[] }) {
+  const byDesig = staff.reduce<Record<string, number>>((acc, s) => {
+    const d = s.designation || "Unknown";
+    acc[d] = (acc[d] ?? 0) + 1;
+    return acc;
+  }, {});
+  const desigData = Object.entries(byDesig).map(([label, value]) => ({
+    label,
+    value,
+  }));
+  const totalSalary = staff.reduce((s, st) => s + (st.salary ?? 0), 0);
+
+  const doExport = () => {
+    const rows = [
+      ["Designation", "Count"],
+      ...desigData.map((d) => [d.label, String(d.value)]),
+    ];
+    downloadCSV("hr_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold font-mono text-pink-700">
+              {staff.length}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">Total Staff</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-xl font-bold font-mono text-pink-700">
+              {formatCurrency(totalSalary)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Total Salary Budget
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      <div>
+        <p className="text-sm font-semibold mb-2 text-foreground">
+          Staff by Designation
+        </p>
+        <BarChart data={desigData} color="oklch(0.65 0.2 350)" />
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.hr.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.hr.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function TransportReport({
+  routes,
+  students,
+}: { routes: TransportRoute[]; students: Student[] }) {
+  const routeData = routes.map((r) => ({
+    label: r.routeName ?? r.busNo,
+    value: students.filter(
+      (s) => s.transportId === r.id || s.transportRoute === r.routeName,
+    ).length,
+  }));
+
+  const doExport = () => {
+    const rows = [
+      ["Route", "Students"],
+      ...routeData.map((d) => [d.label, String(d.value)]),
+    ];
+    downloadCSV("transport_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardContent className="pt-4 pb-3 text-center">
+          <p className="text-2xl font-bold font-mono text-orange-700">
+            {routes.length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">Total Routes</p>
+        </CardContent>
+      </Card>
+      {routeData.length > 0 ? (
+        <div>
+          <p className="text-sm font-semibold mb-2 text-foreground">
+            Students per Route
+          </p>
+          <BarChart data={routeData} color="oklch(0.65 0.18 55)" />
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No routes configured.</p>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.transport.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.transport.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function InventoryReport({ items }: { items: InventoryItem[] }) {
+  const lowStock = items.filter((i) => i.quantity <= 5);
+  const catData = Object.entries(
+    items.reduce<Record<string, number>>((acc, i) => {
+      acc[i.category] = (acc[i.category] ?? 0) + 1;
+      return acc;
+    }, {}),
+  ).map(([label, value]) => ({ label, value }));
+
+  const doExport = () => {
+    const rows = [
+      ["Name", "Category", "Quantity", "Sell Price"],
+      ...items.map((i) => [
+        i.name,
+        i.category,
+        String(i.quantity),
+        String(i.sellPrice),
+      ]),
+    ];
+    downloadCSV("inventory_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold font-mono text-teal-700">
+              {items.length}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">Total Items</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-4 pb-3 text-center">
+            <p className="text-2xl font-bold font-mono text-red-600">
+              {lowStock.length}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Low Stock (&le;5)
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+      {lowStock.length > 0 && (
+        <div>
+          <p className="text-sm font-semibold mb-2 text-foreground">
+            Low Stock Items
+          </p>
+          <div className="space-y-1">
+            {lowStock.map((i) => (
+              <div
+                key={i.id}
+                className="flex justify-between text-sm px-3 py-1.5 bg-red-50 rounded border border-red-100"
+              >
+                <span>{i.name}</span>
+                <Badge variant="destructive">{i.quantity} left</Badge>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {catData.length > 0 && (
+        <BarChart data={catData} color="oklch(0.6 0.15 175)" />
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.inventory.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.inventory.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function FeesDueReport({
+  students,
+  receipts,
+}: { students: Student[]; receipts: FeeReceipt[] }) {
+  const dueStudents = useMemo(() => {
+    return students
+      .map((s) => {
+        const sReceipts = receipts.filter(
+          (r) => r.studentId === s.id && !r.isDeleted,
+        );
+        const lastBalance =
+          sReceipts.length > 0
+            ? (sReceipts[sReceipts.length - 1].balance ?? 0)
+            : 0;
+        return { ...s, balance: lastBalance };
+      })
+      .filter((s) => s.balance > 0)
+      .sort((a, b) => b.balance - a.balance);
+  }, [students, receipts]);
+
+  const doExport = () => {
+    const rows = [
+      ["Name", "Adm No", "Class", "Section", "Balance (₹)"],
+      ...dueStudents.map((s) => [
+        s.fullName,
+        s.admNo,
+        s.class,
+        s.section,
+        String(s.balance),
+      ]),
+    ];
+    downloadCSV("fees_due_report.csv", rows);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Badge variant="destructive" className="text-base px-3 py-1">
+          {dueStudents.length} students with dues
+        </Badge>
+        <span className="text-sm text-muted-foreground">
+          Total:{" "}
+          {formatCurrency(dueStudents.reduce((s, st) => s + st.balance, 0))}
+        </span>
+      </div>
+      <div className="max-h-72 overflow-y-auto border rounded-lg">
+        <table className="w-full text-sm">
+          <thead className="bg-muted sticky top-0">
+            <tr>
+              {["Name", "Adm No", "Class", "Balance"].map((h) => (
+                <th
+                  key={h}
+                  className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {dueStudents.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="px-3 py-6 text-center text-muted-foreground"
+                >
+                  No outstanding dues
+                </td>
+              </tr>
+            ) : (
+              dueStudents.map((s, i) => (
+                <tr
+                  key={s.id}
+                  className="border-t"
+                  data-ocid={`reports.feesdue.item.${i + 1}`}
+                >
+                  <td className="px-3 py-2">{s.fullName}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{s.admNo}</td>
+                  <td className="px-3 py-2">
+                    {s.class}-{s.section}
+                  </td>
+                  <td className="px-3 py-2 font-mono text-red-600 font-semibold">
+                    {formatCurrency(s.balance)}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={doExport}
+          data-ocid="reports.feesdue.export_button"
+        >
+          <Download className="w-4 h-4 mr-1" /> Export CSV
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => window.print()}
+          data-ocid="reports.feesdue.print_button"
+        >
+          <Printer className="w-4 h-4 mr-1" /> Print
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
+export default function Reports() {
+  const { getData } = useApp();
+  const [activeReport, setActiveReport] = useState<ReportKey | null>(null);
+
+  const students = getData("students") as Student[];
+  const staff = getData("staff") as Staff[];
+  const attendance = getData("attendance") as AttendanceRecord[];
+  const receipts = getData("fee_receipts") as FeeReceipt[];
+  const routes = getData("transport_routes") as TransportRoute[];
+  const items = getData("inventory_items") as InventoryItem[];
+
+  const activeCard = REPORT_CARDS.find((c) => c.key === activeReport);
+
+  const renderDetail = () => {
+    switch (activeReport) {
+      case "students":
+        return <StudentsReport students={students} />;
+      case "finance":
+        return <FinanceReport receipts={receipts} />;
+      case "attendance":
+        return <AttendanceReport attendance={attendance} students={students} />;
+      case "examinations":
+        return <ExaminationsReport />;
+      case "hr":
+        return <HRReport staff={staff} />;
+      case "transport":
+        return <TransportReport routes={routes} students={students} />;
+      case "inventory":
+        return <InventoryReport items={items} />;
+      case "feesdue":
+        return <FeesDueReport students={students} receipts={receipts} />;
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="p-4 md:p-6 space-y-6 bg-background min-h-screen">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground font-display">
+          Reports
+        </h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          Click any report card to view details
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {REPORT_CARDS.map((card) => {
+          const Icon = card.icon;
+          const isActive = activeReport === card.key;
+          return (
+            <button
+              key={card.key}
+              type="button"
+              onClick={() => setActiveReport(isActive ? null : card.key)}
+              data-ocid={`reports.${card.key}.card`}
+              className={`text-left p-4 rounded-xl border-2 transition-all cursor-pointer ${isActive ? "border-primary bg-primary/5 shadow-md" : "border-border bg-card hover:border-primary/40 hover:shadow-sm"}`}
+            >
+              <div className={`inline-flex p-2 rounded-lg mb-3 ${card.color}`}>
+                <Icon className="w-5 h-5" />
+              </div>
+              <p className="font-semibold text-sm text-foreground leading-tight">
+                {card.title}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1 leading-snug">
+                {card.description}
+              </p>
+              <div className="flex items-center gap-1 mt-2 text-xs text-primary">
+                <span>{isActive ? "Close" : "View"}</span>
+                <ChevronRight className="w-3 h-3" />
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      {activeReport && (
+        <Card data-ocid="reports.detail.panel">
+          <CardHeader className="flex flex-row items-center justify-between pb-3">
+            <CardTitle className="text-base">{activeCard?.title}</CardTitle>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setActiveReport(null)}
+              data-ocid="reports.detail.close_button"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          </CardHeader>
+          <CardContent>{renderDetail()}</CardContent>
+        </Card>
+      )}
     </div>
   );
 }

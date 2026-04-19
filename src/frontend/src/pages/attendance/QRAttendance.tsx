@@ -11,11 +11,11 @@ import {
   ShieldOff,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Student } from "../../types";
-import { generateId, ls } from "../../utils/localStorage";
+import { generateId } from "../../utils/localStorage";
 
 interface QRAttendanceProps {
   date: string;
@@ -25,13 +25,12 @@ type ScanMode = "camera" | "device";
 
 const ALLOWED_ROLES = new Set(["superadmin", "admin", "teacher", "driver"]);
 
-/** Broadcast scan event for WelcomeDisplay */
+/** Broadcast scan event for WelcomeDisplay (same tab) */
 function broadcastScan(
   personId: string,
   personType: "student" | "staff",
   record: AttendanceRecord,
 ) {
-  ls.set("last_scan", { personId, personType, record, ts: Date.now() });
   window.dispatchEvent(
     new CustomEvent("attendance_scan", {
       detail: { personId, personType, record },
@@ -51,7 +50,8 @@ function parseAdmNo(raw: string): string {
 }
 
 export default function QRAttendance({ date }: QRAttendanceProps) {
-  const { addNotification, currentSession, currentUser } = useApp();
+  const { getData, saveData, addNotification, currentSession, currentUser } =
+    useApp();
   const [mode, setMode] = useState<ScanMode>("camera");
 
   // Camera state
@@ -80,33 +80,30 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
     name: string;
     time: string;
   } | null>(null);
-  // Rapid-input timeout: if no keypress within 100ms after chars were typed, treat as scan
   const deviceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [scanLog, setScanLog] = useState<
     Array<{ name: string; admNo: string; cls: string; time: string }>
   >([]);
 
-  const students = useRef<Student[]>([]);
-  students.current = ls
-    .get<Student[]>("students", [])
-    .filter(
-      (s) =>
-        s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-    );
-
-  const [_records, setRecords] = useState<AttendanceRecord[]>(() =>
-    ls.get<AttendanceRecord[]>("attendance", []),
+  const activeStudents = useMemo(
+    () =>
+      (getData("students") as Student[]).filter(
+        (s) =>
+          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
+      ),
+    [getData, currentSession],
   );
 
   // Role gate
   const canAccess = currentUser ? ALLOWED_ROLES.has(currentUser.role) : false;
 
   const markStudent = useCallback(
-    (student: Student) => {
-      const existing = ls
-        .get<AttendanceRecord[]>("attendance", [])
-        .find((r) => r.date === date && r.studentId === student.id);
+    async (student: Student) => {
+      // Check if already marked today
+      const existing = (getData("attendance") as AttendanceRecord[]).find(
+        (r) => r.date === date && r.studentId === student.id,
+      );
       if (existing) {
         toast.info(`${student.fullName} already marked present`);
         return false;
@@ -122,36 +119,41 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
         date,
         status: "Present",
         timeIn,
-        markedBy: currentUser?.name ?? "System",
+        markedBy: currentUser?.username ?? currentUser?.name ?? "System",
         type: "student",
         method: "qr",
+        class: student.class,
+        section: student.section,
+        sessionId: currentSession?.id,
       };
-      setRecords((prev) => {
-        const updated = [...prev, rec];
-        ls.set("attendance", updated);
-        return updated;
-      });
-      setScanLog((prev) =>
-        [
-          {
-            name: student.fullName,
-            admNo: student.admNo,
-            cls: `${student.class}-${student.section}`,
-            time: timeIn,
-          },
-          ...prev,
-        ].slice(0, 50),
-      );
-      toast.success(`✅ ${student.fullName} marked Present`);
-      addNotification(
-        `📷 QR Scan: ${student.fullName} checked in`,
-        "success",
-        "📷",
-      );
-      broadcastScan(student.id, "student", rec);
-      return true;
+
+      try {
+        await saveData("attendance", rec as unknown as Record<string, unknown>);
+        setScanLog((prev) =>
+          [
+            {
+              name: student.fullName,
+              admNo: student.admNo,
+              cls: `${student.class}-${student.section}`,
+              time: timeIn,
+            },
+            ...prev,
+          ].slice(0, 50),
+        );
+        toast.success(`✅ ${student.fullName} marked Present`);
+        addNotification(
+          `📷 QR Scan: ${student.fullName} checked in`,
+          "success",
+          "📷",
+        );
+        broadcastScan(student.id, "student", rec);
+        return true;
+      } catch {
+        toast.error(`Failed to save attendance for ${student.fullName}`);
+        return false;
+      }
     },
-    [date, currentUser, addNotification],
+    [date, currentUser, currentSession, getData, saveData, addNotification],
   );
 
   // ── Camera helpers ──────────────────────────────────────
@@ -159,12 +161,12 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
   function handleManualCamera() {
     const q = manualAdm.trim().toLowerCase();
     if (!q) return;
-    const student = students.current.find((s) => s.admNo.toLowerCase() === q);
+    const student = activeStudents.find((s) => s.admNo.toLowerCase() === q);
     if (!student) {
       toast.error("Student not found");
       return;
     }
-    markStudent(student);
+    void markStudent(student);
     setManualAdm("");
   }
 
@@ -195,11 +197,11 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
       lastDecodedRef.current = decoded;
       lastDecodeTimeRef.current = now;
       const admNo = parseAdmNo(decoded);
-      const student = students.current.find(
+      const student = activeStudents.find(
         (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
       );
       if (student) {
-        markStudent(student);
+        void markStudent(student);
       } else {
         toast.error(`QR decoded: "${admNo}" — student not found`);
       }
@@ -254,66 +256,54 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup only
   useEffect(() => () => stopCamera(), []);
 
-  // ── Device scanner helpers ──────────────────────────────
-
-  /** Auto-focus the device input when switching to device mode */
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — only re-run when mode changes
   useEffect(() => {
     if (mode === "device") {
-      // Stop camera if running
       stopCamera();
-      setTimeout(() => deviceInputRef.current?.focus(), 100);
+      const cb = (el: HTMLInputElement | null) => el?.focus();
+      setTimeout(() => cb(deviceInputRef.current), 100);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
 
   function processDeviceScan(raw: string) {
     const value = raw.trim();
     if (!value) return;
     const admNo = parseAdmNo(value);
-    const student = students.current.find(
+    const student = activeStudents.find(
       (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
     );
     if (!student) {
       toast.error(`Not found: "${admNo}"`);
     } else {
-      const ok = markStudent(student);
-      if (ok !== false) {
-        const now = new Date().toLocaleTimeString("en-IN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        setLastScanFeedback({ name: student.fullName, time: now });
-        setTimeout(() => setLastScanFeedback(null), 3000);
-      }
+      const now = new Date().toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      void markStudent(student).then((ok) => {
+        if (ok !== false) {
+          setLastScanFeedback({ name: student.fullName, time: now });
+          setTimeout(() => setLastScanFeedback(null), 3000);
+        }
+      });
     }
-    // Clear input and re-focus for next scan
     setDeviceInputValue("");
     setTimeout(() => deviceInputRef.current?.focus(), 50);
   }
 
   function handleDeviceKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    // Clear any pending timeout
     if (deviceTimerRef.current) clearTimeout(deviceTimerRef.current);
-
     if (e.key === "Enter") {
       e.preventDefault();
       processDeviceScan(deviceInputValue);
-      return;
     }
   }
 
   function handleDeviceChange(e: React.ChangeEvent<HTMLInputElement>) {
     const val = e.target.value;
     setDeviceInputValue(val);
-
-    // Set a short timeout — if no more keys come within 150ms, treat as complete scan
     if (deviceTimerRef.current) clearTimeout(deviceTimerRef.current);
     if (val.length > 0) {
       deviceTimerRef.current = setTimeout(() => {
-        // Only auto-submit if we have a reasonable length (scanner sends full code at once)
-        // USB scanners typically send 6-20 chars very fast; manual typists are slower
-        // We only auto-submit if the value hasn't changed in 150ms AND length >= 3
         if (val.trim().length >= 3) {
           processDeviceScan(val);
         }
@@ -333,7 +323,6 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
     a.click();
   }
 
-  // Role-gated view
   if (!canAccess) {
     return (
       <Card className="p-10 flex flex-col items-center gap-4 border-dashed">
@@ -365,9 +354,9 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          data-ocid="qr-mode-camera"
+          data-ocid="qr.camera-mode.tab"
         >
-          <Camera className="w-4 h-4" />📷 Camera
+          <Camera className="w-4 h-4" /> Camera
         </button>
         <button
           type="button"
@@ -377,10 +366,9 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
               ? "bg-card text-foreground shadow-sm"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          data-ocid="qr-mode-device"
+          data-ocid="qr.device-mode.tab"
         >
-          <Keyboard className="w-4 h-4" />
-          ⌨️ Scanner Device
+          <Keyboard className="w-4 h-4" /> Scanner Device
         </button>
       </div>
 
@@ -402,7 +390,6 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 </Badge>
               </div>
 
-              {/* Camera viewport */}
               <div className="relative bg-foreground/5 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-border">
                 <video
                   ref={videoRef}
@@ -418,11 +405,6 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                       {cameraError ||
                         "Tap Start Camera to scan student QR codes"}
                     </p>
-                    {cameraError && (
-                      <p className="text-xs text-muted-foreground">
-                        Use manual entry below as fallback
-                      </p>
-                    )}
                   </div>
                 )}
                 {scanning && (
@@ -446,8 +428,10 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 {!scanning ? (
                   <Button
                     className="flex-1"
-                    onClick={startCamera}
-                    data-ocid="qr-start-camera"
+                    onClick={() => {
+                      void startCamera();
+                    }}
+                    data-ocid="qr.start-camera.button"
                   >
                     <Camera className="w-4 h-4 mr-2" /> Start Camera
                   </Button>
@@ -456,7 +440,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                     variant="destructive"
                     className="flex-1"
                     onClick={stopCamera}
-                    data-ocid="qr-stop-camera"
+                    data-ocid="qr.stop-camera.button"
                   >
                     <X className="w-4 h-4 mr-2" /> Stop Camera
                   </Button>
@@ -474,11 +458,11 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                     value={manualAdm}
                     onChange={(e) => setManualAdm(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleManualCamera()}
-                    data-ocid="qr-manual-input"
+                    data-ocid="qr.manual-adm.input"
                   />
                   <Button
                     onClick={handleManualCamera}
-                    data-ocid="qr-manual-submit"
+                    data-ocid="qr.manual-submit.button"
                   >
                     Mark
                   </Button>
@@ -486,7 +470,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
               </div>
             </>
           ) : (
-            /* ── Device Scanner Mode ── */
+            /* Device Scanner Mode */
             <>
               <div className="flex items-center gap-2">
                 <Keyboard className="w-5 h-5 text-primary" />
@@ -498,15 +482,14 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 </Badge>
               </div>
 
-              {/* Feedback banner */}
               {lastScanFeedback ? (
-                <div className="flex items-center gap-3 p-4 bg-green-50 border border-green-200 rounded-xl animate-in fade-in duration-200">
-                  <CheckCircle2 className="w-8 h-8 text-green-600 flex-shrink-0" />
+                <div className="flex items-center gap-3 p-4 bg-accent/10 border border-accent/30 rounded-xl animate-in fade-in duration-200">
+                  <CheckCircle2 className="w-8 h-8 text-accent flex-shrink-0" />
                   <div>
-                    <p className="font-bold text-green-800 text-lg">
+                    <p className="font-bold text-foreground text-lg">
                       ✅ {lastScanFeedback.name}
                     </p>
-                    <p className="text-green-600 text-sm">
+                    <p className="text-muted-foreground text-sm">
                       Marked Present at {lastScanFeedback.time}
                     </p>
                   </div>
@@ -527,7 +510,6 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 </div>
               )}
 
-              {/* Always-visible, always-focused scan input */}
               <div className="space-y-1.5">
                 <label
                   htmlFor="device-scan-input"
@@ -548,7 +530,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                   autoCorrect="off"
                   autoCapitalize="off"
                   spellCheck={false}
-                  data-ocid="device-scan-input"
+                  data-ocid="qr.device-scan.input"
                 />
                 <p className="text-[10px] text-muted-foreground">
                   USB scanner: auto-submits on Enter. Manual typing: press Enter
@@ -556,12 +538,11 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 </p>
               </div>
 
-              {/* Keep input focused hint */}
               <button
                 type="button"
                 onClick={() => deviceInputRef.current?.focus()}
                 className="w-full py-1.5 text-xs text-muted-foreground border border-dashed border-border rounded-lg hover:bg-muted/30 transition-colors"
-                data-ocid="device-refocus-btn"
+                data-ocid="qr.refocus.button"
               >
                 🔁 Click here to re-focus scan input
               </button>
@@ -583,7 +564,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
               size="sm"
               variant="outline"
               onClick={exportCSV}
-              data-ocid="qr-export-csv"
+              data-ocid="qr.export-csv.button"
             >
               <Download className="w-3.5 h-3.5 mr-1" /> CSV
             </Button>
@@ -591,7 +572,10 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
 
           <div className="space-y-2 max-h-96 overflow-y-auto">
             {scanLog.length === 0 ? (
-              <div className="py-10 text-center text-muted-foreground">
+              <div
+                className="py-10 text-center text-muted-foreground"
+                data-ocid="qr.scan-log.empty-state"
+              >
                 <QrCode className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No scans yet today</p>
                 <p className="text-xs mt-1">
@@ -605,7 +589,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 <div
                   key={`${entry.admNo}-${i}`}
                   className="flex items-center gap-3 p-2.5 rounded-lg bg-muted/40"
-                  data-ocid={`scan-log-row-${entry.admNo}`}
+                  data-ocid={`qr.scan-log.item.${i + 1}`}
                 >
                   <div className="w-9 h-9 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0 text-accent font-bold">
                     {entry.name.charAt(0)}
@@ -629,15 +613,14 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
         </Card>
       </div>
 
-      {/* Info */}
       <Card className="p-4 bg-primary/5 border-primary/20">
         <p className="text-sm text-foreground">
           <span className="font-semibold">📷 Camera mode:</span> Start the
           camera and point it at a student's admit card QR code.{" "}
           <span className="font-semibold ml-2">⌨️ Scanner Device mode:</span>{" "}
           Connect a USB/Bluetooth barcode scanner — it will type the code into
-          the input and auto-submit on Enter. Both modes share the same scan
-          log. Accessible to: Super Admin, Admin, Teacher, Driver.
+          the input and auto-submit on Enter. All scans save directly to MySQL
+          via the server.
         </p>
       </Card>
     </div>

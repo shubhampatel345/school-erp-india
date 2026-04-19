@@ -16,16 +16,24 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import type { AppUser, ClassSection, Student } from "../types";
-import { dataService } from "../utils/dataService";
+import type { ClassSection, Student } from "../types";
 import { generateId, ls } from "../utils/localStorage";
 
 interface StudentFormProps {
   student?: Student;
   onSave: (student: Student) => void;
   onClose: () => void;
+  saveData: (
+    collection: string,
+    item: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
+  updateData: (
+    collection: string,
+    id: string,
+    changes: Record<string, unknown>,
+  ) => Promise<void>;
 }
 
 function makeDobFromParts(dd: string, mm: string, yyyy: string): string {
@@ -39,8 +47,6 @@ function parseDobToParts(dob: string): [string, string, string] {
   const parts = dob.split("/");
   return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""];
 }
-
-// ── Class helpers (defined outside component so they are stable references) ──
 
 const CLASS_ORDER = [
   "Nursery",
@@ -68,11 +74,14 @@ function classDisplayName(name: string): string {
 
 function sortClasses(classes: ClassSection[]): ClassSection[] {
   return [...classes].sort((a, b) => {
-    const ai = CLASS_ORDER.indexOf(a.className as (typeof CLASS_ORDER)[number]);
-    const bi = CLASS_ORDER.indexOf(b.className as (typeof CLASS_ORDER)[number]);
-    const aIdx = ai === -1 ? CLASS_ORDER.length : ai;
-    const bIdx = bi === -1 ? CLASS_ORDER.length : bi;
-    return aIdx - bIdx;
+    const an = a.className ?? (a as unknown as { name?: string }).name ?? "";
+    const bn = b.className ?? (b as unknown as { name?: string }).name ?? "";
+    const ai = CLASS_ORDER.indexOf(an as (typeof CLASS_ORDER)[number]);
+    const bi = CLASS_ORDER.indexOf(bn as (typeof CLASS_ORDER)[number]);
+    return (
+      (ai === -1 ? CLASS_ORDER.length : ai) -
+      (bi === -1 ? CLASS_ORDER.length : bi)
+    );
   });
 }
 
@@ -80,45 +89,30 @@ export default function StudentForm({
   student,
   onSave,
   onClose,
+  saveData,
+  updateData,
 }: StudentFormProps) {
-  const { currentSession, addNotification } = useApp();
+  const { currentSession, addNotification, getData } = useApp();
 
-  // ── Dynamic class/section data from server ────────────────────────────────
-  const [availableClasses, setAvailableClasses] = useState<ClassSection[]>([]);
-  const [classesLoading, setClassesLoading] = useState(true);
+  // ── Class data from context (server-loaded) ──────────────────────────────
+  const rawClasses = getData("classes") as ClassSection[];
+  const availableClasses = useMemo(
+    () =>
+      sortClasses(
+        (Array.isArray(rawClasses) ? rawClasses : []).filter(Boolean),
+      ),
+    [rawClasses],
+  );
+  const classesLoading = false; // Data is already loaded by AppContext on login
 
-  useEffect(() => {
-    // Fetch classes from server (or cache) on mount — wrapped in try/catch so
-    // a server error never crashes the form
-    try {
-      dataService
-        .getAsync<ClassSection>("classes")
-        .then((rows) => {
-          setAvailableClasses(sortClasses(Array.isArray(rows) ? rows : []));
-        })
-        .catch(() => {
-          try {
-            const local = ls.get<ClassSection[]>("class_sections", []);
-            setAvailableClasses(sortClasses(Array.isArray(local) ? local : []));
-          } catch {
-            setAvailableClasses([]);
-          }
-        })
-        .finally(() => setClassesLoading(false));
-    } catch {
-      setClassesLoading(false);
-    }
-  }, []);
-
-  // Use dataService cache first, fall back to localStorage for next adm no
+  // Next admission number
   const getNextAdmNo = () => {
     try {
-      const students =
-        dataService.get<Student>("students").length > 0
-          ? dataService.get<Student>("students")
-          : ls.get<Student[]>("students", []);
-      if (students.length === 0) return "1001";
-      const nums = students
+      const students = getData("students") as Student[];
+      const list =
+        students.length > 0 ? students : ls.get<Student[]>("students", []);
+      if (list.length === 0) return "1001";
+      const nums = list
         .map((s) => Number.parseInt((s.admNo ?? "").replace(/\D/g, ""), 10))
         .filter((n) => !Number.isNaN(n));
       if (nums.length === 0) return "1001";
@@ -147,6 +141,7 @@ export default function StudentForm({
     student?.guardianMobile ?? "",
   );
   const [address, setAddress] = useState(student?.address ?? "");
+  const [village, setVillage] = useState(student?.village ?? "");
   const [category, setCategory] = useState(student?.category ?? "General");
   const [aadhaarNo, setAadhaarNo] = useState(student?.aadhaarNo ?? "");
   const [srNo, setSrNo] = useState(student?.srNo ?? "");
@@ -156,7 +151,14 @@ export default function StudentForm({
     student?.previousSchool ?? "",
   );
   const [admissionDate, setAdmissionDate] = useState(
-    student?.admissionDate ?? "",
+    student?.admissionDate ??
+      new Date()
+        .toLocaleDateString("en-IN", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        })
+        .replace(/\//g, "/"),
   );
   const [photo, setPhoto] = useState(student?.photo ?? "");
   const [guardianOpen, setGuardianOpen] = useState(false);
@@ -165,10 +167,14 @@ export default function StudentForm({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Sections for the currently selected class — computed after cls is initialised
-  const sectionsForClass =
-    availableClasses.find((c) => c.className === cls || c.id === cls)
-      ?.sections ?? [];
+  // Sections for the currently selected class
+  const sectionsForClass = useMemo(() => {
+    const found = availableClasses.find(
+      (c) =>
+        (c.className ?? (c as unknown as { name?: string }).name ?? "") === cls,
+    );
+    return found?.sections ?? [];
+  }, [availableClasses, cls]);
 
   // When selected class changes, reset section if it's no longer valid
   useEffect(() => {
@@ -230,10 +236,9 @@ export default function StudentForm({
     const dobForPassword = `${dobParts[0]}${dobParts[1]}${dobParts[2]}`;
     const isNew = !student;
 
-    const saved: Student = {
+    const studentData: Student = {
       id: student?.id ?? generateId(),
       admNo: admNo.trim(),
-      // Send both fullName and name so MySQL (which has `name` column) gets the data
       fullName: fullName.trim(),
       fatherName: fatherName.trim(),
       fatherMobile: fatherMobile.trim() || undefined,
@@ -246,6 +251,7 @@ export default function StudentForm({
       mobile: mobile.trim(),
       guardianMobile: guardianMobile.trim(),
       address: address.trim(),
+      village: village.trim() || undefined,
       photo,
       category,
       aadhaarNo: aadhaarNo.trim() || undefined,
@@ -271,77 +277,31 @@ export default function StudentForm({
     setSaveError(null);
 
     try {
-      // Save to server — includes both fullName and name so MySQL gets the data
-      await dataService.save("students", {
-        ...saved,
-        name: saved.fullName,
-      } as unknown as Record<string, unknown>);
-
-      // Re-fetch from server so the grid shows the new record immediately
-      await dataService.getAsync<Student>("students");
-
-      // Auto-create AppUser credentials for new students
       if (isNew) {
-        try {
-          const appUsers = ls.get<AppUser[]>("app_users", []);
-          const existingUser = appUsers.find((u) => u.username === saved.admNo);
-          if (!existingUser) {
-            const newUser: AppUser = {
-              id: generateId(),
-              username: saved.admNo,
-              role: "student",
-              name: saved.fullName,
-              studentId: saved.id,
-            };
-            appUsers.push(newUser);
-            ls.set("app_users", appUsers);
-            const passwords = ls.get<Record<string, string>>(
-              "user_passwords",
-              {},
-            );
-            passwords[saved.admNo] = dobForPassword;
-            ls.set("user_passwords", passwords);
-          }
-          const parentMobile =
-            fatherMobile.trim() || guardianMobile.trim() || mobile.trim();
-          if (parentMobile) {
-            const allUsers = ls.get<AppUser[]>("app_users", []);
-            const existingParent = allUsers.find(
-              (u) => u.username === parentMobile && u.role === "parent",
-            );
-            if (!existingParent) {
-              const parentUser: AppUser = {
-                id: generateId(),
-                username: parentMobile,
-                role: "parent",
-                name: fatherName.trim() || fullName.trim(),
-                mobile: parentMobile,
-              };
-              allUsers.push(parentUser);
-              ls.set("app_users", allUsers);
-              const passwords2 = ls.get<Record<string, string>>(
-                "user_passwords",
-                {},
-              );
-              passwords2[parentMobile] = parentMobile;
-              ls.set("user_passwords", passwords2);
-            }
-          }
-        } catch {
-          // Credential creation failure is non-fatal — student is already saved
-        }
-
-        // Fire success notification AFTER server confirms save
+        // saveData creates a new record via context → server
+        await saveData("students", {
+          ...studentData,
+          name: studentData.fullName, // MySQL column alias
+        } as unknown as Record<string, unknown>);
         addNotification(
-          `New student added: ${saved.fullName}`,
+          `New student added: ${studentData.fullName}`,
           "success",
           "👤",
         );
       } else {
-        addNotification(`Student updated: ${saved.fullName}`, "success", "✅");
+        // updateData patches the existing record via context → server
+        await updateData("students", studentData.id, {
+          ...studentData,
+          name: studentData.fullName,
+        } as unknown as Record<string, unknown>);
+        addNotification(
+          `Student updated: ${studentData.fullName}`,
+          "success",
+          "✅",
+        );
       }
 
-      onSave(saved);
+      onSave(studentData);
     } catch (err: unknown) {
       const msg =
         err instanceof Error
@@ -355,7 +315,6 @@ export default function StudentForm({
     }
   }
 
-  // No classes configured yet — show a warning banner
   const noClassesWarning = !classesLoading && availableClasses.length === 0;
 
   return (
@@ -365,7 +324,12 @@ export default function StudentForm({
           <h2 className="text-lg font-semibold font-display text-foreground">
             {student ? "Edit Student" : "Add New Student"}
           </h2>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            data-ocid="student-form.close_button"
+          >
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -378,8 +342,7 @@ export default function StudentForm({
               <p className="text-xs text-amber-800">
                 <strong>No classes configured.</strong> Please add classes first
                 in <strong>Academics → Classes &amp; Sections</strong> before
-                adding students. You can still fill in the form but the
-                class/section dropdowns will be empty.
+                adding students.
               </p>
             </div>
           )}
@@ -430,7 +393,7 @@ export default function StudentForm({
                 value={admNo}
                 onChange={(e) => setAdmNo(e.target.value)}
                 placeholder="e.g. 1001"
-                data-ocid="student-admno"
+                data-ocid="student-form.admno"
               />
               {errors.admNo && (
                 <p className="text-destructive text-xs">{errors.admNo}</p>
@@ -444,7 +407,7 @@ export default function StudentForm({
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="Student full name"
-                data-ocid="student-name"
+                data-ocid="student-form.fullname"
               />
               {errors.fullName && (
                 <p className="text-destructive text-xs">{errors.fullName}</p>
@@ -452,8 +415,8 @@ export default function StudentForm({
             </div>
           </div>
 
+          {/* Class + Section from context */}
           <div className="grid grid-cols-2 gap-4">
-            {/* ── ISSUE 3 FIX: Class dropdown from real ERP classes ── */}
             <div className="space-y-1">
               <Label>
                 Class <span className="text-destructive">*</span>
@@ -462,32 +425,36 @@ export default function StudentForm({
                 value={cls}
                 onValueChange={(v) => {
                   setCls(v);
-                  setSection(""); // reset section when class changes
+                  setSection("");
                 }}
                 disabled={classesLoading}
               >
-                <SelectTrigger data-ocid="student-class">
+                <SelectTrigger data-ocid="student-form.class">
                   <SelectValue
                     placeholder={
-                      classesLoading
-                        ? "Loading classes…"
-                        : availableClasses.length === 0
-                          ? "No classes — add in Academics"
-                          : "Select class"
+                      availableClasses.length === 0
+                        ? "No classes — add in Academics"
+                        : "Select class"
                     }
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {availableClasses.length === 0 && !classesLoading && (
+                  {availableClasses.length === 0 && (
                     <SelectItem value="_none" disabled>
                       No classes configured
                     </SelectItem>
                   )}
-                  {availableClasses.map((c) => (
-                    <SelectItem key={c.id} value={c.className}>
-                      {classDisplayName(c.className)}
-                    </SelectItem>
-                  ))}
+                  {availableClasses.map((c) => {
+                    const cn =
+                      c.className ??
+                      (c as unknown as { name?: string }).name ??
+                      "";
+                    return (
+                      <SelectItem key={c.id} value={cn}>
+                        {classDisplayName(cn)}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
               {errors.class && (
@@ -495,7 +462,6 @@ export default function StudentForm({
               )}
             </div>
 
-            {/* ── ISSUE 3 FIX: Section dropdown filtered by selected class ── */}
             <div className="space-y-1">
               <Label>
                 Section <span className="text-destructive">*</span>
@@ -503,15 +469,15 @@ export default function StudentForm({
               <Select
                 value={section}
                 onValueChange={setSection}
-                disabled={classesLoading || !cls}
+                disabled={!cls}
               >
-                <SelectTrigger data-ocid="student-section">
+                <SelectTrigger data-ocid="student-form.section">
                   <SelectValue
                     placeholder={
                       !cls
                         ? "Select class first"
                         : sectionsForClass.length === 0
-                          ? "No sections for this class"
+                          ? "No sections"
                           : "Select section"
                     }
                   />
@@ -519,7 +485,7 @@ export default function StudentForm({
                 <SelectContent>
                   {sectionsForClass.length === 0 && cls && (
                     <SelectItem value="_none" disabled>
-                      No sections configured for {cls}
+                      No sections for {cls}
                     </SelectItem>
                   )}
                   {sectionsForClass.map((s) => (
@@ -535,7 +501,7 @@ export default function StudentForm({
             </div>
           </div>
 
-          {/* Date of Birth with auto-advance */}
+          {/* Date of Birth */}
           <div className="space-y-1">
             <Label>
               Date of Birth <span className="text-destructive">*</span>
@@ -547,7 +513,7 @@ export default function StudentForm({
                 value={dobParts[0]}
                 maxLength={2}
                 onChange={(e) => handleDayChange(e.target.value)}
-                data-ocid="student-dob-dd"
+                data-ocid="student-form.dob-dd"
               />
               <span className="text-muted-foreground">/</span>
               <Input
@@ -557,7 +523,7 @@ export default function StudentForm({
                 value={dobParts[1]}
                 maxLength={2}
                 onChange={(e) => handleMonthChange(e.target.value)}
-                data-ocid="student-dob-mm"
+                data-ocid="student-form.dob-mm"
               />
               <span className="text-muted-foreground">/</span>
               <Input
@@ -567,7 +533,7 @@ export default function StudentForm({
                 value={dobParts[2]}
                 maxLength={4}
                 onChange={(e) => handleYearChange(e.target.value)}
-                data-ocid="student-dob-yyyy"
+                data-ocid="student-form.dob-yyyy"
               />
             </div>
             {errors.dob && (
@@ -646,13 +612,23 @@ export default function StudentForm({
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label>Address</Label>
-            <Input
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Full address"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label>Address</Label>
+              <Input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                placeholder="Full address"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Village</Label>
+              <Input
+                value={village}
+                onChange={(e) => setVillage(e.target.value)}
+                placeholder="Village / locality"
+              />
+            </div>
           </div>
 
           {/* Guardian Info */}
@@ -677,7 +653,7 @@ export default function StudentForm({
                   <Input
                     value={fatherMobile}
                     onChange={(e) => setFatherMobile(e.target.value)}
-                    placeholder="Father's mobile (used for parent login)"
+                    placeholder="Father's mobile"
                     type="tel"
                   />
                 </div>
@@ -808,7 +784,12 @@ export default function StudentForm({
         </div>
 
         <div className="flex items-center justify-end gap-3 p-5 border-t border-border">
-          <Button variant="outline" onClick={onClose} disabled={saving}>
+          <Button
+            variant="outline"
+            onClick={onClose}
+            disabled={saving}
+            data-ocid="student-form.cancel_button"
+          >
             Cancel
           </Button>
           {saveError && (
@@ -819,7 +800,7 @@ export default function StudentForm({
           <Button
             onClick={() => void handleSave()}
             disabled={saving}
-            data-ocid="student-form-save"
+            data-ocid="student-form.submit_button"
           >
             {saving ? (
               <>

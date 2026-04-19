@@ -1,13 +1,22 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { FeeAccount, FeeHeading, FeeReceipt } from "../../types";
-import { formatCurrency, generateId, ls } from "../../utils/localStorage";
+import { formatCurrency, generateId } from "../../utils/localStorage";
 
 export default function FeeAccounts() {
-  const { currentUser, isReadOnly, currentSession } = useApp();
-  const [accounts, setAccounts] = useState<FeeAccount[]>([]);
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    currentUser,
+    isReadOnly,
+    currentSession,
+    addNotification,
+  } = useApp();
+
   const [newName, setNewName] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
@@ -15,50 +24,18 @@ export default function FeeAccounts() {
   const canEdit =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  useEffect(() => {
-    setAccounts(ls.get<FeeAccount[]>("fee_accounts", []));
-  }, []);
+  // All data from context
+  const accounts = getData("feeAccounts") as FeeAccount[];
 
-  function addAccount() {
-    if (!newName.trim()) return;
-    const acc: FeeAccount = { id: generateId(), name: newName.trim() };
-    const updated = [...accounts, acc];
-    ls.set("fee_accounts", updated);
-    setAccounts(updated);
-    setNewName("");
-  }
-
-  function saveEdit(id: string) {
-    if (!editName.trim()) return;
-    const updated = accounts.map((a) =>
-      a.id === id ? { ...a, name: editName.trim() } : a,
-    );
-    ls.set("fee_accounts", updated);
-    setAccounts(updated);
-    setEditId(null);
-    setEditName("");
-  }
-
-  function deleteAccount(id: string) {
-    if (!confirm("Delete this account?")) return;
-    const updated = accounts.filter((a) => a.id !== id);
-    ls.set("fee_accounts", updated);
-    setAccounts(updated);
-  }
-
-  const sessionReceipts = ls
-    .get<FeeReceipt[]>("fee_receipts", [])
-    .filter(
-      (r) =>
-        !r.isDeleted && (!currentSession || r.sessionId === currentSession.id),
-    );
+  const sessionReceipts = (getData("feeReceipts") as FeeReceipt[]).filter(
+    (r) =>
+      !r.isDeleted && (!currentSession || r.sessionId === currentSession.id),
+  );
 
   const totalReceipts = sessionReceipts.reduce((s, r) => s + r.totalAmount, 0);
 
-  // ── Heading-wise breakdown ─────────────────────────────────
-  const feeHeadings = ls.get<FeeHeading[]>("fee_headings", []);
-
-  // Sum amounts per headingId across all session receipts
+  // Heading-wise breakdown
+  const feeHeadings = getData("feeHeadings") as FeeHeading[];
   const headingTotals: Record<string, number> = {};
   let otherChargesTotal = 0;
   for (const receipt of sessionReceipts) {
@@ -66,7 +43,6 @@ export default function FeeAccounts() {
       headingTotals[item.headingId] =
         (headingTotals[item.headingId] ?? 0) + item.amount;
     }
-    // Sum otherCharges array amounts
     if (Array.isArray(receipt.otherCharges)) {
       for (const oc of receipt.otherCharges) {
         otherChargesTotal += oc.paidAmount ?? 0;
@@ -74,7 +50,6 @@ export default function FeeAccounts() {
     }
   }
 
-  // Build display rows: known headings first, then any orphaned headingIds
   const headingRows: { id: string; name: string; total: number }[] = [];
   const seenIds = new Set<string>();
   for (const h of feeHeadings) {
@@ -84,10 +59,8 @@ export default function FeeAccounts() {
       seenIds.add(h.id);
     }
   }
-  // Add any headingIds in receipts that don't have a matching FeeHeading (deleted headings)
   for (const [hId, total] of Object.entries(headingTotals)) {
     if (!seenIds.has(hId) && total > 0) {
-      // Try to get name from the receipt items
       let name = "(Deleted Heading)";
       outer: for (const receipt of sessionReceipts) {
         for (const item of receipt.items) {
@@ -101,9 +74,29 @@ export default function FeeAccounts() {
     }
   }
   headingRows.sort((a, b) => b.total - a.total);
-
   const grandTotal =
     headingRows.reduce((s, r) => s + r.total, 0) + otherChargesTotal;
+
+  async function addAccount() {
+    if (!newName.trim()) return;
+    const acc: FeeAccount = { id: generateId(), name: newName.trim() };
+    await saveData("feeAccounts", acc as unknown as Record<string, unknown>);
+    addNotification(`Account "${acc.name}" added`, "success");
+    setNewName("");
+  }
+
+  async function saveEdit(id: string) {
+    if (!editName.trim()) return;
+    await updateData("feeAccounts", id, { name: editName.trim() });
+    setEditId(null);
+    setEditName("");
+  }
+
+  async function deleteAccount(id: string) {
+    if (!confirm("Delete this account?")) return;
+    await deleteData("feeAccounts", id);
+    addNotification("Account deleted", "info");
+  }
 
   return (
     <div className="space-y-6">
@@ -133,14 +126,16 @@ export default function FeeAccounts() {
           <p className="text-sm font-medium mb-2">Add New Account</p>
           <div className="flex gap-2">
             <Input
-              placeholder="Account name (e.g. Main Account, Hostel Fund)"
+              placeholder="Account name (e.g. Main Account, Lab Fund)"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addAccount()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void addAccount();
+              }}
               data-ocid="add-account-input"
             />
             <Button
-              onClick={addAccount}
+              onClick={() => void addAccount()}
               disabled={!newName.trim()}
               data-ocid="add-account-btn"
             >
@@ -152,7 +147,10 @@ export default function FeeAccounts() {
 
       {/* Accounts list */}
       {accounts.length === 0 ? (
-        <div className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground">
+        <div
+          className="bg-card border border-border rounded-xl p-10 text-center text-muted-foreground"
+          data-ocid="fee-accounts.empty_state"
+        >
           <p className="text-lg mb-1">No accounts yet</p>
           <p className="text-sm">
             Add account names to track fee collections by account.
@@ -179,7 +177,7 @@ export default function FeeAccounts() {
                 <tr
                   key={acc.id}
                   className="border-t border-border hover:bg-muted/20"
-                  data-ocid="fee-account-row"
+                  data-ocid={`fee-account-row.item.${idx + 1}`}
                 >
                   <td className="px-4 py-3 text-muted-foreground">{idx + 1}</td>
                   <td className="px-4 py-3">
@@ -193,7 +191,7 @@ export default function FeeAccounts() {
                         />
                         <Button
                           size="sm"
-                          onClick={() => saveEdit(acc.id)}
+                          onClick={() => void saveEdit(acc.id)}
                           data-ocid="save-account-btn"
                         >
                           Save
@@ -225,7 +223,7 @@ export default function FeeAccounts() {
                                 setEditId(acc.id);
                                 setEditName(acc.name);
                               }}
-                              data-ocid="edit-account-btn"
+                              data-ocid={`edit-account-btn.${idx + 1}`}
                             >
                               Edit
                             </Button>
@@ -233,8 +231,8 @@ export default function FeeAccounts() {
                               size="sm"
                               variant="outline"
                               className="text-destructive border-destructive/20 hover:bg-destructive/10"
-                              onClick={() => deleteAccount(acc.id)}
-                              data-ocid="delete-account-btn"
+                              onClick={() => void deleteAccount(acc.id)}
+                              data-ocid={`delete-account-btn.${idx + 1}`}
                             >
                               Delete
                             </Button>
@@ -250,7 +248,7 @@ export default function FeeAccounts() {
         </div>
       )}
 
-      {/* ── Heading-wise Collections ─────────────────────────── */}
+      {/* Heading-wise Collections */}
       <div>
         <div className="mb-3">
           <h3 className="font-semibold text-foreground">
@@ -317,7 +315,6 @@ export default function FeeAccounts() {
                     </td>
                   </tr>
                 )}
-                {/* Grand total row */}
                 <tr className="border-t-2 border-border bg-muted/30">
                   <td className="px-4 py-3" />
                   <td className="px-4 py-3 font-bold text-foreground">

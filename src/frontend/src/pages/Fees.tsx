@@ -18,7 +18,7 @@ type FeeTab =
 
 const TABS: { id: FeeTab; label: string }[] = [
   { id: "collect", label: "Collect Fees" },
-  { id: "heading", label: "Fee Heading" },
+  { id: "heading", label: "Fee Headings" },
   { id: "plan", label: "Fees Plan" },
   { id: "due", label: "Due Fees" },
   { id: "register", label: "Fee Register" },

@@ -8,6 +8,7 @@ import {
   Palette,
   School,
   Settings as SettingsIcon,
+  ShieldCheck,
   Sparkles,
   Users,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { useApp } from "../context/AppContext";
 import DataManagement from "./settings/DataManagement";
 import NotificationScheduler from "./settings/NotificationScheduler";
 import OnlinePaymentSettings from "./settings/OnlinePaymentSettings";
+import PermissionManagement from "./settings/PermissionManagement";
 import SchoolProfile from "./settings/SchoolProfile";
 import SessionManagement from "./settings/SessionManagement";
 import SystemUpdate from "./settings/SystemUpdate";
@@ -28,6 +30,12 @@ const TABS = [
   { id: "profile", label: "School Profile", icon: School },
   { id: "sessions", label: "Session Management", icon: Clock },
   { id: "users", label: "User Management", icon: Users, superAdminOnly: true },
+  {
+    id: "permissions",
+    label: "Permissions",
+    icon: ShieldCheck,
+    superAdminOnly: true,
+  },
   {
     id: "whatsapp",
     label: "WhatsApp API",
@@ -62,7 +70,6 @@ interface SettingsProps {
   initialTab?: string;
 }
 
-// Map sidebar route segments to internal tab IDs
 const SETTINGS_TAB_MAP: Record<string, string> = {
   profile: "profile",
   sessions: "sessions",
@@ -70,6 +77,9 @@ const SETTINGS_TAB_MAP: Record<string, string> = {
   "online-payment": "payment",
   notifications: "notifications",
   users: "users",
+  permissions: "permissions",
+  data: "data",
+  update: "update",
 };
 
 export default function Settings({
@@ -113,7 +123,7 @@ export default function Settings({
             <button
               key={tab.id}
               type="button"
-              data-ocid={`settings-tab-${tab.id}`}
+              data-ocid={`settings.tab.${tab.id}`}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 activeTab === tab.id
@@ -133,6 +143,9 @@ export default function Settings({
         {activeTab === "profile" && <SchoolProfile />}
         {activeTab === "sessions" && <SessionManagement />}
         {activeTab === "users" && isSuperAdmin && <UserManagement />}
+        {activeTab === "permissions" && isSuperAdmin && (
+          <PermissionManagement />
+        )}
         {activeTab === "whatsapp" && isSuperAdmin && <WhatsAppSettings />}
         {activeTab === "whatsapp-bot" && isSuperAdmin && <WhatsAppAutoReply />}
         {activeTab === "payment" && <OnlinePaymentSettings />}

@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Columns,
   Download,
   Edit2,
   Eye,
@@ -18,43 +19,18 @@ import {
   Trash2,
   Upload,
   UserCircle,
+  X,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useApp } from "../../context/AppContext";
 import type { Staff } from "../../types";
-import { dataService } from "../../utils/dataService";
-import { generateId, ls } from "../../utils/localStorage";
+import { generateId } from "../../utils/localStorage";
 import StaffForm from "./StaffForm";
+
+// ── Constants ─────────────────────────────────────────────
 
 interface Props {
   onNavigate?: (page: string) => void;
-}
-
-function StaffAvatar({ photo, name }: { photo?: string; name: string }) {
-  if (photo) {
-    return (
-      <img
-        src={photo}
-        alt={name}
-        className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
-      />
-    );
-  }
-  return (
-    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs shrink-0">
-      {name.charAt(0).toUpperCase()}
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status?: string }) {
-  return (
-    <Badge
-      variant={status === "inactive" ? "secondary" : "outline"}
-      className={`text-xs ${status === "inactive" ? "text-muted-foreground" : "text-accent border-accent/40"}`}
-    >
-      {status === "inactive" ? "Inactive" : "Active"}
-    </Badge>
-  );
 }
 
 const DESIGNATIONS = [
@@ -72,83 +48,196 @@ const DESIGNATIONS = [
   "Other",
 ];
 
-/** Read staff from DataService cache (server-synced) */
-function loadStaff(): Staff[] {
-  const ds = dataService.get<Staff>("staff");
-  return ds.length > 0 ? ds : ls.get<Staff[]>("staff", []);
+const DEPARTMENTS = [
+  "All",
+  "Teaching",
+  "Administration",
+  "Accounts",
+  "Library",
+  "Transport",
+  "Security",
+  "Housekeeping",
+];
+
+const ALL_COLUMNS = [
+  { id: "empId", label: "Emp ID" },
+  { id: "photo", label: "Photo" },
+  { id: "name", label: "Name" },
+  { id: "designation", label: "Designation" },
+  { id: "department", label: "Department" },
+  { id: "mobile", label: "Mobile" },
+  { id: "email", label: "Email" },
+  { id: "salary", label: "Salary" },
+  { id: "joinDate", label: "Join Date" },
+  { id: "status", label: "Status" },
+] as const;
+
+type ColId = (typeof ALL_COLUMNS)[number]["id"];
+
+const DEFAULT_VISIBLE: ColId[] = [
+  "photo",
+  "empId",
+  "name",
+  "designation",
+  "department",
+  "mobile",
+  "salary",
+  "status",
+];
+
+// ── Helpers ───────────────────────────────────────────────
+
+function autoEmpId(existing: Staff[]): string {
+  const nums = existing
+    .map((s) => {
+      const m = s.empId?.match(/^EMP(\d+)$/);
+      return m ? Number.parseInt(m[1], 10) : 0;
+    })
+    .filter(Boolean);
+  const next = nums.length > 0 ? Math.max(...nums) + 1 : 1;
+  return `EMP${String(next).padStart(3, "0")}`;
 }
 
+function StaffAvatar({ photo, name }: { photo?: string; name: string }) {
+  if (photo) {
+    return (
+      <img
+        src={photo}
+        alt={name}
+        className="w-8 h-8 rounded-full object-cover border border-border shrink-0"
+      />
+    );
+  }
+  return (
+    <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs shrink-0">
+      {(name ?? "?").charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status?: string }) {
+  return (
+    <Badge
+      variant={status === "inactive" ? "secondary" : "outline"}
+      className={`text-xs ${status === "inactive" ? "text-muted-foreground" : "text-accent border-accent/40"}`}
+    >
+      {status === "inactive" ? "Inactive" : "Active"}
+    </Badge>
+  );
+}
+
+// ── Component ─────────────────────────────────────────────
+
 export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
-  const [staff, setStaff] = useState<Staff[]>([]);
-  const [loadingStaff, setLoadingStaff] = useState(true);
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    addNotification,
+    canWrite,
+  } = useApp();
+
   const [search, setSearch] = useState("");
   const [filterDesignation, setFilterDesignation] = useState("All");
+  const [filterDepartment, setFilterDepartment] = useState("All");
+  const [filterStatus, setFilterStatus] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editStaff, setEditStaff] = useState<Staff | undefined>(undefined);
   const [viewStaff, setViewStaff] = useState<Staff | null>(null);
+  const [visibleCols, setVisibleCols] = useState<Set<ColId>>(
+    new Set(DEFAULT_VISIBLE),
+  );
+  const [showColMenu, setShowColMenu] = useState(false);
+  const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Server-first load: always fetch fresh from MySQL on mount
+  // Re-read from context on every render (reactive to data changes)
+  const staff = (getData("staff") as Staff[]).map((s) => ({
+    ...s,
+    name: s.name ?? s.fullName ?? "",
+  }));
+
   useEffect(() => {
-    setLoadingStaff(true);
-    dataService
-      .getAsync<Staff>("staff")
-      .then((rows) => {
-        setStaff(rows.length > 0 ? rows : loadStaff());
-      })
-      .catch(() => setStaff(loadStaff()))
-      .finally(() => setLoadingStaff(false));
+    // Close column menu when clicking outside
+    function handleClick(e: MouseEvent) {
+      const target = e.target as HTMLElement;
+      if (!target.closest("[data-colmenu]")) setShowColMenu(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
   const filtered = staff.filter((s) => {
     const q = search.toLowerCase();
     const matchSearch =
-      s.name.toLowerCase().includes(q) ||
-      s.empId.toLowerCase().includes(q) ||
-      s.designation.toLowerCase().includes(q) ||
-      (s.department ?? "").toLowerCase().includes(q) ||
-      s.mobile.includes(search);
-    const matchDesignation =
+      !q ||
+      (s.name ?? "").toLowerCase().includes(q) ||
+      (s.empId ?? "").toLowerCase().includes(q) ||
+      (s.mobile ?? "").includes(search) ||
+      (s.designation ?? "").toLowerCase().includes(q) ||
+      (s.department ?? "").toLowerCase().includes(q);
+    const matchDesig =
       filterDesignation === "All" || s.designation === filterDesignation;
-    return matchSearch && matchDesignation;
+    const matchDept =
+      filterDepartment === "All" || (s.department ?? "") === filterDepartment;
+    const matchStatus =
+      filterStatus === "All" ||
+      (filterStatus === "active"
+        ? (s.status ?? "active") === "active"
+        : s.status === "inactive");
+    return matchSearch && matchDesig && matchDept && matchStatus;
   });
 
-  function handleSave(s: Staff) {
-    setStaff((prev) => {
-      const idx = prev.findIndex((x) => x.id === s.id);
-      const updated =
-        idx >= 0 ? prev.map((x) => (x.id === s.id ? s : x)) : [...prev, s];
-      ls.set("staff", updated);
-      return updated;
-    });
-    // Sync to server via DataService
-    void dataService.save("staff", s as unknown as Record<string, unknown>);
-    setShowForm(false);
-    setEditStaff(undefined);
-  }
+  // ── CRUD ──────────────────────────────────────────────────
 
-  function handleDelete(id: string) {
-    if (!confirm("Delete this staff member?")) return;
-    setStaff((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      ls.set("staff", updated);
-      return updated;
-    });
-    // Sync delete to server
-    void dataService.delete("staff", id);
-    setViewStaff(null);
-  }
+  const handleSave = useCallback(
+    async (s: Staff) => {
+      setSaving(true);
+      try {
+        const existing = staff.find((x) => x.id === s.id);
+        if (existing) {
+          await updateData(
+            "staff",
+            s.id,
+            s as unknown as Record<string, unknown>,
+          );
+          addNotification(`Staff updated: ${s.name}`, "success", "👤");
+        } else {
+          // Auto-generate empId if missing
+          const empId = s.empId?.trim() || autoEmpId(staff);
+          await saveData("staff", {
+            ...s,
+            empId,
+          } as unknown as Record<string, unknown>);
+          addNotification(`Staff added: ${s.name}`, "success", "👤");
+        }
+        setShowForm(false);
+        setEditStaff(undefined);
+      } catch {
+        addNotification("Failed to save staff member.", "error");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [staff, saveData, updateData, addNotification],
+  );
 
-  function handleEdit(s: Staff) {
-    setEditStaff({ ...s }); // clone to avoid reference mutation
-    setViewStaff(null);
-    setShowForm(true);
-  }
+  const handleDelete = useCallback(
+    async (id: string) => {
+      if (!confirm("Delete this staff member? This cannot be undone.")) return;
+      try {
+        await deleteData("staff", id);
+        addNotification("Staff member deleted.", "info");
+        setViewStaff(null);
+      } catch {
+        addNotification("Failed to delete staff member.", "error");
+      }
+    },
+    [deleteData, addNotification],
+  );
 
-  function handleAddNew() {
-    setEditStaff(undefined);
-    setShowForm(true);
-  }
+  // ── Export CSV ─────────────────────────────────────────────
 
   function handleExport() {
     const headers = [
@@ -161,27 +250,23 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       "Email",
       "Address",
       "Qualification",
-      "Joining Date",
+      "JoiningDate",
       "Salary",
       "Status",
-      "Subjects",
     ];
     const rows = staff.map((s) => [
-      s.empId,
-      s.name,
-      s.designation,
+      s.empId ?? "",
+      s.name ?? "",
+      s.designation ?? "",
       s.department ?? "",
-      s.mobile,
-      s.dob,
+      s.mobile ?? "",
+      s.dob ?? "",
       s.email ?? "",
       (s.address ?? "").replace(/,/g, " "),
       s.qualification ?? "",
       s.joiningDate ?? "",
-      s.salary ?? "",
+      String(s.salary ?? ""),
       s.status ?? "active",
-      (s.subjects ?? [])
-        .map((x) => `${x.subject}:${x.classFrom}-${x.classTo}`)
-        .join("; "),
     ]);
     const csv = [headers, ...rows]
       .map((r) => r.map((cell) => `"${cell}"`).join(","))
@@ -192,20 +277,21 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     a.click();
   }
 
+  // ── Import CSV ─────────────────────────────────────────────
+
   function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
         const text = ev.target?.result as string;
         const lines = text
           .split("\n")
-          .slice(1) // skip header row
+          .slice(1)
           .filter((l) => l.trim());
 
         const imported: Staff[] = lines.map((line) => {
-          // Handle quoted CSV properly
           const cols = line
             .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
             .map((c) => c.replace(/^"|"$/g, "").trim());
@@ -223,47 +309,18 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             joiningDate,
             salaryRaw,
             status,
-            subjectsRaw,
           ] = cols;
 
-          const dobStr = dob ?? "";
-          // Parse dob for password generation (ddmmyyyy)
-          let password = mobile?.trim() ?? "";
-          if (dobStr) {
-            if (dobStr.includes("/")) {
-              const [d, m, y] = dobStr.split("/");
-              if (d && m && y)
-                password = `${d.padStart(2, "0")}${m.padStart(2, "0")}${y}`;
-            } else if (dobStr.includes("-") && dobStr.length === 10) {
-              const [y, m, d] = dobStr.split("-");
-              if (d && m && y)
-                password = `${d.padStart(2, "0")}${m.padStart(2, "0")}${y}`;
-            }
-          }
-
-          const subjects = (subjectsRaw ?? "")
-            .split(";")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((s) => {
-              const [subj, range] = s.split(":");
-              const [from, to] = (range ?? "").split("-");
-              return {
-                subject: subj?.trim() ?? "",
-                classFrom: from?.trim() ?? "1",
-                classTo: to?.trim() ?? "10",
-              };
-            })
-            .filter((s) => s.subject);
-
+          const password = mobile?.trim() ?? "";
           return {
             id: generateId(),
-            empId: empIdRaw?.trim() || `EMP${generateId()}`,
+            empId: empIdRaw?.trim() || autoEmpId(staff),
             name: name?.trim() ?? "",
+            fullName: name?.trim() ?? "",
             designation: designation?.trim() || "Other",
             department: department?.trim() || undefined,
             mobile: mobile?.trim() ?? "",
-            dob: dobStr,
+            dob: dob ?? "",
             email: email?.trim() || undefined,
             address: address?.trim() || undefined,
             qualification: qualification?.trim() || undefined,
@@ -272,7 +329,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             status: (status?.trim() === "inactive" ? "inactive" : "active") as
               | "active"
               | "inactive",
-            subjects,
+            subjects: [],
             credentials: { username: mobile?.trim() ?? "", password },
           };
         });
@@ -282,36 +339,32 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
           return;
         }
 
-        setStaff((prev) => {
-          const updated = [...prev, ...imported];
-          ls.set("staff", updated);
-          // Sync all imported staff to server
-          for (const s of imported) {
-            void dataService.save(
-              "staff",
-              s as unknown as Record<string, unknown>,
-            );
+        let count = 0;
+        for (const s of imported) {
+          try {
+            await saveData("staff", s as unknown as Record<string, unknown>);
+            count++;
+          } catch {
+            // continue
           }
-          return updated;
-        });
-
-        alert(`Successfully imported ${imported.length} staff member(s).`);
-      } catch (err) {
+        }
+        addNotification(`Imported ${count} staff member(s).`, "success");
+      } catch {
         alert("Failed to parse CSV. Please check the file format.");
-        console.error(err);
       }
     };
     reader.readAsText(file);
-    // Reset so same file can be re-imported if needed
     e.target.value = "";
   }
 
-  // ── FORM VIEW ──────────────────────────────────────────
+  // ── FORM VIEW ──────────────────────────────────────────────
   if (showForm) {
     return (
       <StaffForm
         initial={editStaff}
-        onSave={handleSave}
+        onSave={(s) => {
+          void handleSave(s);
+        }}
         onCancel={() => {
           setShowForm(false);
           setEditStaff(undefined);
@@ -320,9 +373,8 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     );
   }
 
-  // ── DETAIL VIEW ────────────────────────────────────────
+  // ── DETAIL VIEW ────────────────────────────────────────────
   if (viewStaff) {
-    // Always re-read from current state in case of stale ref
     const current = staff.find((s) => s.id === viewStaff.id) ?? viewStaff;
     return (
       <div className="p-4 lg:p-6 max-w-2xl mx-auto space-y-5">
@@ -348,7 +400,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               />
             ) : (
               <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center text-primary text-3xl font-bold">
-                {current.name.charAt(0)}
+                {(current.name ?? "?").charAt(0)}
               </div>
             )}
             <div>
@@ -394,75 +446,62 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             )}
           </div>
 
-          {(current.subjects ?? []).length > 0 && (
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                Subject Assignments
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {(current.subjects ?? []).map((s) => (
-                  <Badge
-                    key={`${s.subject}-${s.classFrom}-${s.classTo}`}
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    {s.subject}: Class {s.classFrom}–{s.classTo}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          )}
-
           <div className="border border-border rounded-lg p-3 bg-muted/30">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
               Login Credentials
             </p>
             <p className="text-sm">
-              <span className="text-muted-foreground">Username:</span>{" "}
+              <span className="text-muted-foreground">Username: </span>
               <span className="font-mono font-medium">
                 {current.credentials?.username ?? current.mobile}
               </span>
             </p>
             <p className="text-sm">
-              <span className="text-muted-foreground">Password:</span>{" "}
+              <span className="text-muted-foreground">Password: </span>
               <span className="font-mono font-medium">
                 {current.credentials?.password ?? "—"}
               </span>
             </p>
           </div>
 
-          <div className="flex gap-2">
-            <Button size="sm" onClick={() => handleEdit(current)}>
-              Edit
-            </Button>
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={() => handleDelete(current.id)}
-            >
-              Delete
-            </Button>
-          </div>
+          {canWrite && (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  setEditStaff({ ...current });
+                  setViewStaff(null);
+                  setShowForm(true);
+                }}
+                data-ocid="staff.edit_button"
+              >
+                Edit
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => handleDelete(current.id)}
+                data-ocid="staff.delete_button"
+              >
+                Delete
+              </Button>
+            </div>
+          )}
         </Card>
       </div>
     );
   }
 
-  // ── LIST VIEW ──────────────────────────────────────────
+  // ── LIST VIEW ──────────────────────────────────────────────
   return (
     <div className="p-4 lg:p-6 space-y-4">
-      {loadingStaff && (
-        <div className="text-center py-6 text-muted-foreground text-sm">
-          Loading staff from server…
-        </div>
-      )}
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex flex-col sm:flex-row gap-2 flex-1">
-          <div className="relative flex-1 max-w-sm">
+        <div className="flex flex-col sm:flex-row gap-2 flex-1 flex-wrap">
+          <div className="relative flex-1 min-w-[200px] max-w-sm">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
             <Input
-              data-ocid="staff-search"
+              data-ocid="staff.search_input"
               placeholder="Search by name, mobile, designation…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -474,8 +513,8 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             onValueChange={setFilterDesignation}
           >
             <SelectTrigger
-              className="w-44"
-              data-ocid="staff-filter-designation"
+              className="w-40"
+              data-ocid="staff.filter-designation"
             >
               <SelectValue placeholder="All Designations" />
             </SelectTrigger>
@@ -487,8 +526,81 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               ))}
             </SelectContent>
           </Select>
+          <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+            <SelectTrigger className="w-40" data-ocid="staff.filter-dept">
+              <SelectValue placeholder="All Departments" />
+            </SelectTrigger>
+            <SelectContent>
+              {DEPARTMENTS.map((d) => (
+                <SelectItem key={d} value={d}>
+                  {d === "All" ? "All Departments" : d}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-32" data-ocid="staff.filter-status">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Status</SelectItem>
+              <SelectItem value="active">Active</SelectItem>
+              <SelectItem value="inactive">Inactive</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
+
         <div className="flex gap-2 flex-wrap">
+          {/* Column picker */}
+          <div className="relative" data-colmenu>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowColMenu((v) => !v)}
+              data-ocid="staff.columns_button"
+            >
+              <Columns className="w-4 h-4 mr-1.5" /> Columns
+            </Button>
+            {showColMenu && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-card border border-border rounded-lg shadow-lg p-3 min-w-[180px] space-y-1">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    Show/Hide Columns
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowColMenu(false)}
+                    aria-label="Close"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                {ALL_COLUMNS.map((col) => (
+                  <label
+                    key={col.id}
+                    className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/40 rounded px-1 py-0.5"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={visibleCols.has(col.id)}
+                      onChange={(e) => {
+                        setVisibleCols((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(col.id);
+                          else next.delete(col.id);
+                          return next;
+                        });
+                      }}
+                      className="accent-primary"
+                    />
+                    <span className="text-foreground">{col.label}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           <input
             ref={fileRef}
             type="file"
@@ -500,51 +612,81 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             variant="outline"
             size="sm"
             onClick={() => fileRef.current?.click()}
-            data-ocid="staff-import"
+            data-ocid="staff.import_button"
           >
-            <Upload className="w-4 h-4 mr-1.5" /> Import CSV
+            <Upload className="w-4 h-4 mr-1.5" /> Import
           </Button>
           <Button
             variant="outline"
             size="sm"
             onClick={handleExport}
-            data-ocid="staff-export"
+            data-ocid="staff.export_button"
           >
-            <Download className="w-4 h-4 mr-1.5" /> Export CSV
+            <Download className="w-4 h-4 mr-1.5" /> Export
           </Button>
-          <Button size="sm" data-ocid="staff-add" onClick={handleAddNew}>
-            <Plus className="w-4 h-4 mr-1.5" /> Add Staff
-          </Button>
+          {canWrite && (
+            <Button
+              size="sm"
+              data-ocid="staff.add_button"
+              onClick={() => {
+                setEditStaff(undefined);
+                setShowForm(true);
+              }}
+              disabled={saving}
+            >
+              <Plus className="w-4 h-4 mr-1.5" /> Add Staff
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Stats row */}
       {staff.length > 0 && (
         <div className="flex gap-4 text-sm text-muted-foreground">
-          <span>{staff.length} total</span>
-          <span className="text-accent">
+          <span className="font-medium text-foreground">
+            {staff.length} total
+          </span>
+          <span className="text-primary">
             {staff.filter((s) => s.designation === "Teacher").length} teachers
           </span>
           <span className="text-destructive">
             {staff.filter((s) => s.status === "inactive").length} inactive
+          </span>
+          <span className="text-muted-foreground">
+            {filtered.length !== staff.length ? `${filtered.length} shown` : ""}
           </span>
         </div>
       )}
 
       {/* Table */}
       {filtered.length === 0 ? (
-        <Card className="p-12 text-center" data-ocid="staff-empty">
+        <Card className="p-12 text-center" data-ocid="staff.empty_state">
           <UserCircle className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
           <p className="text-muted-foreground font-medium">
-            {search || filterDesignation !== "All"
-              ? "No staff match your search or filter."
+            {search ||
+            filterDesignation !== "All" ||
+            filterDepartment !== "All" ||
+            filterStatus !== "All"
+              ? "No staff match your search or filters."
               : "No staff yet. Add your first staff member."}
           </p>
-          {!search && filterDesignation === "All" && (
-            <Button className="mt-4" size="sm" onClick={handleAddNew}>
-              <Plus className="w-4 h-4 mr-1.5" /> Add Staff
-            </Button>
-          )}
+          {!search &&
+            filterDesignation === "All" &&
+            filterDepartment === "All" &&
+            filterStatus === "All" &&
+            canWrite && (
+              <Button
+                className="mt-4"
+                size="sm"
+                onClick={() => {
+                  setEditStaff(undefined);
+                  setShowForm(true);
+                }}
+                data-ocid="staff.empty_add_button"
+              >
+                <Plus className="w-4 h-4 mr-1.5" /> Add Staff
+              </Button>
+            )}
         </Card>
       ) : (
         <Card className="overflow-hidden">
@@ -552,31 +694,60 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground w-8">
+                  <th className="text-left px-3 py-3 font-semibold text-muted-foreground w-10">
                     #
                   </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                    Name
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                    Designation
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">
-                    Department
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                    Mobile
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                    Net Salary
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                    Subjects
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground">
+                  {visibleCols.has("photo") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground w-10">
+                      Photo
+                    </th>
+                  )}
+                  {visibleCols.has("empId") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                      Emp ID
+                    </th>
+                  )}
+                  {visibleCols.has("name") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                      Name
+                    </th>
+                  )}
+                  {visibleCols.has("designation") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                      Designation
+                    </th>
+                  )}
+                  {visibleCols.has("department") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden md:table-cell">
+                      Department
+                    </th>
+                  )}
+                  {visibleCols.has("mobile") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                      Mobile
+                    </th>
+                  )}
+                  {visibleCols.has("email") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                      Email
+                    </th>
+                  )}
+                  {visibleCols.has("salary") && (
+                    <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                      Salary
+                    </th>
+                  )}
+                  {visibleCols.has("joinDate") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                      Join Date
+                    </th>
+                  )}
+                  {visibleCols.has("status") && (
+                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                      Status
+                    </th>
+                  )}
+                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
                     Actions
                   </th>
                 </tr>
@@ -586,72 +757,77 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                   <tr
                     key={s.id}
                     className="hover:bg-muted/30 transition-colors cursor-pointer"
-                    data-ocid={`staff-row-${s.id}`}
+                    data-ocid={`staff.item.${idx + 1}`}
                     onDoubleClick={() => setViewStaff(s)}
-                    title="Double-click for details"
+                    title="Double-click for full details"
                   >
-                    <td className="px-4 py-3 text-muted-foreground text-xs">
+                    <td className="px-3 py-3 text-muted-foreground text-xs">
                       {idx + 1}
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <StaffAvatar photo={s.photo} name={s.name} />
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground truncate">
-                            {s.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground font-mono">
-                            {s.empId}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge
-                        variant={
-                          s.designation === "Teacher" ? "default" : "secondary"
-                        }
-                        className="text-xs"
-                      >
-                        {s.designation}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      {s.department ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {s.mobile}
-                    </td>
-                    <td className="px-4 py-3 text-right font-mono text-sm hidden lg:table-cell">
-                      {s.salary ? `₹${s.salary.toLocaleString("en-IN")}` : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={s.status} />
-                    </td>
-                    <td className="px-4 py-3 hidden lg:table-cell">
-                      <div className="flex flex-wrap gap-1 max-w-[180px]">
-                        {(s.subjects ?? []).slice(0, 2).map((sub) => (
-                          <Badge
-                            key={`${s.id}-${sub.subject}`}
-                            variant="outline"
-                            className="text-xs"
-                          >
-                            {sub.subject} ({sub.classFrom}–{sub.classTo})
-                          </Badge>
-                        ))}
-                        {(s.subjects ?? []).length > 2 && (
-                          <Badge variant="outline" className="text-xs">
-                            +{(s.subjects ?? []).length - 2}
-                          </Badge>
-                        )}
-                        {(s.subjects ?? []).length === 0 && (
-                          <span className="text-xs text-muted-foreground">
-                            —
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
+                    {visibleCols.has("photo") && (
+                      <td className="px-3 py-3">
+                        <StaffAvatar photo={s.photo} name={s.name ?? ""} />
+                      </td>
+                    )}
+                    {visibleCols.has("empId") && (
+                      <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                        {s.empId}
+                      </td>
+                    )}
+                    {visibleCols.has("name") && (
+                      <td className="px-3 py-3">
+                        <p className="font-medium text-foreground truncate max-w-[160px]">
+                          {s.name}
+                        </p>
+                      </td>
+                    )}
+                    {visibleCols.has("designation") && (
+                      <td className="px-3 py-3">
+                        <Badge
+                          variant={
+                            s.designation === "Teacher"
+                              ? "default"
+                              : "secondary"
+                          }
+                          className="text-xs"
+                        >
+                          {s.designation}
+                        </Badge>
+                      </td>
+                    )}
+                    {visibleCols.has("department") && (
+                      <td className="px-3 py-3 text-muted-foreground hidden md:table-cell">
+                        {s.department ?? "—"}
+                      </td>
+                    )}
+                    {visibleCols.has("mobile") && (
+                      <td className="px-3 py-3 text-muted-foreground">
+                        {s.mobile}
+                      </td>
+                    )}
+                    {visibleCols.has("email") && (
+                      <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs truncate max-w-[150px]">
+                        {s.email ?? "—"}
+                      </td>
+                    )}
+                    {visibleCols.has("salary") && (
+                      <td className="px-3 py-3 text-right font-mono text-sm hidden lg:table-cell">
+                        {s.salary
+                          ? `₹${s.salary.toLocaleString("en-IN")}`
+                          : "—"}
+                      </td>
+                    )}
+                    {visibleCols.has("joinDate") && (
+                      <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs">
+                        {s.joiningDate ?? "—"}
+                      </td>
+                    )}
+                    {visibleCols.has("status") && (
+                      <td className="px-3 py-3">
+                        <StatusBadge status={s.status} />
+                      </td>
+                    )}
+                    <td className="px-3 py-3">
                       <div className="flex items-center gap-1 justify-end">
                         <Button
                           size="sm"
@@ -661,32 +837,40 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                             e.stopPropagation();
                             setViewStaff(s);
                           }}
+                          data-ocid={`staff.view_button.${idx + 1}`}
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label="Edit staff"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleEdit(s);
-                          }}
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label="Delete staff"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDelete(s.id);
-                          }}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        {canWrite && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label="Edit staff"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditStaff({ ...s });
+                                setShowForm(true);
+                              }}
+                              data-ocid={`staff.edit_button.${idx + 1}`}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              aria-label="Delete staff"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void handleDelete(s.id);
+                              }}
+                              className="text-destructive hover:text-destructive"
+                              data-ocid={`staff.delete_button.${idx + 1}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -698,10 +882,9 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       )}
 
       <p className="text-xs text-muted-foreground">
-        CSV columns: EmpID, Name, Designation, Department, Mobile, DOB
-        (DD/MM/YYYY), Email, Address, Qualification, Joining Date, Salary,
-        Status (active/inactive), Subjects (Subject:ClassFrom-ClassTo;
-        separated) — double-click a row for full details.
+        CSV import columns: EmpID, Name, Designation, Department, Mobile, DOB,
+        Email, Address, Qualification, JoiningDate, Salary, Status —
+        double-click a row for full details.
       </p>
     </div>
   );

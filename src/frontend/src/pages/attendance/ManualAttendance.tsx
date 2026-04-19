@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/select";
 import {
   AlertCircle,
-  Bus,
   CheckCircle2,
   Download,
   Save,
@@ -18,13 +17,11 @@ import {
   UserX,
   Users,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Student, TransportRoute } from "../../types";
-import { dataService } from "../../utils/dataService";
-import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
-import { buildAbsentMessage, sendWhatsApp } from "../../utils/whatsapp";
+import type { AttendanceRecord, ClassSection, Student } from "../../types";
+import { generateId } from "../../utils/localStorage";
 
 interface ManualAttendanceProps {
   date: string;
@@ -64,60 +61,101 @@ const STATUS_CONFIG: { status: AttendStatus; color: string }[] = [
 interface StudentRow {
   student: Student;
   status: AttendStatus;
+  existingId?: string;
+}
+
+function getRowBg(status: AttendStatus) {
+  if (status === "Absent") return "bg-destructive/5";
+  if (status === "Present") return "bg-accent/5";
+  if (status === "Leave") return "bg-blue-500/5";
+  if (status === "Late") return "bg-amber-500/5";
+  return "";
 }
 
 export default function ManualAttendance({
   date,
   onDateChange,
 }: ManualAttendanceProps) {
-  const { addNotification, currentSession, currentUser } = useApp();
+  const {
+    getData,
+    saveData,
+    updateData,
+    addNotification,
+    currentSession,
+    currentUser,
+  } = useApp();
 
   const [filterClass, setFilterClass] = useState("");
   const [filterSection, setFilterSection] = useState("");
   const [rows, setRows] = useState<StudentRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showRouteBreakdown, setShowRouteBreakdown] = useState(false);
-  const [allStudentsData, setAllStudentsData] = useState<Student[]>([]);
 
-  // Server-first: load students from MySQL on mount
-  useEffect(() => {
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => setAllStudentsData(rows))
-      .catch(() => setAllStudentsData(dataService.get<Student>("students")));
-  }, []);
-
+  // Derived data from context
   const allStudents = useMemo(() => {
-    return allStudentsData.filter(
+    return (getData("students") as Student[]).filter(
       (s) =>
         s.sessionId === (currentSession?.id ?? "") && s.status === "active",
     );
-  }, [allStudentsData, currentSession]);
+  }, [getData, currentSession]);
 
-  const routes = useMemo(
-    () => ls.get<TransportRoute[]>("transport_routes", []),
-    [],
+  const classSections = useMemo(
+    () => getData("classes") as ClassSection[],
+    [getData],
   );
 
-  const schoolName = ls.get<{ name: string }>("school_profile", {
-    name: "SHUBH SCHOOL ERP",
-  }).name;
+  // Build sorted class list from context, fallback to fixed list
+  const classList = useMemo(() => {
+    const order = [
+      "Nursery",
+      "LKG",
+      "UKG",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+    ];
+    if (classSections.length > 0) {
+      const names = classSections.map((c) => c.className);
+      return order
+        .filter((c) => names.includes(c))
+        .concat(names.filter((n) => !order.includes(n)));
+    }
+    return order;
+  }, [classSections]);
 
-  // Summary stats (from all records today)
-  const todayRecords = useMemo(() => {
-    const ds = dataService.get<AttendanceRecord>("attendance");
-    return ds.filter((r) => r.date === date && r.type === "student");
-  }, [date]);
+  // Available sections for selected class
+  const sectionList = useMemo(() => {
+    if (!filterClass) return ["A", "B", "C", "D", "E"];
+    const cs = classSections.find((c) => c.className === filterClass);
+    return cs?.sections?.length ? cs.sections : ["A", "B", "C", "D", "E"];
+  }, [filterClass, classSections]);
+
+  // Stats
+  const allAttendance = useMemo(
+    () =>
+      (getData("attendance") as AttendanceRecord[]).filter(
+        (r) => r.date === date && r.type === "student",
+      ),
+    [getData, date],
+  );
 
   const presentTodayIds = useMemo(
     () =>
       new Set(
-        todayRecords
+        allAttendance
           .filter((r) => r.status === "Present")
           .map((r) => r.studentId),
       ),
-    [todayRecords],
+    [allAttendance],
   );
 
   const totalStudents = allStudents.length;
@@ -139,10 +177,8 @@ export default function ManualAttendance({
       toast.info("No students found for selected class/section");
       return;
     }
-    // Load existing attendance for this date/class (prefer DataService cache)
-    const ds = dataService.get<AttendanceRecord>("attendance");
-    const existing =
-      ds.length > 0 ? ds : ls.get<AttendanceRecord[]>("attendance", []);
+    // Pre-fill with existing attendance for this date
+    const existing = getData("attendance") as AttendanceRecord[];
     const loadedRows: StudentRow[] = matching.map((student) => {
       const rec = existing.find(
         (r) => r.date === date && r.studentId === student.id,
@@ -150,6 +186,7 @@ export default function ManualAttendance({
       return {
         student,
         status: rec ? (rec.status as AttendStatus) : "Present",
+        existingId: rec?.id,
       };
     });
     setRows(loadedRows);
@@ -175,102 +212,58 @@ export default function ManualAttendance({
       minute: "2-digit",
     });
 
-    const absentStudents: Student[] = [];
-
-    // Get existing attendance (prefer DataService cache)
-    const dsRecords = dataService.get<AttendanceRecord>("attendance");
-    const all =
-      dsRecords.length > 0
-        ? [...dsRecords]
-        : [...ls.get<AttendanceRecord[]>("attendance", [])];
-    const updated = [...all];
-
-    const savePromises: Promise<unknown>[] = [];
-
-    for (const row of rows) {
-      const idx = updated.findIndex(
-        (r) => r.date === date && r.studentId === row.student.id,
-      );
-      if (idx !== -1) {
-        updated[idx] = {
-          ...updated[idx],
-          status: row.status as AttendanceRecord["status"],
-          timeIn,
-          markedBy: currentUser?.name ?? "System",
-        };
-        // Update via DataService
-        savePromises.push(
-          dataService.update(
-            "attendance",
-            updated[idx].id,
-            updated[idx] as unknown as Record<string, unknown>,
-          ),
-        );
-      } else {
-        const newRecord: AttendanceRecord = {
-          id: generateId(),
+    try {
+      const savePromises = rows.map((row) => {
+        const base: AttendanceRecord = {
+          id: row.existingId ?? generateId(),
           studentId: row.student.id,
           date,
           status: row.status as AttendanceRecord["status"],
           timeIn,
-          markedBy: currentUser?.name ?? "System",
+          markedBy: currentUser?.username ?? currentUser?.name ?? "System",
           type: "student",
           class: row.student.class,
           section: row.student.section,
           sessionId: currentSession?.id,
           method: "manual",
         };
-        updated.push(newRecord);
-        // Save via DataService (server-first)
-        savePromises.push(
-          dataService.save(
+        if (row.existingId) {
+          return updateData(
             "attendance",
-            newRecord as unknown as Record<string, unknown>,
-          ),
+            row.existingId,
+            base as unknown as Record<string, unknown>,
+          );
+        }
+        return saveData(
+          "attendance",
+          base as unknown as Record<string, unknown>,
         );
-      }
-      if (row.status === "Absent") {
-        absentStudents.push(row.student);
-      }
+      });
+
+      await Promise.allSettled(savePromises);
+
+      const presentCount_ = rows.filter((r) => r.status === "Present").length;
+      const absentCount = rows.filter((r) => r.status === "Absent").length;
+      const leaveCount = rows.filter((r) => r.status === "Leave").length;
+
+      toast.success(
+        `Attendance saved — ${presentCount_} present, ${absentCount} absent${leaveCount > 0 ? `, ${leaveCount} on leave` : ""}`,
+      );
+      addNotification(
+        `✅ Attendance saved for Class ${filterClass}${filterSection ? `-${filterSection}` : ""} on ${date}`,
+        "success",
+        "✅",
+      );
+
+      // Update existingId so re-saves become updates
+      setRows((prev) =>
+        prev.map((r) => ({ ...r, existingId: r.existingId ?? r.student.id })),
+      );
+    } catch {
+      toast.error("Failed to save some attendance records. Please retry.");
+    } finally {
+      setSaving(false);
     }
-
-    // Fire all saves in parallel, update localStorage fallback
-    await Promise.allSettled(savePromises);
-    ls.set("attendance", updated);
-
-    const presentCount_ = rows.filter((r) => r.status === "Present").length;
-    const absentCount = rows.filter((r) => r.status === "Absent").length;
-    const leaveCount = rows.filter((r) => r.status === "Leave").length;
-
-    toast.success(
-      `Attendance saved — ${presentCount_} present, ${absentCount} absent${leaveCount > 0 ? `, ${leaveCount} on leave` : ""}`,
-    );
-    addNotification(
-      `✅ Attendance saved for Class ${filterClass}${filterSection ? `-${filterSection}` : ""} on ${date}`,
-      "success",
-      "✅",
-    );
-
-    // Send WhatsApp alerts for absent students
-    const formattedDate = new Date(date).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "long",
-      year: "numeric",
-    });
-    for (const student of absentStudents) {
-      const mobile =
-        student.fatherMobile ?? student.guardianMobile ?? student.mobile;
-      if (mobile) {
-        const msg = buildAbsentMessage(
-          student.fullName,
-          formattedDate,
-          schoolName,
-        );
-        sendWhatsApp(mobile, msg).catch(() => {});
-      }
-    }
-
-    setSaving(false);
   }, [
     rows,
     date,
@@ -279,7 +272,8 @@ export default function ManualAttendance({
     filterClass,
     filterSection,
     addNotification,
-    schoolName,
+    saveData,
+    updateData,
   ]);
 
   function exportCSV() {
@@ -301,38 +295,13 @@ export default function ManualAttendance({
     a.click();
   }
 
-  // Route-wise present/absent
-  const routeBreakdown = useMemo(
-    () =>
-      routes.map((route) => {
-        const rs = allStudents.filter((s) => route.students.includes(s.id));
-        const rPresent = rs.filter((s) => presentTodayIds.has(s.id)).length;
-        return {
-          name: route.routeName,
-          bus: route.busNo,
-          total: rs.length,
-          present: rPresent,
-          absent: rs.length - rPresent,
-        };
-      }),
-    [routes, allStudents, presentTodayIds],
-  );
-
   const presentInRows = rows.filter((r) => r.status === "Present").length;
   const absentInRows = rows.filter((r) => r.status === "Absent").length;
-
-  function getRowBg(status: AttendStatus) {
-    if (status === "Absent") return "bg-destructive/5";
-    if (status === "Present") return "bg-accent/5";
-    if (status === "Leave") return "bg-blue-500/5";
-    if (status === "Late") return "bg-amber-500/5";
-    return "";
-  }
 
   return (
     <div className="space-y-5">
       {/* Summary Banner */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         <Card className="p-4 flex items-center gap-3 bg-primary/5 border-primary/20">
           <div className="w-9 h-9 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
             <Users className="w-4 h-4 text-primary-foreground" />
@@ -372,74 +341,7 @@ export default function ManualAttendance({
             </p>
           </div>
         </Card>
-        <Card
-          className="p-4 flex items-center gap-3 bg-muted/40 cursor-pointer hover:bg-muted/60 transition-colors"
-          onClick={() => setShowRouteBreakdown((v) => !v)}
-          data-ocid="route-breakdown-toggle"
-        >
-          <div className="w-9 h-9 rounded-lg bg-secondary flex items-center justify-center flex-shrink-0">
-            <Bus className="w-4 h-4 text-secondary-foreground" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">
-              Routes
-            </p>
-            <p className="text-xl font-bold font-display text-foreground">
-              {routes.length}
-            </p>
-          </div>
-        </Card>
       </div>
-
-      {/* Route Breakdown Panel */}
-      {showRouteBreakdown && routeBreakdown.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="p-3 border-b border-border flex items-center gap-2 bg-muted/30">
-            <Bus className="w-4 h-4 text-primary" />
-            <span className="font-semibold text-sm text-foreground">
-              Route-wise Present / Absent
-            </span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40">
-                <tr>
-                  {["Route", "Bus No", "Total", "Present", "Absent"].map(
-                    (h) => (
-                      <th
-                        key={h}
-                        className="text-left p-2.5 font-semibold text-muted-foreground"
-                      >
-                        {h}
-                      </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody>
-                {routeBreakdown.map((r) => (
-                  <tr
-                    key={r.name}
-                    className="border-t border-border hover:bg-muted/20"
-                  >
-                    <td className="p-2.5 font-medium text-foreground">
-                      {r.name}
-                    </td>
-                    <td className="p-2.5 text-muted-foreground">{r.bus}</td>
-                    <td className="p-2.5 text-muted-foreground">{r.total}</td>
-                    <td className="p-2.5 text-accent font-semibold">
-                      {r.present}
-                    </td>
-                    <td className="p-2.5 text-destructive font-semibold">
-                      {r.absent}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
 
       {/* Controls */}
       <Card className="p-4">
@@ -457,7 +359,7 @@ export default function ManualAttendance({
                 setRows([]);
               }}
               className="h-9 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              data-ocid="manual-date-picker"
+              data-ocid="manual.date-picker"
               aria-label="Attendance date"
             />
           </div>
@@ -469,21 +371,22 @@ export default function ManualAttendance({
               value={filterClass}
               onValueChange={(v) => {
                 setFilterClass(v);
+                setFilterSection("");
                 setLoaded(false);
                 setRows([]);
               }}
             >
               <SelectTrigger
-                className="w-32"
-                data-ocid="manual-class-select"
+                className="w-36"
+                data-ocid="manual.class-select"
                 aria-label="Select class"
               >
-                <SelectValue placeholder="Select" />
+                <SelectValue placeholder="Select Class" />
               </SelectTrigger>
               <SelectContent>
-                {CLASSES.map((c) => (
+                {classList.map((c) => (
                   <SelectItem key={c} value={c}>
-                    Class {c}
+                    {["Nursery", "LKG", "UKG"].includes(c) ? c : `Class ${c}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -503,14 +406,14 @@ export default function ManualAttendance({
             >
               <SelectTrigger
                 className="w-28"
-                data-ocid="manual-section-select"
+                data-ocid="manual.section-select"
                 aria-label="Select section"
               >
                 <SelectValue placeholder="All" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sections</SelectItem>
-                {SECTIONS.map((s) => (
+                {sectionList.map((s) => (
                   <SelectItem key={s} value={s}>
                     Section {s}
                   </SelectItem>
@@ -520,7 +423,7 @@ export default function ManualAttendance({
           </div>
           <Button
             onClick={loadStudents}
-            data-ocid="manual-load-btn"
+            data-ocid="manual.load-students-button"
             className="mt-auto"
           >
             Load Students
@@ -552,7 +455,7 @@ export default function ManualAttendance({
                 variant="outline"
                 onClick={() => markAll("Present")}
                 className="text-accent border-accent/30 hover:bg-accent/10"
-                data-ocid="mark-all-present-btn"
+                data-ocid="manual.mark-all-present-button"
               >
                 <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
                 All Present
@@ -562,7 +465,7 @@ export default function ManualAttendance({
                 variant="outline"
                 onClick={() => markAll("Absent")}
                 className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                data-ocid="mark-all-absent-btn"
+                data-ocid="manual.mark-all-absent-button"
               >
                 <UserX className="w-3.5 h-3.5 mr-1.5" />
                 All Absent
@@ -571,15 +474,17 @@ export default function ManualAttendance({
                 size="sm"
                 variant="outline"
                 onClick={exportCSV}
-                data-ocid="manual-export-csv"
+                data-ocid="manual.export-csv-button"
               >
                 <Download className="w-3.5 h-3.5 mr-1.5" /> Export
               </Button>
               <Button
                 size="sm"
-                onClick={handleSave}
+                onClick={() => {
+                  void handleSave();
+                }}
                 disabled={saving}
-                data-ocid="manual-save-btn"
+                data-ocid="manual.save-button"
               >
                 <Save className="w-3.5 h-3.5 mr-1.5" />
                 {saving ? "Saving…" : "Save"}
@@ -615,7 +520,7 @@ export default function ManualAttendance({
                     <tr
                       key={row.student.id}
                       className={`border-t border-border transition-colors ${getRowBg(row.status)}`}
-                      data-ocid={`student-row-${row.student.admNo}`}
+                      data-ocid={`manual.student-row.${idx + 1}`}
                     >
                       <td className="p-3 text-muted-foreground font-mono text-xs">
                         {idx + 1}
@@ -659,7 +564,7 @@ export default function ManualAttendance({
                               type="button"
                               onClick={() => setStatus(row.student.id, s)}
                               data-active={row.status === s}
-                              data-ocid={`status-${s.toLowerCase().replace(" ", "-")}-${row.student.admNo}`}
+                              data-ocid={`manual.status-${s.toLowerCase().replace(" ", "-")}.${idx + 1}`}
                               className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all bg-transparent text-muted-foreground border-border hover:border-foreground/30 ${color}`}
                             >
                               {s}
@@ -677,10 +582,12 @@ export default function ManualAttendance({
           {/* Save button at bottom */}
           <div className="flex justify-end gap-3">
             <Button
-              onClick={handleSave}
+              onClick={() => {
+                void handleSave();
+              }}
               disabled={saving}
               size="lg"
-              data-ocid="manual-save-bottom-btn"
+              data-ocid="manual.save-bottom-button"
             >
               <Save className="w-4 h-4 mr-2" />
               {saving ? "Saving…" : "Save Attendance"}
@@ -691,7 +598,10 @@ export default function ManualAttendance({
 
       {/* Empty state */}
       {!loaded && (
-        <Card className="p-10 flex flex-col items-center gap-4 border-dashed">
+        <Card
+          className="p-10 flex flex-col items-center gap-4 border-dashed"
+          data-ocid="manual.empty-state"
+        >
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
             <AlertCircle className="w-7 h-7 text-primary/60" />
           </div>

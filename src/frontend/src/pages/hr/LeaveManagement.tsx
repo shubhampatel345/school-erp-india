@@ -19,8 +19,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useApp } from "../../context/AppContext";
 import type { Staff } from "../../types";
-import { generateId, ls } from "../../utils/localStorage";
+import { generateId } from "../../utils/localStorage";
+
+// ── Types ─────────────────────────────────────────────────
 
 type LeaveStatus = "Pending" | "Approved" | "Rejected";
 type LeaveType =
@@ -45,6 +48,8 @@ interface LeaveRecord {
   totalDays: number;
 }
 
+// ── Constants ─────────────────────────────────────────────
+
 const LEAVE_TYPES: LeaveType[] = [
   "Casual Leave",
   "Sick Leave",
@@ -53,6 +58,15 @@ const LEAVE_TYPES: LeaveType[] = [
   "Unpaid Leave",
   "Other",
 ];
+
+const LEAVE_BALANCE: Record<string, number> = {
+  "Casual Leave": 12,
+  "Sick Leave": 10,
+  "Earned Leave": 15,
+  "Maternity Leave": 90,
+  "Unpaid Leave": 0,
+  Other: 0,
+};
 
 const STATUS_VARIANT: Record<LeaveStatus, string> = {
   Pending:
@@ -67,15 +81,7 @@ const STATUS_ICONS: Record<LeaveStatus, typeof Clock> = {
   Rejected: XCircle,
 };
 
-// Leave balance per type (default allocations)
-const LEAVE_BALANCE: Record<string, number> = {
-  "Casual Leave": 12,
-  "Sick Leave": 10,
-  "Earned Leave": 15,
-  "Maternity Leave": 90,
-  "Unpaid Leave": 0,
-  Other: 0,
-};
+// ── Helpers ───────────────────────────────────────────────
 
 function daysBetween(from: string, to: string): number {
   if (!from || !to) return 0;
@@ -85,14 +91,22 @@ function daysBetween(from: string, to: string): number {
   return Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1);
 }
 
+// ── Component ─────────────────────────────────────────────
+
 export default function LeaveManagement() {
-  const [records, setRecords] = useState<LeaveRecord[]>(() =>
-    ls.get<LeaveRecord[]>("leave_records", []),
-  );
-  const [staff] = useState<Staff[]>(() => ls.get<Staff[]>("staff", []));
-  const [showForm, setShowForm] = useState(false);
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    addNotification,
+    currentUser,
+  } = useApp();
+
   const [filterStatus, setFilterStatus] = useState<LeaveStatus | "all">("all");
   const [filterStaff, setFilterStaff] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   // Form state
   const [fStaffId, setFStaffId] = useState("");
@@ -101,22 +115,30 @@ export default function LeaveManagement() {
   const [fTo, setFTo] = useState("");
   const [fReason, setFReason] = useState("");
 
-  function saveRecords(updated: LeaveRecord[]) {
-    setRecords(updated);
-    ls.set("leave_records", updated);
-  }
+  // Read from context (server-synced)
+  const records = getData("leave_records") as LeaveRecord[];
+  const staff = (getData("staff") as Staff[]).filter(
+    (s) => (s.status ?? "active") === "active",
+  );
 
-  function handleSubmit() {
+  const canApprove =
+    currentUser?.role === "superadmin" || currentUser?.role === "admin";
+
+  // ── CRUD ──────────────────────────────────────────────────
+
+  async function handleSubmit() {
     if (!fStaffId || !fFrom || !fTo || !fReason.trim()) {
       alert("Please fill all required fields.");
       return;
     }
     const staffMember = staff.find((s) => s.id === fStaffId);
     if (!staffMember) return;
+
+    setSaving(true);
     const rec: LeaveRecord = {
       id: generateId(),
       staffId: fStaffId,
-      staffName: staffMember.name,
+      staffName: staffMember.name ?? staffMember.fullName ?? "",
       designation: staffMember.designation,
       leaveType: fLeaveType,
       fromDate: fFrom,
@@ -126,23 +148,53 @@ export default function LeaveManagement() {
       appliedOn: new Date().toLocaleDateString("en-IN"),
       totalDays: daysBetween(fFrom, fTo),
     };
-    saveRecords([rec, ...records]);
-    setShowForm(false);
-    setFStaffId("");
-    setFFrom("");
-    setFTo("");
-    setFReason("");
-    setFLeaveType("Casual Leave");
+
+    try {
+      await saveData(
+        "leave_records",
+        rec as unknown as Record<string, unknown>,
+      );
+      addNotification(
+        `Leave request submitted for ${rec.staffName}`,
+        "info",
+        "📅",
+      );
+      setShowForm(false);
+      setFStaffId("");
+      setFFrom("");
+      setFTo("");
+      setFReason("");
+      setFLeaveType("Casual Leave");
+    } catch {
+      addNotification("Failed to submit leave request.", "error");
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function updateStatus(id: string, status: LeaveStatus) {
-    saveRecords(records.map((r) => (r.id === id ? { ...r, status } : r)));
+  async function updateStatus(id: string, status: LeaveStatus) {
+    try {
+      await updateData("leave_records", id, { status });
+      addNotification(
+        `Leave ${status.toLowerCase()} successfully.`,
+        status === "Approved" ? "success" : "info",
+      );
+    } catch {
+      addNotification("Failed to update leave status.", "error");
+    }
   }
 
-  function deleteRecord(id: string) {
+  async function handleDelete(id: string) {
     if (!confirm("Delete this leave record?")) return;
-    saveRecords(records.filter((r) => r.id !== id));
+    try {
+      await deleteData("leave_records", id);
+      addNotification("Leave record deleted.", "info");
+    } catch {
+      addNotification("Failed to delete leave record.", "error");
+    }
   }
+
+  // ── Derived ───────────────────────────────────────────────
 
   const filtered = useMemo(
     () =>
@@ -167,7 +219,6 @@ export default function LeaveManagement() {
     [records],
   );
 
-  // Per-staff leave balance: group approved leaves by staff and type
   const staffLeaveBalance = useMemo(() => {
     const balance: Record<string, Record<string, number>> = {};
     for (const r of records) {
@@ -178,6 +229,8 @@ export default function LeaveManagement() {
     }
     return balance;
   }, [records]);
+
+  // ── Render ────────────────────────────────────────────────
 
   return (
     <div className="p-4 lg:p-6 space-y-5">
@@ -195,7 +248,7 @@ export default function LeaveManagement() {
         <Button
           size="sm"
           onClick={() => setShowForm(true)}
-          data-ocid="add-leave-btn"
+          data-ocid="leave.add_button"
         >
           <Plus className="w-4 h-4 mr-1" />
           Apply Leave
@@ -211,6 +264,7 @@ export default function LeaveManagement() {
               type="button"
               key={s}
               onClick={() => setFilterStatus(filterStatus === s ? "all" : s)}
+              data-ocid={`leave.${s.toLowerCase()}_filter`}
               className={`p-4 rounded-xl border text-left transition-colors ${
                 filterStatus === s
                   ? "border-primary bg-primary/5"
@@ -231,10 +285,10 @@ export default function LeaveManagement() {
         })}
       </div>
 
-      {/* Leave Balance Summary */}
+      {/* Leave balance summary */}
       <Card className="p-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
-          Leave Entitlement (Annual Allocation)
+          Annual Leave Entitlement
         </p>
         <div className="flex flex-wrap gap-3">
           {(["Casual Leave", "Sick Leave", "Earned Leave"] as LeaveType[]).map(
@@ -253,7 +307,7 @@ export default function LeaveManagement() {
         </div>
       </Card>
 
-      {/* Leave Request Form */}
+      {/* Leave request form */}
       {showForm && (
         <Card className="p-5 border-primary/30 bg-primary/5 space-y-4 max-w-2xl">
           <div className="flex items-center justify-between">
@@ -263,10 +317,12 @@ export default function LeaveManagement() {
               onClick={() => setShowForm(false)}
               className="text-muted-foreground hover:text-foreground"
               aria-label="Close form"
+              data-ocid="leave.close_button"
             >
               <XCircle className="w-4 h-4" />
             </button>
           </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <Label>Staff Member *</Label>
@@ -274,25 +330,24 @@ export default function LeaveManagement() {
                 className="w-full border border-input rounded-md px-3 py-2 text-sm bg-card text-foreground"
                 value={fStaffId}
                 onChange={(e) => setFStaffId(e.target.value)}
-                data-ocid="leave-staff-select"
+                data-ocid="leave.staff_select"
               >
                 <option value="">Select staff</option>
-                {staff
-                  .filter((s) => s.status !== "inactive")
-                  .map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.designation})
-                    </option>
-                  ))}
+                {staff.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name ?? s.fullName ?? s.empId} ({s.designation})
+                  </option>
+                ))}
               </select>
             </div>
+
             <div className="space-y-1.5">
               <Label>Leave Type *</Label>
               <Select
                 value={fLeaveType}
                 onValueChange={(v) => setFLeaveType(v as LeaveType)}
               >
-                <SelectTrigger>
+                <SelectTrigger data-ocid="leave.type_select">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -304,48 +359,56 @@ export default function LeaveManagement() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="leave-from">From Date *</Label>
+              <Label htmlFor="lv-from">From Date *</Label>
               <Input
-                id="leave-from"
+                id="lv-from"
                 type="date"
                 value={fFrom}
                 onChange={(e) => setFFrom(e.target.value)}
-                data-ocid="leave-from-date"
+                data-ocid="leave.from_date_input"
               />
             </div>
+
             <div className="space-y-1.5">
-              <Label htmlFor="leave-to">To Date *</Label>
+              <Label htmlFor="lv-to">To Date *</Label>
               <Input
-                id="leave-to"
+                id="lv-to"
                 type="date"
                 value={fTo}
                 onChange={(e) => setFTo(e.target.value)}
                 min={fFrom}
-                data-ocid="leave-to-date"
+                data-ocid="leave.to_date_input"
               />
             </div>
           </div>
+
           {fFrom && fTo && (
             <p className="text-sm text-primary font-medium">
               Total days: {daysBetween(fFrom, fTo)}
             </p>
           )}
+
           <div className="space-y-1.5">
-            <Label htmlFor="leave-reason">Reason *</Label>
+            <Label htmlFor="lv-reason">Reason *</Label>
             <Input
-              id="leave-reason"
+              id="lv-reason"
               value={fReason}
               onChange={(e) => setFReason(e.target.value)}
               placeholder="Brief reason for leave"
-              data-ocid="leave-reason-input"
+              data-ocid="leave.reason_input"
             />
           </div>
+
           <div className="flex gap-2">
             <Button
               size="sm"
-              onClick={handleSubmit}
-              data-ocid="submit-leave-btn"
+              onClick={() => {
+                void handleSubmit();
+              }}
+              disabled={saving}
+              data-ocid="leave.submit_button"
             >
               Submit Request
             </Button>
@@ -353,6 +416,7 @@ export default function LeaveManagement() {
               size="sm"
               variant="ghost"
               onClick={() => setShowForm(false)}
+              data-ocid="leave.cancel_button"
             >
               Cancel
             </Button>
@@ -367,13 +431,13 @@ export default function LeaveManagement() {
           value={filterStaff}
           onChange={(e) => setFilterStaff(e.target.value)}
           className="max-w-xs"
-          data-ocid="leave-search"
+          data-ocid="leave.search_input"
         />
         <Select
           value={filterStatus}
           onValueChange={(v) => setFilterStatus(v as LeaveStatus | "all")}
         >
-          <SelectTrigger className="w-36">
+          <SelectTrigger className="w-36" data-ocid="leave.status_filter">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -385,9 +449,9 @@ export default function LeaveManagement() {
         </Select>
       </div>
 
-      {/* Requests list */}
+      {/* List */}
       {filtered.length === 0 ? (
-        <Card className="p-12 text-center" data-ocid="leave-empty">
+        <Card className="p-12 text-center" data-ocid="leave.empty_state">
           <Calendar className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
           <p className="text-muted-foreground">
             {records.length === 0
@@ -399,6 +463,7 @@ export default function LeaveManagement() {
               size="sm"
               className="mt-4"
               onClick={() => setShowForm(true)}
+              data-ocid="leave.empty_add_button"
             >
               <Plus className="w-4 h-4 mr-1" /> Apply Leave
             </Button>
@@ -431,7 +496,7 @@ export default function LeaveManagement() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filtered.map((r) => {
+                {filtered.map((r, idx) => {
                   const StatusIcon = STATUS_ICONS[r.status];
                   const usedDays =
                     staffLeaveBalance[r.staffId]?.[r.leaveType] ?? 0;
@@ -440,7 +505,7 @@ export default function LeaveManagement() {
                     <tr
                       key={r.id}
                       className="hover:bg-muted/30 transition-colors"
-                      data-ocid={`leave-row-${r.id}`}
+                      data-ocid={`leave.item.${idx + 1}`}
                     >
                       <td className="px-4 py-3">
                         <p className="font-medium text-foreground">
@@ -481,17 +546,22 @@ export default function LeaveManagement() {
                           <StatusIcon className="w-3 h-3" />
                           {r.status}
                         </span>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {r.appliedOn}
+                        </p>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 justify-end flex-wrap">
-                          {r.status === "Pending" && (
+                          {r.status === "Pending" && canApprove && (
                             <>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="text-xs h-7 text-accent border-accent/40 hover:bg-accent/10"
-                                onClick={() => updateStatus(r.id, "Approved")}
-                                data-ocid={`approve-leave-${r.id}`}
+                                onClick={() => {
+                                  void updateStatus(r.id, "Approved");
+                                }}
+                                data-ocid={`leave.approve_button.${idx + 1}`}
                               >
                                 <CheckCircle className="w-3 h-3 mr-1" /> Approve
                               </Button>
@@ -499,8 +569,10 @@ export default function LeaveManagement() {
                                 size="sm"
                                 variant="outline"
                                 className="text-xs h-7 text-destructive border-destructive/40 hover:bg-destructive/10"
-                                onClick={() => updateStatus(r.id, "Rejected")}
-                                data-ocid={`reject-leave-${r.id}`}
+                                onClick={() => {
+                                  void updateStatus(r.id, "Rejected");
+                                }}
+                                data-ocid={`leave.reject_button.${idx + 1}`}
                               >
                                 <XCircle className="w-3 h-3 mr-1" /> Reject
                               </Button>
@@ -511,7 +583,10 @@ export default function LeaveManagement() {
                             variant="ghost"
                             className="text-destructive hover:text-destructive h-7"
                             aria-label="Delete record"
-                            onClick={() => deleteRecord(r.id)}
+                            onClick={() => {
+                              void handleDelete(r.id);
+                            }}
+                            data-ocid={`leave.delete_button.${idx + 1}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>

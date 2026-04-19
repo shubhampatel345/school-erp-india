@@ -1,36 +1,25 @@
 import {
-  AlertCircle,
-  ArrowUpCircle,
   Award,
-  Banknote,
   BarChart3,
-  BellRing,
-  BookMarked,
   BookOpen,
   Bus,
   CalendarCheck,
   ClipboardList,
-  CreditCard,
   FileText,
   GraduationCap,
   HelpCircle,
   IndianRupee,
-  Layers,
   LayoutDashboard,
   MessageCircle,
   MessageSquare,
   MoreHorizontal,
   Package,
   Phone,
-  QrCode,
-  Receipt,
-  School,
   Settings,
   TrendingUp,
   UserCheck,
+  UserCog,
   Users,
-  Users2,
-  Wallet,
   X,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
@@ -42,192 +31,63 @@ interface MobileNavProps {
   onClose: () => void;
 }
 
+// 5 primary tabs on the bottom bar
 const BOTTOM_TABS = [
   { id: "dashboard", label: "Home", icon: LayoutDashboard },
   { id: "students", label: "Students", icon: Users },
-  { id: "fees/collect", label: "Fees", icon: IndianRupee },
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "__menu__", label: "Menu", icon: MoreHorizontal },
-];
+  { id: "fees", label: "Fees", icon: IndianRupee },
+  { id: "attendance", label: "Attend.", icon: CalendarCheck },
+  { id: "__menu__", label: "More", icon: MoreHorizontal },
+] as const;
 
-const DRAWER_ITEMS = [
-  // Main
+// Full menu shown in the drawer
+const DRAWER_SECTIONS = [
   {
-    id: "dashboard",
-    label: "Dashboard",
-    icon: LayoutDashboard,
-    section: "Main",
-  },
-  { id: "students", label: "Students", icon: Users, section: "Main" },
-  // Fees
-  { id: "fees/collect", label: "Collect Fees", icon: Receipt, section: "Fees" },
-  { id: "fees/heading", label: "Fee Heading", icon: Layers, section: "Fees" },
-  { id: "fees/plan", label: "Fees Plan", icon: ClipboardList, section: "Fees" },
-  { id: "fees/due", label: "Due Fees", icon: AlertCircle, section: "Fees" },
-  {
-    id: "fees/register",
-    label: "Fee Register",
-    icon: BookMarked,
-    section: "Fees",
-  },
-  { id: "fees/accounts", label: "Accounts", icon: Banknote, section: "Fees" },
-  { id: "fees/online", label: "Online Fees", icon: Wallet, section: "Fees" },
-  // Academics
-  {
-    id: "attendance",
-    label: "Attendance",
-    icon: CalendarCheck,
-    section: "Academics",
+    title: "",
+    items: [
+      { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { id: "students", label: "Students", icon: Users },
+    ],
   },
   {
-    id: "examinations/timetable",
-    label: "Exam Timetable",
-    icon: FileText,
-    section: "Academics",
+    title: "Fees",
+    items: [{ id: "fees", label: "Fees", icon: IndianRupee }],
   },
   {
-    id: "examinations/results",
-    label: "Results",
-    icon: BarChart3,
-    section: "Academics",
+    title: "Academics",
+    items: [
+      { id: "attendance", label: "Attendance", icon: CalendarCheck },
+      { id: "examinations", label: "Examinations", icon: FileText },
+      { id: "academics", label: "Academics", icon: BookOpen },
+      { id: "homework", label: "Homework", icon: ClipboardList },
+    ],
   },
   {
-    id: "academics/classes",
-    label: "Classes & Sections",
-    icon: School,
-    section: "Academics",
+    title: "HR & Operations",
+    items: [
+      { id: "hr", label: "HR / Staff", icon: UserCog },
+      { id: "transport", label: "Transport", icon: Bus },
+      { id: "inventory", label: "Inventory", icon: Package },
+      { id: "expenses", label: "Expenses", icon: TrendingUp },
+    ],
   },
   {
-    id: "academics/subjects",
-    label: "Subjects",
-    icon: BookOpen,
-    section: "Academics",
+    title: "Communication",
+    items: [
+      { id: "chat", label: "Chat", icon: MessageCircle },
+      { id: "communication", label: "Communication", icon: MessageSquare },
+      { id: "calling", label: "Calling", icon: Phone },
+    ],
   },
   {
-    id: "academics/timetable",
-    label: "Teacher Timetable",
-    icon: CalendarCheck,
-    section: "Academics",
-  },
-  {
-    id: "academics/syllabus",
-    label: "Syllabus",
-    icon: BookMarked,
-    section: "Academics",
-  },
-  // HR
-  {
-    id: "hr/staff",
-    label: "Staff Directory",
-    icon: Users2,
-    section: "HR / Staff",
-  },
-  {
-    id: "hr/payroll",
-    label: "Payroll",
-    icon: CreditCard,
-    section: "HR / Staff",
-  },
-  {
-    id: "hr/leave",
-    label: "Leave",
-    icon: CalendarCheck,
-    section: "HR / Staff",
-  },
-  // Operations
-  { id: "transport", label: "Transport", icon: Bus, section: "Operations" },
-  { id: "inventory", label: "Inventory", icon: Package, section: "Operations" },
-  {
-    id: "calling",
-    label: "Calling (Heyophone)",
-    icon: Phone,
-    section: "Operations",
-  },
-  // Communication
-  { id: "chat", label: "Chat", icon: MessageCircle, section: "Communication" },
-  {
-    id: "communication/whatsapp",
-    label: "WhatsApp",
-    icon: MessageSquare,
-    section: "Communication",
-  },
-  {
-    id: "communication/rcs",
-    label: "RCS Messages",
-    icon: MessageSquare,
-    section: "Communication",
-  },
-  {
-    id: "communication/scheduler",
-    label: "Notif. Scheduler",
-    icon: BellRing,
-    section: "Communication",
-  },
-  // Other
-  {
-    id: "certificates",
-    label: "Template Studio",
-    icon: Award,
-    section: "Other",
-  },
-  { id: "alumni", label: "Alumni", icon: UserCheck, section: "Other" },
-  { id: "expenses", label: "Expenses", icon: TrendingUp, section: "Other" },
-  { id: "homework", label: "Homework", icon: BookMarked, section: "Other" },
-  { id: "reports", label: "Reports", icon: BarChart3, section: "Other" },
-  {
-    id: "qr-attendance",
-    label: "QR Attendance",
-    icon: QrCode,
-    section: "Other",
-  },
-  {
-    id: "promote",
-    label: "Promote Students",
-    icon: ArrowUpCircle,
-    section: "Other",
-  },
-  // Settings
-  {
-    id: "settings/profile",
-    label: "School Profile",
-    icon: Settings,
-    section: "Settings",
-  },
-  {
-    id: "settings/sessions",
-    label: "Sessions",
-    icon: CalendarCheck,
-    section: "Settings",
-  },
-  {
-    id: "settings/whatsapp",
-    label: "WhatsApp API",
-    icon: MessageSquare,
-    section: "Settings",
-  },
-  {
-    id: "settings/users",
-    label: "User Management",
-    icon: Users,
-    section: "Settings",
-  },
-  {
-    id: "settings/online-payment",
-    label: "Online Payment",
-    icon: CreditCard,
-    section: "Settings",
-  },
-  {
-    id: "settings/notifications",
-    label: "Notifications",
-    icon: BellRing,
-    section: "Settings",
-  },
-  {
-    id: "documentation",
-    label: "Documentation",
-    icon: HelpCircle,
-    section: "Help",
+    title: "Other",
+    items: [
+      { id: "certificates", label: "Certificates", icon: Award },
+      { id: "alumni", label: "Alumni", icon: UserCheck },
+      { id: "reports", label: "Reports", icon: BarChart3 },
+      { id: "settings", label: "Settings", icon: Settings },
+      { id: "documentation", label: "Documentation", icon: HelpCircle },
+    ],
   },
 ];
 
@@ -239,50 +99,51 @@ export default function MobileNav({
 }: MobileNavProps) {
   const { currentUser } = useApp();
   const isDriver = currentUser?.role === "driver";
-  const isStudent = currentUser?.role === "student";
-  const isParent = currentUser?.role === "parent";
+  const isStudentOrParent =
+    currentUser?.role === "student" || currentUser?.role === "parent";
 
   const handleNav = (id: string) => {
     onNavigate(id);
     onClose();
   };
 
-  let tabs = BOTTOM_TABS;
+  // Customise bottom tabs based on role
+  let tabs: ReadonlyArray<{
+    id: string;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = BOTTOM_TABS;
   if (isDriver) {
     tabs = [
-      BOTTOM_TABS[0],
-      { id: "qr-attendance", label: "QR Scan", icon: QrCode },
-      { id: "chat", label: "Chat", icon: MessageCircle },
-      BOTTOM_TABS[4],
-    ];
-  } else if (isStudent || isParent) {
-    tabs = [
-      BOTTOM_TABS[0],
-      { id: "fees/collect", label: "Fees", icon: IndianRupee },
+      { id: "dashboard", label: "Home", icon: LayoutDashboard },
       { id: "attendance", label: "Attend.", icon: CalendarCheck },
       { id: "chat", label: "Chat", icon: MessageCircle },
-      BOTTOM_TABS[4],
+      { id: "__menu__", label: "More", icon: MoreHorizontal },
+    ];
+  } else if (isStudentOrParent) {
+    tabs = [
+      { id: "dashboard", label: "Home", icon: LayoutDashboard },
+      { id: "fees", label: "Fees", icon: IndianRupee },
+      { id: "attendance", label: "Attend.", icon: CalendarCheck },
+      { id: "chat", label: "Chat", icon: MessageCircle },
+      { id: "__menu__", label: "More", icon: MoreHorizontal },
     ];
   }
 
-  // Group drawer items by section
-  const sections = DRAWER_ITEMS.reduce<Record<string, typeof DRAWER_ITEMS>>(
-    (acc, item) => {
-      if (!acc[item.section]) acc[item.section] = [];
-      acc[item.section].push(item);
-      return acc;
-    },
-    {},
-  );
+  const isActive = (id: string) =>
+    activePage === id || activePage.startsWith(`${id}/`);
 
   return (
     <>
-      {/* Bottom Tab Bar */}
-      <nav className="mobile-nav flex" aria-label="Mobile navigation">
+      {/* Bottom Tab Bar — hidden on md+ */}
+      <nav
+        className="mobile-nav flex md:hidden"
+        aria-label="Mobile navigation"
+        data-ocid="mobile-nav"
+      >
         {tabs.map((tab) => {
           const Icon = tab.icon;
-          const active =
-            activePage === tab.id || activePage.startsWith(`${tab.id}/`);
+          const active = isActive(tab.id) || (tab.id === "__menu__" && isOpen);
           return (
             <button
               type="button"
@@ -296,7 +157,7 @@ export default function MobileNav({
                   : handleNav(tab.id)
               }
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors min-h-[44px]
-                ${active || (tab.id === "__menu__" && isOpen) ? "text-primary" : "text-muted-foreground"}`}
+                ${active ? "text-primary" : "text-muted-foreground"}`}
             >
               <Icon className="w-5 h-5" />
               <span>{tab.label}</span>
@@ -305,10 +166,10 @@ export default function MobileNav({
         })}
       </nav>
 
-      {/* Slide-in Drawer */}
+      {/* Slide-up Drawer — full module list */}
       {isOpen && (
         <aside
-          className="fixed inset-0 z-50 lg:hidden flex"
+          className="fixed inset-0 z-50 md:hidden flex flex-col justify-end"
           aria-label="Navigation drawer"
           onKeyDown={(e) => {
             if (e.key === "Escape") onClose();
@@ -325,10 +186,11 @@ export default function MobileNav({
             tabIndex={0}
             aria-label="Close menu"
           />
-          {/* Drawer panel */}
-          <div className="relative w-72 bg-card h-full overflow-y-auto shadow-elevated ml-auto flex flex-col animate-slide-in-right">
-            {/* Drawer header */}
-            <div className="flex items-center justify-between p-4 border-b border-border sticky top-0 bg-card z-10">
+
+          {/* Drawer panel — slides up from bottom */}
+          <div className="relative bg-card rounded-t-2xl max-h-[85vh] overflow-hidden flex flex-col shadow-elevated animate-slide-up">
+            {/* Handle bar + close */}
+            <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
                   <GraduationCap className="w-4 h-4 text-primary-foreground" />
@@ -342,33 +204,35 @@ export default function MobileNav({
                 onClick={onClose}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors"
                 aria-label="Close menu"
+                data-ocid="mobile-nav.close_button"
               >
-                <X className="w-5 h-5" />
+                <X className="w-5 h-5 text-foreground" />
               </button>
             </div>
 
-            {/* Drawer nav — grouped by section */}
-            <nav className="p-3 pb-24 flex-1">
-              {Object.entries(sections).map(([sectionName, items]) => (
-                <div key={sectionName} className="mb-3">
-                  {sectionName !== "Main" && (
+            {/* Scrollable module list */}
+            <nav
+              className="overflow-y-auto p-3 pb-8 flex-1"
+              data-ocid="mobile-nav.drawer"
+            >
+              {DRAWER_SECTIONS.map((section) => (
+                <div key={section.title || "main"} className="mb-3">
+                  {section.title && (
                     <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2 pt-2 pb-1">
-                      {sectionName}
+                      {section.title}
                     </p>
                   )}
-                  <div className="space-y-0.5">
-                    {items.map((item) => {
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {section.items.map((item) => {
                       const Icon = item.icon;
-                      const active =
-                        activePage === item.id ||
-                        activePage.startsWith(`${item.id}/`);
+                      const active = isActive(item.id);
                       return (
                         <button
                           type="button"
                           key={item.id}
                           data-ocid={`drawer-nav-${item.id.replace(/\//g, "-")}`}
                           onClick={() => handleNav(item.id)}
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm transition-smooth
+                          className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-smooth
                             ${
                               active
                                 ? "bg-primary text-primary-foreground font-semibold"
@@ -376,7 +240,9 @@ export default function MobileNav({
                             }`}
                         >
                           <Icon className="w-4 h-4 flex-shrink-0" />
-                          <span className="text-left">{item.label}</span>
+                          <span className="text-left text-[13px] truncate">
+                            {item.label}
+                          </span>
                         </button>
                       );
                     })}

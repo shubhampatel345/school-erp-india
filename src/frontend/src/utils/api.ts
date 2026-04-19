@@ -2,49 +2,38 @@
  * SHUBH SCHOOL ERP — cPanel MySQL API Client
  *
  * Uses DIRECT FILE ROUTING — no .htaccess needed.
- * ALL API calls go to: {baseUrl}/api/index.php?route=ROUTE_NAME
- *
- * Storage keys:
- *   shubh_erp_api_base_url      — base URL e.g. https://shubh.psmkgs.com
- *   shubh_erp_jwt_token         — JWT returned by auth/login
- *   shubh_erp_jwt_refresh_token — refresh token
+ * ALL API calls go to: https://shubh.psmkgs.com/api/index.php?route=ROUTE_NAME
  */
 
-// ── Key constants ─────────────────────────────────────────
-const KEY_API_URL = "shubh_erp_api_url";
+// ── Fixed API endpoint ─────────────────────────────────────
+export const API_BASE = "https://shubh.psmkgs.com/api/index.php";
+
+// ── Key constants (sessionStorage for auth, localStorage for config) ──
 const KEY_API_BASE = "shubh_erp_api_base_url";
+const KEY_API_URL = "shubh_erp_api_url"; // legacy key
 const KEY_JWT = "shubh_erp_jwt_token";
 const KEY_JWT_REFRESH = "shubh_erp_jwt_refresh_token";
 
-/** Default base domain — NO /api suffix here */
 const DEFAULT_BASE_URL = "https://shubh.psmkgs.com";
 
-// ── URL Migration (auto-correct old wrong URL formats) ────────────────
+// ── URL Migration (auto-correct old wrong URL formats) ─────
 (function migrateApiUrl() {
   try {
-    // Migrate from old KEY_API_URL that stored the full /api path
     const oldStored = localStorage.getItem(KEY_API_URL);
     if (oldStored) {
-      // Extract the base domain from whatever was stored
       let base = oldStored
         .replace(/\/api\/index\.php.*$/, "")
         .replace(/\/api\/?$/, "")
         .replace(/\/$/, "");
-      // Fix missing subdomain
       if (base.includes("psmkgs.com") && !base.includes("shubh.psmkgs.com")) {
         base = DEFAULT_BASE_URL;
       }
-      if (base) {
-        localStorage.setItem(KEY_API_BASE, base);
-      }
+      if (base) localStorage.setItem(KEY_API_BASE, base);
       localStorage.removeItem(KEY_API_URL);
     }
-    // Fix bad base URL
     const base = localStorage.getItem(KEY_API_BASE);
     if (base) {
-      const needsFix =
-        base.includes("psmkgs.com") && !base.includes("shubh.psmkgs.com");
-      if (needsFix) {
+      if (base.includes("psmkgs.com") && !base.includes("shubh.psmkgs.com")) {
         localStorage.setItem(KEY_API_BASE, DEFAULT_BASE_URL);
       }
     }
@@ -53,18 +42,15 @@ const DEFAULT_BASE_URL = "https://shubh.psmkgs.com";
   }
 })();
 
-// ── URL helpers ───────────────────────────────────────────
+// ── URL helpers ────────────────────────────────────────────
 
-/** Returns the stored base URL (e.g. https://shubh.psmkgs.com), never with /api */
 export function getBaseUrl(): string {
   const stored = localStorage.getItem(KEY_API_BASE);
   if (stored) {
-    // Strip any accidental /api suffix
     const clean = stored
       .replace(/\/api\/index\.php.*$/, "")
       .replace(/\/api\/?$/, "")
       .replace(/\/$/, "");
-    // Auto-fix missing subdomain
     if (clean.includes("psmkgs.com") && !clean.includes("shubh.psmkgs.com")) {
       localStorage.setItem(KEY_API_BASE, DEFAULT_BASE_URL);
       return DEFAULT_BASE_URL;
@@ -74,16 +60,11 @@ export function getBaseUrl(): string {
   return DEFAULT_BASE_URL;
 }
 
-/** Returns the full path to index.php: {base}/api/index.php */
 export function getApiIndexUrl(): string {
   return `${getBaseUrl()}/api/index.php`;
 }
 
-/**
- * @deprecated Use getBaseUrl() + getApiIndexUrl()
- * Legacy helper that returns base/api — kept for backward compatibility
- * in components that show the URL to the user.
- */
+/** @deprecated Use getBaseUrl() + getApiIndexUrl() */
 export function getApiUrl(): string {
   return `${getBaseUrl()}/api`;
 }
@@ -97,7 +78,6 @@ export function setApiUrl(rawUrl: string) {
     localStorage.removeItem(KEY_API_BASE);
     return;
   }
-  // Accept either "https://domain.com" or "https://domain.com/api" — store just the base
   const clean = rawUrl
     .replace(/\/api\/index\.php.*$/, "")
     .replace(/\/api\/?$/, "")
@@ -109,30 +89,47 @@ export function isApiConfigured(): boolean {
   return getBaseUrl().length > 0;
 }
 
-// ── JWT helpers ───────────────────────────────────────────
+// ── JWT helpers ────────────────────────────────────────────
 
 export function getJwt(): string | null {
-  return localStorage.getItem(KEY_JWT);
+  // Prefer sessionStorage (auth token), fall back to localStorage for compat
+  return sessionStorage.getItem(KEY_JWT) ?? localStorage.getItem(KEY_JWT);
 }
 
 export function setJwt(token: string) {
-  localStorage.setItem(KEY_JWT, token);
+  sessionStorage.setItem(KEY_JWT, token);
+  // Also store in localStorage for tabs that may not have sessionStorage synced
+  try {
+    localStorage.setItem(KEY_JWT, token);
+  } catch {
+    // ignore
+  }
 }
 
 export function getRefreshToken(): string | null {
-  return localStorage.getItem(KEY_JWT_REFRESH);
+  return (
+    sessionStorage.getItem(KEY_JWT_REFRESH) ??
+    localStorage.getItem(KEY_JWT_REFRESH)
+  );
 }
 
 export function setRefreshToken(token: string) {
-  localStorage.setItem(KEY_JWT_REFRESH, token);
+  sessionStorage.setItem(KEY_JWT_REFRESH, token);
+  try {
+    localStorage.setItem(KEY_JWT_REFRESH, token);
+  } catch {
+    // ignore
+  }
 }
 
 export function clearTokens() {
+  sessionStorage.removeItem(KEY_JWT);
+  sessionStorage.removeItem(KEY_JWT_REFRESH);
   localStorage.removeItem(KEY_JWT);
   localStorage.removeItem(KEY_JWT_REFRESH);
 }
 
-// ── JWT payload decoder ───────────────────────────────────
+// ── JWT payload decoder ────────────────────────────────────
 
 interface JwtPayload {
   sub?: string;
@@ -180,7 +177,7 @@ export function isJwtExpired(): boolean {
   return payload.exp < Math.floor(Date.now() / 1000);
 }
 
-// ── Credential storage helpers ────────────────────────────
+// ── Credential storage helpers ─────────────────────────────
 
 export function storeServerCredentials(username: string, password: string) {
   try {
@@ -207,12 +204,69 @@ export function getStoredServerUsername(): string {
   }
 }
 
-// ── Backend login ─────────────────────────────────────────
+// ── API error type ─────────────────────────────────────────
+
+export interface ApiError {
+  message: string;
+  status?: number;
+  isNetworkError: boolean;
+  isSuperAdminOnly?: boolean;
+}
+
+// ── Safe JSON parser ───────────────────────────────────────
+
+async function safeParseJson<T>(res: Response): Promise<T> {
+  const ct = res.headers.get("content-type") ?? "";
+
+  if (ct.includes("text/html") || ct.includes("application/xhtml")) {
+    throw new Error(
+      "Server returned an HTML page instead of JSON. " +
+        "Upload api/index.php to cPanel public_html/api/ and visit " +
+        "/api/index.php?route=migrate/run to set up the database.",
+    );
+  }
+
+  let text = "";
+  try {
+    text = await res.text();
+  } catch {
+    throw new Error("Could not read response from server.");
+  }
+
+  const trimmed = text.trimStart();
+  if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
+    throw new Error(
+      "Server returned HTML instead of JSON. " +
+        "Upload api/index.php to cPanel public_html/api/. No .htaccess required.",
+    );
+  }
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(
+      `Invalid JSON from server. Response: ${trimmed.substring(0, 200)}`,
+    );
+  }
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// ── Backend login ──────────────────────────────────────────
 
 export interface BackendLoginResult {
   success: boolean;
   role?: string;
   error?: string;
+  token?: string;
+  refreshToken?: string;
 }
 
 export async function backendLogin(
@@ -239,7 +293,7 @@ export async function backendLogin(
       return {
         success: false,
         error:
-          "Server returned an HTML page. The api/ folder is not uploaded to cPanel, or index.php is missing. Upload the api/ folder to public_html/ and visit /api/index.php?route=migrate/run to set up the database.",
+          "Server returned HTML. Upload api/index.php to cPanel public_html/api/ and visit /api/index.php?route=migrate/run.",
       };
     }
 
@@ -255,18 +309,17 @@ export async function backendLogin(
       return {
         success: false,
         error:
-          "Server returned an HTML error page instead of JSON. Check that api/index.php is uploaded to cPanel public_html/api/.",
+          "Server returned HTML error page. Check that api/index.php is uploaded to cPanel public_html/api/.",
       };
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let parsed: Record<string, any> = {};
+    let parsed: Record<string, unknown> = {};
     try {
       parsed = JSON.parse(raw) as Record<string, unknown>;
     } catch {
       return {
         success: false,
-        error: `Invalid JSON from server. Response was: ${raw.substring(0, 200)}`,
+        error: `Invalid JSON from server. Response: ${raw.substring(0, 200)}`,
       };
     }
 
@@ -292,7 +345,7 @@ export async function backendLogin(
     if (res.ok && token) {
       setJwt(token);
       if (refreshToken) setRefreshToken(refreshToken);
-
+      storeServerCredentials(username.trim(), password.trim());
       try {
         const passwords = JSON.parse(
           localStorage.getItem("shubh_erp_user_passwords") ?? "{}",
@@ -302,13 +355,10 @@ export async function backendLogin(
           "shubh_erp_user_passwords",
           JSON.stringify(passwords),
         );
-        // Persist credentials for auto-reauth
-        storeServerCredentials(username.trim(), password.trim());
       } catch {
         // ignore
       }
-
-      return { success: true, role };
+      return { success: true, role, token, refreshToken };
     }
 
     const errorMsg =
@@ -323,15 +373,318 @@ export async function backendLogin(
     if (msg.includes("timeout") || msg.includes("AbortError")) {
       return {
         success: false,
-        error:
-          "Connection timed out. The server did not respond within 10 seconds. Check the API URL.",
+        error: "Connection timed out. Check the API URL.",
       };
     }
     return { success: false, error: msg };
   }
 }
 
-// ── Auto-login helper ─────────────────────────────────────
+// ── Clean API client (WhatsApp-style sync) ─────────────────
+// These functions use the fixed API_BASE and accept an explicit authToken
+
+export async function apiCall<T = unknown>(
+  route: string,
+  method: "GET" | "POST" | "PUT" | "DELETE" = "GET",
+  body: unknown = null,
+  authToken: string | null = null,
+): Promise<T> {
+  const url = `${API_BASE}?route=${encodeURIComponent(route)}`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+
+  const init: RequestInit = { method, headers };
+  if (body !== null && method !== "GET") init.body = JSON.stringify(body);
+
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch (err) {
+    throw {
+      message: err instanceof Error ? err.message : "Network request failed",
+      isNetworkError: true,
+    } satisfies ApiError;
+  }
+
+  return safeParseJson<T>(res);
+}
+
+export async function apiLogin(
+  username: string,
+  password: string,
+): Promise<{
+  token: string;
+  refreshToken: string;
+  user: Record<string, unknown>;
+}> {
+  const result = await apiCall<Record<string, unknown>>("auth/login", "POST", {
+    username,
+    password,
+  });
+  const data = (result.data ?? result) as Record<string, unknown>;
+  const token = (data.token ?? result.token ?? "") as string;
+  const refreshToken = (data.refresh_token ??
+    result.refresh_token ??
+    "") as string;
+  const user = (data.user ?? result.user ?? {}) as Record<string, unknown>;
+  return { token, refreshToken, user };
+}
+
+export async function apiVerifyToken(
+  token: string,
+): Promise<{ valid: boolean; user: Record<string, unknown> }> {
+  const result = await apiCall<Record<string, unknown>>(
+    "auth/verify",
+    "GET",
+    null,
+    token,
+  );
+  return {
+    valid: (result.valid as boolean) ?? result.status === "ok",
+    user: (result.user ?? result.data ?? {}) as Record<string, unknown>,
+  };
+}
+
+export async function apiRefreshToken(
+  refreshToken: string,
+): Promise<{ token: string }> {
+  const result = await apiCall<Record<string, unknown>>(
+    "auth/refresh",
+    "POST",
+    {
+      refresh_token: refreshToken,
+    },
+  );
+  return {
+    token: (result.token ??
+      (result.data as Record<string, unknown>)?.token ??
+      "") as string,
+  };
+}
+
+export async function apiLogout(token: string): Promise<void> {
+  await apiCall("auth/logout", "POST", null, token);
+}
+
+export async function apiChangePassword(
+  userId: string,
+  oldPassword: string,
+  newPassword: string,
+  token: string,
+): Promise<void> {
+  await apiCall(
+    "auth/change-password",
+    "POST",
+    { userId, oldPassword, newPassword },
+    token,
+  );
+}
+
+/** Fetch ALL collections in one request — the WhatsApp-style initial load */
+export async function apiFetchAll(
+  token: string,
+): Promise<Record<string, unknown[]>> {
+  try {
+    const result = await apiCall<Record<string, unknown>>(
+      "sync/all",
+      "GET",
+      null,
+      token,
+    );
+    const data = (result.data ?? result) as Record<string, unknown>;
+    // Normalize: each key should be an array
+    const out: Record<string, unknown[]> = {};
+    for (const [key, val] of Object.entries(data)) {
+      if (Array.isArray(val)) {
+        out[key] = val;
+      }
+    }
+    return out;
+  } catch {
+    // sync/all may not exist yet — fall back to empty
+    return {};
+  }
+}
+
+export async function apiFetchSyncStatus(): Promise<SyncStatusResponse> {
+  return apiCall<SyncStatusResponse>("sync/status");
+}
+
+export async function apiPushBatch(
+  collections: Record<string, unknown[]>,
+  token: string,
+): Promise<Record<string, { pushed: number; errors: string[] }>> {
+  const result = await apiCall<Record<string, unknown>>(
+    "sync/push-batch",
+    "POST",
+    { collections },
+    token,
+  );
+  const data = (result.data ?? result) as Record<string, unknown>;
+  return data as Record<string, { pushed: number; errors: string[] }>;
+}
+
+export async function apiListRecords<T>(
+  collection: string,
+  params: Record<string, string | number> = {},
+  token: string | null = null,
+): Promise<T[]> {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)])),
+  ).toString();
+  const route = qs ? `data/${collection}?${qs}` : `data/${collection}`;
+  const result = await apiCall<Record<string, unknown>>(
+    route,
+    "GET",
+    null,
+    token,
+  );
+  const data = result.data ?? result;
+  if (Array.isArray(data)) return data as T[];
+  if (
+    data &&
+    typeof data === "object" &&
+    Array.isArray((data as Record<string, unknown>).rows)
+  ) {
+    return (data as { rows: T[] }).rows;
+  }
+  return [];
+}
+
+export async function apiGetRecord<T>(
+  collection: string,
+  id: string | number,
+  token: string | null = null,
+): Promise<T> {
+  const result = await apiCall<Record<string, unknown>>(
+    `data/${collection}/${id}`,
+    "GET",
+    null,
+    token,
+  );
+  return (result.data ?? result) as T;
+}
+
+export async function apiCreateRecord<T extends Record<string, unknown>>(
+  collection: string,
+  data: T,
+  token: string | null = null,
+): Promise<{ id: number | string }> {
+  const result = await apiCall<Record<string, unknown>>(
+    `data/${collection}`,
+    "POST",
+    data,
+    token,
+  );
+  const d = (result.data ?? result) as Record<string, unknown>;
+  return { id: (d.id ?? d.insertId ?? 0) as number | string };
+}
+
+export async function apiUpdateRecord<T extends Record<string, unknown>>(
+  collection: string,
+  id: string | number,
+  data: T,
+  token: string | null = null,
+): Promise<void> {
+  await apiCall(`data/${collection}/${id}`, "PUT", data, token);
+}
+
+export async function apiDeleteRecord(
+  collection: string,
+  id: string | number,
+  token: string | null = null,
+): Promise<void> {
+  await apiCall(`data/${collection}/${id}`, "DELETE", null, token);
+}
+
+export async function apiBatchRecords<T extends Record<string, unknown>>(
+  collection: string,
+  records: T[],
+  token: string | null = null,
+): Promise<{ pushed: number; errors: string[] }> {
+  const result = await apiCall<Record<string, unknown>>(
+    "sync/batch",
+    "POST",
+    { collection, items: records },
+    token,
+  );
+  const d = (result.data ?? result) as Record<string, unknown>;
+  return {
+    pushed: (d.pushed as number) ?? 0,
+    errors: (d.errors as string[]) ?? [],
+  };
+}
+
+export async function apiGetPermissions(
+  role: string,
+  token: string,
+): Promise<Record<string, unknown>> {
+  const result = await apiCall<Record<string, unknown>>(
+    `permissions/get?role=${encodeURIComponent(role)}`,
+    "GET",
+    null,
+    token,
+  );
+  return (result.data ?? result) as Record<string, unknown>;
+}
+
+export async function apiUpdatePermissions(
+  role: string,
+  permissions: Record<string, unknown>,
+  token: string,
+): Promise<void> {
+  await apiCall("permissions/update", "POST", { role, permissions }, token);
+}
+
+export async function apiGetChangelog(token: string): Promise<unknown[]> {
+  const result = await apiCall<Record<string, unknown>>(
+    "changelog/list",
+    "GET",
+    null,
+    token,
+  );
+  const data = result.data ?? result;
+  return Array.isArray(data) ? data : [];
+}
+
+export async function apiExportBackup(
+  token: string,
+): Promise<Record<string, unknown>> {
+  return apiCall<Record<string, unknown>>("backup/export", "GET", null, token);
+}
+
+export async function apiImportBackup(
+  data: Record<string, unknown>,
+  token: string,
+): Promise<void> {
+  await apiCall("backup/import", "POST", data, token);
+}
+
+export async function apiRunMigration(): Promise<{
+  message: string;
+  success: boolean;
+}> {
+  return apiCall<{ message: string; success: boolean }>("migrate/run");
+}
+
+export async function apiResetDb(): Promise<{ message: string }> {
+  return apiCall<{ message: string }>("migrate/reset-db");
+}
+
+export async function apiResetSuperAdmin(): Promise<{ message: string }> {
+  return apiCall<{ message: string }>("migrate/reset-superadmin");
+}
+
+export async function apiHealthCheck(): Promise<{
+  status: string;
+  dbConnected: boolean;
+}> {
+  return apiCall<{ status: string; dbConnected: boolean }>("health");
+}
+
+// ── Auto-login helper ──────────────────────────────────────
 
 let _autoLoginInProgress = false;
 
@@ -343,7 +696,6 @@ async function ensureAuthenticated(): Promise<void> {
   _autoLoginInProgress = true;
 
   try {
-    // Try stored credentials first (most reliable)
     const storedUser = getStoredServerUsername();
     const storedPass = getStoredServerPassword();
     if (storedUser && storedPass) {
@@ -351,7 +703,6 @@ async function ensureAuthenticated(): Promise<void> {
       return;
     }
 
-    // Fallback: check current user role
     const currentUserRaw = localStorage.getItem("shubh_erp_current_user");
     if (!currentUserRaw) return;
 
@@ -383,66 +734,7 @@ async function ensureAuthenticated(): Promise<void> {
   }
 }
 
-// ── API error type ────────────────────────────────────────
-
-export interface ApiError {
-  message: string;
-  status?: number;
-  isNetworkError: boolean;
-  isSuperAdminOnly?: boolean;
-}
-
-// ── Safe JSON parser ──────────────────────────────────────
-
-async function safeParseJson<T>(res: Response): Promise<T> {
-  const ct = res.headers.get("content-type") ?? "";
-
-  if (ct.includes("text/html") || ct.includes("application/xhtml")) {
-    throw new Error(
-      "Server returned an HTML page instead of JSON. " +
-        "This usually means the api/ folder is not uploaded to cPanel, " +
-        "or api/index.php is missing. " +
-        "Upload api/ to public_html/ and visit /api/index.php?route=migrate/run.",
-    );
-  }
-
-  let text = "";
-  try {
-    text = await res.text();
-  } catch {
-    throw new Error("Could not read response from server.");
-  }
-
-  const trimmed = text.trimStart();
-  if (trimmed.startsWith("<") || trimmed.startsWith("<!")) {
-    throw new Error(
-      "Server returned HTML instead of JSON. " +
-        "Please upload api/index.php to your cPanel public_html/api/ directory. " +
-        "No .htaccess required — use direct file routing.",
-    );
-  }
-
-  try {
-    return JSON.parse(text) as T;
-  } catch {
-    throw new Error(
-      `Invalid JSON from server. Response was: ${trimmed.substring(0, 200)}`,
-    );
-  }
-}
-
-// ── URL validator ─────────────────────────────────────────
-
-function isValidUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
-}
-
-// ── Internal fetch wrapper ────────────────────────────────
+// ── Internal fetch wrapper ─────────────────────────────────
 // Uses ?route= query string — NO .htaccess needed.
 
 async function apiFetch<T>(
@@ -467,7 +759,6 @@ async function apiFetch<T>(
   const jwt = getJwt();
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
 
-  // Strip leading slash from route
   const cleanRoute = route.replace(/^\/+/, "");
   const url = `${indexUrl}?route=${encodeURIComponent(cleanRoute)}`;
 
@@ -504,7 +795,6 @@ async function apiFetch<T>(
         clearTokens();
       }
     }
-    // Refresh failed — try re-login with stored credentials before giving up
     const storedUser = getStoredServerUsername();
     const storedPass = getStoredServerPassword();
     if (storedUser && storedPass) {
@@ -513,7 +803,6 @@ async function apiFetch<T>(
         return apiFetch<T>(method, route, body, true);
       }
     }
-    // Fall back to ensureAuthenticated (role-based lookup)
     if (!retried) {
       await ensureAuthenticated();
       return apiFetch<T>(method, route, body, true);
@@ -548,7 +837,7 @@ async function apiFetch<T>(
   return safeParseJson<T>(res);
 }
 
-// ── Core typed API functions ──────────────────────────────
+// ── Core typed API functions ───────────────────────────────
 
 export async function apiGet<T>(route: string): Promise<T> {
   return apiFetch<T>("GET", route);
@@ -572,7 +861,7 @@ export async function apiDelete<T>(route: string): Promise<T> {
   return apiFetch<T>("DELETE", route);
 }
 
-// ── Generic collection CRUD ───────────────────────────────
+// ── Generic collection CRUD ────────────────────────────────
 
 export interface CollectionListResult<T> {
   rows: T[];
@@ -581,10 +870,6 @@ export interface CollectionListResult<T> {
   offset: number;
 }
 
-/**
- * Fetch a single page from the server.
- * Returns { rows, total } where total is the server's total count for this collection.
- */
 async function fetchCollectionPage<T>(
   collection: string,
   offset: number,
@@ -610,16 +895,7 @@ async function fetchCollectionPage<T>(
   const jwt = getJwt();
   if (jwt) headers.Authorization = `Bearer ${jwt}`;
 
-  let res: Response;
-  try {
-    res = await fetch(url, { method: "GET", headers });
-  } catch (err) {
-    console.error(
-      `[DataService] fetchCollection(${collection}) network error:`,
-      err,
-    );
-    throw err;
-  }
+  const res = await fetch(url, { method: "GET", headers });
 
   const parsed = await safeParseJson<{
     status?: string;
@@ -628,10 +904,6 @@ async function fetchCollectionPage<T>(
     rows?: T[];
   }>(res);
 
-  // Support multiple response shapes:
-  // { data: [...] }           — json_success(array)
-  // { data: { rows, total } } — paginated shape
-  // { rows: [...], total }    — direct rows
   let rows: T[];
   let total = 0;
 
@@ -656,29 +928,12 @@ async function fetchCollectionPage<T>(
   return { rows, total };
 }
 
-/**
- * Fetch ALL rows for a collection from the server.
- *
- * Strategy:
- *  1. Fetch with a very large page size (BULK_PAGE_SIZE = 5000) in one request
- *     so most collections fit in a single round-trip.
- *  2. If the server reports `total > BULK_PAGE_SIZE` (very large collections),
- *     fetch remaining pages in parallel using BULK_PAGE_SIZE chunks.
- *  3. Deduplicate by `id` field and return the merged array.
- *
- * Why BULK_PAGE_SIZE instead of 500:
- *   The PHP API returns a plain array without a total count when limit > rows.
- *   With PAGE_SIZE=500, if the server returns exactly 500 rows, `total` defaults
- *   to 500 (rows.length) and pagination stops — leaving 684 students missing.
- *   Using 5000 means a single request will capture all records for most schools.
- */
 const BULK_PAGE_SIZE = 5000;
 
 export async function fetchCollection<T>(
   collection: string,
   filters?: Record<string, string | number>,
 ): Promise<T[]> {
-  // Fetch one large page — this captures all records for most collections
   const first = await fetchCollectionPage<T>(
     collection,
     0,
@@ -687,19 +942,11 @@ export async function fetchCollection<T>(
   );
 
   if (first.rows.length === 0) return [];
+  if (first.rows.length < BULK_PAGE_SIZE) return first.rows;
 
-  // If server returned fewer rows than the bulk page size, we have everything
-  if (first.rows.length < BULK_PAGE_SIZE) {
-    return first.rows;
-  }
-
-  // Server returned a full BULK_PAGE_SIZE — there may be more rows.
-  // Use the reported total (if available) or keep fetching until we get a partial page.
   const reportedTotal = first.total > first.rows.length ? first.total : 0;
 
   if (reportedTotal === 0) {
-    // No total reported — keep fetching sequential pages until we get a partial page
-    // (rare: only schools with > 5000 records in one collection reach this path)
     const allRows: T[] = [...first.rows];
     let offset = BULK_PAGE_SIZE;
     for (;;) {
@@ -716,7 +963,6 @@ export async function fetchCollection<T>(
     return deduplicateRows(allRows);
   }
 
-  // We have a reliable total — fetch remaining pages concurrently
   const remainingOffsets: number[] = [];
   for (
     let offset = BULK_PAGE_SIZE;
@@ -786,14 +1032,12 @@ export async function syncAllCollections(
   for (const result of results) {
     if (result.status === "fulfilled") {
       out[result.value.name] = result.value.rows;
-    } else {
-      console.warn("[DataService] Failed to sync collection:", result.reason);
     }
   }
   return out;
 }
 
-// ── Sync status endpoint ──────────────────────────────────
+// ── Sync status endpoint ───────────────────────────────────
 
 export interface SyncStatusResponse {
   status: "ok" | "error";
@@ -806,7 +1050,6 @@ export interface SyncStatusResponse {
 }
 
 export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
-  // Public endpoint — call directly without auth to avoid auth loops
   const indexUrl = getApiIndexUrl();
   const url = `${indexUrl}?route=sync/status`;
 
@@ -824,7 +1067,7 @@ export async function fetchSyncStatus(): Promise<SyncStatusResponse> {
   return safeParseJson<SyncStatusResponse>(res);
 }
 
-// ── Migration endpoint ────────────────────────────────────
+// ── Migration endpoint ─────────────────────────────────────
 
 export interface MigrateResponse {
   success: boolean;
@@ -886,7 +1129,7 @@ export async function migrateLocalData(
   }
 }
 
-// ── Batch push ────────────────────────────────────────────
+// ── Batch push ─────────────────────────────────────────────
 
 export interface BatchPushResult {
   pushed: number;
@@ -900,18 +1143,14 @@ export async function batchPushCollection(
   collection: string,
   items: unknown[],
 ): Promise<BatchPushResult> {
-  // Use sync/batch for single-collection pushes — returns { pushed, total, errors, collection, table }
-  // sync/push also accepts this format (via auto-redirect), but sync/batch is more explicit.
   const raw = await apiFetch<unknown>("POST", "sync/batch", {
     collection,
     items,
   });
-  // Handle both direct shape { pushed, errors } and wrapped { data: { pushed, errors } }
   const r = raw as Record<string, unknown>;
   if (typeof r.pushed === "number") {
     return r as unknown as BatchPushResult;
   }
-  // Unwrap nested data field if present
   const d = (r.data ?? r) as Record<string, unknown>;
   return {
     pushed: (d.pushed as number) ?? 0,
@@ -922,7 +1161,7 @@ export async function batchPushCollection(
   };
 }
 
-// ── Connection test ───────────────────────────────────────
+// ── Connection test ────────────────────────────────────────
 
 export interface ConnectionTestResult {
   connected: boolean;
@@ -937,7 +1176,6 @@ export async function testConnection(
   overrideBaseUrl?: string,
 ): Promise<ConnectionTestResult> {
   let base = overrideBaseUrl ?? getBaseUrl();
-  // Accept "https://domain.com/api" or "https://domain.com" — normalize to base
   base = base
     .replace(/\/api\/index\.php.*$/, "")
     .replace(/\/api\/?$/, "")
@@ -950,8 +1188,7 @@ export async function testConnection(
     return {
       connected: false,
       latencyMs: 0,
-      error:
-        "URL is invalid. It must start with http:// or https:// and be a valid web address.",
+      error: "URL is invalid. It must start with http:// or https://.",
     };
   }
 
@@ -975,7 +1212,7 @@ export async function testConnection(
         connected: false,
         latencyMs,
         error: isHtml
-          ? "Server returned HTML instead of JSON. Upload api/index.php to cPanel public_html/api/ and visit /api/index.php?route=migrate/run to set up the database. No .htaccess required."
+          ? "Server returned HTML. Upload api/index.php to cPanel public_html/api/ and visit /api/index.php?route=migrate/run."
           : errMsg ||
             "API file not found. Upload api/index.php to public_html/api/ on cPanel.",
       };
@@ -998,10 +1235,6 @@ export async function testConnection(
   } catch (err) {
     const latencyMs = Math.round(performance.now() - start);
     const msg = err instanceof Error ? err.message : "Connection failed";
-    return {
-      connected: false,
-      latencyMs,
-      error: msg,
-    };
+    return { connected: false, latencyMs, error: msg };
   }
 }

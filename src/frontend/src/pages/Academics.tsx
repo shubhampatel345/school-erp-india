@@ -29,7 +29,6 @@ interface AcademicsProps {
   initialTab?: string;
 }
 
-// Map sidebar route segments to internal tab IDs
 const TAB_MAP: Record<string, TabId> = {
   classes: "classes",
   subjects: "subjects",
@@ -53,7 +52,7 @@ export default function Academics({ initialTab }: AcademicsProps) {
             <button
               key={tab.id}
               type="button"
-              data-ocid={`academics-tab-${tab.id}`}
+              data-ocid={`academics.${tab.id}.tab`}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 activeTab === tab.id

@@ -34,7 +34,6 @@ export default function Attendance() {
 
   return (
     <div className="p-4 lg:p-6 space-y-5">
-      {/* Page Header */}
       <div>
         <h1 className="text-2xl font-bold font-display text-foreground">
           Attendance
@@ -45,7 +44,6 @@ export default function Attendance() {
         </p>
       </div>
 
-      {/* Tab Navigation */}
       <div
         className="flex gap-1 bg-muted/50 rounded-xl p-1 flex-wrap"
         role="tablist"
@@ -59,7 +57,7 @@ export default function Attendance() {
               type="button"
               role="tab"
               aria-selected={active}
-              data-ocid={`attendance-tab-${tab.id}`}
+              data-ocid={`attendance.${tab.id}.tab`}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all flex-1 justify-center min-w-[100px] ${
                 active
@@ -103,7 +101,6 @@ export default function Attendance() {
         })}
       </div>
 
-      {/* Tab Content */}
       <div>
         {activeTab === "manual" && (
           <ManualAttendance date={date} onDateChange={setDate} />

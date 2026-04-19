@@ -16,16 +16,9 @@ export default function Layout({
   children,
 }: LayoutProps) {
   const { currentSession } = useApp();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const handleMenuToggle = () => {
-    if (window.innerWidth < 1024) {
-      setMobileMenuOpen((v) => !v);
-    } else {
-      setSidebarCollapsed((v) => !v);
-    }
-  };
+  const handleMenuToggle = () => setMobileMenuOpen((v) => !v);
 
   const handleNavigate = (page: string) => {
     if (page === "__menu__") {
@@ -40,10 +33,10 @@ export default function Layout({
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
-      {/* Header — visually elevated with bg-card */}
+      {/* Header — elevated bg-card */}
       <Header onMenuToggle={handleMenuToggle} onNavigate={handleNavigate} />
 
-      {/* Archived session read-only banner */}
+      {/* Archived session banner */}
       {isArchived && (
         <div className="session-banner px-4 py-2 flex items-center justify-center gap-2 flex-shrink-0 z-30">
           <span className="text-sm font-medium">
@@ -54,13 +47,9 @@ export default function Layout({
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Desktop Sidebar — dark navy */}
-        <div className="hidden lg:block flex-shrink-0">
-          <Sidebar
-            activePage={activePage}
-            onNavigate={handleNavigate}
-            collapsed={sidebarCollapsed}
-          />
+        {/* Desktop Sidebar — visible on md+ */}
+        <div className="hidden md:block flex-shrink-0">
+          <Sidebar activePage={activePage} onNavigate={handleNavigate} />
         </div>
 
         {/* Main Content Area */}
@@ -68,11 +57,12 @@ export default function Layout({
           className="flex-1 overflow-y-auto bg-background"
           id="main-content"
         >
-          <div className="min-h-full pb-20 lg:pb-0">{children}</div>
+          {/* Bottom padding on mobile to avoid MobileNav overlap */}
+          <div className="min-h-full pb-20 md:pb-0">{children}</div>
         </main>
       </div>
 
-      {/* Mobile Navigation */}
+      {/* Mobile Navigation — bottom fixed, hidden on md+ */}
       <MobileNav
         activePage={activePage}
         onNavigate={handleNavigate}

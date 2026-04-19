@@ -32,7 +32,7 @@ export default function HR({ onNavigate, initialTab }: HRProps) {
             <button
               key={tab.id}
               type="button"
-              data-ocid={`hr-tab-${tab.id}`}
+              data-ocid={`hr.${tab.id}.tab`}
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
                 activeTab === tab.id

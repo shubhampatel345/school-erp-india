@@ -1,926 +1,512 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  CalendarDays,
-  GraduationCap,
+  Download,
+  Edit2,
   Mail,
   Phone,
   Plus,
-  UserCheck,
+  Trash2,
   Users,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
-import { generateId, ls } from "../utils/localStorage";
+import type { Alumni, AlumniEvent } from "../types";
+import { generateId } from "../utils/localStorage";
 
-// ─────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────
+function downloadCSV(filename: string, rows: string[][]): void {
+  const csv = rows
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
-interface AlumniRecord {
-  id: string;
+interface AlumniFormData {
   name: string;
-  batch: string; // e.g. "2020-21"
-  graduationYear: string; // e.g. "2021"
-  class_: string;
   admNo: string;
+  yearOfPassing: string;
+  classGrade: string;
   mobile: string;
   email: string;
-  address: string;
-  photo: string;
-  currentRole: string; // current job / position
+  occupation: string;
 }
 
-interface AlumniEventRecord {
-  id: string;
-  title: string;
-  date: string;
-  description: string;
-  venue: string;
-  attendees: string[]; // alumni IDs
-}
-
-type AlumniTab = "directory" | "batch" | "events";
-
-const TABS: { id: AlumniTab; label: string; icon: React.ReactNode }[] = [
-  { id: "directory", label: "Directory", icon: <Users className="w-4 h-4" /> },
-  {
-    id: "batch",
-    label: "Batch View",
-    icon: <GraduationCap className="w-4 h-4" />,
-  },
-  {
-    id: "events",
-    label: "Events",
-    icon: <CalendarDays className="w-4 h-4" />,
-  },
-];
-
-const EMPTY_ALUMNI: Omit<AlumniRecord, "id"> = {
+const EMPTY_FORM: AlumniFormData = {
   name: "",
-  batch: "",
-  graduationYear: "",
-  class_: "",
   admNo: "",
+  yearOfPassing: "",
+  classGrade: "",
   mobile: "",
   email: "",
-  address: "",
-  photo: "",
-  currentRole: "",
+  occupation: "",
 };
 
-const EMPTY_EVENT: Omit<AlumniEventRecord, "id"> = {
-  title: "",
-  date: "",
-  description: "",
-  venue: "",
-  attendees: [],
-};
+function AlumniForm({
+  initial,
+  onSave,
+  onClose,
+}: {
+  initial?: Partial<AlumniFormData>;
+  onSave: (data: AlumniFormData) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<AlumniFormData>({
+    ...EMPTY_FORM,
+    ...initial,
+  });
+  const set = (k: keyof AlumniFormData, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
 
-const today = new Date().toISOString().split("T")[0];
-
-// ─────────────────────────────────────────────
-// Avatar helper
-// ─────────────────────────────────────────────
-function AlumniAvatar({
-  a,
-  size = "sm",
-}: { a: AlumniRecord; size?: "sm" | "lg" }) {
-  const cls =
-    size === "lg"
-      ? "w-14 h-14 rounded-full object-cover"
-      : "w-8 h-8 rounded-full object-cover";
-  const placeholderCls =
-    size === "lg"
-      ? "w-14 h-14 rounded-full bg-gradient-to-br from-primary/30 to-accent/20 flex items-center justify-center text-primary font-bold text-xl mx-auto"
-      : "w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold text-sm shrink-0";
-
-  if (a.photo) {
-    return (
-      <img
-        src={a.photo}
-        alt={a.name}
-        className={size === "lg" ? `${cls} mx-auto` : cls}
-      />
-    );
-  }
-  return <div className={placeholderCls}>{a.name.charAt(0).toUpperCase()}</div>;
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label>Full Name *</Label>
+          <Input
+            value={form.name}
+            onChange={(e) => set("name", e.target.value)}
+            data-ocid="alumni.form.name_input"
+          />
+        </div>
+        <div>
+          <Label>Adm. No.</Label>
+          <Input
+            value={form.admNo}
+            onChange={(e) => set("admNo", e.target.value)}
+          />
+        </div>
+        <div>
+          <Label>Year of Passing *</Label>
+          <Input
+            value={form.yearOfPassing}
+            onChange={(e) => set("yearOfPassing", e.target.value)}
+            placeholder="e.g. 2020"
+          />
+        </div>
+        <div>
+          <Label>Class/Grade</Label>
+          <Input
+            value={form.classGrade}
+            onChange={(e) => set("classGrade", e.target.value)}
+            placeholder="e.g. 12"
+          />
+        </div>
+        <div>
+          <Label>Mobile</Label>
+          <Input
+            value={form.mobile}
+            onChange={(e) => set("mobile", e.target.value)}
+            type="tel"
+          />
+        </div>
+        <div>
+          <Label>Email</Label>
+          <Input
+            value={form.email}
+            onChange={(e) => set("email", e.target.value)}
+            type="email"
+          />
+        </div>
+        <div className="col-span-2">
+          <Label>Occupation</Label>
+          <Input
+            value={form.occupation}
+            onChange={(e) => set("occupation", e.target.value)}
+          />
+        </div>
+      </div>
+      <div className="flex gap-2 justify-end pt-2">
+        <Button
+          variant="outline"
+          onClick={onClose}
+          data-ocid="alumni.form.cancel_button"
+        >
+          Cancel
+        </Button>
+        <Button
+          onClick={() => {
+            if (!form.name || !form.yearOfPassing) return;
+            onSave(form);
+          }}
+          data-ocid="alumni.form.submit_button"
+        >
+          Save
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 export default function AlumniPage() {
-  const { addNotification } = useApp();
-  const [activeTab, setActiveTab] = useState<AlumniTab>("directory");
-  const [alumnis, setAlumnis] = useState<AlumniRecord[]>(() =>
-    ls.get<AlumniRecord[]>("alumni", []),
-  );
-  const [events, setEvents] = useState<AlumniEventRecord[]>(() =>
-    ls.get<AlumniEventRecord[]>("alumni_events", []),
-  );
+  const { getData, saveData, updateData, deleteData } = useApp();
+  const alumniList = getData("alumni") as Alumni[];
+  const eventsList = getData("alumni_events") as AlumniEvent[];
 
-  // Directory state
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<Omit<AlumniRecord, "id">>(EMPTY_ALUMNI);
-  const [editId, setEditId] = useState<string | null>(null);
-  const [searchName, setSearchName] = useState("");
-  const [searchBatch, setSearchBatch] = useState("");
-  const photoInputRef = useRef<HTMLInputElement>(null);
+  const [search, setSearch] = useState("");
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editItem, setEditItem] = useState<Alumni | null>(null);
+  const [eventDialogOpen, setEventDialogOpen] = useState(false);
+  const [eventForm, setEventForm] = useState({
+    title: "",
+    date: "",
+    description: "",
+  });
 
-  // Events state
-  const [showEventForm, setShowEventForm] = useState(false);
-  const [eventForm, setEventForm] =
-    useState<Omit<AlumniEventRecord, "id">>(EMPTY_EVENT);
-  const [editEventId, setEditEventId] = useState<string | null>(null);
-  const [attendeeSearch, setAttendeeSearch] = useState("");
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return alumniList.filter(
+      (a) =>
+        (a.name ?? "").toLowerCase().includes(q) ||
+        (a.batch ?? "").toLowerCase().includes(q) ||
+        (a.admNo ?? "").toLowerCase().includes(q),
+    );
+  }, [alumniList, search]);
 
-  // Batch expansion state
-  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(
-    new Set(),
-  );
+  const batches = useMemo(() => {
+    const map: Record<string, Alumni[]> = {};
+    for (const a of alumniList) {
+      const b = a.batch ?? "Unknown";
+      if (!map[b]) map[b] = [];
+      map[b].push(a);
+    }
+    return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
+  }, [alumniList]);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setForm((p) => ({ ...p, photo: ev.target?.result as string }));
+  const handleSave = async (form: AlumniFormData) => {
+    const record: Record<string, unknown> = {
+      name: form.name,
+      admNo: form.admNo,
+      batch: form.yearOfPassing,
+      class_: form.classGrade,
+      mobile: form.mobile,
+      email: form.email,
+      occupation: form.occupation,
     };
-    reader.readAsDataURL(file);
+    if (editItem) {
+      await updateData("alumni", editItem.id, record);
+    } else {
+      record.id = generateId();
+      await saveData("alumni", record);
+    }
+    setDialogOpen(false);
+    setEditItem(null);
   };
 
-  const handleSave = useCallback(() => {
-    if (!form.name.trim()) return;
-    if (editId) {
-      const updated = alumnis.map((a) =>
-        a.id === editId ? { ...form, id: editId } : a,
-      );
-      setAlumnis(updated);
-      ls.set("alumni", updated);
-    } else {
-      const updated = [...alumnis, { ...form, id: generateId() }];
-      setAlumnis(updated);
-      ls.set("alumni", updated);
-      addNotification(
-        `${form.name} added to alumni directory`,
-        "success",
-        "🎓",
-      );
-    }
-    setForm(EMPTY_ALUMNI);
-    setEditId(null);
-    setShowForm(false);
-  }, [form, editId, alumnis, addNotification]);
-
-  const handleDelete = useCallback(
-    (id: string) => {
-      if (!confirm("Delete this alumni record?")) return;
-      const updated = alumnis.filter((a) => a.id !== id);
-      setAlumnis(updated);
-      ls.set("alumni", updated);
-    },
-    [alumnis],
-  );
-
-  const handleEdit = useCallback((a: AlumniRecord) => {
-    setForm({
-      name: a.name,
-      batch: a.batch,
-      graduationYear: a.graduationYear ?? "",
-      class_: a.class_,
-      admNo: a.admNo,
-      mobile: a.mobile,
-      email: a.email,
-      address: a.address,
-      photo: a.photo,
-      currentRole: a.currentRole ?? "",
-    });
-    setEditId(a.id);
-    setShowForm(true);
-  }, []);
-
-  const handleSaveEvent = useCallback(() => {
-    if (!eventForm.title.trim()) return;
-    if (editEventId) {
-      const updated = events.map((e) =>
-        e.id === editEventId ? { ...eventForm, id: editEventId } : e,
-      );
-      setEvents(updated);
-      ls.set("alumni_events", updated);
-    } else {
-      const updated = [...events, { ...eventForm, id: generateId() }];
-      setEvents(updated);
-      ls.set("alumni_events", updated);
-      addNotification(
-        `Alumni event "${eventForm.title}" scheduled`,
-        "success",
-        "📅",
-      );
-    }
-    setEventForm(EMPTY_EVENT);
-    setEditEventId(null);
-    setShowEventForm(false);
-  }, [eventForm, editEventId, events, addNotification]);
-
-  const handleDeleteEvent = useCallback(
-    (id: string) => {
-      if (!confirm("Delete this event?")) return;
-      const updated = events.filter((e) => e.id !== id);
-      setEvents(updated);
-      ls.set("alumni_events", updated);
-    },
-    [events],
-  );
-
-  const toggleAttendee = useCallback((alumniId: string) => {
-    setEventForm((prev) => {
-      const has = prev.attendees.includes(alumniId);
-      return {
-        ...prev,
-        attendees: has
-          ? prev.attendees.filter((id) => id !== alumniId)
-          : [...prev.attendees, alumniId],
-      };
-    });
-  }, []);
-
-  const toggleBatch = (batch: string) => {
-    setExpandedBatches((prev) => {
-      const next = new Set(prev);
-      if (next.has(batch)) next.delete(batch);
-      else next.add(batch);
-      return next;
-    });
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this alumni record?")) return;
+    await deleteData("alumni", id);
   };
 
-  const filtered = alumnis.filter((a) => {
-    const matchName = a.name.toLowerCase().includes(searchName.toLowerCase());
-    const matchBatch = searchBatch ? a.batch.includes(searchBatch) : true;
-    return matchName && matchBatch;
-  });
+  const handleSaveEvent = async () => {
+    if (!eventForm.title || !eventForm.date) return;
+    await saveData("alumni_events", {
+      id: generateId(),
+      ...eventForm,
+      attendees: [],
+    });
+    setEventDialogOpen(false);
+    setEventForm({ title: "", date: "", description: "" });
+  };
 
-  // Group by batch
-  const batchMap: Record<string, AlumniRecord[]> = {};
-  for (const a of alumnis) {
-    const key = a.batch || "Unknown";
-    if (!batchMap[key]) batchMap[key] = [];
-    batchMap[key].push(a);
-  }
-  const sortedBatches = Object.keys(batchMap).sort((a, b) => {
-    const na = Number(a.split("-")[0]);
-    const nb = Number(b.split("-")[0]);
-    return nb - na;
-  });
-
-  const filteredAttendees = alumnis.filter((a) =>
-    a.name.toLowerCase().includes(attendeeSearch.toLowerCase()),
-  );
+  const exportCSV = () => {
+    const rows = [
+      ["Name", "Adm No", "Batch", "Class", "Mobile", "Email"],
+      ...alumniList.map((a) => [
+        a.name ?? "",
+        a.admNo ?? "",
+        a.batch ?? "",
+        a.class_ ?? "",
+        a.mobile ?? "",
+        a.email ?? "",
+      ]),
+    ];
+    downloadCSV("alumni_directory.csv", rows);
+  };
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
-      {/* Page Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-          <GraduationCap className="w-5 h-5 text-primary" />
-        </div>
+    <div className="p-4 md:p-6 bg-background min-h-screen space-y-4">
+      <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-display font-bold text-foreground">
+          <h1 className="text-2xl font-bold text-foreground font-display">
             Alumni
           </h1>
-          <p className="text-sm text-muted-foreground">
-            {alumnis.length} alumni in directory
+          <p className="text-muted-foreground text-sm mt-0.5">
+            {alumniList.length} alumni registered
           </p>
         </div>
+        <Button
+          onClick={() => {
+            setEditItem(null);
+            setDialogOpen(true);
+          }}
+          data-ocid="alumni.add_button"
+        >
+          <Plus className="w-4 h-4 mr-1" /> Add Alumni
+        </Button>
       </div>
 
-      {/* Tab Nav */}
-      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
-        {TABS.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
-              activeTab === tab.id
-                ? "bg-primary text-primary-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
-            }`}
-            data-ocid={`alumni-tab-${tab.id}`}
-          >
-            {tab.icon}
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <Tabs defaultValue="directory">
+        <TabsList>
+          <TabsTrigger value="directory" data-ocid="alumni.directory.tab">
+            Directory
+          </TabsTrigger>
+          <TabsTrigger value="batches" data-ocid="alumni.batches.tab">
+            Batches
+          </TabsTrigger>
+          <TabsTrigger value="events" data-ocid="alumni.events.tab">
+            Events
+          </TabsTrigger>
+        </TabsList>
 
-      {/* ── DIRECTORY ── */}
-      {activeTab === "directory" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-2">
-            <h2 className="text-base font-semibold text-foreground">
-              Alumni Directory
-            </h2>
+        <TabsContent value="directory" className="mt-4 space-y-3">
+          <div className="flex gap-2">
+            <Input
+              placeholder="Search by name, batch, adm no…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="max-w-sm"
+              data-ocid="alumni.search_input"
+            />
             <Button
-              onClick={() => {
-                setShowForm(true);
-                setForm(EMPTY_ALUMNI);
-                setEditId(null);
-              }}
-              data-ocid="add-alumni-btn"
-              className="gap-1.5"
+              variant="outline"
+              size="sm"
+              onClick={exportCSV}
+              data-ocid="alumni.export_button"
             >
-              <Plus className="w-4 h-4" /> Add Alumni
+              <Download className="w-4 h-4 mr-1" /> Export
             </Button>
           </div>
-
-          <div className="flex gap-3 flex-wrap">
-            <Input
-              className="max-w-xs"
-              placeholder="Search by name..."
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
-              data-ocid="alumni-search-name"
-            />
-            <Input
-              className="max-w-[180px]"
-              placeholder="Filter by batch..."
-              value={searchBatch}
-              onChange={(e) => setSearchBatch(e.target.value)}
-              data-ocid="alumni-search-batch"
-            />
-          </div>
-
-          {showForm && (
-            <Card className="border-primary/30 bg-primary/5">
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {editId ? "Edit Alumni" : "Add Alumni"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Photo upload */}
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 rounded-full bg-primary/10 border-2 border-dashed border-primary/30 flex items-center justify-center overflow-hidden shrink-0">
-                    {form.photo ? (
-                      <img
-                        src={form.photo}
-                        alt="Alumni"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <GraduationCap className="w-7 h-7 text-primary/40" />
-                    )}
-                  </div>
-                  <div>
-                    <Label className="text-xs">Photo</Label>
-                    <div className="flex gap-2 mt-1">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => photoInputRef.current?.click()}
-                      >
-                        Upload Photo
-                      </Button>
-                      {form.photo && (
+          {filtered.length === 0 ? (
+            <div
+              className="text-center py-16 text-muted-foreground"
+              data-ocid="alumni.directory.empty_state"
+            >
+              <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p>No alumni found</p>
+              <p className="text-xs mt-1">Click "Add Alumni" to get started</p>
+            </div>
+          ) : (
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((a, i) => (
+                <Card key={a.id} data-ocid={`alumni.item.${i + 1}`}>
+                  <CardContent className="pt-4 pb-3">
+                    <div className="flex justify-between items-start">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-foreground truncate">
+                          {a.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Batch {a.batch} • Class {a.class_}
+                        </p>
+                        {a.mobile && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                            <Phone className="w-3 h-3" /> {a.mobile}
+                          </p>
+                        )}
+                        {a.email && (
+                          <p className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Mail className="w-3 h-3" /> {a.email}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex gap-1 ml-2">
                         <Button
-                          type="button"
+                          size="icon"
                           variant="ghost"
-                          size="sm"
-                          onClick={() => setForm((p) => ({ ...p, photo: "" }))}
-                        >
-                          Remove
-                        </Button>
-                      )}
-                    </div>
-                    <input
-                      ref={photoInputRef}
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={handlePhotoUpload}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  {[
-                    {
-                      label: "Full Name *",
-                      key: "name" as const,
-                      placeholder: "Alumni name",
-                    },
-                    {
-                      label: "Batch Year",
-                      key: "batch" as const,
-                      placeholder: "e.g. 2020-21",
-                    },
-                    {
-                      label: "Graduation Year",
-                      key: "graduationYear" as const,
-                      placeholder: "e.g. 2021",
-                    },
-                    {
-                      label: "Class",
-                      key: "class_" as const,
-                      placeholder: "e.g. Class 10",
-                    },
-                    {
-                      label: "Adm. No.",
-                      key: "admNo" as const,
-                      placeholder: "Admission number",
-                    },
-                    {
-                      label: "Mobile",
-                      key: "mobile" as const,
-                      placeholder: "10-digit mobile",
-                    },
-                    {
-                      label: "Email",
-                      key: "email" as const,
-                      placeholder: "alumni@email.com",
-                    },
-                    {
-                      label: "Current Role",
-                      key: "currentRole" as const,
-                      placeholder: "Engineer at Infosys",
-                    },
-                    {
-                      label: "Address",
-                      key: "address" as const,
-                      placeholder: "City, State",
-                    },
-                  ].map(({ label, key, placeholder }) => (
-                    <div key={key}>
-                      <Label className="text-xs">{label}</Label>
-                      <Input
-                        value={form[key]}
-                        onChange={(e) =>
-                          setForm((p) => ({ ...p, [key]: e.target.value }))
-                        }
-                        placeholder={placeholder}
-                        data-ocid={`alumni-input-${key}`}
-                      />
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-2">
-                  <Button onClick={handleSave} data-ocid="save-alumni-btn">
-                    Save
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowForm(false);
-                      setEditId(null);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 sticky top-0">
-                <tr>
-                  {[
-                    "Name",
-                    "Batch",
-                    "Year",
-                    "Current Role",
-                    "Contact",
-                    "Email",
-                    "Actions",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 && (
-                  <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-12 text-center text-muted-foreground"
-                    >
-                      <GraduationCap className="w-10 h-10 mx-auto mb-2 text-muted-foreground/40" />
-                      No alumni records found.
-                    </td>
-                  </tr>
-                )}
-                {filtered.map((a) => (
-                  <tr
-                    key={a.id}
-                    className="border-t border-border hover:bg-muted/30"
-                    data-ocid={`alumni-row-${a.id}`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <AlumniAvatar a={a} />
-                        <span className="font-medium">{a.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <Badge variant="secondary">{a.batch || "—"}</Badge>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {a.graduationYear || a.batch?.split("-")[1] || "—"}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground truncate max-w-[140px]">
-                      {a.currentRole || "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      {a.mobile ? (
-                        <a
-                          href={`tel:${a.mobile}`}
-                          className="flex items-center gap-1 text-primary hover:underline"
-                        >
-                          <Phone className="w-3 h-3" /> {a.mobile}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3 truncate max-w-[140px]">
-                      {a.email ? (
-                        <a
-                          href={`mailto:${a.email}`}
-                          className="flex items-center gap-1 text-primary hover:underline"
-                        >
-                          <Mail className="w-3 h-3" /> {a.email}
-                        </a>
-                      ) : (
-                        "—"
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleEdit(a)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDelete(a.id)}
-                        >
-                          Delete
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── BATCH VIEW ── */}
-      {activeTab === "batch" && (
-        <div className="space-y-4">
-          <h2 className="text-base font-semibold text-foreground">
-            Alumni by Batch
-          </h2>
-          {sortedBatches.length === 0 && (
-            <Card>
-              <CardContent className="py-16 text-center">
-                <GraduationCap className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-muted-foreground">
-                  No alumni records yet. Add alumni from the Directory tab.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-          {sortedBatches.map((batch) => {
-            const isExpanded = expandedBatches.has(batch);
-            return (
-              <div
-                key={batch}
-                className="border border-border rounded-xl overflow-hidden"
-              >
-                <button
-                  type="button"
-                  onClick={() => toggleBatch(batch)}
-                  className="w-full flex items-center justify-between px-5 py-4 bg-card hover:bg-muted/30 transition-colors"
-                  data-ocid={`batch-toggle-${batch}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
-                      <GraduationCap className="w-4 h-4 text-primary" />
-                    </div>
-                    <div className="text-left">
-                      <p className="font-semibold text-foreground">
-                        Batch {batch}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {batchMap[batch].length} alumni
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary">{batchMap[batch].length}</Badge>
-                    <span className="text-muted-foreground text-sm">
-                      {isExpanded ? "▲" : "▼"}
-                    </span>
-                  </div>
-                </button>
-                {isExpanded && (
-                  <div className="border-t border-border bg-background p-4">
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-                      {batchMap[batch].map((a) => (
-                        <Card
-                          key={a.id}
-                          className="hover:shadow-md transition-shadow"
-                        >
-                          <CardContent className="py-4 text-center space-y-2">
-                            <AlumniAvatar a={a} size="lg" />
-                            <div className="font-semibold text-sm text-foreground truncate px-1">
-                              {a.name}
-                            </div>
-                            {a.currentRole && (
-                              <div className="text-xs text-muted-foreground truncate px-1">
-                                {a.currentRole}
-                              </div>
-                            )}
-                            <div className="flex flex-wrap gap-1 justify-center">
-                              {a.class_ && (
-                                <Badge variant="outline" className="text-xs">
-                                  {a.class_}
-                                </Badge>
-                              )}
-                              {(a.graduationYear || a.batch) && (
-                                <Badge variant="secondary" className="text-xs">
-                                  {a.graduationYear || a.batch}
-                                </Badge>
-                              )}
-                            </div>
-                            {a.mobile && (
-                              <a
-                                href={`tel:${a.mobile}`}
-                                className="flex items-center justify-center gap-1 text-[10px] text-primary hover:underline"
-                              >
-                                <Phone className="w-3 h-3" /> {a.mobile}
-                              </a>
-                            )}
-                          </CardContent>
-                        </Card>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* ── EVENTS ── */}
-      {activeTab === "events" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-base font-semibold text-foreground">
-              Alumni Events
-            </h2>
-            <Button
-              onClick={() => {
-                setShowEventForm(true);
-                setEventForm({ ...EMPTY_EVENT, date: today });
-                setEditEventId(null);
-              }}
-              data-ocid="add-event-btn"
-              className="gap-1.5"
-            >
-              <Plus className="w-4 h-4" /> Add Event
-            </Button>
-          </div>
-
-          {showEventForm && (
-            <Card className="border-primary/30 bg-primary/5">
-              <CardHeader>
-                <CardTitle className="text-base">
-                  {editEventId ? "Edit Event" : "New Alumni Event"}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Event Title *</Label>
-                    <Input
-                      value={eventForm.title}
-                      onChange={(e) =>
-                        setEventForm((p) => ({ ...p, title: e.target.value }))
-                      }
-                      placeholder="Annual Alumni Meet 2026"
-                      data-ocid="event-title-input"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Date</Label>
-                    <Input
-                      type="date"
-                      value={eventForm.date}
-                      onChange={(e) =>
-                        setEventForm((p) => ({ ...p, date: e.target.value }))
-                      }
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Venue</Label>
-                    <Input
-                      value={eventForm.venue}
-                      onChange={(e) =>
-                        setEventForm((p) => ({ ...p, venue: e.target.value }))
-                      }
-                      placeholder="School Auditorium"
-                    />
-                  </div>
-                  <div>
-                    <Label className="text-xs">Description</Label>
-                    <Input
-                      value={eventForm.description}
-                      onChange={(e) =>
-                        setEventForm((p) => ({
-                          ...p,
-                          description: e.target.value,
-                        }))
-                      }
-                      placeholder="Brief description"
-                    />
-                  </div>
-                </div>
-
-                {/* Attendee selector */}
-                {alumnis.length > 0 && (
-                  <div className="space-y-2">
-                    <Label className="text-xs">
-                      Add Attendees ({eventForm.attendees.length} selected)
-                    </Label>
-                    <Input
-                      placeholder="Search alumni..."
-                      value={attendeeSearch}
-                      onChange={(e) => setAttendeeSearch(e.target.value)}
-                      className="h-8 text-sm"
-                    />
-                    <div className="max-h-32 overflow-y-auto border border-border rounded-lg p-2 space-y-1">
-                      {filteredAttendees.map((a) => (
-                        <label
-                          key={a.id}
-                          className="flex items-center gap-2 cursor-pointer hover:bg-muted/30 p-1 rounded text-sm"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={eventForm.attendees.includes(a.id)}
-                            onChange={() => toggleAttendee(a.id)}
-                            className="rounded"
-                          />
-                          <span>{a.name}</span>
-                          {a.batch && (
-                            <span className="text-xs text-muted-foreground">
-                              ({a.batch})
-                            </span>
-                          )}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <Button onClick={handleSaveEvent} data-ocid="save-event-btn">
-                    Save Event
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowEventForm(false);
-                      setEditEventId(null);
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {events.length === 0 && !showEventForm && (
-            <Card>
-              <CardContent className="py-16 text-center">
-                <UserCheck className="w-12 h-12 mx-auto mb-3 text-muted-foreground/40" />
-                <p className="text-muted-foreground">
-                  No events scheduled yet.
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
-          <div className="grid gap-3">
-            {[...events]
-              .sort((a, b) => a.date.localeCompare(b.date))
-              .map((ev) => {
-                const isPast = ev.date < today;
-                const attendeeNames = ev.attendees
-                  .map((id) => alumnis.find((a) => a.id === id)?.name)
-                  .filter(Boolean)
-                  .slice(0, 5);
-                return (
-                  <Card key={ev.id} className={isPast ? "opacity-70" : ""}>
-                    <CardContent className="py-4 flex items-start justify-between gap-3">
-                      <div className="flex gap-3 items-start">
-                        <div className="w-14 h-14 rounded-xl bg-primary/10 flex flex-col items-center justify-center shrink-0">
-                          <span className="text-xs font-semibold text-primary">
-                            {ev.date
-                              ? new Date(`${ev.date}T00:00:00`).toLocaleString(
-                                  "en-IN",
-                                  { month: "short" },
-                                )
-                              : "—"}
-                          </span>
-                          <span className="text-xl font-bold text-primary leading-none">
-                            {ev.date
-                              ? new Date(`${ev.date}T00:00:00`).getDate()
-                              : "—"}
-                          </span>
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-foreground flex items-center gap-2 flex-wrap">
-                            {ev.title}
-                            {isPast ? (
-                              <Badge variant="secondary" className="text-xs">
-                                Past
-                              </Badge>
-                            ) : (
-                              <Badge className="text-xs bg-accent/20 text-accent-foreground border-accent/30">
-                                Upcoming
-                              </Badge>
-                            )}
-                          </div>
-                          {ev.venue && (
-                            <div className="text-sm text-muted-foreground">
-                              📍 {ev.venue}
-                            </div>
-                          )}
-                          {ev.description && (
-                            <div className="text-sm text-muted-foreground mt-0.5">
-                              {ev.description}
-                            </div>
-                          )}
-                          {attendeeNames.length > 0 && (
-                            <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1 flex-wrap">
-                              <Users className="w-3 h-3" />
-                              {attendeeNames.join(", ")}
-                              {ev.attendees.length > 5 &&
-                                ` +${ev.attendees.length - 5} more`}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        <Button
-                          variant="outline"
-                          size="sm"
+                          className="h-7 w-7"
                           onClick={() => {
-                            setEventForm({
-                              title: ev.title,
-                              date: ev.date,
-                              description: ev.description,
-                              venue: ev.venue,
-                              attendees: ev.attendees,
-                            });
-                            setEditEventId(ev.id);
-                            setShowEventForm(true);
+                            setEditItem(a);
+                            setDialogOpen(true);
                           }}
+                          data-ocid={`alumni.edit_button.${i + 1}`}
                         >
-                          Edit
+                          <Edit2 className="w-3.5 h-3.5" />
                         </Button>
                         <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDeleteEvent(ev.id)}
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          onClick={() => handleDelete(a.id)}
+                          data-ocid={`alumni.delete_button.${i + 1}`}
                         >
-                          Delete
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="batches" className="mt-4 space-y-3">
+          {batches.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm py-8 text-center"
+              data-ocid="alumni.batches.empty_state"
+            >
+              No batches yet. Add alumni first.
+            </p>
+          ) : (
+            batches.map(([batch, members]) => (
+              <Card key={batch}>
+                <CardContent className="pt-4 pb-3">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="font-semibold text-foreground">
+                      Batch {batch}
+                    </h3>
+                    <Badge>{members.length} alumni</Badge>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {members.map((m) => (
+                      <span
+                        key={m.id}
+                        className="text-xs bg-muted px-2 py-0.5 rounded"
+                      >
+                        {m.name}
+                      </span>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+
+        <TabsContent value="events" className="mt-4 space-y-3">
+          <Button
+            onClick={() => setEventDialogOpen(true)}
+            data-ocid="alumni.add_event_button"
+          >
+            <Plus className="w-4 h-4 mr-1" /> Add Event
+          </Button>
+          {eventsList.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm py-8 text-center"
+              data-ocid="alumni.events.empty_state"
+            >
+              No alumni events scheduled.
+            </p>
+          ) : (
+            eventsList.map((ev, i) => (
+              <Card key={ev.id} data-ocid={`alumni.event.item.${i + 1}`}>
+                <CardContent className="pt-4 pb-3">
+                  <p className="font-semibold text-foreground">{ev.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {ev.date}
+                  </p>
+                  {ev.description && (
+                    <p className="text-sm text-foreground/80 mt-1">
+                      {ev.description}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            ))
+          )}
+        </TabsContent>
+      </Tabs>
+
+      {/* Add/Edit Alumni Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent data-ocid="alumni.dialog">
+          <DialogHeader>
+            <DialogTitle>{editItem ? "Edit Alumni" : "Add Alumni"}</DialogTitle>
+          </DialogHeader>
+          <AlumniForm
+            initial={
+              editItem
+                ? {
+                    name: editItem.name ?? "",
+                    admNo: editItem.admNo ?? "",
+                    yearOfPassing: editItem.batch ?? "",
+                    classGrade: editItem.class_ ?? "",
+                    mobile: editItem.mobile ?? "",
+                    email: editItem.email ?? "",
+                    occupation: "",
+                  }
+                : undefined
+            }
+            onSave={handleSave}
+            onClose={() => {
+              setDialogOpen(false);
+              setEditItem(null);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Event Dialog */}
+      <Dialog open={eventDialogOpen} onOpenChange={setEventDialogOpen}>
+        <DialogContent data-ocid="alumni.event.dialog">
+          <DialogHeader>
+            <DialogTitle>Add Alumni Event</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Event Title *</Label>
+              <Input
+                value={eventForm.title}
+                onChange={(e) =>
+                  setEventForm((f) => ({ ...f, title: e.target.value }))
+                }
+                data-ocid="alumni.event.title_input"
+              />
+            </div>
+            <div>
+              <Label>Date *</Label>
+              <Input
+                type="date"
+                value={eventForm.date}
+                onChange={(e) =>
+                  setEventForm((f) => ({ ...f, date: e.target.value }))
+                }
+              />
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Input
+                value={eventForm.description}
+                onChange={(e) =>
+                  setEventForm((f) => ({ ...f, description: e.target.value }))
+                }
+              />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                onClick={() => setEventDialogOpen(false)}
+                data-ocid="alumni.event.cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveEvent}
+                data-ocid="alumni.event.submit_button"
+              >
+                Save Event
+              </Button>
+            </div>
           </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

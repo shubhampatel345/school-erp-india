@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -11,13 +11,32 @@ import { Input } from "../../components/ui/input";
 import { Skeleton } from "../../components/ui/skeleton";
 import { useApp } from "../../context/AppContext";
 import type { FeeHeading } from "../../types";
-import { dataService } from "../../utils/dataService";
 import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
 
+function safeArray<T>(v: T[] | string | undefined): T[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string" && v) {
+    try {
+      const p = JSON.parse(v);
+      return Array.isArray(p) ? p : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export default function FeeHeadingPage() {
-  const { isReadOnly, currentUser } = useApp();
-  const [headings, setHeadings] = useState<FeeHeading[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    isReadOnly,
+    currentUser,
+    addNotification,
+  } = useApp();
+
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -30,47 +49,27 @@ export default function FeeHeadingPage() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // ── Fetch headings from server on mount (getAsync always hits the server) ─────
-  const loadHeadings = useCallback(async () => {
-    setLoading(true);
-    try {
-      const fromServer = await dataService.getAsync<FeeHeading>("fee_headings");
-      if (fromServer.length > 0) {
-        setHeadings(fromServer);
-      } else {
-        const fromAlt = await dataService.getAsync<FeeHeading>("fee_heads");
-        setHeadings(fromAlt);
-      }
-    } catch {
-      setHeadings(dataService.get<FeeHeading>("fee_headings"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadHeadings();
-  }, [loadHeadings]);
+  // Read from context — data is already loaded from server on login
+  const rawHeadings = getData("feeHeadings") as FeeHeading[];
+  const headings = rawHeadings.map((h) => ({
+    ...h,
+    months: safeArray<string>(h.months as unknown as string[]),
+    applicableClasses: h.applicableClasses
+      ? safeArray<string>(h.applicableClasses as unknown as string[])
+      : undefined,
+  }));
 
   async function save() {
     if (!name.trim() || selectedMonths.length === 0) return;
     setSaving(true);
     try {
       if (editId) {
-        const existing = headings.find((h) => h.id === editId);
-        if (!existing) return;
-        const updated: FeeHeading = {
-          ...existing,
+        await updateData("feeHeadings", editId, {
           name: name.trim(),
           months: selectedMonths,
-          applicableClasses:
-            selectedClasses.length > 0 ? selectedClasses : undefined,
-        };
-        await dataService.update(
-          "fee_headings",
-          editId,
-          updated as unknown as Record<string, unknown>,
-        );
+          applicableClasses: selectedClasses.length > 0 ? selectedClasses : [],
+        });
+        addNotification("Fee heading updated", "success");
       } else {
         const h: FeeHeading = {
           id: generateId(),
@@ -80,13 +79,9 @@ export default function FeeHeadingPage() {
             selectedClasses.length > 0 ? selectedClasses : undefined,
           amount: 0,
         };
-        await dataService.save(
-          "fee_headings",
-          h as unknown as Record<string, unknown>,
-        );
+        await saveData("feeHeadings", h as unknown as Record<string, unknown>);
+        addNotification(`Fee heading "${h.name}" added`, "success");
       }
-      // Re-fetch from server after save to confirm persisted data
-      await loadHeadings();
       resetForm();
     } finally {
       setSaving(false);
@@ -100,16 +95,19 @@ export default function FeeHeadingPage() {
       )
     )
       return;
-    await dataService.delete("fee_headings", id);
-    // Re-fetch from server to reflect deletion
-    await loadHeadings();
+    await deleteData("feeHeadings", id);
+    addNotification("Fee heading deleted", "info");
   }
 
   function openEdit(h: FeeHeading) {
     setEditId(h.id);
     setName(h.name);
-    setSelectedMonths([...h.months]);
-    setSelectedClasses(h.applicableClasses ? [...h.applicableClasses] : []);
+    setSelectedMonths(safeArray<string>(h.months as unknown as string[]));
+    setSelectedClasses(
+      h.applicableClasses
+        ? safeArray<string>(h.applicableClasses as unknown as string[])
+        : [],
+    );
     setOpen(true);
   }
 
@@ -121,25 +119,7 @@ export default function FeeHeadingPage() {
     setOpen(false);
   }
 
-  function toggleMonth(m: string) {
-    setSelectedMonths((prev) =>
-      prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m],
-    );
-  }
-
-  function toggleClass(c: string) {
-    setSelectedClasses((prev) =>
-      prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c],
-    );
-  }
-
-  function selectAllMonths() {
-    setSelectedMonths([...MONTHS]);
-  }
-
-  function selectAllClasses() {
-    setSelectedClasses([...CLASSES]);
-  }
+  const isLoading = false; // data already in context from initial server load
 
   return (
     <div className="space-y-4">
@@ -147,7 +127,7 @@ export default function FeeHeadingPage() {
         <div>
           <h3 className="font-semibold text-foreground">Fee Heading Design</h3>
           <p className="text-sm text-muted-foreground">
-            Define fee headings, the months they apply to, and which classes
+            Define fee headings, applicable months, and classes
           </p>
         </div>
         {canEdit && !isReadOnly && (
@@ -157,7 +137,7 @@ export default function FeeHeadingPage() {
         )}
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="bg-card border border-border rounded-xl p-6 space-y-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="flex items-center gap-4">
@@ -172,10 +152,20 @@ export default function FeeHeadingPage() {
           className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground"
           data-ocid="fee-headings.empty_state"
         >
-          <p className="text-lg mb-1">No fee headings yet</p>
+          <p className="text-4xl mb-3">📋</p>
+          <p className="text-lg font-medium mb-1">No fee headings yet</p>
           <p className="text-sm">
-            Add headings like Tuition Fee, Lab Fee, etc.
+            Add headings like Tuition Fee, Lab Fee, Library Fee etc.
           </p>
+          {canEdit && !isReadOnly && (
+            <Button
+              className="mt-4"
+              onClick={() => setOpen(true)}
+              data-ocid="add-fee-heading-empty-btn"
+            >
+              + Add First Heading
+            </Button>
+          )}
         </div>
       ) : (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
@@ -206,12 +196,7 @@ export default function FeeHeadingPage() {
                   <td className="px-4 py-3 font-medium">{h.name}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {(Array.isArray(h.months)
-                        ? h.months
-                        : typeof h.months === "string"
-                          ? JSON.parse(h.months as unknown as string)
-                          : []
-                      ).map((m: string) => (
+                      {h.months.map((m) => (
                         <Badge key={m} variant="secondary" className="text-xs">
                           {m.slice(0, 3)}
                         </Badge>
@@ -221,34 +206,14 @@ export default function FeeHeadingPage() {
                   <td className="px-4 py-3">
                     {h.applicableClasses && h.applicableClasses.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {(Array.isArray(h.applicableClasses)
-                          ? h.applicableClasses
-                          : typeof h.applicableClasses === "string"
-                            ? JSON.parse(
-                                h.applicableClasses as unknown as string,
-                              )
-                            : []
-                        )
-                          .slice(0, 5)
-                          .map((c: string) => (
-                            <Badge
-                              key={c}
-                              variant="outline"
-                              className="text-xs"
-                            >
-                              {c}
-                            </Badge>
-                          ))}
-                        {(Array.isArray(h.applicableClasses)
-                          ? h.applicableClasses
-                          : []
-                        ).length > 5 && (
+                        {h.applicableClasses.slice(0, 5).map((c) => (
+                          <Badge key={c} variant="outline" className="text-xs">
+                            {c}
+                          </Badge>
+                        ))}
+                        {h.applicableClasses.length > 5 && (
                           <Badge variant="outline" className="text-xs">
-                            +
-                            {(Array.isArray(h.applicableClasses)
-                              ? h.applicableClasses
-                              : []
-                            ).length - 5}
+                            +{h.applicableClasses.length - 5}
                           </Badge>
                         )}
                       </div>
@@ -324,7 +289,7 @@ export default function FeeHeadingPage() {
                 <button
                   type="button"
                   className="text-xs text-primary hover:underline"
-                  onClick={selectAllMonths}
+                  onClick={() => setSelectedMonths([...MONTHS])}
                 >
                   Select All
                 </button>
@@ -340,7 +305,13 @@ export default function FeeHeadingPage() {
                       id={`month-${m}`}
                       type="checkbox"
                       checked={selectedMonths.includes(m)}
-                      onChange={() => toggleMonth(m)}
+                      onChange={() =>
+                        setSelectedMonths((prev) =>
+                          prev.includes(m)
+                            ? prev.filter((x) => x !== m)
+                            : [...prev, m],
+                        )
+                      }
                       className="accent-primary"
                       data-ocid="fee-month-checkbox"
                     />
@@ -364,7 +335,7 @@ export default function FeeHeadingPage() {
                 <button
                   type="button"
                   className="text-xs text-primary hover:underline"
-                  onClick={selectAllClasses}
+                  onClick={() => setSelectedClasses([...CLASSES])}
                 >
                   Select All
                 </button>
@@ -380,7 +351,13 @@ export default function FeeHeadingPage() {
                       id={`class-${c}`}
                       type="checkbox"
                       checked={selectedClasses.includes(c)}
-                      onChange={() => toggleClass(c)}
+                      onChange={() =>
+                        setSelectedClasses((prev) =>
+                          prev.includes(c)
+                            ? prev.filter((x) => x !== c)
+                            : [...prev, c],
+                        )
+                      }
                       className="accent-primary"
                       data-ocid="fee-class-checkbox"
                     />
@@ -390,7 +367,7 @@ export default function FeeHeadingPage() {
               </div>
               {selectedClasses.length === 0 && (
                 <p className="text-xs text-amber-600 mt-1">
-                  No classes selected — this heading will apply to all classes
+                  No classes selected — heading will apply to all classes
                 </p>
               )}
             </div>

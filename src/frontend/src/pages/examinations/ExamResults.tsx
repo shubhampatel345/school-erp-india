@@ -33,19 +33,6 @@ interface ExamResultGroup {
   savedAt: string;
 }
 
-interface ExamResultLegacy {
-  id: string;
-  studentId: string;
-  studentName: string;
-  admNo: string;
-  studentClass: string;
-  section: string;
-  examName: string;
-  sessionId: string;
-  subjects: SubjectMark[];
-  createdAt: string;
-}
-
 // ── Grade helpers ─────────────────────────────────────────────────────────────
 function calcGrade(pct: number): string {
   if (pct >= 90) return "A+";
@@ -67,16 +54,12 @@ function gradeBadgeClass(grade: string): string {
   return "bg-muted text-muted-foreground border-border";
 }
 
-// ── Marksheet Print ───────────────────────────────────────────────────────────
+// ── Marksheet Print Modal ─────────────────────────────────────────────────────
 function Marksheet({
   result,
   examName,
   onClose,
-}: {
-  result: StudentResult;
-  examName: string;
-  onClose: () => void;
-}) {
+}: { result: StudentResult; examName: string; onClose: () => void }) {
   const school = ls.get<{ name: string; address: string; phone?: string }>(
     "school_profile",
     { name: "SHUBH SCHOOL ERP", address: "" },
@@ -85,7 +68,6 @@ function Marksheet({
   const maxTotal = result.subjects.reduce((s, r) => s + r.maxMarks, 0);
   const pct = maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0;
   const grade = calcGrade(pct);
-  const pass = pct >= 40;
 
   return (
     <div
@@ -94,16 +76,13 @@ function Marksheet({
       onKeyDown={(e) => e.key === "Escape" && onClose()}
     >
       <div
-        className="bg-card border border-border rounded-xl w-full max-w-lg shadow-elevated print:shadow-none print:border-0 print:rounded-none"
+        className="bg-card border border-border rounded-xl w-full max-w-lg shadow-elevated print:shadow-none print:border-0"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={() => {}}
       >
         <div className="p-6 space-y-4 print:p-4">
-          {/* Header */}
-          <div className="text-center border-b border-border pb-3 print:border-gray-300">
-            <h1 className="text-xl font-bold font-display text-foreground">
-              {school.name}
-            </h1>
+          <div className="text-center border-b border-border pb-3">
+            <h1 className="text-xl font-bold font-display">{school.name}</h1>
             {school.address && (
               <p className="text-sm text-muted-foreground">{school.address}</p>
             )}
@@ -112,28 +91,20 @@ function Marksheet({
                 Ph: {school.phone}
               </p>
             )}
-            <h2 className="text-base font-semibold mt-2 text-foreground">
+            <h2 className="text-base font-semibold mt-2">
               MARKSHEET — {examName}
             </h2>
           </div>
-
-          {/* Student info */}
           <div className="grid grid-cols-2 gap-2 text-sm bg-muted/30 rounded-lg p-3">
             <div>
-              <span className="font-medium text-muted-foreground">
-                Student:{" "}
-              </span>
-              <span className="text-foreground">{result.studentName}</span>
+              <span className="text-muted-foreground">Student: </span>
+              <span>{result.studentName}</span>
             </div>
             <div>
-              <span className="font-medium text-muted-foreground">
-                Adm. No.:{" "}
-              </span>
-              <span className="text-foreground">{result.admNo}</span>
+              <span className="text-muted-foreground">Adm. No.: </span>
+              <span>{result.admNo}</span>
             </div>
           </div>
-
-          {/* Marks table */}
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full text-sm">
               <thead>
@@ -164,11 +135,11 @@ function Marksheet({
                   return (
                     // biome-ignore lint/suspicious/noArrayIndexKey: stable index for read-only marksheet
                     <tr key={i} className="border-t border-border/50">
-                      <td className="px-3 py-2 text-foreground">{s.subject}</td>
+                      <td className="px-3 py-2">{s.subject}</td>
                       <td className="px-3 py-2 text-center text-muted-foreground">
                         {s.maxMarks}
                       </td>
-                      <td className="px-3 py-2 text-center font-medium text-foreground">
+                      <td className="px-3 py-2 text-center font-medium">
                         {s.marksObtained}
                       </td>
                       <td className="px-3 py-2 text-center text-muted-foreground">
@@ -183,16 +154,10 @@ function Marksheet({
                   );
                 })}
                 <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-                  <td className="px-3 py-2 text-foreground">TOTAL</td>
-                  <td className="px-3 py-2 text-center text-foreground">
-                    {maxTotal}
-                  </td>
-                  <td className="px-3 py-2 text-center text-foreground">
-                    {total}
-                  </td>
-                  <td className="px-3 py-2 text-center text-foreground">
-                    {pct}%
-                  </td>
+                  <td className="px-3 py-2">TOTAL</td>
+                  <td className="px-3 py-2 text-center">{maxTotal}</td>
+                  <td className="px-3 py-2 text-center">{total}</td>
+                  <td className="px-3 py-2 text-center">{pct}%</td>
                   <td className="px-3 py-2 text-center">
                     <Badge className={gradeBadgeClass(grade)}>{grade}</Badge>
                   </td>
@@ -200,19 +165,17 @@ function Marksheet({
               </tbody>
             </table>
           </div>
-
-          {/* Result line */}
           <div className="flex items-center justify-between border-t border-border pt-3">
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Result:</span>
               <Badge
                 className={
-                  pass
+                  pct >= 40
                     ? "bg-accent/20 text-accent border-accent/30"
                     : "bg-destructive/20 text-destructive border-destructive/30"
                 }
               >
-                {pass ? "PASS" : "FAIL"}
+                {pct >= 40 ? "PASS" : "FAIL"}
               </Badge>
             </div>
             <span className="text-sm text-muted-foreground">
@@ -220,7 +183,6 @@ function Marksheet({
             </span>
           </div>
         </div>
-
         <div className="flex justify-end gap-2 px-6 pb-4 print:hidden border-t border-border pt-3">
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
@@ -260,15 +222,15 @@ function MarksEntryTable({
     }));
   });
 
-  const updateMark = (studentIdx: number, subjIdx: number, value: string) => {
+  const updateMark = (si: number, sj: number, value: string) => {
     const num = Math.min(group.maxMarks, Math.max(0, Number(value) || 0));
     setResults((prev) =>
-      prev.map((r, si) =>
-        si === studentIdx
+      prev.map((r, rsi) =>
+        rsi === si
           ? {
               ...r,
-              subjects: r.subjects.map((s, sj) =>
-                sj === subjIdx ? { ...s, marksObtained: num } : s,
+              subjects: r.subjects.map((s, rsj) =>
+                rsj === sj ? { ...s, marksObtained: num } : s,
               ),
             }
           : r,
@@ -276,47 +238,39 @@ function MarksEntryTable({
     );
   };
 
-  const handleSave = () => {
-    onSave({ ...group, studentResults: results });
-  };
-
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
       <div className="bg-card border border-border rounded-xl w-full max-w-5xl max-h-[90vh] flex flex-col shadow-elevated">
         <div className="sticky top-0 bg-card border-b border-border px-5 py-4 flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-foreground">
-              Marks Entry — {group.examName}
-            </h2>
+            <h2 className="font-semibold">Marks Entry — {group.examName}</h2>
             <p className="text-xs text-muted-foreground">
-              {group.classKey} &nbsp;·&nbsp; Max marks: {group.maxMarks} per
-              subject
+              {group.classKey} · Max marks: {group.maxMarks} per subject
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-muted-foreground hover:text-foreground transition-smooth text-xl leading-none"
+            className="text-muted-foreground hover:text-foreground text-xl"
             aria-label="Close"
           >
             ✕
           </button>
         </div>
-
         <div className="overflow-auto flex-1 p-5">
           <table className="w-full text-sm min-w-max border-collapse">
             <thead className="sticky top-0">
               <tr className="bg-muted/50">
-                <th className="px-3 py-2.5 text-left font-semibold text-foreground border border-border bg-muted/50 sticky left-0 z-10 min-w-40">
+                <th className="px-3 py-2.5 text-left font-semibold border border-border bg-muted/50 sticky left-0 z-10 min-w-40">
                   Student
                 </th>
-                <th className="px-3 py-2.5 text-left font-semibold text-foreground border border-border bg-muted/50 w-24">
+                <th className="px-3 py-2.5 text-left font-semibold border border-border bg-muted/50 w-24">
                   Adm. No.
                 </th>
                 {group.subjects.map((subj) => (
                   <th
                     key={subj}
-                    className="px-3 py-2.5 text-center font-semibold text-foreground border border-border bg-muted/50 min-w-28 whitespace-nowrap"
+                    className="px-3 py-2.5 text-center font-semibold border border-border bg-muted/50 min-w-28 whitespace-nowrap"
                   >
                     {subj}
                     <span className="block text-xs font-normal text-muted-foreground">
@@ -324,13 +278,13 @@ function MarksEntryTable({
                     </span>
                   </th>
                 ))}
-                <th className="px-3 py-2.5 text-center font-semibold text-foreground border border-border bg-muted/50 w-20">
+                <th className="px-3 py-2.5 text-center font-semibold border border-border bg-muted/50 w-20">
                   Total
                 </th>
-                <th className="px-3 py-2.5 text-center font-semibold text-foreground border border-border bg-muted/50 w-16">
+                <th className="px-3 py-2.5 text-center font-semibold border border-border bg-muted/50 w-16">
                   %
                 </th>
-                <th className="px-3 py-2.5 text-center font-semibold text-foreground border border-border bg-muted/50 w-16">
+                <th className="px-3 py-2.5 text-center font-semibold border border-border bg-muted/50 w-16">
                   Grade
                 </th>
               </tr>
@@ -347,14 +301,12 @@ function MarksEntryTable({
                 );
                 const pct =
                   maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0;
-                const grade = calcGrade(pct);
                 return (
                   <tr
-                    // biome-ignore lint/suspicious/noArrayIndexKey: student index is stable within this session
-                    key={si}
+                    key={r.studentId}
                     className={`border-b border-border ${si % 2 === 0 ? "bg-background" : "bg-muted/10"}`}
                   >
-                    <td className="px-3 py-2 font-medium text-foreground border border-border sticky left-0 bg-inherit">
+                    <td className="px-3 py-2 font-medium border border-border sticky left-0 bg-inherit">
                       {r.studentName}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground text-xs border border-border font-mono">
@@ -362,8 +314,7 @@ function MarksEntryTable({
                     </td>
                     {r.subjects.map((s, sj) => (
                       <td
-                        // biome-ignore lint/suspicious/noArrayIndexKey: subject index is stable within row
-                        key={sj}
+                        key={s.subject}
                         className="px-2 py-1 border border-border"
                       >
                         <Input
@@ -377,15 +328,17 @@ function MarksEntryTable({
                         />
                       </td>
                     ))}
-                    <td className="px-3 py-2 text-center font-mono font-semibold text-foreground border border-border">
+                    <td className="px-3 py-2 text-center font-mono font-semibold border border-border">
                       {total}/{maxTotal}
                     </td>
-                    <td className="px-3 py-2 text-center font-semibold text-foreground border border-border">
+                    <td className="px-3 py-2 text-center font-semibold border border-border">
                       {pct}%
                     </td>
                     <td className="px-3 py-2 text-center border border-border">
-                      <Badge className={`${gradeBadgeClass(grade)} text-xs`}>
-                        {grade}
+                      <Badge
+                        className={`${gradeBadgeClass(calcGrade(pct))} text-xs`}
+                      >
+                        {calcGrade(pct)}
                       </Badge>
                     </td>
                   </tr>
@@ -394,12 +347,14 @@ function MarksEntryTable({
             </tbody>
           </table>
         </div>
-
         <div className="border-t border-border px-5 py-3 flex justify-end gap-2">
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button onClick={handleSave} data-ocid="marks-save">
+          <Button
+            onClick={() => onSave({ ...group, studentResults: results })}
+            data-ocid="marks-save"
+          >
             Save Marks
           </Button>
         </div>
@@ -410,23 +365,31 @@ function MarksEntryTable({
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ExamResults() {
-  const { currentSession } = useApp();
+  const { currentSession, getData, saveData, updateData, deleteData } =
+    useApp();
   const sessionId = currentSession?.id ?? "sess_2025";
 
-  const [savedTimetables, setSavedTimetables] = useState<SavedTimetable[]>(() =>
-    ls.get<SavedTimetable[]>("exam_timetables", []),
-  );
+  // Load timetables from context + localStorage fallback
+  const contextTimetables = getData("examTimetables") as SavedTimetable[];
+  const [savedTimetables, setSavedTimetables] = useState<SavedTimetable[]>([]);
+  useEffect(() => {
+    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
+    setSavedTimetables(
+      contextTimetables.length > 0 ? contextTimetables : local,
+    );
+  }, [contextTimetables]);
 
-  const [groups, setGroups] = useState<ExamResultGroup[]>(() =>
-    ls.get<ExamResultGroup[]>("exam_result_groups", []),
-  );
+  // Load result groups from context
+  const contextGroups = getData("examResultGroups") as ExamResultGroup[];
+  const [groups, setGroups] = useState<ExamResultGroup[]>([]);
+  useEffect(() => {
+    const local = ls.get<ExamResultGroup[]>("exam_result_groups", []);
+    setGroups(contextGroups.length > 0 ? contextGroups : local);
+  }, [contextGroups]);
 
-  // Filters
   const [filterExam, setFilterExam] = useState("all");
   const [filterClass, setFilterClass] = useState("all");
   const [search, setSearch] = useState("");
-
-  // UI state
   const [showNewForm, setShowNewForm] = useState(false);
   const [editGroup, setEditGroup] = useState<ExamResultGroup | null>(null);
   const [printTarget, setPrintTarget] = useState<{
@@ -434,58 +397,53 @@ export default function ExamResults() {
     examName: string;
   } | null>(null);
 
-  // New result form state
   const [newExamId, setNewExamId] = useState("");
   const [newClassKey, setNewClassKey] = useState("");
   const [newMaxMarks, setNewMaxMarks] = useState(100);
   const [newSubjects, setNewSubjects] = useState<string[]>([]);
 
-  // Refresh saved timetables when component mounts
-  useEffect(() => {
-    setSavedTimetables(ls.get<SavedTimetable[]>("exam_timetables", []));
-  }, []);
-
   const selectedTimetable = savedTimetables.find((t) => t.id === newExamId);
+  const availableClasses =
+    selectedTimetable?.tables.map((t) => t.classKey) ?? [];
 
-  // When exam selected, auto-populate class list
-  const availableClasses = selectedTimetable
-    ? selectedTimetable.tables.map((t) => t.classKey)
-    : [];
-
-  // When class selected, auto-populate subjects
   useEffect(() => {
     if (!selectedTimetable || !newClassKey) {
       setNewSubjects([]);
       return;
     }
-    const classTable = selectedTimetable.tables.find(
-      (t) => t.classKey === newClassKey,
-    );
-    if (classTable) {
-      const uniqueSubjects = [
-        ...new Set(classTable.rows.map((r) => r.subject)),
-      ];
-      setNewSubjects(uniqueSubjects);
-    }
+    const ct = selectedTimetable.tables.find((t) => t.classKey === newClassKey);
+    if (ct) setNewSubjects([...new Set(ct.rows.map((r) => r.subject))]);
   }, [selectedTimetable, newClassKey]);
 
+  const allStudents = getData("students") as Student[];
   const studentsForClass = newClassKey
-    ? ls.get<Student[]>("students", []).filter((s) => {
+    ? allStudents.filter((s) => {
         const cls = newClassKey.replace("Class ", "").replace(/[A-Z]$/, "");
         const sec = newClassKey.replace("Class ", "").slice(-1);
-        return s.class === cls && s.section === sec;
+        return (
+          s.class === cls && s.section === sec && s.sessionId === sessionId
+        );
       })
     : [];
 
-  const handleCreateGroup = () => {
+  const handleCreateGroup = async () => {
     if (!selectedTimetable || !newClassKey || newSubjects.length === 0) return;
+    const cls = newClassKey.replace("Class ", "").replace(/[A-Z]$/, "");
+    const sec = newClassKey.replace("Class ", "").slice(-1);
+    const classStudents =
+      studentsForClass.length > 0
+        ? studentsForClass
+        : ls
+            .get<Student[]>("students", [])
+            .filter((s) => s.class === cls && s.section === sec);
+
     const newGroup: ExamResultGroup = {
       id: generateId(),
       examName: selectedTimetable.examName,
       classKey: newClassKey,
       subjects: newSubjects,
       maxMarks: newMaxMarks,
-      studentResults: studentsForClass.map((s) => ({
+      studentResults: classStudents.map((s) => ({
         studentId: s.id,
         studentName: s.fullName,
         admNo: s.admNo,
@@ -498,9 +456,15 @@ export default function ExamResults() {
       sessionId,
       savedAt: new Date().toISOString(),
     };
-    const updated = [newGroup, ...groups];
-    ls.set("exam_result_groups", updated);
-    setGroups(updated);
+    await saveData(
+      "examResultGroups",
+      newGroup as unknown as Record<string, unknown>,
+    );
+    ls.set("exam_result_groups", [
+      newGroup,
+      ...ls.get<ExamResultGroup[]>("exam_result_groups", []),
+    ]);
+    setGroups((prev) => [newGroup, ...prev]);
     setShowNewForm(false);
     setNewExamId("");
     setNewClassKey("");
@@ -509,21 +473,29 @@ export default function ExamResults() {
     setEditGroup(newGroup);
   };
 
-  const handleSaveGroup = (updated: ExamResultGroup) => {
-    setGroups((prev) => {
-      const list = prev.map((g) => (g.id === updated.id ? updated : g));
-      ls.set("exam_result_groups", list);
-      return list;
-    });
+  const handleSaveGroup = async (updated: ExamResultGroup) => {
+    await updateData(
+      "examResultGroups",
+      updated.id,
+      updated as unknown as Record<string, unknown>,
+    );
+    const localList = ls.get<ExamResultGroup[]>("exam_result_groups", []);
+    ls.set(
+      "exam_result_groups",
+      localList.map((g) => (g.id === updated.id ? updated : g)),
+    );
+    setGroups((prev) => prev.map((g) => (g.id === updated.id ? updated : g)));
     setEditGroup(null);
   };
 
-  const handleDeleteGroup = (id: string) => {
-    setGroups((prev) => {
-      const list = prev.filter((g) => g.id !== id);
-      ls.set("exam_result_groups", list);
-      return list;
-    });
+  const handleDeleteGroup = async (id: string) => {
+    await deleteData("examResultGroups", id);
+    const localList = ls.get<ExamResultGroup[]>("exam_result_groups", []);
+    ls.set(
+      "exam_result_groups",
+      localList.filter((g) => g.id !== id),
+    );
+    setGroups((prev) => prev.filter((g) => g.id !== id));
   };
 
   const examNames = [...new Set(groups.map((g) => g.examName))];
@@ -537,24 +509,8 @@ export default function ExamResults() {
     return matchExam && matchClass;
   });
 
-  // For legacy individual results display
-  const legacyResults = ls
-    .get<ExamResultLegacy[]>("exam_results", [])
-    .filter((r) => {
-      const matchExam = filterExam === "all" || r.examName === filterExam;
-      const matchClass =
-        filterClass === "all" ||
-        `Class ${r.studentClass}${r.section}` === filterClass;
-      const matchSearch =
-        !search ||
-        r.studentName.toLowerCase().includes(search.toLowerCase()) ||
-        r.admNo.toLowerCase().includes(search.toLowerCase());
-      return matchExam && matchClass && matchSearch;
-    });
-
   return (
     <div className="space-y-4">
-      {/* Header */}
       <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
         <div className="flex gap-2 flex-wrap">
           <Input
@@ -596,13 +552,10 @@ export default function ExamResults() {
         </Button>
       </div>
 
-      {/* New Result Form */}
       {showNewForm && (
         <div className="bg-card border border-border rounded-xl p-5 space-y-4">
           <div className="flex items-center justify-between">
-            <h3 className="font-semibold text-foreground">
-              Create Result Sheet
-            </h3>
+            <h3 className="font-semibold">Create Result Sheet</h3>
             <button
               type="button"
               onClick={() => setShowNewForm(false)}
@@ -612,14 +565,12 @@ export default function ExamResults() {
               ✕
             </button>
           </div>
-
           {savedTimetables.length === 0 ? (
             <div className="text-center py-8 bg-muted/30 rounded-lg">
               <p className="text-2xl mb-2">📅</p>
-              <p className="font-medium text-foreground">No saved timetables</p>
+              <p className="font-medium">No saved timetables</p>
               <p className="text-sm text-muted-foreground mt-1">
-                Create and save an exam timetable first from the Timetable Maker
-                tab
+                Create and save an exam timetable first
               </p>
             </div>
           ) : (
@@ -627,7 +578,7 @@ export default function ExamResults() {
               <div className="space-y-1.5">
                 <Label>Select Exam</Label>
                 <select
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   value={newExamId}
                   onChange={(e) => {
                     setNewExamId(e.target.value);
@@ -644,11 +595,10 @@ export default function ExamResults() {
                   ))}
                 </select>
               </div>
-
               <div className="space-y-1.5">
                 <Label>Class &amp; Section</Label>
                 <select
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   value={newClassKey}
                   onChange={(e) => setNewClassKey(e.target.value)}
                   disabled={!newExamId}
@@ -662,7 +612,6 @@ export default function ExamResults() {
                   ))}
                 </select>
               </div>
-
               <div className="space-y-1.5">
                 <Label>Max Marks (per subject)</Label>
                 <Input
@@ -676,7 +625,6 @@ export default function ExamResults() {
                   data-ocid="new-result-max-marks"
                 />
               </div>
-
               <div className="space-y-1.5 flex flex-col justify-end">
                 <Button
                   onClick={handleCreateGroup}
@@ -690,10 +638,9 @@ export default function ExamResults() {
               </div>
             </div>
           )}
-
           {newSubjects.length > 0 && (
             <div className="space-y-1.5">
-              <Label>Subjects (auto-populated from timetable)</Label>
+              <Label>Subjects (from timetable)</Label>
               <div className="flex flex-wrap gap-1.5">
                 {newSubjects.map((s) => (
                   <Badge key={s} variant="secondary" className="px-2.5 py-1">
@@ -711,16 +658,13 @@ export default function ExamResults() {
         </div>
       )}
 
-      {/* Result Groups List */}
-      {filteredGroups.length === 0 && legacyResults.length === 0 ? (
+      {filteredGroups.length === 0 ? (
         <div
           className="bg-card border border-dashed border-border rounded-xl py-16 text-center"
-          data-ocid="result-empty"
+          data-ocid="result.empty_state"
         >
           <p className="text-4xl mb-3">📋</p>
-          <p className="font-semibold text-foreground text-lg">
-            No results yet
-          </p>
+          <p className="font-semibold text-lg">No results yet</p>
           <p className="text-muted-foreground text-sm mt-1">
             Create a result sheet by clicking "+ New Result Sheet" above
           </p>
@@ -758,17 +702,15 @@ export default function ExamResults() {
                 <div className="flex items-center justify-between p-4 border-b border-border/50">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-foreground">
-                        {g.examName}
-                      </p>
+                      <p className="font-semibold">{g.examName}</p>
                       <Badge variant="secondary">{g.classKey}</Badge>
                       <Badge className="bg-muted text-muted-foreground border-border">
                         {g.subjects.length} subjects
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {totalStudents} students &nbsp;·&nbsp; {filledCount} marks
-                      entered &nbsp;·&nbsp; Avg: {avgPct}%
+                      {totalStudents} students · {filledCount} marks entered ·
+                      Avg: {avgPct}%
                     </p>
                   </div>
                   <div className="flex gap-2 shrink-0 ml-3">
@@ -791,8 +733,6 @@ export default function ExamResults() {
                     </Button>
                   </div>
                 </div>
-
-                {/* Student results summary */}
                 {g.studentResults.length > 0 && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm min-w-max">
@@ -841,7 +781,7 @@ export default function ExamResults() {
                                 .toLowerCase()
                                 .includes(search.toLowerCase()),
                           )
-                          .map((r, ri) => {
+                          .map((r) => {
                             const total = r.subjects.reduce(
                               (s, sub) => s + sub.marksObtained,
                               0,
@@ -855,32 +795,29 @@ export default function ExamResults() {
                                 ? Math.round((total / maxTotal) * 100)
                                 : 0;
                             const grade = calcGrade(pct);
-                            const pass = pct >= 40;
                             return (
                               <tr
-                                // biome-ignore lint/suspicious/noArrayIndexKey: stable index for result rows
-                                key={ri}
+                                key={r.studentId}
                                 className="border-t border-border/50 hover:bg-muted/20"
                               >
-                                <td className="px-4 py-2 font-medium text-foreground">
+                                <td className="px-4 py-2 font-medium">
                                   {r.studentName}
                                 </td>
                                 <td className="px-4 py-2 text-xs text-muted-foreground font-mono">
                                   {r.admNo}
                                 </td>
-                                {r.subjects.map((s, si) => (
+                                {r.subjects.map((s) => (
                                   <td
-                                    // biome-ignore lint/suspicious/noArrayIndexKey: stable index
-                                    key={si}
-                                    className="px-3 py-2 text-center font-mono text-foreground"
+                                    key={s.subject}
+                                    className="px-3 py-2 text-center font-mono"
                                   >
                                     {s.marksObtained}
                                   </td>
                                 ))}
-                                <td className="px-3 py-2 text-center font-mono font-semibold text-foreground">
+                                <td className="px-3 py-2 text-center font-mono font-semibold">
                                   {total}/{maxTotal}
                                 </td>
-                                <td className="px-3 py-2 text-center font-semibold text-foreground">
+                                <td className="px-3 py-2 text-center font-semibold">
                                   {pct}%
                                 </td>
                                 <td className="px-3 py-2 text-center">
@@ -893,12 +830,12 @@ export default function ExamResults() {
                                 <td className="px-3 py-2 text-center">
                                   <Badge
                                     className={
-                                      pass
+                                      pct >= 40
                                         ? "bg-accent/20 text-accent text-xs"
                                         : "bg-destructive/20 text-destructive text-xs"
                                     }
                                   >
-                                    {pass ? "PASS" : "FAIL"}
+                                    {pct >= 40 ? "PASS" : "FAIL"}
                                   </Badge>
                                 </td>
                                 <td className="px-3 py-2 text-right">
@@ -911,7 +848,7 @@ export default function ExamResults() {
                                         examName: g.examName,
                                       })
                                     }
-                                    data-ocid={`result-print-${g.id}-${ri}`}
+                                    data-ocid={`result-print-${g.id}-${r.admNo}`}
                                   >
                                     Marksheet
                                   </Button>
@@ -929,11 +866,10 @@ export default function ExamResults() {
         </div>
       )}
 
-      {/* Marks entry modal */}
       {editGroup && (
         <MarksEntryTable
           group={editGroup}
-          students={ls.get<Student[]>("students", []).filter((s) => {
+          students={allStudents.filter((s) => {
             const cls = editGroup.classKey
               .replace("Class ", "")
               .replace(/[A-Z]$/, "");
@@ -945,7 +881,6 @@ export default function ExamResults() {
         />
       )}
 
-      {/* Marksheet print modal */}
       {printTarget && (
         <Marksheet
           result={printTarget.result}

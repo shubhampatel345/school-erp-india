@@ -1,13 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useApp } from "../../context/AppContext";
 import type { Staff, Student } from "../../types";
-import { ls } from "../../utils/localStorage";
-
-interface LastScan {
-  personId: string;
-  personType: "student" | "staff";
-  record: { timeIn?: string; timeOut?: string };
-  ts: number;
-}
 
 interface CheckIn {
   id: string;
@@ -48,19 +41,25 @@ function Clock() {
 }
 
 export default function WelcomeDisplay() {
-  const students = useMemo(() => ls.get<Student[]>("students", []), []);
-  const staff = useMemo(() => ls.get<Staff[]>("staff", []), []);
-  const schoolName = useMemo(
-    () =>
-      ls.get<{ name?: string }>("school_profile", {}).name ??
-      "SHUBH SCHOOL ERP",
-    [],
-  );
+  const { getData } = useApp();
+
+  const students = useMemo(() => getData("students") as Student[], [getData]);
+  const staff = useMemo(() => getData("staff") as Staff[], [getData]);
+
+  const schoolName = useMemo(() => {
+    try {
+      const profile = localStorage.getItem("school_profile");
+      if (profile) {
+        const parsed = JSON.parse(profile) as { name?: string };
+        return parsed.name ?? "SHUBH SCHOOL ERP";
+      }
+    } catch {}
+    return "SHUBH SCHOOL ERP";
+  }, []);
 
   const [activeCard, setActiveCard] = useState<CheckIn | null>(null);
   const [recentCheckins, setRecentCheckins] = useState<CheckIn[]>([]);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastTsRef = useRef<number>(0);
 
   const buildCheckIn = useCallback(
     (
@@ -86,7 +85,7 @@ export default function WelcomeDisplay() {
       if (!m) return null;
       return {
         id: personId,
-        name: m.name,
+        name: m.name ?? m.fullName ?? "",
         subtitle: m.designation,
         cls: m.department ?? "Staff",
         photo: m.photo ?? "",
@@ -105,7 +104,7 @@ export default function WelcomeDisplay() {
     dismissTimerRef.current = setTimeout(() => setActiveCard(null), 6000);
   }, []);
 
-  // Listen for real-time CustomEvents dispatched by RFID/QR tabs (same page/tab)
+  // Listen for real-time CustomEvents dispatched by QR/RFID tabs (same page/tab)
   useEffect(() => {
     function handleScan(e: Event) {
       const { personId, personType, record } = (e as CustomEvent).detail as {
@@ -128,24 +127,52 @@ export default function WelcomeDisplay() {
     return () => window.removeEventListener("attendance_scan", handleScan);
   }, [buildCheckIn, showCard]);
 
-  // Poll localStorage every 500ms for scans from other browser tabs
-  useEffect(() => {
-    const id = setInterval(() => {
-      const scan = ls.get<LastScan | null>("last_scan", null);
-      if (!scan) return;
-      if (scan.ts <= lastTsRef.current) return;
-      lastTsRef.current = scan.ts;
-      const timeIn =
-        scan.record.timeIn ??
-        new Date().toLocaleTimeString("en-IN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-      const checkin = buildCheckIn(scan.personId, scan.personType, timeIn);
-      if (checkin) showCard(checkin);
-    }, 500);
-    return () => clearInterval(id);
-  }, [buildCheckIn, showCard]);
+  // Also accept keyboard input directly (kiosk mode) - auto-mark from typed admNo
+  const kioskInputRef = useRef<HTMLInputElement>(null);
+  const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [kioskValue, setKioskValue] = useState("");
+
+  function processKioskScan(raw: string) {
+    const admNo = raw.trim();
+    if (!admNo) return;
+    const student = students.find(
+      (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
+    );
+    if (student) {
+      const timeIn = new Date().toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const checkin: CheckIn = {
+        id: student.id,
+        name: student.fullName,
+        subtitle: student.fatherName ? `Father: ${student.fatherName}` : "",
+        cls: `Class ${student.class} - ${student.section}`,
+        photo: student.photo ?? "",
+        timeIn,
+        type: "student",
+        scannedAt: Date.now(),
+      };
+      showCard(checkin);
+    }
+    setKioskValue("");
+  }
+
+  function handleKioskChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const val = e.target.value;
+    setKioskValue(val);
+    if (kioskTimerRef.current) clearTimeout(kioskTimerRef.current);
+    if (val.trim().length >= 3) {
+      kioskTimerRef.current = setTimeout(() => processKioskScan(val), 150);
+    }
+  }
+
+  function handleKioskKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      processKioskScan(kioskValue);
+    }
+  }
 
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "long",
@@ -158,7 +185,9 @@ export default function WelcomeDisplay() {
     <div
       className="relative w-full min-h-[calc(100vh-120px)] flex flex-col items-center justify-center overflow-hidden rounded-2xl"
       style={{ background: "oklch(0.13 0.04 260)" }}
-      data-ocid="welcome-display-screen"
+      data-ocid="welcome-display.screen"
+      onClick={() => kioskInputRef.current?.focus()}
+      onKeyDown={() => kioskInputRef.current?.focus()}
     >
       {/* Background grid pattern */}
       <div
@@ -168,6 +197,17 @@ export default function WelcomeDisplay() {
             "linear-gradient(oklch(0.5 0.18 260) 1px, transparent 1px), linear-gradient(90deg, oklch(0.5 0.18 260) 1px, transparent 1px)",
           backgroundSize: "60px 60px",
         }}
+      />
+
+      {/* Hidden kiosk input - captures scanner input when display is focused */}
+      <input
+        ref={kioskInputRef}
+        value={kioskValue}
+        onChange={handleKioskChange}
+        onKeyDown={handleKioskKeyDown}
+        className="absolute opacity-0 w-0 h-0 pointer-events-none"
+        aria-label="Kiosk scan input"
+        autoComplete="off"
       />
 
       {/* School name header */}
@@ -189,7 +229,6 @@ export default function WelcomeDisplay() {
       {/* Idle State */}
       {!activeCard && (
         <div className="flex flex-col items-center gap-6 text-center z-10 px-8">
-          {/* Digital Clock */}
           <div
             className="text-6xl md:text-8xl font-bold font-mono tracking-tight"
             style={{
@@ -205,7 +244,6 @@ export default function WelcomeDisplay() {
           >
             {today}
           </p>
-          {/* Pulsing prompt */}
           <div
             className="mt-4 px-8 py-4 rounded-2xl border"
             style={{
@@ -231,7 +269,6 @@ export default function WelcomeDisplay() {
           className="z-20 flex flex-col items-center gap-5 text-center px-8"
           style={{ animation: "fadeInScale 0.4s ease-out" }}
         >
-          {/* Avatar */}
           <div
             className="w-36 h-36 md:w-48 md:h-48 rounded-full flex items-center justify-center text-5xl overflow-hidden border-4"
             style={{
@@ -258,7 +295,6 @@ export default function WelcomeDisplay() {
             )}
           </div>
 
-          {/* Name & Details */}
           <div>
             <p
               className="text-4xl md:text-6xl font-bold font-display"
@@ -285,7 +321,6 @@ export default function WelcomeDisplay() {
             </p>
           </div>
 
-          {/* Entry Time */}
           <div
             className="flex items-center gap-3 px-6 py-2 rounded-full"
             style={{ background: "oklch(0.25 0.04 260 / 0.8)" }}
@@ -301,7 +336,6 @@ export default function WelcomeDisplay() {
             </span>
           </div>
 
-          {/* Welcome Banner */}
           <div
             className="px-10 py-4 rounded-2xl text-2xl md:text-3xl font-bold"
             style={{
@@ -373,7 +407,6 @@ export default function WelcomeDisplay() {
         </div>
       )}
 
-      {/* CSS for animations */}
       <style>{`
         @keyframes fadeInScale {
           from { opacity: 0; transform: scale(0.85); }
