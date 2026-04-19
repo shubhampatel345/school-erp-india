@@ -42,6 +42,8 @@ function Clock() {
 
 export default function WelcomeDisplay() {
   const { getData } = useApp();
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   const students = useMemo(() => getData("students") as Student[], [getData]);
   const staff = useMemo(() => getData("staff") as Staff[], [getData]);
@@ -51,10 +53,10 @@ export default function WelcomeDisplay() {
       const profile = localStorage.getItem("school_profile");
       if (profile) {
         const parsed = JSON.parse(profile) as { name?: string };
-        return parsed.name ?? "SHUBH SCHOOL ERP";
+        return parsed.name ?? "SCHOOL LEDGER ERP";
       }
     } catch {}
-    return "SHUBH SCHOOL ERP";
+    return "SCHOOL LEDGER ERP";
   }, []);
 
   const [activeCard, setActiveCard] = useState<CheckIn | null>(null);
@@ -74,7 +76,7 @@ export default function WelcomeDisplay() {
           id: personId,
           name: s.fullName,
           subtitle: s.fatherName ? `Father: ${s.fatherName}` : "",
-          cls: `Class ${s.class} - ${s.section}`,
+          cls: `Class ${s.class}${s.section ? ` - ${s.section}` : ""}`,
           photo: s.photo ?? "",
           timeIn,
           type: "student",
@@ -104,7 +106,7 @@ export default function WelcomeDisplay() {
     dismissTimerRef.current = setTimeout(() => setActiveCard(null), 6000);
   }, []);
 
-  // Listen for real-time CustomEvents dispatched by QR/RFID tabs (same page/tab)
+  // Listen for real-time CustomEvents dispatched by QR/RFID tabs (same tab)
   useEffect(() => {
     function handleScan(e: Event) {
       const { personId, personType, record } = (e as CustomEvent).detail as {
@@ -127,7 +129,7 @@ export default function WelcomeDisplay() {
     return () => window.removeEventListener("attendance_scan", handleScan);
   }, [buildCheckIn, showCard]);
 
-  // Also accept keyboard input directly (kiosk mode) - auto-mark from typed admNo
+  // Kiosk mode input: hidden input captures scanner/keyboard input
   const kioskInputRef = useRef<HTMLInputElement>(null);
   const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [kioskValue, setKioskValue] = useState("");
@@ -147,7 +149,7 @@ export default function WelcomeDisplay() {
         id: student.id,
         name: student.fullName,
         subtitle: student.fatherName ? `Father: ${student.fatherName}` : "",
-        cls: `Class ${student.class} - ${student.section}`,
+        cls: `Class ${student.class}${student.section ? ` - ${student.section}` : ""}`,
         photo: student.photo ?? "",
         timeIn,
         type: "student",
@@ -174,6 +176,50 @@ export default function WelcomeDisplay() {
     }
   }
 
+  // Fullscreen API
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      containerRef.current
+        ?.requestFullscreen()
+        .then(() => {
+          setIsFullscreen(true);
+        })
+        .catch(() => {
+          // ignore — browser may block
+        });
+    } else {
+      void document.exitFullscreen().then(() => setIsFullscreen(false));
+    }
+  }, []);
+
+  useEffect(() => {
+    function onFsChange() {
+      setIsFullscreen(!!document.fullscreenElement);
+    }
+    document.addEventListener("fullscreenchange", onFsChange);
+    return () => document.removeEventListener("fullscreenchange", onFsChange);
+  }, []);
+
+  // Demo: simulate a scan for preview purposes
+  function simulateScan() {
+    const sample = students[Math.floor(Math.random() * students.length)];
+    if (!sample) return;
+    const checkin: CheckIn = {
+      id: sample.id,
+      name: sample.fullName,
+      subtitle: sample.fatherName ? `Father: ${sample.fatherName}` : "",
+      cls: `Class ${sample.class}${sample.section ? ` - ${sample.section}` : ""}`,
+      photo: sample.photo ?? "",
+      timeIn: new Date().toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      type: "student",
+      scannedAt: Date.now(),
+    };
+    showCard(checkin);
+  }
+
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
@@ -182,239 +228,292 @@ export default function WelcomeDisplay() {
   });
 
   return (
-    <div
-      className="relative w-full min-h-[calc(100vh-120px)] flex flex-col items-center justify-center overflow-hidden rounded-2xl"
-      style={{ background: "oklch(0.13 0.04 260)" }}
-      data-ocid="welcome-display.screen"
-      onClick={() => kioskInputRef.current?.focus()}
-      onKeyDown={() => kioskInputRef.current?.focus()}
-    >
-      {/* Background grid pattern */}
-      <div
-        className="absolute inset-0 opacity-10"
-        style={{
-          backgroundImage:
-            "linear-gradient(oklch(0.5 0.18 260) 1px, transparent 1px), linear-gradient(90deg, oklch(0.5 0.18 260) 1px, transparent 1px)",
-          backgroundSize: "60px 60px",
-        }}
-      />
-
-      {/* Hidden kiosk input - captures scanner input when display is focused */}
-      <input
-        ref={kioskInputRef}
-        value={kioskValue}
-        onChange={handleKioskChange}
-        onKeyDown={handleKioskKeyDown}
-        className="absolute opacity-0 w-0 h-0 pointer-events-none"
-        aria-label="Kiosk scan input"
-        autoComplete="off"
-      />
-
-      {/* School name header */}
-      <div className="absolute top-6 text-center z-10">
-        <p
-          className="text-xs tracking-[0.3em] uppercase font-semibold"
-          style={{ color: "oklch(0.65 0.15 260)" }}
-        >
-          Welcome to
+    <div className="space-y-3">
+      {/* Control bar outside fullscreen container */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <p className="text-sm text-muted-foreground">
+          This display is intended for the school entrance. Students scan their
+          QR/RFID card — their welcome card will appear here.
         </p>
-        <p
-          className="text-2xl md:text-3xl font-bold font-display mt-1"
-          style={{ color: "oklch(0.95 0.01 260)" }}
-        >
-          {schoolName}
-        </p>
+        <div className="flex gap-2">
+          {students.length > 0 && (
+            <button
+              type="button"
+              onClick={simulateScan}
+              className="px-3 py-1.5 text-xs rounded-md border border-border bg-card text-foreground hover:bg-muted transition-colors"
+              data-ocid="welcome-display.simulate.button"
+            >
+              🎯 Simulate Scan
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="px-3 py-1.5 text-xs rounded-md border border-primary/40 bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            data-ocid="welcome-display.fullscreen.button"
+          >
+            {isFullscreen ? "⛶ Exit Fullscreen" : "⛶ Fullscreen Mode"}
+          </button>
+        </div>
       </div>
 
-      {/* Idle State */}
-      {!activeCard && (
-        <div className="flex flex-col items-center gap-6 text-center z-10 px-8">
-          <div
-            className="text-6xl md:text-8xl font-bold font-mono tracking-tight"
-            style={{
-              color: "oklch(0.9 0.01 260)",
-              textShadow: "0 0 40px oklch(0.55 0.18 260 / 0.4)",
-            }}
-          >
-            <Clock />
-          </div>
-          <p
-            className="text-xl md:text-2xl"
-            style={{ color: "oklch(0.6 0.01 260)" }}
-          >
-            {today}
-          </p>
-          <div
-            className="mt-4 px-8 py-4 rounded-2xl border"
-            style={{
-              borderColor: "oklch(0.45 0.15 260 / 0.5)",
-              background: "oklch(0.2 0.04 260 / 0.6)",
-              animation: "pulse 2.5s ease-in-out infinite",
-            }}
-          >
-            <p
-              className="text-lg md:text-xl font-semibold tracking-wide"
-              style={{ color: "oklch(0.75 0.16 260)" }}
-            >
-              📡 SCAN YOUR CARD TO CHECK IN
-            </p>
-          </div>
-        </div>
-      )}
-
-      {/* Welcome Card — animated slide-in */}
-      {activeCard && (
+      {/* Main display */}
+      <div
+        ref={containerRef}
+        className="relative w-full min-h-[calc(100vh-200px)] flex flex-col items-center justify-center overflow-hidden rounded-2xl select-none"
+        style={{ background: "oklch(0.13 0.04 260)" }}
+        data-ocid="welcome-display.screen"
+        onClick={() => kioskInputRef.current?.focus()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ")
+            kioskInputRef.current?.focus();
+        }}
+      >
+        {/* Background grid pattern */}
         <div
-          key={activeCard.scannedAt}
-          className="z-20 flex flex-col items-center gap-5 text-center px-8"
-          style={{ animation: "fadeInScale 0.4s ease-out" }}
-        >
-          <div
-            className="w-36 h-36 md:w-48 md:h-48 rounded-full flex items-center justify-center text-5xl overflow-hidden border-4"
-            style={{
-              borderColor: "oklch(0.65 0.18 260)",
-              boxShadow: "0 0 60px oklch(0.55 0.18 260 / 0.5)",
-            }}
-          >
-            {activeCard.photo ? (
-              <img
-                src={activeCard.photo}
-                alt={activeCard.name}
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <span
-                className="w-full h-full flex items-center justify-center text-6xl font-bold"
-                style={{
-                  background: "oklch(0.25 0.06 260)",
-                  color: "oklch(0.75 0.16 260)",
-                }}
-              >
-                {activeCard.name.charAt(0)}
-              </span>
-            )}
-          </div>
+          className="absolute inset-0 opacity-10"
+          style={{
+            backgroundImage:
+              "linear-gradient(oklch(0.5 0.18 260) 1px, transparent 1px), linear-gradient(90deg, oklch(0.5 0.18 260) 1px, transparent 1px)",
+            backgroundSize: "60px 60px",
+          }}
+        />
 
-          <div>
-            <p
-              className="text-4xl md:text-6xl font-bold font-display"
+        {/* Ambient glow blobs */}
+        <div
+          className="absolute top-1/4 left-1/4 w-64 h-64 rounded-full blur-3xl pointer-events-none"
+          style={{ background: "oklch(0.3 0.12 260 / 0.3)" }}
+        />
+        <div
+          className="absolute bottom-1/4 right-1/4 w-48 h-48 rounded-full blur-3xl pointer-events-none"
+          style={{ background: "oklch(0.35 0.14 200 / 0.25)" }}
+        />
+
+        {/* Hidden kiosk input */}
+        <input
+          ref={kioskInputRef}
+          value={kioskValue}
+          onChange={handleKioskChange}
+          onKeyDown={handleKioskKeyDown}
+          className="absolute opacity-0 w-0 h-0 pointer-events-none"
+          aria-label="Kiosk scan input"
+          autoComplete="off"
+        />
+
+        {/* School name header */}
+        <div className="absolute top-6 text-center z-10 px-4">
+          <p
+            className="text-xs tracking-[0.3em] uppercase font-semibold"
+            style={{ color: "oklch(0.65 0.15 260)" }}
+          >
+            Welcome to
+          </p>
+          <p
+            className="text-2xl md:text-3xl font-bold font-display mt-1"
+            style={{ color: "oklch(0.95 0.01 260)" }}
+          >
+            {schoolName}
+          </p>
+        </div>
+
+        {/* Idle State */}
+        {!activeCard && (
+          <div className="flex flex-col items-center gap-6 text-center z-10 px-8">
+            <div
+              className="text-6xl md:text-8xl font-bold font-mono tracking-tight"
               style={{
-                color: "oklch(0.97 0.005 260)",
-                textShadow: "0 2px 20px rgba(0,0,0,0.3)",
+                color: "oklch(0.9 0.01 260)",
+                textShadow: "0 0 40px oklch(0.55 0.18 260 / 0.4)",
               }}
             >
-              {activeCard.name}
-            </p>
-            {activeCard.subtitle && (
-              <p
-                className="text-lg md:text-2xl mt-2"
-                style={{ color: "oklch(0.65 0.12 260)" }}
-              >
-                {activeCard.subtitle}
-              </p>
-            )}
+              <Clock />
+            </div>
             <p
-              className="text-base md:text-lg mt-1"
-              style={{ color: "oklch(0.55 0.08 260)" }}
+              className="text-xl md:text-2xl"
+              style={{ color: "oklch(0.6 0.01 260)" }}
             >
-              {activeCard.cls}
+              {today}
             </p>
-          </div>
-
-          <div
-            className="flex items-center gap-3 px-6 py-2 rounded-full"
-            style={{ background: "oklch(0.25 0.04 260 / 0.8)" }}
-          >
-            <span style={{ color: "oklch(0.6 0.1 260)" }} className="text-sm">
-              Entry Time:
-            </span>
-            <span
-              className="text-xl font-mono font-bold"
-              style={{ color: "oklch(0.8 0.18 260)" }}
+            <div
+              className="mt-4 px-8 py-4 rounded-2xl border"
+              style={{
+                borderColor: "oklch(0.45 0.15 260 / 0.5)",
+                background: "oklch(0.2 0.04 260 / 0.6)",
+                animation: "pulse 2.5s ease-in-out infinite",
+              }}
             >
-              {activeCard.timeIn}
-            </span>
+              <p
+                className="text-lg md:text-xl font-semibold tracking-wide"
+                style={{ color: "oklch(0.75 0.16 260)" }}
+              >
+                📡 SCAN YOUR CARD TO CHECK IN
+              </p>
+            </div>
           </div>
+        )}
 
+        {/* Welcome Card — animated entrance */}
+        {activeCard && (
           <div
-            className="px-10 py-4 rounded-2xl text-2xl md:text-3xl font-bold"
+            key={activeCard.scannedAt}
+            className="z-20 flex flex-col items-center gap-5 text-center px-8 max-w-lg"
             style={{
-              background:
-                "linear-gradient(135deg, oklch(0.42 0.18 260), oklch(0.55 0.15 150))",
-              boxShadow: "0 8px 32px oklch(0.42 0.18 260 / 0.4)",
-              color: "oklch(0.97 0.005 0)",
+              animation: "welcomeIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
             }}
           >
-            🎉 WELCOME TO SCHOOL!
-          </div>
-        </div>
-      )}
-
-      {/* Recent Check-ins Ticker */}
-      {recentCheckins.length > 0 && (
-        <div
-          className="absolute bottom-0 left-0 right-0 px-4 py-3 z-10"
-          style={{
-            background: "oklch(0.1 0.03 260 / 0.9)",
-            borderTop: "1px solid oklch(0.25 0.04 260)",
-          }}
-        >
-          <p
-            className="text-xs uppercase tracking-widest mb-2"
-            style={{ color: "oklch(0.45 0.08 260)" }}
-          >
-            Recent Check-ins
-          </p>
-          <div className="flex gap-4 overflow-x-auto scrollbar-hide">
-            {recentCheckins.map((c) => (
-              <div
-                key={`${c.id}-${c.scannedAt}`}
-                className="flex items-center gap-2 flex-shrink-0"
-              >
-                <div
-                  className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden"
-                  style={{ background: "oklch(0.3 0.06 260)" }}
+            {/* Avatar */}
+            <div
+              className="w-36 h-36 md:w-48 md:h-48 rounded-full flex items-center justify-center overflow-hidden border-4"
+              style={{
+                borderColor: "oklch(0.65 0.18 260)",
+                boxShadow:
+                  "0 0 60px oklch(0.55 0.18 260 / 0.5), 0 0 120px oklch(0.45 0.14 260 / 0.3)",
+              }}
+            >
+              {activeCard.photo ? (
+                <img
+                  src={activeCard.photo}
+                  alt={activeCard.name}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <span
+                  className="w-full h-full flex items-center justify-center text-6xl font-bold"
+                  style={{
+                    background: "oklch(0.25 0.06 260)",
+                    color: "oklch(0.75 0.16 260)",
+                  }}
                 >
-                  {c.photo ? (
-                    <img
-                      src={c.photo}
-                      alt={c.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <span style={{ color: "oklch(0.75 0.16 260)" }}>
-                      {c.name.charAt(0)}
-                    </span>
-                  )}
-                </div>
-                <div>
-                  <p
-                    className="text-sm font-medium"
-                    style={{ color: "oklch(0.8 0.01 260)" }}
-                  >
-                    {c.name}
-                  </p>
-                  <p
-                    className="text-xs"
-                    style={{ color: "oklch(0.5 0.01 260)" }}
-                  >
-                    {c.timeIn}
-                  </p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+                  {activeCard.name.charAt(0)}
+                </span>
+              )}
+            </div>
 
-      <style>{`
-        @keyframes fadeInScale {
-          from { opacity: 0; transform: scale(0.85); }
-          to   { opacity: 1; transform: scale(1); }
-        }
-        .scrollbar-hide::-webkit-scrollbar { display: none; }
-        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
+            {/* Name + details */}
+            <div>
+              <p
+                className="text-4xl md:text-6xl font-bold font-display leading-tight"
+                style={{
+                  color: "oklch(0.97 0.005 260)",
+                  textShadow: "0 2px 20px rgba(0,0,0,0.3)",
+                }}
+              >
+                {activeCard.name}
+              </p>
+              {activeCard.subtitle && (
+                <p
+                  className="text-lg md:text-2xl mt-2"
+                  style={{ color: "oklch(0.65 0.12 260)" }}
+                >
+                  {activeCard.subtitle}
+                </p>
+              )}
+              <p
+                className="text-base md:text-lg mt-1"
+                style={{ color: "oklch(0.55 0.08 260)" }}
+              >
+                {activeCard.cls}
+              </p>
+            </div>
+
+            {/* Entry time chip */}
+            <div
+              className="flex items-center gap-3 px-6 py-2 rounded-full"
+              style={{ background: "oklch(0.25 0.04 260 / 0.8)" }}
+            >
+              <span style={{ color: "oklch(0.6 0.1 260)" }} className="text-sm">
+                Entry Time:
+              </span>
+              <span
+                className="text-xl font-mono font-bold"
+                style={{ color: "oklch(0.8 0.18 260)" }}
+              >
+                {activeCard.timeIn}
+              </span>
+            </div>
+
+            {/* Welcome banner */}
+            <div
+              className="px-10 py-4 rounded-2xl text-2xl md:text-3xl font-bold"
+              style={{
+                background:
+                  "linear-gradient(135deg, oklch(0.42 0.18 260), oklch(0.55 0.15 150))",
+                boxShadow: "0 8px 32px oklch(0.42 0.18 260 / 0.4)",
+                color: "oklch(0.97 0.005 0)",
+              }}
+            >
+              🎉 WELCOME TO SCHOOL!
+            </div>
+          </div>
+        )}
+
+        {/* Recent Check-ins Ticker */}
+        {recentCheckins.length > 0 && (
+          <div
+            className="absolute bottom-0 left-0 right-0 px-4 py-3 z-10"
+            style={{
+              background: "oklch(0.1 0.03 260 / 0.9)",
+              borderTop: "1px solid oklch(0.25 0.04 260)",
+            }}
+          >
+            <p
+              className="text-xs uppercase tracking-widest mb-2"
+              style={{ color: "oklch(0.45 0.08 260)" }}
+            >
+              Recent Check-ins
+            </p>
+            <div
+              className="flex gap-4 overflow-x-auto"
+              style={{ scrollbarWidth: "none" }}
+            >
+              {recentCheckins.map((c) => (
+                <div
+                  key={`${c.id}-${c.scannedAt}`}
+                  className="flex items-center gap-2 flex-shrink-0"
+                >
+                  <div
+                    className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold overflow-hidden"
+                    style={{ background: "oklch(0.3 0.06 260)" }}
+                  >
+                    {c.photo ? (
+                      <img
+                        src={c.photo}
+                        alt={c.name}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <span style={{ color: "oklch(0.75 0.16 260)" }}>
+                        {c.name.charAt(0)}
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    <p
+                      className="text-sm font-medium"
+                      style={{ color: "oklch(0.8 0.01 260)" }}
+                    >
+                      {c.name}
+                    </p>
+                    <p
+                      className="text-xs"
+                      style={{ color: "oklch(0.5 0.01 260)" }}
+                    >
+                      {c.timeIn}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <style>{`
+          @keyframes welcomeIn {
+            from { opacity: 0; transform: scale(0.75) translateY(20px); }
+            to   { opacity: 1; transform: scale(1) translateY(0); }
+          }
+        `}</style>
+      </div>
     </div>
   );
 }

@@ -1,30 +1,29 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, fully working School Management System for Indian schools. All modules (Students, Fees, Attendance, HR/Payroll, Academics, Transport, Inventory, Examinations, Communication, Chat, Calling, Reports) work end-to-end with real MySQL data sync — every change saves immediately to the server like WhatsApp Web, with a changelog tracking who changed what.",
+  "overview": "School Ledger ERP is a comprehensive, server-centric school management system for Indian schools. All data is stored in MySQL on cPanel hosting and syncs across all devices in real time. It covers all school operations: student management, fees collection (INR), attendance (RFID/QR/biometric), examinations, HR/payroll, transport, inventory, communication (WhatsApp), chat, certificates, alumni, reports, and more — all in a fast, mobile-optimized PWA.",
   "features": [
-    "WhatsApp-style real-time data sync — all data loads from MySQL on open, every change saves instantly to server",
-    "Role-based permissions — Super Admin controls what each role (Teacher, Admin, Principal, Parent, Student) can read/write/add/delete",
-    "Student Information — Excel-style grid with 20+ columns, rich filters, bulk import/export, family grouping",
-    "Fees Module — fee headings, class-wise plans, collect fees, receipt with QR, balance carry-forward, dues tracking",
-    "Attendance — QR scanner, RFID, ESSL/IP biometric, welcome display, summary reports",
-    "HR & Payroll — staff directory, attendance-based salary calculation, payslip generation",
-    "Academics — classes/sections CRUD, subjects, timetables, syllabus tracker",
-    "Chat System — direct messages + class/section/route group chats with file sharing (WhatsApp-style mobile UI)",
-    "Calling System — Heyophone VoIP integration, click-to-call from profiles, call logs",
-    "Changelog audit trail — every change tracked with who/what/when for sync and compliance",
-    "PWA — installable, mobile-optimized, bottom navigation",
-    "Backup & Restore — export/import all data, factory reset"
+    "Full cPanel/MySQL backend — all data saved to server, syncs across every device in real time",
+    "20+ modules: Students, Fees, Attendance, HR/Payroll, Academics, Transport, Inventory, Exams, Chat, Communication, Certificates, Reports",
+    "Excel-style grids with rich filters, bulk actions, import/export for students and staff",
+    "Fees collection with auto-month selection, receipt generation (4 templates), QR code receipts, balance carry-forward",
+    "WhatsApp auto-reply bot — parents send admission number, receive attendance + fees summary",
+    "Role-based permissions: Super Admin, Admin, Teacher, Parent, Student, Driver, Accountant, Librarian",
+    "PWA — installable on Android/iOS, mobile bottom navigation, offline support",
+    "Fast performance: skeleton loading, parallel data fetches, 50-record pagination, client-side cache",
+    "Chat system: DMs between any users, auto-generated class/section/route groups, file sharing",
+    "Complete documentation and cPanel deployment guide included"
   ],
   "category": "productivity",
   "tags": [
     "school-erp",
+    "school-management",
     "education",
-    "india",
-    "pwa",
-    "mysql",
-    "role-based-access",
     "fees-management",
     "attendance",
-    "payroll"
+    "payroll",
+    "india",
+    "cpanel",
+    "mysql",
+    "pwa"
   ],
-  "last_updated": "2026-04-19T14:19:24.427Z"
+  "last_updated": "2026-04-19T17:52:32.038Z"
 }

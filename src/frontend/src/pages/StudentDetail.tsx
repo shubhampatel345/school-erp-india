@@ -1,220 +1,159 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  AlertCircle,
+  ArrowLeft,
   Bus,
+  Calendar,
   CreditCard,
+  Edit2,
   FileText,
-  Lock,
-  UserCheck,
-  X,
+  Mail,
+  Phone,
+  User,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import StudentDetailModal from "../components/StudentDetailModal";
+import StudentForm from "../components/StudentForm";
 import { useApp } from "../context/AppContext";
-import type {
-  DiscountEntry,
-  FeeHeading,
-  FeeReceipt,
-  FeesPlan,
-  Student,
-  TransportRoute,
-} from "../types";
-import {
-  CLASSES,
-  MONTHS,
-  MONTH_SHORT,
-  SECTIONS,
-  formatCurrency,
-  ls,
-} from "../utils/localStorage";
+import type { Student } from "../types";
 
-interface StudentDetailProps {
-  student: Student;
-  onClose: () => void;
-  onUpdate: (s: Student) => void;
+interface StudentDetailPageProps {
+  studentId: string;
+  onBack: () => void;
+  onNavigate?: (page: string) => void;
 }
 
-function parseDobToParts(dob: string): [string, string, string] {
-  const p = dob.split("/");
-  return [p[0] ?? "", p[1] ?? "", p[2] ?? ""];
-}
-function makeDob(dd: string, mm: string, yyyy: string) {
-  return `${dd}/${mm}/${yyyy}`;
-}
-
-type PrintTemplate = "basic" | "detailed" | "official";
-
-export default function StudentDetail({
-  student,
-  onClose,
-  onUpdate,
-}: StudentDetailProps) {
-  const { currentUser, currentSession } = useApp();
-  const isSuperAdmin = currentUser?.role === "superadmin";
-
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ ...student });
-  const [dobParts, setDobParts] = useState<[string, string, string]>(
-    parseDobToParts(student.dob),
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex items-start gap-3 py-2 border-b border-border/60 last:border-0">
+      <span className="text-xs text-muted-foreground w-36 flex-shrink-0 mt-0.5">
+        {label}
+      </span>
+      <span className="text-sm text-foreground font-medium break-words flex-1">
+        {value}
+      </span>
+    </div>
   );
-  const [showDiscontinue, setShowDiscontinue] = useState(false);
-  const [leaveDate, setLeaveDate] = useState("");
-  const [leaveReason, setLeaveReason] = useState("");
-  const [remarks, setRemarks] = useState("");
-  const [printTemplate, setPrintTemplate] = useState<PrintTemplate | null>(
-    null,
-  );
+}
 
-  const mmRef = useRef<HTMLInputElement>(null);
-  const yyyyRef = useRef<HTMLInputElement>(null);
+export default function StudentDetailPage({
+  studentId,
+  onBack,
+  onNavigate,
+}: StudentDetailPageProps) {
+  const { getData, saveData, updateData, deleteData, refreshCollection } =
+    useApp();
+  const [loading, setLoading] = useState(true);
+  const [student, setStudent] = useState<Student | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const allStudents = getData("students") as Student[];
 
-  const schoolProfile = ls.get("school_profile", {
-    name: "SHUBH SCHOOL ERP",
-    address: "",
-    phone: "",
-    principalName: "",
-    affiliationNo: "",
-  }) as {
-    name: string;
-    address: string;
-    phone: string;
-    principalName: string;
-    affiliationNo: string;
-  };
+  // biome-ignore lint/correctness/useExhaustiveDependencies: studentId is the dependency
+  useEffect(() => {
+    void loadStudent();
+  }, [studentId]);
 
-  // Fees data
-  const feeHeadings = ls.get<FeeHeading[]>("fee_headings", []);
-  const feesPlan = ls.get<FeesPlan[]>("fees_plan", []);
-  const receipts = ls
-    .get<FeeReceipt[]>("fee_receipts", [])
-    .filter((r) => r.studentId === student.id && !r.isDeleted);
-  const discounts = ls
-    .get<DiscountEntry[]>("discounts", [])
-    .filter(
-      (d) => d.studentId === student.id && d.sessionId === currentSession?.id,
+  async function loadStudent() {
+    setLoading(true);
+    const cached = (getData("students") as Student[]).find(
+      (s) => s.id === studentId,
     );
-
-  // Transport auto-populate
-  const transportRoutes = ls.get<TransportRoute[]>("transport_routes", []);
-  const assignedRoute = transportRoutes.find((r) =>
-    r.students.includes(student.id),
-  );
-
-  // Previous session dues
-  const prevDues = ls.get<Record<string, Record<string, number>>>(
-    "prev_dues",
-    {},
-  );
-  const studentPrevDues = prevDues[student.id] ?? {};
-
-  function handleFieldChange(field: keyof Student, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function saveEdits() {
-    const dob = makeDob(dobParts[0], dobParts[1], dobParts[2]);
-    const dobForPwd = `${dobParts[0]}${dobParts[1]}${dobParts[2]}`;
-    const updated: Student = {
-      ...form,
-      dob,
-      credentials: {
-        username: form.admNo,
-        password: dobForPwd,
-      },
-    };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
-    onUpdate(updated);
-    setEditing(false);
-  }
-
-  function handleDiscontinue() {
-    const updated: Student = {
-      ...student,
-      status: "discontinued",
-      leavingDate: leaveDate,
-      leavingReason: leaveReason,
-      remarks,
-    };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
-    onUpdate(updated);
-    setShowDiscontinue(false);
-  }
-
-  function handleReinstate() {
-    const updated: Student = {
-      ...student,
-      status: "active",
-      leavingDate: undefined,
-      leavingReason: undefined,
-      remarks: undefined,
-    };
-    const all = ls.get<Student[]>("students", []);
-    const idx = all.findIndex((s) => s.id === updated.id);
-    if (idx >= 0) all[idx] = updated;
-    ls.set("students", all);
-    onUpdate(updated);
-  }
-
-  function getPaidMonthsForHeading(headingId: string): string[] {
-    const paid: string[] = [];
-    for (const r of receipts) {
-      for (const item of r.items) {
-        if (item.headingId === headingId) paid.push(item.month);
-      }
+    if (cached) {
+      setStudent(cached);
+      setLoading(false);
+      return;
     }
-    return paid;
+    try {
+      await refreshCollection("students");
+      const fresh = (getData("students") as Student[]).find(
+        (s) => s.id === studentId,
+      );
+      setStudent(fresh ?? null);
+    } catch {
+      setStudent(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function getApplicablePlan(headingId: string) {
+  function handleUpdate(updated: Student) {
+    setStudent(updated);
+  }
+
+  if (loading) {
     return (
-      feesPlan.find(
-        (p) =>
-          p.headingId === headingId &&
-          p.classId === student.class &&
-          p.sectionId === student.section,
-      ) ??
-      feesPlan.find(
-        (p) => p.headingId === headingId && p.classId === student.class,
-      )
+      <div className="p-6 space-y-4 max-w-3xl mx-auto">
+        <div className="flex items-center gap-3 mb-6">
+          <Skeleton className="w-8 h-8 rounded" />
+          <Skeleton className="w-40 h-6" />
+        </div>
+        <div className="flex items-center gap-4 p-5 rounded-xl border border-border bg-card">
+          <Skeleton className="w-20 h-20 rounded-full" />
+          <div className="space-y-2 flex-1">
+            <Skeleton className="w-48 h-6" />
+            <Skeleton className="w-32 h-4" />
+            <Skeleton className="w-24 h-5" />
+          </div>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-5 space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: skeleton rows
+            <Skeleton key={i} className="w-full h-8" />
+          ))}
+        </div>
+      </div>
     );
   }
 
-  function getDiscountForMonth(month: string) {
-    return discounts
-      .filter((d) => d.month === month)
-      .reduce((sum, d) => sum + d.amount, 0);
+  if (!student) {
+    return (
+      <div className="p-6 flex flex-col items-center justify-center gap-4 text-center">
+        <User className="w-12 h-12 text-muted-foreground opacity-40" />
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            Student Not Found
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            The student record could not be loaded.
+          </p>
+        </div>
+        <Button variant="outline" onClick={onBack}>
+          <ArrowLeft className="w-4 h-4 mr-2" /> Back to Student List
+        </Button>
+      </div>
+    );
   }
-
-  function printAdmForm(template: PrintTemplate) {
-    setPrintTemplate(template);
-    setTimeout(() => window.print(), 300);
-  }
-
-  const tabClass = "text-xs";
 
   return (
-    <>
-      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div className="bg-card rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] overflow-y-auto">
-          {/* Header */}
-          <div className="flex items-start gap-4 p-5 border-b border-border bg-muted/30">
-            <div className="w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center overflow-hidden flex-shrink-0">
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* Header */}
+      <div className="px-4 md:px-6 pt-4 pb-3 bg-card border-b border-border flex-shrink-0">
+        <div className="flex items-center gap-3 mb-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1.5 text-muted-foreground hover:text-foreground"
+            onClick={onBack}
+            data-ocid="student-detail-page.back_button"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back
+          </Button>
+          <span className="text-muted-foreground text-sm">/</span>
+          <span className="text-sm font-medium text-foreground truncate">
+            {student.fullName}
+          </span>
+        </div>
+      </div>
+
+      <div className="flex-1 p-4 md:p-6 space-y-4 max-w-3xl">
+        {/* Student Card */}
+        <div className="bg-card rounded-xl border border-border p-5">
+          <div className="flex items-start gap-4">
+            <div className="w-20 h-20 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
               {student.photo ? (
                 <img
                   src={student.photo}
@@ -222,911 +161,253 @@ export default function StudentDetail({
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <span className="text-2xl font-bold text-primary">
+                <span className="text-3xl font-bold text-primary">
                   {student.fullName.charAt(0).toUpperCase()}
                 </span>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-bold font-display text-foreground truncate">
+              <h1 className="text-xl font-bold font-display text-foreground">
                 {student.fullName}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Adm. No: {student.admNo}
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Adm. No:{" "}
+                <span className="font-mono font-medium">{student.admNo}</span>
               </p>
               <p className="text-sm text-muted-foreground">
-                Class {student.class} – {student.section} &nbsp;|&nbsp;{" "}
+                Class {student.class} – {student.section} &nbsp;·&nbsp;{" "}
                 {student.fatherName}
               </p>
-              <div className="flex gap-2 mt-1 flex-wrap">
+              <div className="flex flex-wrap gap-2 mt-2">
                 <Badge
                   variant={
                     student.status === "active" ? "default" : "destructive"
                   }
+                  className="text-xs"
                 >
                   {student.status === "active" ? "Active" : "Discontinued"}
                 </Badge>
                 {student.category && (
-                  <Badge variant="secondary">{student.category}</Badge>
+                  <Badge variant="secondary" className="text-xs">
+                    {student.category}
+                  </Badge>
+                )}
+                {student.gender && (
+                  <Badge variant="outline" className="text-xs">
+                    {student.gender}
+                  </Badge>
+                )}
+                {student.transportRoute && (
+                  <Badge variant="outline" className="text-xs">
+                    <Bus className="w-2.5 h-2.5 mr-1" />
+                    {student.transportRoute}
+                  </Badge>
                 )}
               </div>
             </div>
-            <div className="flex gap-2 flex-shrink-0">
-              {editing ? (
-                <>
-                  <Button size="sm" onClick={saveEdits}>
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditing(false)}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit
-                </Button>
-              )}
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-
-          <Tabs defaultValue="personal" className="p-4">
-            <TabsList className="mb-4 flex-wrap h-auto gap-1">
-              <TabsTrigger value="personal" className={tabClass}>
-                Personal Info
-              </TabsTrigger>
-              <TabsTrigger value="fees" className={tabClass}>
-                Fees Details
-              </TabsTrigger>
-              <TabsTrigger value="transport" className={tabClass}>
-                Transport
-              </TabsTrigger>
-              <TabsTrigger value="discounts" className={tabClass}>
-                Discounts
-              </TabsTrigger>
-              <TabsTrigger value="oldfees" className={tabClass}>
-                Old Fees
-              </TabsTrigger>
-              {isSuperAdmin && (
-                <TabsTrigger value="credentials" className={tabClass}>
-                  Credentials
-                </TabsTrigger>
-              )}
-            </TabsList>
-
-            {/* Personal Info Tab */}
-            <TabsContent value="personal" className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Admission No."
-                  value={editing ? form.admNo : student.admNo}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("admNo", v)}
-                />
-                <Field
-                  label="Full Name"
-                  value={editing ? form.fullName : student.fullName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("fullName", v)}
-                />
-              </div>
-
-              {editing ? (
-                <div className="space-y-1">
-                  <Label>Date of Birth</Label>
-                  <div className="flex gap-2 items-center">
-                    <Input
-                      className="w-16 text-center"
-                      placeholder="DD"
-                      value={dobParts[0]}
-                      maxLength={2}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 2);
-                        setDobParts([v, dobParts[1], dobParts[2]]);
-                        if (v.length === 2) mmRef.current?.focus();
-                      }}
-                    />
-                    <span>/</span>
-                    <Input
-                      ref={mmRef}
-                      className="w-16 text-center"
-                      placeholder="MM"
-                      value={dobParts[1]}
-                      maxLength={2}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 2);
-                        setDobParts([dobParts[0], v, dobParts[2]]);
-                        if (v.length === 2) yyyyRef.current?.focus();
-                      }}
-                    />
-                    <span>/</span>
-                    <Input
-                      ref={yyyyRef}
-                      className="w-24 text-center"
-                      placeholder="YYYY"
-                      value={dobParts[2]}
-                      maxLength={4}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 4);
-                        setDobParts([dobParts[0], dobParts[1], v]);
-                      }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <Field
-                  label="Date of Birth"
-                  value={student.dob}
-                  editing={false}
-                  onChange={() => {}}
-                />
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                {editing ? (
-                  <>
-                    <div className="space-y-1">
-                      <Label>Gender</Label>
-                      <Select
-                        value={form.gender}
-                        onValueChange={(v) => handleFieldChange("gender", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Male">Male</SelectItem>
-                          <SelectItem value="Female">Female</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Category</Label>
-                      <Select
-                        value={form.category}
-                        onValueChange={(v) => handleFieldChange("category", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {["General", "OBC", "SC", "ST", "EWS"].map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Field
-                      label="Gender"
-                      value={student.gender}
-                      editing={false}
-                      onChange={() => {}}
-                    />
-                    <Field
-                      label="Category"
-                      value={student.category}
-                      editing={false}
-                      onChange={() => {}}
-                    />
-                  </>
-                )}
-              </div>
-
-              {editing ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label>Class</Label>
-                    <Select
-                      value={form.class}
-                      onValueChange={(v) => handleFieldChange("class", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {CLASSES.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Section</Label>
-                    <Select
-                      value={form.section}
-                      onValueChange={(v) => handleFieldChange("section", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {SECTIONS.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <Field
-                    label="Class"
-                    value={student.class}
-                    editing={false}
-                    onChange={() => {}}
-                  />
-                  <Field
-                    label="Section"
-                    value={student.section}
-                    editing={false}
-                    onChange={() => {}}
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Father's Name"
-                  value={editing ? form.fatherName : student.fatherName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("fatherName", v)}
-                />
-                <Field
-                  label="Mother's Name"
-                  value={editing ? form.motherName : student.motherName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("motherName", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Mobile"
-                  value={editing ? form.mobile : student.mobile}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("mobile", v)}
-                />
-                <Field
-                  label="Guardian Mobile"
-                  value={editing ? form.guardianMobile : student.guardianMobile}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("guardianMobile", v)}
-                />
-              </div>
-              <Field
-                label="Address"
-                value={editing ? form.address : student.address}
-                editing={editing}
-                onChange={(v) => handleFieldChange("address", v)}
-              />
-
-              {student.status === "discontinued" && (
-                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 space-y-1">
-                  <p className="text-sm font-medium text-destructive flex items-center gap-1">
-                    <AlertCircle className="w-4 h-4" /> Discontinued
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Leaving Date: {student.leavingDate}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Reason: {student.leavingReason}
-                  </p>
-                  {student.remarks && (
-                    <p className="text-xs text-muted-foreground">
-                      Remarks: {student.remarks}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("basic")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Basic)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("detailed")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Detailed)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("official")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Official)
-                </Button>
-                {student.status === "active" ? (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setShowDiscontinue(true)}
-                  >
-                    Discontinue
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={handleReinstate}>
-                    <UserCheck className="w-3 h-3 mr-1" /> Reinstate
-                  </Button>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Fees Details Tab */}
-            <TabsContent value="fees">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                        Fee Heading
-                      </th>
-                      {MONTH_SHORT.map((m) => (
-                        <th
-                          key={m}
-                          className="p-2 text-xs font-medium text-muted-foreground text-center"
-                        >
-                          {m}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {feeHeadings.map((h) => {
-                      const plan = getApplicablePlan(h.id);
-                      const paidMonths = getPaidMonthsForHeading(h.id);
-                      return (
-                        <tr key={h.id} className="border-t border-border">
-                          <td className="p-2 font-medium text-foreground text-xs">
-                            {h.name}
-                          </td>
-                          {MONTHS.map((month) => {
-                            const applicable = h.months.includes(month);
-                            const paid = paidMonths.includes(month);
-                            const amt = plan?.amount ?? h.amount;
-                            if (!applicable)
-                              return (
-                                <td
-                                  key={month}
-                                  className="p-2 text-center text-muted-foreground text-xs"
-                                >
-                                  —
-                                </td>
-                              );
-                            return (
-                              <td
-                                key={month}
-                                className="p-2 text-center text-xs"
-                              >
-                                {paid ? (
-                                  <span className="text-green-600 font-medium">
-                                    ✓
-                                  </span>
-                                ) : (
-                                  <span className="text-destructive">
-                                    {formatCurrency(amt)}
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      );
-                    })}
-                    {feeHeadings.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={13}
-                          className="p-4 text-center text-muted-foreground text-sm"
-                        >
-                          No fee headings configured
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </TabsContent>
-
-            {/* Transport Tab */}
-            <TabsContent value="transport">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-                  <Bus className="w-4 h-4" />
-                  {assignedRoute
-                    ? "Auto-populated from Transport module"
-                    : "Student not assigned to any route"}
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <InfoCard
-                    label="Bus No."
-                    value={
-                      assignedRoute?.busNo ?? student.transportBusNo ?? "—"
-                    }
-                  />
-                  <InfoCard
-                    label="Route"
-                    value={
-                      assignedRoute?.routeName ?? student.transportRoute ?? "—"
-                    }
-                  />
-                  <InfoCard
-                    label="Pickup Point"
-                    value={
-                      student.transportPickup ||
-                      (assignedRoute?.pickupPoints[0] ?? "—")
-                    }
-                  />
-                </div>
-                {assignedRoute && (
-                  <div className="bg-muted/30 rounded-lg p-3 text-sm">
-                    <p className="font-medium text-foreground mb-1">
-                      Driver: {assignedRoute.driverName}
-                    </p>
-                    <p className="text-muted-foreground">
-                      Mobile: {assignedRoute.driverMobile}
-                    </p>
-                    <p className="text-muted-foreground mt-1">
-                      Pickup Points: {assignedRoute.pickupPoints.join(", ")}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Discounts Tab */}
-            <TabsContent value="discounts">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground mb-3">
-                  Per-month discounts applied to this student
-                </p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/50">
-                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                          Month
-                        </th>
-                        <th className="text-right p-2 text-xs font-medium text-muted-foreground">
-                          Discount
-                        </th>
-                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                          Reason
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {MONTHS.map((month) => {
-                        const discount = getDiscountForMonth(month);
-                        return (
-                          <tr key={month} className="border-t border-border">
-                            <td className="p-2 text-xs">{month}</td>
-                            <td className="p-2 text-right text-xs font-medium">
-                              {discount > 0 ? (
-                                <span className="text-green-600">
-                                  {formatCurrency(discount)}
-                                </span>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                            <td className="p-2 text-xs text-muted-foreground">
-                              {discounts
-                                .filter((d) => d.month === month)
-                                .map((d) => d.reason)
-                                .join(", ") || "—"}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t-2 border-border bg-muted/30">
-                        <td className="p-2 text-xs font-bold">
-                          Total Discount
-                        </td>
-                        <td className="p-2 text-right text-xs font-bold text-green-600">
-                          {formatCurrency(
-                            discounts.reduce((sum, d) => sum + d.amount, 0),
-                          )}
-                        </td>
-                        <td />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Old Fees Tab */}
-            <TabsContent value="oldfees">
-              <div className="space-y-2">
-                <p className="text-sm text-muted-foreground mb-3">
-                  Unpaid dues from previous session carried forward as old
-                  balance
-                </p>
-                {Object.keys(studentPrevDues).length === 0 ? (
-                  <p className="text-center text-muted-foreground py-6 text-sm">
-                    No old balance carried forward
-                  </p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-muted/50">
-                          <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                            Month
-                          </th>
-                          <th className="text-right p-2 text-xs font-medium text-muted-foreground">
-                            Due Amount
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(studentPrevDues).map(
-                          ([month, amount]) => (
-                            <tr key={month} className="border-t border-border">
-                              <td className="p-2 text-xs">{month}</td>
-                              <td className="p-2 text-right text-xs font-medium text-destructive">
-                                {formatCurrency(amount as number)}
-                              </td>
-                            </tr>
-                          ),
-                        )}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t-2 border-border bg-muted/30">
-                          <td className="p-2 text-xs font-bold">
-                            Total Old Balance
-                          </td>
-                          <td className="p-2 text-right text-xs font-bold text-destructive">
-                            {formatCurrency(
-                              Object.values(studentPrevDues).reduce(
-                                (s, a) => s + (a as number),
-                                0,
-                              ),
-                            )}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Credentials Tab (Super Admin only) */}
-            {isSuperAdmin && (
-              <TabsContent value="credentials">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                    <Lock className="w-4 h-4" />
-                    Auto-generated login credentials for this student
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <InfoCard
-                      label="Username (Adm. No.)"
-                      value={student.credentials.username}
-                    />
-                    <InfoCard
-                      label="Password (DOB)"
-                      value={student.credentials.password}
-                    />
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <p className="text-xs text-amber-800 font-medium">
-                      <CreditCard className="w-3 h-3 inline mr-1" />
-                      Username = Admission Number &nbsp;|&nbsp; Password = Date
-                      of Birth as ddmmyyyy
-                    </p>
-                    <p className="text-xs text-amber-700 mt-1">
-                      e.g. DOB 15/08/2010 → Password: 15082010
-                    </p>
-                  </div>
-                </div>
-              </TabsContent>
-            )}
-          </Tabs>
-        </div>
-      </div>
-
-      {/* Discontinue Modal */}
-      {showDiscontinue && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
-            <h3 className="text-lg font-semibold font-display text-foreground">
-              Discontinue Student
-            </h3>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label>Leaving Date</Label>
-                <Input
-                  type="date"
-                  value={leaveDate}
-                  onChange={(e) => setLeaveDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Reason</Label>
-                <Input
-                  value={leaveReason}
-                  onChange={(e) => setLeaveReason(e.target.value)}
-                  placeholder="Reason for leaving"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Remarks</Label>
-                <Input
-                  value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
-                  placeholder="Additional remarks"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
+            <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
               <Button
+                size="sm"
                 variant="outline"
-                onClick={() => setShowDiscontinue(false)}
+                onClick={() => setShowDetailModal(true)}
+                data-ocid="student-detail-page.view_details_button"
               >
-                Cancel
+                <FileText className="w-3.5 h-3.5 mr-1" />
+                Full Details
               </Button>
-              <Button variant="destructive" onClick={handleDiscontinue}>
-                Confirm Discontinue
+              <Button
+                size="sm"
+                onClick={() => setShowForm(true)}
+                data-ocid="student-detail-page.edit_button"
+              >
+                <Edit2 className="w-3.5 h-3.5 mr-1" />
+                Edit
               </Button>
             </div>
           </div>
         </div>
-      )}
 
-      {/* Print Template */}
-      {printTemplate && (
-        <div
-          id="print-adm-form"
-          className="hidden print:block fixed inset-0 bg-white z-[100] p-8"
-        >
-          {printTemplate === "basic" && (
-            <BasicAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          {printTemplate === "detailed" && (
-            <DetailedAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          {printTemplate === "official" && (
-            <OfficialAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          <style>
-            {
-              "@media print { body > *:not(#print-adm-form) { display: none !important; } #print-adm-form { display: block !important; } }"
-            }
-          </style>
-        </div>
-      )}
-    </>
-  );
-}
+        {/* Info Sections */}
+        <div className="grid md:grid-cols-2 gap-4">
+          {/* Personal Info */}
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <User className="w-4 h-4 text-primary" />
+              Personal Information
+            </h3>
+            <InfoRow label="Date of Birth" value={student.dob} />
+            <InfoRow label="Gender" value={student.gender} />
+            <InfoRow label="Category" value={student.category} />
+            <InfoRow label="Blood Group" value={student.bloodGroup} />
+            <InfoRow label="Religion" value={student.religion} />
+            <InfoRow label="Admission Date" value={student.admissionDate} />
+            <InfoRow label="Session" value={student.sessionId} />
+          </div>
 
-function Field({
-  label,
-  value,
-  editing,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  editing: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {editing ? (
-        <Input value={value} onChange={(e) => onChange(e.target.value)} />
-      ) : (
-        <p className="text-sm text-foreground font-medium min-h-[2rem] leading-8 px-1">
-          {value || "—"}
-        </p>
-      )}
-    </div>
-  );
-}
+          {/* Contact Info */}
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <Phone className="w-4 h-4 text-primary" />
+              Contact Information
+            </h3>
+            <InfoRow label="Father's Name" value={student.fatherName} />
+            <InfoRow label="Father Mobile" value={student.fatherMobile} />
+            <InfoRow label="Mother's Name" value={student.motherName} />
+            <InfoRow label="Mother Mobile" value={student.motherMobile} />
+            <InfoRow label="Primary Mobile" value={student.mobile} />
+            <InfoRow label="Guardian Mobile" value={student.guardianMobile} />
+            <InfoRow label="Address" value={student.address} />
+            <InfoRow label="Village" value={student.village} />
+          </div>
 
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-muted/40 rounded-lg p-3">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-sm font-semibold text-foreground">{value}</p>
-    </div>
-  );
-}
+          {/* Academic Info */}
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <Calendar className="w-4 h-4 text-primary" />
+              Academic Information
+            </h3>
+            <InfoRow label="Class" value={`Class ${student.class}`} />
+            <InfoRow label="Section" value={student.section} />
+            <InfoRow label="Previous School" value={student.previousSchool} />
+          </div>
 
-type ProfileShape = {
-  name: string;
-  address: string;
-  phone: string;
-  principalName: string;
-  affiliationNo: string;
-};
-
-function BasicAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-sans text-black">
-      <div className="text-center mb-4">
-        <h1 className="text-xl font-bold">{schoolProfile.name}</h1>
-        <p className="text-sm">{schoolProfile.address}</p>
-        <h2 className="text-base font-semibold mt-2 border-b border-black pb-1">
-          ADMISSION FORM
-        </h2>
-      </div>
-      <table className="w-full text-sm border-collapse">
-        <tbody>
-          {[
-            ["Admission No.", student.admNo],
-            ["Student Name", student.fullName],
-            ["Class", `${student.class} – ${student.section}`],
-            ["Father's Name", student.fatherName],
-            ["Date of Birth", student.dob],
-            ["Address", student.address],
-          ].map(([label, value]) => (
-            <tr key={label} className="border border-black">
-              <td className="p-2 font-medium w-1/3">{label}</td>
-              <td className="p-2">{value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-8 flex justify-between">
-        <div>Principal's Signature: _______________</div>
-        <div>Date: _______________</div>
-      </div>
-    </div>
-  );
-}
-
-function DetailedAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-sans text-black">
-      <div className="text-center mb-4">
-        <h1 className="text-2xl font-bold">{schoolProfile.name}</h1>
-        <p className="text-sm">
-          {schoolProfile.address} &nbsp;|&nbsp; {schoolProfile.phone}
-        </p>
-        <h2 className="text-lg font-semibold mt-2 bg-gray-200 py-1">
-          STUDENT ADMISSION FORM
-        </h2>
-      </div>
-      <div className="flex gap-4">
-        <div className="flex-1">
-          <table className="w-full text-sm border-collapse">
-            <tbody>
-              {[
-                ["Admission No.", student.admNo],
-                ["Full Name", student.fullName],
-                ["Class", student.class],
-                ["Section", student.section],
-                ["Date of Birth", student.dob],
-                ["Gender", student.gender],
-                ["Category", student.category],
-                ["Father's Name", student.fatherName],
-                ["Mother's Name", student.motherName],
-                ["Mobile", student.mobile],
-                ["Guardian Mobile", student.guardianMobile],
-                ["Address", student.address],
-              ].map(([label, value]) => (
-                <tr key={label} className="border border-black">
-                  <td className="p-1.5 font-medium bg-gray-50 w-2/5 text-xs">
-                    {label}
-                  </td>
-                  <td className="p-1.5 text-xs">{value || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="w-28 flex-shrink-0">
-          <div className="border-2 border-black w-28 h-32 flex items-center justify-center text-xs text-gray-400">
-            Photo
+          {/* Identity Documents */}
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <CreditCard className="w-4 h-4 text-primary" />
+              Identity Documents
+            </h3>
+            <InfoRow label="Aadhaar No." value={student.aadhaarNo} />
+            <InfoRow label="S.R. No." value={student.srNo} />
+            <InfoRow label="Pen No." value={student.penNo} />
+            <InfoRow label="APAAR No." value={student.apaarNo} />
           </div>
         </div>
-      </div>
-      <div className="mt-6 grid grid-cols-3 gap-4 text-sm">
-        <div>Parent's Signature: _______________</div>
-        <div>Principal's Signature: _______________</div>
-        <div>Date: _______________</div>
-      </div>
-    </div>
-  );
-}
 
-function OfficialAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-serif text-black">
-      <div className="border-4 border-double border-black p-4 mb-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold uppercase tracking-widest">
-            {schoolProfile.name}
-          </h1>
-          {schoolProfile.affiliationNo && (
-            <p className="text-xs mt-1">
-              Affiliation No: {schoolProfile.affiliationNo}
-            </p>
-          )}
-          <p className="text-sm">{schoolProfile.address}</p>
-          <p className="text-sm">Tel: {schoolProfile.phone}</p>
-        </div>
+        {/* Transport */}
+        {(student.transportRoute || student.transportBusNo) && (
+          <div className="bg-card rounded-xl border border-border p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <Bus className="w-4 h-4 text-primary" />
+              Transport
+            </h3>
+            <div className="grid grid-cols-3 gap-4">
+              {student.transportBusNo && (
+                <div className="bg-muted/40 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Bus No.</p>
+                  <p className="font-semibold text-foreground mt-0.5">
+                    {student.transportBusNo}
+                  </p>
+                </div>
+              )}
+              {student.transportRoute && (
+                <div className="bg-muted/40 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Route</p>
+                  <p className="font-semibold text-foreground mt-0.5">
+                    {student.transportRoute}
+                  </p>
+                </div>
+              )}
+              {student.transportPickup && (
+                <div className="bg-muted/40 rounded-lg p-3 text-center">
+                  <p className="text-xs text-muted-foreground">Pickup Point</p>
+                  <p className="font-semibold text-foreground mt-0.5">
+                    {student.transportPickup}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Family Siblings */}
+        {(() => {
+          const primaryMobile =
+            student.mobile || student.guardianMobile || student.fatherMobile;
+          if (!primaryMobile) return null;
+          const siblings = allStudents.filter(
+            (s) =>
+              s.id !== student.id &&
+              (s.mobile === primaryMobile ||
+                s.guardianMobile === primaryMobile ||
+                s.fatherMobile === primaryMobile),
+          );
+          if (siblings.length === 0) return null;
+          return (
+            <div className="bg-card rounded-xl border border-primary/30 p-5">
+              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+                <Mail className="w-4 h-4 text-primary" />
+                Family Members ({siblings.length})
+              </h3>
+              <div className="space-y-2">
+                {siblings.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 p-2.5 bg-muted/30 rounded-lg"
+                  >
+                    <div className="w-8 h-8 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
+                      {s.photo ? (
+                        <img
+                          src={s.photo}
+                          alt={s.fullName}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-primary">
+                          {(s.fullName ?? "?").charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {s.fullName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Adm: {s.admNo} · Class {s.class}-{s.section}
+                      </p>
+                    </div>
+                    <Badge
+                      variant={
+                        s.status === "active" ? "default" : "destructive"
+                      }
+                      className="text-xs"
+                    >
+                      {s.status === "active" ? "Active" : "Disc."}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
       </div>
-      <h2 className="text-center text-lg font-bold uppercase mb-4 underline">
-        APPLICATION FOR ADMISSION
-      </h2>
-      <p className="text-sm mb-4">
-        This is to certify that <strong>{student.fullName}</strong>, S/D/O of{" "}
-        <strong>{student.fatherName}</strong>, is hereby admitted to Class{" "}
-        <strong>
-          {student.class}-{student.section}
-        </strong>{" "}
-        under Admission No. <strong>{student.admNo}</strong> with effect from
-        the current academic session.
-      </p>
-      <table className="w-full text-sm border-collapse mb-6">
-        <tbody>
-          {[
-            ["Date of Birth", student.dob],
-            ["Gender", student.gender],
-            ["Category", student.category],
-            ["Residential Address", student.address],
-            ["Contact Number", `${student.mobile} / ${student.guardianMobile}`],
-          ].map(([label, value]) => (
-            <tr key={label} className="border border-black">
-              <td className="p-2 font-medium w-1/3 bg-gray-50">{label}</td>
-              <td className="p-2">{value || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-8 flex justify-between">
-        <div>
-          <p className="text-sm">
-            Principal: {schoolProfile.principalName || "_____________"}
-          </p>
-          <p className="text-sm mt-4">Signature & Seal</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm">Date: _______________</p>
-          <p className="text-sm mt-4">Parent/Guardian Signature</p>
-        </div>
-      </div>
+
+      {/* Edit Form */}
+      {showForm && (
+        <StudentForm
+          student={student}
+          onSave={(updated) => {
+            setStudent(updated);
+            setShowForm(false);
+          }}
+          onClose={() => setShowForm(false)}
+          saveData={saveData}
+          updateData={updateData}
+        />
+      )}
+
+      {/* Full Detail Modal */}
+      {showDetailModal && (
+        <StudentDetailModal
+          student={student}
+          onClose={() => setShowDetailModal(false)}
+          onUpdate={handleUpdate}
+          onNavigate={onNavigate}
+          updateData={updateData}
+          deleteData={deleteData}
+          allStudents={allStudents}
+        />
+      )}
     </div>
   );
 }

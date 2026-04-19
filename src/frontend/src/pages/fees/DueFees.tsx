@@ -36,10 +36,10 @@ export default function DueFees() {
     const students = (getData("students") as Student[]).filter(
       (s) => s.status === "active" && (!classFilter || s.class === classFilter),
     );
-    const receipts = (getData("feeReceipts") as FeeReceipt[]).filter(
+    const receipts = (getData("fee_receipts") as FeeReceipt[]).filter(
       (r) => r.sessionId === currentSession.id && !r.isDeleted,
     );
-    const plans = getData("feesPlans") as FeesPlan[];
+    const plans = getData("fees_plan") as FeesPlan[];
 
     const rows: DueRow[] = [];
     for (const student of students) {

@@ -24,10 +24,10 @@ export default function FeeAccounts() {
   const canEdit =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  // All data from context
+  // All data from context — collection keys match server MySQL tables
   const accounts = getData("feeAccounts") as FeeAccount[];
 
-  const sessionReceipts = (getData("feeReceipts") as FeeReceipt[]).filter(
+  const sessionReceipts = (getData("fee_receipts") as FeeReceipt[]).filter(
     (r) =>
       !r.isDeleted && (!currentSession || r.sessionId === currentSession.id),
   );
@@ -35,7 +35,7 @@ export default function FeeAccounts() {
   const totalReceipts = sessionReceipts.reduce((s, r) => s + r.totalAmount, 0);
 
   // Heading-wise breakdown
-  const feeHeadings = getData("feeHeadings") as FeeHeading[];
+  const feeHeadings = getData("fee_headings") as FeeHeading[];
   const headingTotals: Record<string, number> = {};
   let otherChargesTotal = 0;
   for (const receipt of sessionReceipts) {

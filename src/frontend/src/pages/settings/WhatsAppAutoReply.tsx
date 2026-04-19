@@ -25,12 +25,36 @@ import { Label } from "../../components/ui/label";
 import { Switch } from "../../components/ui/switch";
 import { Textarea } from "../../components/ui/textarea";
 import type { AttendanceRecord, FeeReceipt, Student } from "../../types";
+import { getApiIndexUrl, getJwt } from "../../utils/api";
 import {
   MONTHS,
   formatCurrency,
   generateId,
   ls,
 } from "../../utils/localStorage";
+
+async function saveAutoReplyToServer(
+  settings: AutoReplySettings & { whatsappBotEnabled?: boolean },
+): Promise<void> {
+  try {
+    const token = getJwt();
+    const url = getApiIndexUrl();
+    await fetch(`${url}?route=school_settings/save`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        key: "whatsapp_autoreply",
+        whatsappBotEnabled: settings.enabled,
+        ...settings,
+      }),
+    });
+  } catch {
+    // fail silently
+  }
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -234,6 +258,7 @@ export default function WhatsAppAutoReply() {
 
   function save() {
     ls.set("wa_autoreply_settings", settings);
+    void saveAutoReplyToServer(settings);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   }

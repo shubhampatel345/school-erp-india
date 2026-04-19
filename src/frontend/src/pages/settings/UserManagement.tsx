@@ -20,6 +20,7 @@ import {
   Eye,
   EyeOff,
   KeyRound,
+  Loader2,
   Pencil,
   Plus,
   Search,
@@ -29,6 +30,7 @@ import {
   Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AppUser, UserRole } from "../../types";
 import {
@@ -39,8 +41,6 @@ import {
 } from "../../utils/api";
 import { generateId, ls } from "../../utils/localStorage";
 
-// ── Types ──────────────────────────────────────────────────
-
 interface UserFormData {
   fullName: string;
   username: string;
@@ -48,577 +48,517 @@ interface UserFormData {
   mobile: string;
   email: string;
   password: string;
+  confirmPassword: string;
 }
 
-const BLANK_FORM: UserFormData = {
+const EMPTY_FORM: UserFormData = {
   fullName: "",
   username: "",
   role: "teacher",
   mobile: "",
   email: "",
   password: "",
+  confirmPassword: "",
 };
 
-// ── Role config ────────────────────────────────────────────
-
-const ROLE_OPTIONS: { label: string; value: UserRole }[] = [
-  { label: "Admin", value: "admin" },
-  { label: "Teacher", value: "teacher" },
-  { label: "Receptionist", value: "receptionist" },
-  { label: "Accountant", value: "accountant" },
-  { label: "Librarian", value: "librarian" },
-  { label: "Driver", value: "driver" },
-  { label: "Student", value: "student" },
-  { label: "Parent", value: "parent" },
+const ROLE_OPTIONS: { value: UserRole; label: string; color: string }[] = [
+  { value: "admin", label: "Admin", color: "bg-purple-100 text-purple-700" },
+  { value: "teacher", label: "Teacher", color: "bg-blue-100 text-blue-700" },
+  {
+    value: "receptionist",
+    label: "Receptionist",
+    color: "bg-teal-100 text-teal-700",
+  },
+  {
+    value: "accountant",
+    label: "Accountant",
+    color: "bg-amber-100 text-amber-700",
+  },
+  {
+    value: "librarian",
+    label: "Librarian",
+    color: "bg-green-100 text-green-700",
+  },
+  { value: "driver", label: "Driver", color: "bg-orange-100 text-orange-700" },
+  { value: "parent", label: "Parent", color: "bg-pink-100 text-pink-700" },
+  { value: "student", label: "Student", color: "bg-sky-100 text-sky-700" },
 ];
 
-const ROLE_BADGE: Record<string, string> = {
-  superadmin: "bg-primary/10 text-primary border-primary/20",
-  admin: "bg-accent/10 text-accent border-accent/20",
-  teacher: "bg-blue-100 text-blue-700 border-blue-200",
-  student: "bg-green-100 text-green-700 border-green-200",
-  parent: "bg-purple-100 text-purple-700 border-purple-200",
-  driver: "bg-orange-100 text-orange-700 border-orange-200",
-  receptionist: "bg-yellow-100 text-yellow-700 border-yellow-200",
-  accountant: "bg-teal-100 text-teal-700 border-teal-200",
-  librarian: "bg-pink-100 text-pink-700 border-pink-200",
-};
-
-function roleBadge(role: string) {
+function getRoleColor(role: UserRole): string {
   return (
-    ROLE_BADGE[role.toLowerCase()] ??
-    "bg-muted text-muted-foreground border-border"
+    ROLE_OPTIONS.find((r) => r.value === role)?.color ??
+    "bg-muted text-muted-foreground"
   );
 }
 
-function capitalize(s: string) {
-  return s.charAt(0).toUpperCase() + s.slice(1);
+interface StoredUser extends AppUser {
+  password?: string;
+  isActive?: boolean;
+  lastLogin?: string;
 }
-
-// ── Server helpers ─────────────────────────────────────────
-
-async function serverSaveUser(
-  user: AppUser & { password?: string },
-  isNew: boolean,
-) {
-  const token = getJwt();
-  const payload = user as unknown as Record<string, unknown>;
-  try {
-    if (isNew) {
-      await apiCreateRecord("users", payload, token);
-    } else {
-      await apiUpdateRecord("users", user.id, payload, token);
-    }
-  } catch {
-    // server unavailable — local only is fine
-  }
-}
-
-async function serverDeleteUser(id: string) {
-  const token = getJwt();
-  try {
-    await apiDeleteRecord("users", id, token);
-  } catch {
-    // server unavailable
-  }
-}
-
-// ── Component ──────────────────────────────────────────────
 
 export default function UserManagement() {
-  const { currentUser, changePassword, hasPermission } = useApp();
+  const { currentUser, changePassword } = useApp();
 
+  const [users, setUsers] = useState<StoredUser[]>(() =>
+    ls.get<StoredUser[]>("custom_users", []),
+  );
   const [search, setSearch] = useState("");
-  const [filterRole, setFilterRole] = useState("all");
-
-  // Add/Edit modal
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<UserFormData>(BLANK_FORM);
+  const [showForm, setShowForm] = useState(false);
+  const [editUser, setEditUser] = useState<StoredUser | null>(null);
+  const [form, setForm] = useState<UserFormData>({ ...EMPTY_FORM });
   const [showPw, setShowPw] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState("");
-
-  // Reset password modal
-  const [resetTarget, setResetTarget] = useState<{
-    id: string;
-    name: string;
-    username: string;
-  } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<StoredUser | null>(null);
+  const [resetUser, setResetUser] = useState<StoredUser | null>(null);
   const [newPassword, setNewPassword] = useState("");
-  const [showNewPw, setShowNewPw] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
-  // Delete confirm
-  const [deleteTarget, setDeleteTarget] = useState<{
-    id: string;
-    name: string;
-  } | null>(null);
+  const jwt = getJwt();
 
-  // Visible password
-  const [visiblePasswords, setVisiblePasswords] = useState<
-    Record<string, boolean>
-  >({});
-
-  // ── Load users ────────────────────────────────────────────
-
-  function getAllUsers(): (AppUser & { email?: string; status?: string })[] {
-    const customUsers = ls.get<(AppUser & { email?: string })[]>(
-      "custom_users",
-      [],
+  const filteredUsers = useMemo(() => {
+    const q = search.toLowerCase();
+    return users.filter(
+      (u) =>
+        u.fullName?.toLowerCase().includes(q) ||
+        u.username?.toLowerCase().includes(q) ||
+        u.role?.toLowerCase().includes(q),
     );
-    const rows: (AppUser & { email?: string; status?: string })[] = [
-      {
-        id: "su1",
-        username: "superadmin",
-        role: "superadmin",
-        name: "Super Admin",
-        status: "active",
-      },
-    ];
-    for (const u of customUsers) {
-      rows.push({ ...u, status: "active" });
-    }
-    return rows;
+  }, [users, search]);
+
+  function persistUsers(updated: StoredUser[]) {
+    ls.set("custom_users", updated);
+    setUsers(updated);
   }
-
-  function getStoredPassword(username: string): string {
-    const passwords = ls.get<Record<string, string>>("user_passwords", {});
-    return passwords[username] ?? "—";
-  }
-
-  const allUsers = getAllUsers();
-
-  // ── Permission guard (after all hooks) ────────────────────
-  const canAccess =
-    hasPermission("userManagement", "canView") ||
-    currentUser?.role === "superadmin";
-  const roles = Array.from(new Set(allUsers.map((u) => u.role)));
-
-  const filtered = useMemo(() => {
-    return allUsers.filter((u) => {
-      const q = search.toLowerCase();
-      const matchSearch =
-        u.name.toLowerCase().includes(q) ||
-        u.username.toLowerCase().includes(q) ||
-        (u.mobile?.includes(q) ?? false) ||
-        (u.email?.toLowerCase().includes(q) ?? false);
-      const matchRole = filterRole === "all" || u.role === filterRole;
-      return matchSearch && matchRole;
-    });
-  }, [allUsers, search, filterRole]);
-
-  // ── Stats ──────────────────────────────────────────────────
-
-  const totalUsers = allUsers.length;
-  const staffCount = allUsers.filter(
-    (u) => !["student", "parent"].includes(u.role),
-  ).length;
-  const studentCount = allUsers.filter((u) => u.role === "student").length;
-
-  // ── Open add/edit modal ────────────────────────────────────
 
   function openAdd() {
-    setEditingId(null);
-    setForm(BLANK_FORM);
-    setFormError("");
+    setEditUser(null);
+    setForm({ ...EMPTY_FORM });
     setShowPw(false);
-    setModalOpen(true);
+    setShowForm(true);
   }
 
-  function openEdit(u: AppUser & { email?: string }) {
-    setEditingId(u.id);
+  function openEdit(user: StoredUser) {
+    setEditUser(user);
     setForm({
-      fullName: u.name,
-      username: u.username,
-      role: u.role,
-      mobile: u.mobile ?? "",
-      email: u.email ?? "",
+      fullName: user.fullName ?? user.name ?? "",
+      username: user.username,
+      role: user.role,
+      mobile: user.mobile ?? "",
+      email: user.email ?? "",
       password: "",
+      confirmPassword: "",
     });
-    setFormError("");
     setShowPw(false);
-    setModalOpen(true);
+    setShowForm(true);
   }
-
-  // ── Save user ──────────────────────────────────────────────
 
   async function handleSave() {
-    setFormError("");
-    if (!form.fullName.trim()) {
-      setFormError("Full name is required.");
+    const {
+      fullName,
+      username,
+      role,
+      mobile,
+      email,
+      password,
+      confirmPassword,
+    } = form;
+    if (!fullName.trim()) {
+      toast.error("Full name is required.");
       return;
     }
-    if (!form.username.trim()) {
-      setFormError("Username is required.");
+    if (!username.trim()) {
+      toast.error("Username is required.");
       return;
     }
-    if (!editingId && !form.password.trim()) {
-      setFormError("Password is required for new user.");
+    if (username.match(/^\d+$/)) {
+      toast.error("Username cannot be a mobile number.");
+      return;
+    }
+    if (!editUser && !password) {
+      toast.error("Password is required for new users.");
+      return;
+    }
+    if (password && password !== confirmPassword) {
+      toast.error("Passwords do not match.");
+      return;
+    }
+    if (!editUser && users.some((u) => u.username === username)) {
+      toast.error("Username already exists.");
       return;
     }
 
     setSaving(true);
     try {
-      if (editingId) {
-        // Update
-        const customUsers = ls.get<AppUser[]>("custom_users", []);
-        const idx = customUsers.findIndex((u) => u.id === editingId);
-        if (idx !== -1) {
-          const updated: AppUser = {
-            ...customUsers[idx],
-            name: form.fullName.trim(),
-            username: form.username.trim(),
-            role: form.role,
-            mobile: form.mobile.trim() || undefined,
-          };
-          customUsers[idx] = updated;
-          ls.set("custom_users", customUsers);
-          if (form.password.trim()) {
-            const passwords = ls.get<Record<string, string>>(
-              "user_passwords",
-              {},
-            );
-            passwords[form.username.trim()] = form.password.trim();
-            ls.set("user_passwords", passwords);
-          }
-          await serverSaveUser(updated, false);
-        }
-      } else {
-        // Create
-        const user: AppUser = {
-          id: generateId(),
-          username: form.username.trim(),
-          role: form.role,
-          name: form.fullName.trim(),
-          mobile: form.mobile.trim() || undefined,
+      if (editUser) {
+        const updated: StoredUser = {
+          ...editUser,
+          fullName,
+          name: fullName,
+          username,
+          role,
+          mobile,
+          email,
         };
-        // For parent role: use mobile as username if not explicitly set
-        if (form.role === "parent" && !form.username.trim()) {
-          user.username = form.mobile.trim();
-        }
-        const customUsers = ls.get<AppUser[]>("custom_users", []);
-        customUsers.push(user);
-        ls.set("custom_users", customUsers);
+        const updatedList = users.map((u) =>
+          u.id === editUser.id ? updated : u,
+        );
+        persistUsers(updatedList);
 
-        const passwords = ls.get<Record<string, string>>("user_passwords", {});
-        passwords[user.username] = form.password.trim();
-        // For parent: also allow mobile as password (default)
-        if (form.role === "parent") {
-          passwords[form.mobile.trim()] = form.mobile.trim();
+        // Server update
+        if (jwt) {
+          await apiUpdateRecord(
+            "users",
+            editUser.id,
+            {
+              fullName,
+              username,
+              role,
+              mobile,
+              email,
+            } as Record<string, unknown>,
+            jwt,
+          ).catch(() => {});
         }
+
+        if (password) {
+          changePassword(editUser.id, password);
+          const passwords = ls.get<Record<string, string>>(
+            "user_passwords",
+            {},
+          );
+          passwords[username] = password;
+          ls.set("user_passwords", passwords);
+        }
+        toast.success("User updated.");
+      } else {
+        const id = generateId();
+        const newUser: StoredUser = {
+          id,
+          username,
+          role,
+          fullName,
+          name: fullName,
+          mobile,
+          email,
+          isActive: true,
+        };
+        persistUsers([...users, newUser]);
+        const passwords = ls.get<Record<string, string>>("user_passwords", {});
+        passwords[username] = password;
         ls.set("user_passwords", passwords);
-        await serverSaveUser(user, true);
+
+        // Server create
+        if (jwt) {
+          await apiCreateRecord(
+            "users",
+            {
+              id,
+              fullName,
+              username,
+              role,
+              mobile,
+              email,
+              password,
+            } as Record<string, unknown>,
+            jwt,
+          ).catch(() => {});
+        }
+        toast.success("User created.");
       }
-      setModalOpen(false);
+      setShowForm(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save user.");
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Reset password ─────────────────────────────────────────
-
-  function handleResetPassword() {
-    if (!resetTarget || !newPassword.trim()) return;
-    const passwords = ls.get<Record<string, string>>("user_passwords", {});
-    passwords[resetTarget.username] = newPassword.trim();
-    ls.set("user_passwords", passwords);
-    changePassword(resetTarget.id, newPassword.trim());
-    setResetTarget(null);
-    setNewPassword("");
-  }
-
-  // ── Delete user ────────────────────────────────────────────
-
   async function handleDelete() {
     if (!deleteTarget) return;
-    const customUsers = ls.get<AppUser[]>("custom_users", []);
-    ls.set(
-      "custom_users",
-      customUsers.filter((u) => u.id !== deleteTarget.id),
-    );
-    await serverDeleteUser(deleteTarget.id);
-    setDeleteTarget(null);
+    try {
+      const updated = users.filter((u) => u.id !== deleteTarget.id);
+      persistUsers(updated);
+      const passwords = ls.get<Record<string, string>>("user_passwords", {});
+      delete passwords[deleteTarget.username];
+      ls.set("user_passwords", passwords);
+      if (jwt) {
+        await apiDeleteRecord("users", deleteTarget.id, jwt).catch(() => {});
+      }
+      toast.success("User deleted.");
+      setDeleteTarget(null);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to delete user.",
+      );
+    }
   }
 
-  // ── Render ─────────────────────────────────────────────────
+  async function handleResetPassword() {
+    if (!resetUser || !newPassword.trim()) {
+      toast.error("Enter a new password.");
+      return;
+    }
+    setResetting(true);
+    try {
+      changePassword(resetUser.id, newPassword);
+      const passwords = ls.get<Record<string, string>>("user_passwords", {});
+      passwords[resetUser.username] = newPassword;
+      ls.set("user_passwords", passwords);
+      if (jwt) {
+        await apiUpdateRecord(
+          "users",
+          resetUser.id,
+          { password: newPassword } as Record<string, unknown>,
+          jwt,
+        ).catch(() => {});
+      }
+      toast.success(
+        `Password reset for ${resetUser.fullName ?? resetUser.username}.`,
+      );
+      setResetUser(null);
+      setNewPassword("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to reset password.",
+      );
+    } finally {
+      setResetting(false);
+    }
+  }
 
-  if (!canAccess) {
-    return (
-      <div className="p-10 text-center">
-        <Shield className="w-14 h-14 mx-auto mb-4 text-muted-foreground/30" />
-        <p className="font-medium text-muted-foreground">
-          Super Admin access required.
-        </p>
-      </div>
+  function handleToggleActive(user: StoredUser) {
+    const updated = users.map((u) =>
+      u.id === user.id ? { ...u, isActive: !u.isActive } : u,
+    );
+    persistUsers(updated);
+    toast.success(
+      `${user.fullName ?? user.username} ${user.isActive ? "deactivated" : "activated"}.`,
     );
   }
+
+  const isSuperAdmin = currentUser?.role === "superadmin";
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <Card className="p-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-1">
-            <Users className="w-4 h-4 text-muted-foreground" />
-          </div>
-          <p className="text-2xl font-bold font-display text-foreground">
-            {totalUsers}
+    <div className="p-4 lg:p-6 max-w-5xl space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-display font-semibold text-foreground flex items-center gap-2">
+            <Users className="w-5 h-5 text-primary" /> User Management
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {users.length} user{users.length !== 1 ? "s" : ""} — Super Admin
+            manages all roles
           </p>
-          <p className="text-xs text-muted-foreground mt-0.5">Total Users</p>
-        </Card>
-        <Card className="p-4 text-center">
-          <p className="text-2xl font-bold font-display text-primary">
-            {staffCount}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">Staff / Admin</p>
-        </Card>
-        <Card className="p-4 text-center">
-          <p
-            className="text-2xl font-bold font-display"
-            style={{ color: "oklch(0.55 0.18 145)" }}
-          >
-            {studentCount}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">Students</p>
-        </Card>
-      </div>
-
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div className="flex gap-3 flex-wrap flex-1">
-          <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              data-ocid="user_management.search_input"
-              placeholder="Search name, username, mobile…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Select value={filterRole} onValueChange={setFilterRole}>
-            <SelectTrigger
-              className="w-40"
-              data-ocid="user_management.role_filter"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Roles</SelectItem>
-              {roles.map((r) => (
-                <SelectItem key={r} value={r}>
-                  {capitalize(r)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </div>
-        <Button data-ocid="user_management.open_modal_button" onClick={openAdd}>
-          <Plus className="w-4 h-4 mr-1.5" /> Add User
-        </Button>
+        {isSuperAdmin && (
+          <Button onClick={openAdd} data-ocid="users.add_button">
+            <Plus className="w-4 h-4 mr-1.5" /> Add User
+          </Button>
+        )}
       </div>
 
-      {/* Table */}
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                  Name
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                  Username
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">
-                  Mobile
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                  Role
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden md:table-cell">
-                  Password
-                </th>
-                <th className="text-right px-4 py-3 font-semibold text-muted-foreground">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map((u, i) => (
-                <tr
-                  key={u.id}
-                  data-ocid={`user_management.item.${i + 1}`}
-                  className="hover:bg-muted/30 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">
-                        {u.name.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="font-medium truncate max-w-[120px]">
-                        {u.name}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {u.username}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground hidden sm:table-cell">
-                    {u.mobile ?? "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <Badge
-                      className={`text-xs border ${roleBadge(u.role)}`}
-                      variant="outline"
-                    >
-                      {capitalize(u.role)}
-                    </Badge>
-                  </td>
-                  <td className="px-4 py-3 hidden md:table-cell">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {visiblePasswords[u.id]
-                          ? getStoredPassword(u.username)
-                          : "••••••••"}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setVisiblePasswords((p) => ({
-                            ...p,
-                            [u.id]: !p[u.id],
-                          }))
-                        }
-                        className="text-muted-foreground hover:text-foreground transition-colors"
-                        aria-label={
-                          visiblePasswords[u.id]
-                            ? "Hide password"
-                            : "Show password"
-                        }
-                      >
-                        {visiblePasswords[u.id] ? (
-                          <EyeOff className="w-3.5 h-3.5" />
-                        ) : (
-                          <Eye className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      {u.role !== "superadmin" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-ocid={`user_management.edit_button.${i + 1}`}
-                          onClick={() => openEdit(u)}
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        data-ocid={`user_management.reset_password.${i + 1}`}
-                        onClick={() => {
-                          setResetTarget({
-                            id: u.id,
-                            name: u.name,
-                            username: u.username,
-                          });
-                          setNewPassword("");
-                          setShowNewPw(false);
-                        }}
-                      >
-                        <KeyRound className="w-3.5 h-3.5 mr-1" /> Reset
-                      </Button>
-                      {u.role !== "superadmin" && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          data-ocid={`user_management.delete_button.${i + 1}`}
-                          onClick={() =>
-                            setDeleteTarget({ id: u.id, name: u.name })
-                          }
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={6}
-                    data-ocid="user_management.empty_state"
-                    className="px-4 py-12 text-center text-muted-foreground text-sm"
-                  >
-                    <Users className="w-10 h-10 mx-auto mb-2 opacity-20" />
-                    No users found{search ? ` for "${search}"` : ""}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      {/* Super Admin Card */}
+      <Card className="p-4 border-primary/20 bg-primary/5">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
+            <Shield className="w-5 h-5 text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-foreground">Super Admin</p>
+            <p className="text-xs text-muted-foreground">
+              superadmin — Full access to all modules
+            </p>
+          </div>
+          <Badge className="text-[10px] bg-primary/10 text-primary border-primary/30">
+            Active
+          </Badge>
+          {isSuperAdmin && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setResetUser({
+                  id: "su1",
+                  username: "superadmin",
+                  role: "superadmin",
+                  name: "Super Admin",
+                  fullName: "Super Admin",
+                });
+                setNewPassword("");
+              }}
+              data-ocid="users.superadmin.reset_button"
+            >
+              <KeyRound className="w-3.5 h-3.5 mr-1" />
+              Reset Password
+            </Button>
+          )}
         </div>
       </Card>
 
-      {/* Add / Edit Modal */}
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent data-ocid="user_management.dialog">
+      {/* Search */}
+      <div className="relative">
+        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          placeholder="Search by name, username or role…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="pl-9"
+          data-ocid="users.search_input"
+        />
+      </div>
+
+      {/* Users Table */}
+      {filteredUsers.length === 0 && users.length === 0 ? (
+        <Card className="p-10 text-center" data-ocid="users.empty_state">
+          <UserCog className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
+          <p className="font-medium text-muted-foreground">
+            No custom users yet
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Add staff users — they can log in with their username and password.
+          </p>
+          {isSuperAdmin && (
+            <Button className="mt-4" onClick={openAdd}>
+              <Plus className="w-4 h-4 mr-1.5" />
+              Add First User
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {filteredUsers.map((user, idx) => (
+            <Card
+              key={user.id}
+              className={`p-4 transition-smooth ${user.isActive === false ? "opacity-60" : ""}`}
+              data-ocid={`users.item.${idx + 1}`}
+            >
+              <div className="flex items-center gap-3 flex-wrap">
+                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                  <span className="text-sm font-bold text-muted-foreground">
+                    {(user.fullName ?? user.username)[0]?.toUpperCase()}
+                  </span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-foreground truncate">
+                    {user.fullName ?? user.name ?? user.username}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    @{user.username}
+                    {user.mobile ? ` · ${user.mobile}` : ""}
+                  </p>
+                </div>
+                <Badge className={`text-[10px] ${getRoleColor(user.role)}`}>
+                  {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ??
+                    user.role}
+                </Badge>
+                <Badge
+                  variant={user.isActive !== false ? "outline" : "secondary"}
+                  className="text-[10px]"
+                >
+                  {user.isActive !== false ? "Active" : "Inactive"}
+                </Badge>
+                {isSuperAdmin && (
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openEdit(user)}
+                      data-ocid={`users.edit_button.${idx + 1}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setResetUser(user);
+                        setNewPassword("");
+                      }}
+                      data-ocid={`users.reset_button.${idx + 1}`}
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleToggleActive(user)}
+                      data-ocid={`users.toggle_button.${idx + 1}`}
+                    >
+                      {user.isActive !== false ? "Deactivate" : "Activate"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                      onClick={() => setDeleteTarget(user)}
+                      data-ocid={`users.delete_button.${idx + 1}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Add/Edit Dialog */}
+      <Dialog
+        open={showForm}
+        onOpenChange={(v) => {
+          if (!v) setShowForm(false);
+        }}
+      >
+        <DialogContent className="max-w-lg" data-ocid="users.dialog">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <UserCog className="w-5 h-5" />
-              {editingId ? "Edit User" : "Add New User"}
-            </DialogTitle>
+            <DialogTitle>{editUser ? "Edit User" : "Add New User"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="um-fullname">Full Name *</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="u-fullname">Full Name *</Label>
                 <Input
-                  id="um-fullname"
-                  data-ocid="user_management.fullname.input"
+                  id="u-fullname"
                   value={form.fullName}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, fullName: e.target.value }))
                   }
                   placeholder="Full name"
+                  data-ocid="users.fullname.input"
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="um-username">Username *</Label>
+                <Label htmlFor="u-username">Username *</Label>
                 <Input
-                  id="um-username"
-                  data-ocid="user_management.username.input"
+                  id="u-username"
                   value={form.username}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, username: e.target.value }))
                   }
-                  placeholder="Login username"
+                  placeholder="login username (not mobile no.)"
+                  data-ocid="users.username.input"
+                  disabled={!!editUser}
                 />
+                {!editUser && (
+                  <p className="text-[10px] text-muted-foreground">
+                    Must not be a mobile number
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
-                <Label>Role *</Label>
+                <Label htmlFor="u-role">Role *</Label>
                 <Select
                   value={form.role}
-                  onValueChange={(v) => {
-                    const role = v as UserRole;
-                    setForm((f) => ({
-                      ...f,
-                      role,
-                      // For parent: auto-fill username from mobile
-                      username:
-                        role === "parent" && f.mobile ? f.mobile : f.username,
-                    }));
-                  }}
+                  onValueChange={(v) =>
+                    setForm((f) => ({ ...f, role: v as UserRole }))
+                  }
+                  disabled={!isSuperAdmin}
                 >
-                  <SelectTrigger data-ocid="user_management.role.select">
-                    <SelectValue />
+                  <SelectTrigger id="u-role" data-ocid="users.role.select">
+                    <SelectValue placeholder="Select role" />
                   </SelectTrigger>
                   <SelectContent>
                     {ROLE_OPTIONS.map((r) => (
@@ -630,64 +570,52 @@ export default function UserManagement() {
                 </Select>
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="um-mobile">Mobile</Label>
+                <Label htmlFor="u-mobile">Mobile</Label>
                 <Input
-                  id="um-mobile"
-                  data-ocid="user_management.mobile.input"
+                  id="u-mobile"
                   value={form.mobile}
-                  onChange={(e) => {
-                    const mobile = e.target.value;
-                    setForm((f) => ({
-                      ...f,
-                      mobile,
-                      // For parent: mobile is both username and password
-                      username: f.role === "parent" ? mobile : f.username,
-                      password: f.role === "parent" ? mobile : f.password,
-                    }));
-                  }}
-                  placeholder="10-digit mobile"
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, mobile: e.target.value }))
+                  }
+                  placeholder="+91 XXXXX XXXXX"
+                  data-ocid="users.mobile.input"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="um-email">Email</Label>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="u-email">Email</Label>
                 <Input
-                  id="um-email"
-                  data-ocid="user_management.email.input"
+                  id="u-email"
                   type="email"
                   value={form.email}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, email: e.target.value }))
                   }
-                  placeholder="Email address"
+                  placeholder="user@school.com"
+                  data-ocid="users.email.input"
                 />
               </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label htmlFor="um-password">
-                  {editingId
+              <div className="space-y-1.5">
+                <Label htmlFor="u-pw">
+                  {editUser
                     ? "New Password (leave blank to keep)"
                     : "Password *"}
                 </Label>
                 <div className="relative">
                   <Input
-                    id="um-password"
-                    data-ocid="user_management.password.input"
+                    id="u-pw"
                     type={showPw ? "text" : "password"}
                     value={form.password}
                     onChange={(e) =>
                       setForm((f) => ({ ...f, password: e.target.value }))
                     }
-                    placeholder={
-                      editingId
-                        ? "Leave blank to keep current"
-                        : "Set login password"
-                    }
+                    placeholder={editUser ? "Leave blank to keep" : "Password"}
+                    data-ocid="users.password.input"
                     className="pr-10"
                   />
                   <button
                     type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                     onClick={() => setShowPw((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    aria-label={showPw ? "Hide" : "Show"}
                   >
                     {showPw ? (
                       <EyeOff className="w-4 h-4" />
@@ -697,38 +625,48 @@ export default function UserManagement() {
                   </button>
                 </div>
               </div>
+              {form.password && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="u-confirm-pw">Confirm Password</Label>
+                  <Input
+                    id="u-confirm-pw"
+                    type="password"
+                    value={form.confirmPassword}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        confirmPassword: e.target.value,
+                      }))
+                    }
+                    placeholder="Repeat password"
+                    data-ocid="users.confirm_password.input"
+                  />
+                </div>
+              )}
             </div>
-
-            {form.role === "parent" && (
-              <p className="text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
-                Parent login: Username = Mobile Number, Password = Mobile Number
-                (auto-set)
-              </p>
-            )}
-
-            {formError && (
-              <p
-                data-ocid="user_management.error_state"
-                className="text-sm text-destructive"
-              >
-                {formError}
-              </p>
-            )}
-
-            <div className="flex gap-3 justify-end">
+            <div className="flex gap-2 justify-end pt-2">
               <Button
                 variant="outline"
-                data-ocid="user_management.cancel_button"
-                onClick={() => setModalOpen(false)}
+                onClick={() => setShowForm(false)}
+                data-ocid="users.form.cancel_button"
               >
                 Cancel
               </Button>
               <Button
-                data-ocid="user_management.save_button"
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={saving}
+                data-ocid="users.form.submit_button"
               >
-                {saving ? "Saving…" : editingId ? "Save Changes" : "Add User"}
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving…
+                  </>
+                ) : editUser ? (
+                  "Save Changes"
+                ) : (
+                  "Create User"
+                )}
               </Button>
             </div>
           </div>
@@ -736,98 +674,94 @@ export default function UserManagement() {
       </Dialog>
 
       {/* Reset Password Dialog */}
-      <Dialog open={!!resetTarget} onOpenChange={() => setResetTarget(null)}>
-        <DialogContent data-ocid="user_management.reset_dialog">
+      <Dialog
+        open={!!resetUser}
+        onOpenChange={(v) => {
+          if (!v) setResetUser(null);
+        }}
+      >
+        <DialogContent className="max-w-sm" data-ocid="users.reset_dialog">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="w-5 h-5" />
-              Reset Password — {resetTarget?.name}
+            <DialogTitle>
+              Reset Password — {resetUser?.fullName ?? resetUser?.username}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <div className="bg-muted/40 rounded-lg p-3 text-xs text-muted-foreground">
-              Username:{" "}
-              <span className="font-mono font-medium text-foreground">
-                {resetTarget?.username}
-              </span>
-            </div>
             <div className="space-y-1.5">
               <Label htmlFor="reset-pw">New Password</Label>
-              <div className="relative">
-                <Input
-                  id="reset-pw"
-                  data-ocid="user_management.new_password.input"
-                  type={showNewPw ? "text" : "password"}
-                  value={newPassword}
-                  onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="Enter new password"
-                  className="pr-10"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowNewPw((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={showNewPw ? "Hide" : "Show"}
-                >
-                  {showNewPw ? (
-                    <EyeOff className="w-4 h-4" />
-                  ) : (
-                    <Eye className="w-4 h-4" />
-                  )}
-                </button>
-              </div>
+              <Input
+                id="reset-pw"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="Enter new password"
+                data-ocid="users.reset.password.input"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleResetPassword();
+                }}
+              />
             </div>
-            <div className="flex gap-3 justify-end">
+            <div className="flex gap-2 justify-end">
               <Button
                 variant="outline"
-                data-ocid="user_management.reset_cancel_button"
-                onClick={() => setResetTarget(null)}
+                onClick={() => setResetUser(null)}
+                data-ocid="users.reset.cancel_button"
               >
                 Cancel
               </Button>
               <Button
-                data-ocid="user_management.reset_confirm_button"
-                onClick={handleResetPassword}
-                disabled={!newPassword.trim()}
+                onClick={() => void handleResetPassword()}
+                disabled={resetting || !newPassword}
+                data-ocid="users.reset.confirm_button"
               >
-                Reset Password
+                {resetting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Resetting…
+                  </>
+                ) : (
+                  <>
+                    <KeyRound className="w-4 h-4 mr-2" />
+                    Reset Password
+                  </>
+                )}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirm Dialog */}
-      <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <DialogContent data-ocid="user_management.delete_dialog">
+      {/* Delete Confirm */}
+      <Dialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => {
+          if (!v) setDeleteTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm" data-ocid="users.delete_dialog">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-destructive">
-              <Trash2 className="w-5 h-5" />
-              Delete User
-            </DialogTitle>
+            <DialogTitle>Delete User?</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4 py-2">
-            <p className="text-sm text-muted-foreground">
-              Are you sure you want to delete{" "}
-              <strong className="text-foreground">{deleteTarget?.name}</strong>?
-              This action cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <Button
-                variant="outline"
-                data-ocid="user_management.delete_cancel_button"
-                onClick={() => setDeleteTarget(null)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                data-ocid="user_management.delete_confirm_button"
-                onClick={handleDelete}
-              >
-                Delete User
-              </Button>
-            </div>
+          <p className="text-sm text-muted-foreground py-2">
+            Delete{" "}
+            <strong>{deleteTarget?.fullName ?? deleteTarget?.username}</strong>?
+            This cannot be undone.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteTarget(null)}
+              data-ocid="users.delete.cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => void handleDelete()}
+              data-ocid="users.delete.confirm_button"
+            >
+              Delete
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

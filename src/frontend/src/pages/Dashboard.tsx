@@ -379,13 +379,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             ).length
           : "—";
 
-    const totalTeachersCount = cachedStaff.filter(
-      (s) =>
-        s.designation?.toLowerCase().includes("teacher") ||
-        s.designation?.toLowerCase() === "pgt" ||
-        s.designation?.toLowerCase() === "tgt" ||
-        s.designation?.toLowerCase() === "prt",
-    ).length;
+    const totalTeachersCount =
+      serverCounts.teachers != null
+        ? serverCounts.teachers
+        : cachedStaff.filter(
+            (s) =>
+              s.designation?.toLowerCase().includes("teacher") ||
+              s.designation?.toLowerCase() === "pgt" ||
+              s.designation?.toLowerCase() === "tgt" ||
+              s.designation?.toLowerCase() === "prt",
+          ).length;
 
     const totalStaffCount =
       serverCounts.staff ?? (cachedStaff.length > 0 ? cachedStaff.length : 0);
@@ -678,7 +681,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             </div>
           )}
           <h1 className="text-xl sm:text-2xl font-bold font-display text-white drop-shadow">
-            {greeting()}, {currentUser?.name?.split(" ")[0] ?? "User"} 👋
+            {greeting()},{" "}
+            {
+              (currentUser?.fullName ?? currentUser?.name ?? "User").split(
+                " ",
+              )[0]
+            }{" "}
+            👋
           </h1>
           <p className="text-white/80 text-sm mt-0.5">
             Session:{" "}

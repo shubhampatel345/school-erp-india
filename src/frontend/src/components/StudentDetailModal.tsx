@@ -130,7 +130,7 @@ export default function StudentDetailModal({
     return found?.sections ?? SECTIONS;
   })();
   const [dobParts, setDobParts] = useState<[string, string, string]>(
-    parseDobToParts(student.dob),
+    parseDobToParts(student.dob ?? ""),
   );
   const [showDiscontinue, setShowDiscontinue] = useState(false);
   const [leaveDate, setLeaveDate] = useState(student.leavingDate ?? "");
@@ -2131,13 +2131,13 @@ export default function StudentDetailModal({
                       </p>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student.credentials.username}
+                          {student.credentials?.username}
                         </p>
                         <button
                           type="button"
                           onClick={() =>
                             copyToClipboard(
-                              student.credentials.username,
+                              student.credentials?.username ?? "",
                               "user",
                             )
                           }
@@ -2157,13 +2157,13 @@ export default function StudentDetailModal({
                       </p>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student.credentials.password}
+                          {student.credentials?.password}
                         </p>
                         <button
                           type="button"
                           onClick={() =>
                             copyToClipboard(
-                              student.credentials.password,
+                              student.credentials?.password ?? "",
                               "pass",
                             )
                           }
@@ -2442,7 +2442,7 @@ function Field({
   onChange,
 }: {
   label: string;
-  value: string;
+  value: string | undefined;
   editing: boolean;
   onChange: (v: string) => void;
 }) {

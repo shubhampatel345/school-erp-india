@@ -3,9 +3,17 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertCircle,
   Bus,
   CalendarCheck,
+  CalendarRange,
   Download,
   TrendingUp,
   Users,
@@ -19,7 +27,6 @@ import type {
   Student,
   TransportRoute,
 } from "../../types";
-import { CLASSES, SECTIONS } from "../../utils/localStorage";
 
 interface AttendanceSummaryProps {
   date: string;
@@ -244,11 +251,295 @@ function DrillDownModal({
   );
 }
 
+// ─── Student-level Date Range Report ─────────────────────────────────────────
+
+interface StudentRangeRow {
+  student: Student;
+  present: number;
+  absent: number;
+  leave: number;
+  late: number;
+  total: number;
+  pct: number;
+}
+
+function DateRangeSummary({
+  fromDate,
+  toDate,
+  students,
+  records,
+}: {
+  fromDate: string;
+  toDate: string;
+  students: Student[];
+  records: AttendanceRecord[];
+}) {
+  const [search, setSearch] = useState("");
+  const [filterClass, setFilterClass] = useState("all");
+
+  const classList = useMemo(() => {
+    const names = [...new Set(students.map((s) => s.class))];
+    const order = [
+      "Nursery",
+      "LKG",
+      "UKG",
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10",
+      "11",
+      "12",
+    ];
+    return order
+      .filter((c) => names.includes(c))
+      .concat(names.filter((n) => !order.includes(n)));
+  }, [students]);
+
+  // Count unique working days in range
+  const workingDays = useMemo(() => {
+    const days = new Set(
+      records
+        .filter(
+          (r) => r.date >= fromDate && r.date <= toDate && r.type === "student",
+        )
+        .map((r) => r.date),
+    );
+    return days.size || 1;
+  }, [records, fromDate, toDate]);
+
+  const rangeRecords = useMemo(
+    () =>
+      records.filter(
+        (r) => r.type === "student" && r.date >= fromDate && r.date <= toDate,
+      ),
+    [records, fromDate, toDate],
+  );
+
+  const rows: StudentRangeRow[] = useMemo(() => {
+    const filtered = students.filter((s) => {
+      if (filterClass !== "all" && s.class !== filterClass) return false;
+      if (search) {
+        const q = search.toLowerCase();
+        return (
+          s.fullName.toLowerCase().includes(q) ||
+          s.admNo.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+
+    return filtered.map((s) => {
+      const recs = rangeRecords.filter((r) => r.studentId === s.id);
+      const present = recs.filter((r) => r.status === "Present").length;
+      const absent = recs.filter((r) => r.status === "Absent").length;
+      const leave = recs.filter((r) => (r.status as string) === "Leave").length;
+      const late = recs.filter((r) => r.status === "Late").length;
+      const pct =
+        workingDays > 0 ? Math.round((present / workingDays) * 100) : 0;
+      return {
+        student: s,
+        present,
+        absent,
+        leave,
+        late,
+        total: workingDays,
+        pct,
+      };
+    });
+  }, [students, filterClass, search, rangeRecords, workingDays]);
+
+  function exportRangeCSV() {
+    const rowData = [
+      [
+        "Adm No",
+        "Name",
+        "Class",
+        "Section",
+        "Present",
+        "Absent",
+        "Leave",
+        "Late",
+        "Working Days",
+        "Attendance%",
+      ],
+    ];
+    for (const r of rows) {
+      rowData.push([
+        r.student.admNo,
+        r.student.fullName,
+        r.student.class,
+        r.student.section,
+        String(r.present),
+        String(r.absent),
+        String(r.leave),
+        String(r.late),
+        String(r.total),
+        `${r.pct}%`,
+      ]);
+    }
+    const csv = rowData.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
+    const a = document.createElement("a");
+    a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    a.download = `attendance_range_${fromDate}_to_${toDate}.csv`;
+    a.click();
+  }
+
+  return (
+    <Card className="overflow-hidden">
+      <div className="p-4 border-b border-border">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-2">
+            <CalendarRange className="w-4 h-4 text-primary" />
+            <h3 className="font-display font-semibold text-foreground">
+              Student-wise Attendance ({fromDate} to {toDate})
+            </h3>
+            <Badge variant="secondary">{workingDays} working days</Badge>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={exportRangeCSV}
+            data-ocid="summary.range-export.button"
+          >
+            <Download className="w-4 h-4 mr-1.5" /> Export CSV
+          </Button>
+        </div>
+        <div className="flex gap-3 mt-3 flex-wrap">
+          <Input
+            placeholder="Search student…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-48 h-8 text-sm"
+            data-ocid="summary.range-search.input"
+          />
+          <Select value={filterClass} onValueChange={setFilterClass}>
+            <SelectTrigger
+              className="w-32 h-8 text-sm"
+              data-ocid="summary.range-class.select"
+            >
+              <SelectValue placeholder="All Classes" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Classes</SelectItem>
+              {classList.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {["Nursery", "LKG", "UKG"].includes(c) ? c : `Class ${c}`}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <div className="overflow-x-auto max-h-96">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/60 sticky top-0">
+            <tr>
+              <th className="text-left p-3 font-semibold text-muted-foreground">
+                #
+              </th>
+              <th className="text-left p-3 font-semibold text-muted-foreground">
+                Student
+              </th>
+              <th className="text-left p-3 font-semibold text-muted-foreground hidden sm:table-cell">
+                Class
+              </th>
+              <th className="text-right p-3 font-semibold text-muted-foreground">
+                Present
+              </th>
+              <th className="text-right p-3 font-semibold text-muted-foreground">
+                Absent
+              </th>
+              <th className="text-right p-3 font-semibold text-muted-foreground hidden md:table-cell">
+                Leave
+              </th>
+              <th className="text-left p-3 font-semibold text-muted-foreground">
+                Attendance %
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={7}
+                  className="py-10 text-center text-muted-foreground"
+                  data-ocid="summary.range-table.empty-state"
+                >
+                  No student data available
+                </td>
+              </tr>
+            ) : (
+              rows.map((row, idx) => (
+                <tr
+                  key={row.student.id}
+                  className="border-t border-border hover:bg-muted/20 transition-colors"
+                  data-ocid={`summary.range-row.${idx + 1}`}
+                >
+                  <td className="p-3 text-muted-foreground text-xs">
+                    {idx + 1}
+                  </td>
+                  <td className="p-3 font-medium text-foreground">
+                    {row.student.fullName}
+                  </td>
+                  <td className="p-3 text-muted-foreground hidden sm:table-cell">
+                    {row.student.class}-{row.student.section}
+                  </td>
+                  <td className="p-3 text-right text-accent font-semibold">
+                    {row.present}
+                  </td>
+                  <td className="p-3 text-right text-destructive font-semibold">
+                    {row.absent}
+                  </td>
+                  <td className="p-3 text-right text-blue-500 hidden md:table-cell">
+                    {row.leave}
+                  </td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-12">
+                        <div
+                          className="h-full bg-accent rounded-full transition-all"
+                          style={{ width: `${row.pct}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
+                        {row.pct}%
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+// ─── Main Component ────────────────────────────────────────────────────────────
+
 export default function AttendanceSummary({
   date,
   onDateChange,
 }: AttendanceSummaryProps) {
   const { getData, currentSession } = useApp();
+
+  // Date range state
+  const today = new Date().toISOString().split("T")[0];
+  const [viewMode, setViewMode] = useState<"single" | "range">("single");
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1); // First of current month
+    return d.toISOString().split("T")[0];
+  });
+  const [toDate, setToDate] = useState(today);
+
   const [drillDown, setDrillDown] = useState<ClassSectionRow | null>(null);
 
   const students = useMemo(
@@ -260,12 +551,14 @@ export default function AttendanceSummary({
     [getData, currentSession],
   );
 
+  const allRecords = useMemo(
+    () => getData("attendance") as AttendanceRecord[],
+    [getData],
+  );
+
   const records = useMemo(
-    () =>
-      (getData("attendance") as AttendanceRecord[]).filter(
-        (r) => r.date === date && r.type === "student",
-      ),
-    [getData, date],
+    () => allRecords.filter((r) => r.date === date && r.type === "student"),
+    [allRecords, date],
   );
 
   const classSections = useMemo(
@@ -278,10 +571,28 @@ export default function AttendanceSummary({
     [getData],
   );
 
-  // Build sorted class list
+  const CLASS_ORDER = [
+    "Nursery",
+    "LKG",
+    "UKG",
+    "1",
+    "2",
+    "3",
+    "4",
+    "5",
+    "6",
+    "7",
+    "8",
+    "9",
+    "10",
+    "11",
+    "12",
+  ];
+  const SECTIONS = ["A", "B", "C", "D", "E", "F"];
+
   const sortedClasses = useMemo(() => {
     if (classSections.length > 0) return classSections.map((c) => c.className);
-    return CLASSES;
+    return CLASS_ORDER;
   }, [classSections]);
 
   const presentIds = useMemo(
@@ -337,7 +648,7 @@ export default function AttendanceSummary({
     () =>
       routes.map((route) => {
         const routeStudents = students.filter((s) =>
-          route.students.includes(s.id),
+          (route.students ?? []).includes(s.id),
         );
         const routePresent = routeStudents.filter((s) =>
           presentIds.has(s.id),
@@ -391,254 +702,310 @@ export default function AttendanceSummary({
 
   return (
     <div className="space-y-6">
-      {/* Date selector */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm font-medium text-muted-foreground">
-          Viewing date:
-        </span>
-        <Input
-          type="date"
-          value={date}
-          onChange={(e) => onDateChange(e.target.value)}
-          className="w-40"
-          data-ocid="summary.date-picker"
-        />
-        {date !== new Date().toISOString().split("T")[0] && (
-          <Badge variant="outline">Historical View</Badge>
-        )}
-        <div className="flex-1" />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={exportCSV}
-          data-ocid="summary.export-csv.button"
-        >
-          <Download className="w-4 h-4 mr-1.5" /> Export CSV
-        </Button>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <SummaryCard
-          label="Total Students"
-          value={total}
-          sub="Active enrollments"
-          icon={Users}
-          colorCls="bg-primary"
-        />
-        <SummaryCard
-          label="Present Today"
-          value={present}
-          sub={`${pct}% attendance rate`}
-          icon={CalendarCheck}
-          colorCls="bg-accent"
-        />
-        <SummaryCard
-          label="Absent Today"
-          value={absent}
-          sub={`${100 - pct}% absent`}
-          icon={AlertCircle}
-          colorCls="bg-orange-500"
-        />
-        <SummaryCard
-          label="Attendance %"
-          value={`${pct}%`}
-          sub={`${present}/${total} students`}
-          icon={TrendingUp}
-          colorCls="bg-emerald-600"
-        />
-      </div>
-
-      {/* Class/Section Breakdown */}
-      <Card className="overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center gap-2">
-          <Users className="w-4 h-4 text-primary" />
-          <h3 className="font-display font-semibold text-foreground">
-            Class &amp; Section Wise Attendance
-          </h3>
-          <span className="text-xs text-muted-foreground ml-1">
-            (click a row for student-wise detail)
-          </span>
-        </div>
-        {classSectionData.length === 0 ? (
-          <div
-            className="py-10 text-center text-muted-foreground"
-            data-ocid="summary.class-table.empty-state"
+      {/* View Mode Toggle + Date Picker */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-1 p-1 bg-muted/40 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setViewMode("single")}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              viewMode === "single"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            data-ocid="summary.single-day.tab"
           >
-            <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-            <p className="text-sm">No student data available</p>
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60">
-                <tr>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Class
-                  </th>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Section
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Total
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Present
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Absent
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground hidden sm:table-cell">
-                    Leave
-                  </th>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Attendance
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {classSectionData.map((row, idx) => {
-                  const rowPct =
-                    row.total > 0
-                      ? Math.round((row.present / row.total) * 100)
-                      : 0;
-                  return (
-                    <tr
-                      key={`${row.cls}-${row.section}`}
-                      className="border-t border-border hover:bg-primary/5 cursor-pointer transition-colors"
-                      onClick={() => setDrillDown(row)}
-                      onKeyDown={(e) => e.key === "Enter" && setDrillDown(row)}
-                      tabIndex={0}
-                      data-ocid={`summary.class-row.${idx + 1}`}
-                    >
-                      <td className="p-3 font-medium text-foreground">
-                        Class {row.cls}
-                      </td>
-                      <td className="p-3 text-muted-foreground">
-                        {row.section}
-                      </td>
-                      <td className="p-3 text-right text-muted-foreground">
-                        {row.total}
-                      </td>
-                      <td className="p-3 text-right text-accent font-semibold">
-                        {row.present}
-                      </td>
-                      <td className="p-3 text-right text-orange-500 font-semibold">
-                        {row.absent}
-                      </td>
-                      <td className="p-3 text-right text-blue-500 hidden sm:table-cell">
-                        {row.leave}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-16">
-                            <div
-                              className="h-full bg-accent rounded-full transition-all"
-                              style={{ width: `${rowPct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
-                            {rowPct}%
-                          </span>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+            Single Day
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("range")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              viewMode === "range"
+                ? "bg-card text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            data-ocid="summary.date-range.tab"
+          >
+            <CalendarRange className="w-3.5 h-3.5" />
+            Date Range
+          </button>
+        </div>
 
-      {/* Route-wise Breakdown */}
-      {routes.length > 0 ? (
-        <Card className="overflow-hidden">
-          <div className="p-4 border-b border-border flex items-center gap-2">
-            <Bus className="w-4 h-4 text-primary" />
-            <h3 className="font-display font-semibold text-foreground">
-              Route / Transport Wise Attendance
-            </h3>
+        {viewMode === "single" ? (
+          <>
+            <Input
+              type="date"
+              value={date}
+              onChange={(e) => onDateChange(e.target.value)}
+              className="w-40"
+              data-ocid="summary.date-picker"
+            />
+            {date !== today && <Badge variant="outline">Historical View</Badge>}
+            <div className="flex-1" />
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={exportCSV}
+              data-ocid="summary.export-csv.button"
+            >
+              <Download className="w-4 h-4 mr-1.5" /> Export CSV
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">From</span>
+              <Input
+                type="date"
+                value={fromDate}
+                onChange={(e) => setFromDate(e.target.value)}
+                className="w-36"
+                data-ocid="summary.from-date.input"
+              />
+              <span className="text-sm text-muted-foreground">To</span>
+              <Input
+                type="date"
+                value={toDate}
+                onChange={(e) => setToDate(e.target.value)}
+                className="w-36"
+                data-ocid="summary.to-date.input"
+              />
+            </div>
+          </>
+        )}
+      </div>
+
+      {viewMode === "single" ? (
+        <>
+          {/* Summary Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <SummaryCard
+              label="Total Students"
+              value={total}
+              sub="Active enrollments"
+              icon={Users}
+              colorCls="bg-primary"
+            />
+            <SummaryCard
+              label="Present Today"
+              value={present}
+              sub={`${pct}% attendance rate`}
+              icon={CalendarCheck}
+              colorCls="bg-accent"
+            />
+            <SummaryCard
+              label="Absent Today"
+              value={absent}
+              sub={`${100 - pct}% absent`}
+              icon={AlertCircle}
+              colorCls="bg-orange-500"
+            />
+            <SummaryCard
+              label="Attendance %"
+              value={`${pct}%`}
+              sub={`${present}/${total} students`}
+              icon={TrendingUp}
+              colorCls="bg-emerald-600"
+            />
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60">
-                <tr>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Route
-                  </th>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Bus No.
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Total
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Present
-                  </th>
-                  <th className="text-right p-3 font-semibold text-muted-foreground">
-                    Absent
-                  </th>
-                  <th className="text-left p-3 font-semibold text-muted-foreground">
-                    Attendance
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {routeData.map((row, idx) => {
-                  const rowPct =
-                    row.total > 0
-                      ? Math.round((row.present / row.total) * 100)
-                      : 0;
-                  return (
-                    <tr
-                      key={row.route}
-                      className="border-t border-border hover:bg-muted/30 transition-colors"
-                      data-ocid={`summary.route-row.${idx + 1}`}
-                    >
-                      <td className="p-3 font-medium text-foreground">
-                        {row.route}
-                      </td>
-                      <td className="p-3 text-muted-foreground">{row.bus}</td>
-                      <td className="p-3 text-right text-muted-foreground">
-                        {row.total}
-                      </td>
-                      <td className="p-3 text-right text-accent font-semibold">
-                        {row.present}
-                      </td>
-                      <td className="p-3 text-right text-orange-500 font-semibold">
-                        {row.absent}
-                      </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-16">
-                            <div
-                              className="h-full bg-accent rounded-full transition-all"
-                              style={{ width: `${rowPct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
-                            {rowPct}%
-                          </span>
-                        </div>
-                      </td>
+
+          {/* Class/Section Breakdown */}
+          <Card className="overflow-hidden">
+            <div className="p-4 border-b border-border flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              <h3 className="font-display font-semibold text-foreground">
+                Class &amp; Section Wise Attendance
+              </h3>
+              <span className="text-xs text-muted-foreground ml-1">
+                (click a row for student-wise detail)
+              </span>
+            </div>
+            {classSectionData.length === 0 ? (
+              <div
+                className="py-10 text-center text-muted-foreground"
+                data-ocid="summary.class-table.empty-state"
+              >
+                <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                <p className="text-sm">No student data available for {date}</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Class
+                      </th>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Section
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Total
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Present
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Absent
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground hidden sm:table-cell">
+                        Leave
+                      </th>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Attendance
+                      </th>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                  </thead>
+                  <tbody>
+                    {classSectionData.map((row, idx) => {
+                      const rowPct =
+                        row.total > 0
+                          ? Math.round((row.present / row.total) * 100)
+                          : 0;
+                      return (
+                        <tr
+                          key={`${row.cls}-${row.section}`}
+                          className="border-t border-border hover:bg-primary/5 cursor-pointer transition-colors"
+                          onClick={() => setDrillDown(row)}
+                          onKeyDown={(e) =>
+                            e.key === "Enter" && setDrillDown(row)
+                          }
+                          tabIndex={0}
+                          data-ocid={`summary.class-row.${idx + 1}`}
+                        >
+                          <td className="p-3 font-medium text-foreground">
+                            {["Nursery", "LKG", "UKG"].includes(row.cls)
+                              ? row.cls
+                              : `Class ${row.cls}`}
+                          </td>
+                          <td className="p-3 text-muted-foreground">
+                            {row.section}
+                          </td>
+                          <td className="p-3 text-right text-muted-foreground">
+                            {row.total}
+                          </td>
+                          <td className="p-3 text-right text-accent font-semibold">
+                            {row.present}
+                          </td>
+                          <td className="p-3 text-right text-orange-500 font-semibold">
+                            {row.absent}
+                          </td>
+                          <td className="p-3 text-right text-blue-500 hidden sm:table-cell">
+                            {row.leave}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-16">
+                                <div
+                                  className="h-full bg-accent rounded-full transition-all"
+                                  style={{ width: `${rowPct}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
+                                {rowPct}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+
+          {/* Route-wise Breakdown */}
+          {routes.length > 0 ? (
+            <Card className="overflow-hidden">
+              <div className="p-4 border-b border-border flex items-center gap-2">
+                <Bus className="w-4 h-4 text-primary" />
+                <h3 className="font-display font-semibold text-foreground">
+                  Route / Transport Wise Attendance
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Route
+                      </th>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Bus No.
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Total
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Present
+                      </th>
+                      <th className="text-right p-3 font-semibold text-muted-foreground">
+                        Absent
+                      </th>
+                      <th className="text-left p-3 font-semibold text-muted-foreground">
+                        Attendance
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {routeData.map((row, idx) => {
+                      const rowPct =
+                        row.total > 0
+                          ? Math.round((row.present / row.total) * 100)
+                          : 0;
+                      return (
+                        <tr
+                          key={row.route}
+                          className="border-t border-border hover:bg-muted/30 transition-colors"
+                          data-ocid={`summary.route-row.${idx + 1}`}
+                        >
+                          <td className="p-3 font-medium text-foreground">
+                            {row.route}
+                          </td>
+                          <td className="p-3 text-muted-foreground">
+                            {row.bus}
+                          </td>
+                          <td className="p-3 text-right text-muted-foreground">
+                            {row.total}
+                          </td>
+                          <td className="p-3 text-right text-accent font-semibold">
+                            {row.present}
+                          </td>
+                          <td className="p-3 text-right text-orange-500 font-semibold">
+                            {row.absent}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center gap-2">
+                              <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-16">
+                                <div
+                                  className="h-full bg-accent rounded-full transition-all"
+                                  style={{ width: `${rowPct}%` }}
+                                />
+                              </div>
+                              <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
+                                {rowPct}%
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          ) : null}
+        </>
       ) : (
-        <Card className="p-5 border-dashed">
-          <div className="flex items-center gap-3 text-muted-foreground">
-            <Bus className="w-5 h-5 opacity-40" />
-            <p className="text-sm">
-              No transport routes configured. Add routes in the Transport module
-              to see route-wise attendance here.
-            </p>
-          </div>
-        </Card>
+        /* Date Range View */
+        <DateRangeSummary
+          fromDate={fromDate}
+          toDate={toDate}
+          students={students}
+          records={allRecords}
+        />
       )}
 
       {/* Drill-down modal */}

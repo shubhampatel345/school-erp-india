@@ -25,7 +25,7 @@ export default function HR({ onNavigate, initialTab }: HRProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Tab Bar */}
-      <div className="bg-card border-b px-4 lg:px-6 flex gap-1 overflow-x-auto">
+      <div className="bg-card border-b px-4 lg:px-6 flex gap-1 overflow-x-auto sticky top-0 z-10">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           return (

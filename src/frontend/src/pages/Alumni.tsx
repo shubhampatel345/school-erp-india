@@ -45,6 +45,7 @@ interface AlumniFormData {
   mobile: string;
   email: string;
   occupation: string;
+  address: string;
 }
 
 const EMPTY_FORM: AlumniFormData = {
@@ -55,6 +56,7 @@ const EMPTY_FORM: AlumniFormData = {
   mobile: "",
   email: "",
   occupation: "",
+  address: "",
 };
 
 function AlumniForm({
@@ -76,12 +78,12 @@ function AlumniForm({
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <div>
+        <div className="col-span-2">
           <Label>Full Name *</Label>
           <Input
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
-            data-ocid="alumni.form.name_input"
+            data-ocid="alumni.form_name_input"
           />
         </div>
         <div>
@@ -123,11 +125,19 @@ function AlumniForm({
             type="email"
           />
         </div>
-        <div className="col-span-2">
+        <div>
           <Label>Occupation</Label>
           <Input
             value={form.occupation}
             onChange={(e) => set("occupation", e.target.value)}
+            placeholder="e.g. Engineer"
+          />
+        </div>
+        <div className="col-span-2">
+          <Label>Address</Label>
+          <Input
+            value={form.address}
+            onChange={(e) => set("address", e.target.value)}
           />
         </div>
       </div>
@@ -135,7 +145,7 @@ function AlumniForm({
         <Button
           variant="outline"
           onClick={onClose}
-          data-ocid="alumni.form.cancel_button"
+          data-ocid="alumni.form_cancel_button"
         >
           Cancel
         </Button>
@@ -144,7 +154,7 @@ function AlumniForm({
             if (!form.name || !form.yearOfPassing) return;
             onSave(form);
           }}
-          data-ocid="alumni.form.submit_button"
+          data-ocid="alumni.form_submit_button"
         >
           Save
         </Button>
@@ -159,6 +169,7 @@ export default function AlumniPage() {
   const eventsList = getData("alumni_events") as AlumniEvent[];
 
   const [search, setSearch] = useState("");
+  const [batchFilter, setBatchFilter] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<Alumni | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
@@ -168,17 +179,24 @@ export default function AlumniPage() {
     description: "",
   });
 
+  const batches = useMemo(() => {
+    const set = new Set(alumniList.map((a) => a.batch ?? "").filter(Boolean));
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [alumniList]);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return alumniList.filter(
       (a) =>
-        (a.name ?? "").toLowerCase().includes(q) ||
-        (a.batch ?? "").toLowerCase().includes(q) ||
-        (a.admNo ?? "").toLowerCase().includes(q),
+        (!q ||
+          (a.name ?? "").toLowerCase().includes(q) ||
+          (a.batch ?? "").includes(q) ||
+          (a.admNo ?? "").toLowerCase().includes(q)) &&
+        (batchFilter === "all" || a.batch === batchFilter),
     );
-  }, [alumniList, search]);
+  }, [alumniList, search, batchFilter]);
 
-  const batches = useMemo(() => {
+  const batchGroups = useMemo(() => {
     const map: Record<string, Alumni[]> = {};
     for (const a of alumniList) {
       const b = a.batch ?? "Unknown";
@@ -197,6 +215,7 @@ export default function AlumniPage() {
       mobile: form.mobile,
       email: form.email,
       occupation: form.occupation,
+      address: form.address,
     };
     if (editItem) {
       await updateData("alumni", editItem.id, record);
@@ -225,8 +244,8 @@ export default function AlumniPage() {
   };
 
   const exportCSV = () => {
-    const rows = [
-      ["Name", "Adm No", "Batch", "Class", "Mobile", "Email"],
+    downloadCSV("alumni_directory.csv", [
+      ["Name", "Adm No", "Batch", "Class", "Mobile", "Email", "Occupation"],
       ...alumniList.map((a) => [
         a.name ?? "",
         a.admNo ?? "",
@@ -234,9 +253,9 @@ export default function AlumniPage() {
         a.class_ ?? "",
         a.mobile ?? "",
         a.email ?? "",
+        "",
       ]),
-    ];
-    downloadCSV("alumni_directory.csv", rows);
+    ]);
   };
 
   return (
@@ -257,25 +276,26 @@ export default function AlumniPage() {
           }}
           data-ocid="alumni.add_button"
         >
-          <Plus className="w-4 h-4 mr-1" /> Add Alumni
+          <Plus className="w-4 h-4 mr-1" />
+          Add Alumni
         </Button>
       </div>
 
       <Tabs defaultValue="directory">
         <TabsList>
-          <TabsTrigger value="directory" data-ocid="alumni.directory.tab">
+          <TabsTrigger value="directory" data-ocid="alumni.directory_tab">
             Directory
           </TabsTrigger>
-          <TabsTrigger value="batches" data-ocid="alumni.batches.tab">
-            Batches
+          <TabsTrigger value="batches" data-ocid="alumni.batches_tab">
+            Batch View
           </TabsTrigger>
-          <TabsTrigger value="events" data-ocid="alumni.events.tab">
+          <TabsTrigger value="events" data-ocid="alumni.events_tab">
             Events
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="directory" className="mt-4 space-y-3">
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
             <Input
               placeholder="Search by name, batch, adm no…"
               value={search}
@@ -283,19 +303,33 @@ export default function AlumniPage() {
               className="max-w-sm"
               data-ocid="alumni.search_input"
             />
+            <select
+              className="border border-input rounded-md px-3 py-2 text-sm bg-background"
+              value={batchFilter}
+              onChange={(e) => setBatchFilter(e.target.value)}
+            >
+              <option value="all">All Batches</option>
+              {batches.map((b) => (
+                <option key={b} value={b}>
+                  Batch {b}
+                </option>
+              ))}
+            </select>
             <Button
               variant="outline"
               size="sm"
               onClick={exportCSV}
               data-ocid="alumni.export_button"
             >
-              <Download className="w-4 h-4 mr-1" /> Export
+              <Download className="w-4 h-4 mr-1" />
+              Export
             </Button>
           </div>
+
           {filtered.length === 0 ? (
             <div
               className="text-center py-16 text-muted-foreground"
-              data-ocid="alumni.directory.empty_state"
+              data-ocid="alumni.directory_empty_state"
             >
               <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
               <p>No alumni found</p>
@@ -312,17 +346,24 @@ export default function AlumniPage() {
                           {a.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Batch {a.batch} • Class {a.class_}
+                          Batch {a.batch} · Class {a.class_}
                         </p>
                         {a.mobile && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                            <Phone className="w-3 h-3" /> {a.mobile}
+                            <Phone className="w-3 h-3" />
+                            {a.mobile}
                           </p>
                         )}
                         {a.email && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Mail className="w-3 h-3" /> {a.email}
+                            <Mail className="w-3 h-3" />
+                            {a.email}
                           </p>
+                        )}
+                        {a.admNo && (
+                          <Badge variant="outline" className="text-xs mt-1">
+                            {a.admNo}
+                          </Badge>
                         )}
                       </div>
                       <div className="flex gap-1 ml-2">
@@ -341,7 +382,7 @@ export default function AlumniPage() {
                         <Button
                           size="icon"
                           variant="ghost"
-                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          className="h-7 w-7 text-destructive"
                           onClick={() => handleDelete(a.id)}
                           data-ocid={`alumni.delete_button.${i + 1}`}
                         >
@@ -357,15 +398,15 @@ export default function AlumniPage() {
         </TabsContent>
 
         <TabsContent value="batches" className="mt-4 space-y-3">
-          {batches.length === 0 ? (
+          {batchGroups.length === 0 ? (
             <p
               className="text-muted-foreground text-sm py-8 text-center"
-              data-ocid="alumni.batches.empty_state"
+              data-ocid="alumni.batches_empty_state"
             >
               No batches yet. Add alumni first.
             </p>
           ) : (
-            batches.map(([batch, members]) => (
+            batchGroups.map(([batch, members]) => (
               <Card key={batch}>
                 <CardContent className="pt-4 pb-3">
                   <div className="flex items-center justify-between mb-3">
@@ -395,18 +436,19 @@ export default function AlumniPage() {
             onClick={() => setEventDialogOpen(true)}
             data-ocid="alumni.add_event_button"
           >
-            <Plus className="w-4 h-4 mr-1" /> Add Event
+            <Plus className="w-4 h-4 mr-1" />
+            Add Event
           </Button>
           {eventsList.length === 0 ? (
             <p
               className="text-muted-foreground text-sm py-8 text-center"
-              data-ocid="alumni.events.empty_state"
+              data-ocid="alumni.events_empty_state"
             >
               No alumni events scheduled.
             </p>
           ) : (
             eventsList.map((ev, i) => (
-              <Card key={ev.id} data-ocid={`alumni.event.item.${i + 1}`}>
+              <Card key={ev.id} data-ocid={`alumni.event.${i + 1}`}>
                 <CardContent className="pt-4 pb-3">
                   <p className="font-semibold text-foreground">{ev.title}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
@@ -441,6 +483,7 @@ export default function AlumniPage() {
                     mobile: editItem.mobile ?? "",
                     email: editItem.email ?? "",
                     occupation: "",
+                    address: editItem.address ?? "",
                   }
                 : undefined
             }
@@ -453,9 +496,9 @@ export default function AlumniPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Event Dialog */}
+      {/* Event Dialog */}
       <Dialog open={eventDialogOpen} onOpenChange={setEventDialogOpen}>
-        <DialogContent data-ocid="alumni.event.dialog">
+        <DialogContent data-ocid="alumni.event_dialog">
           <DialogHeader>
             <DialogTitle>Add Alumni Event</DialogTitle>
           </DialogHeader>
@@ -467,7 +510,7 @@ export default function AlumniPage() {
                 onChange={(e) =>
                   setEventForm((f) => ({ ...f, title: e.target.value }))
                 }
-                data-ocid="alumni.event.title_input"
+                data-ocid="alumni.event_title_input"
               />
             </div>
             <div>
@@ -493,13 +536,13 @@ export default function AlumniPage() {
               <Button
                 variant="outline"
                 onClick={() => setEventDialogOpen(false)}
-                data-ocid="alumni.event.cancel_button"
+                data-ocid="alumni.event_cancel_button"
               >
                 Cancel
               </Button>
               <Button
                 onClick={handleSaveEvent}
-                data-ocid="alumni.event.submit_button"
+                data-ocid="alumni.event_submit_button"
               >
                 Save Event
               </Button>

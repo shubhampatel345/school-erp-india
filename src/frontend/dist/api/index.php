@@ -125,12 +125,16 @@ try {
     if ($route === 'staff/count')     { handle_staff_count(); }
     if ($route === 'students/count')  { handle_students_count(); }
 
-    // ── collection CRUD: {collection}/list|get|create|update|delete|batch ────────
+    // ── files/upload ─────────────────────────────────────────────────────────────
+    if ($route === 'files/upload') { handle_files_upload($method, $auth); }
+
+    // ── collection CRUD: {collection}/list|get|save|create|update|delete|batch ──
     $collectionMap = collection_table_map();
     foreach (array_keys($collectionMap) as $col) {
-        // exact: students/list, students/get, students/create ...
+        // exact: students/list, students/get, students/save ...
         if ($route === "{$col}/list")   { handle_col_list($method, $col, $auth); }
         if ($route === "{$col}/get")    { handle_col_get($method, $col, $auth); }
+        if ($route === "{$col}/save")   { handle_col_save($method, $col, $body, $auth); }
         if ($route === "{$col}/create") { handle_col_create($method, $col, $body, $auth); }
         if ($route === "{$col}/update") { handle_col_update($method, $col, $body, $auth); }
         if ($route === "{$col}/delete") { handle_col_delete($method, $col, $auth); }
@@ -1266,8 +1270,108 @@ function handle_students_count(): void {
 
 
 // =============================================================================
+// FILES / UPLOAD
+// =============================================================================
+function handle_files_upload(string $method, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth)             json_error('Authentication required', 401);
+
+    if (empty($_FILES['file'])) json_error('No file uploaded (field: file)', 400);
+    $file = $_FILES['file'];
+
+    if ($file['error'] !== UPLOAD_ERR_OK) {
+        json_error('Upload error code: ' . $file['error'], 400);
+    }
+    if ($file['size'] > MAX_FILE_SIZE) {
+        json_error('File exceeds maximum size of 5 MB', 400);
+    }
+
+    $uploadDir = UPLOAD_DIR;
+    if (!is_dir($uploadDir)) {
+        @mkdir($uploadDir, 0755, true);
+    }
+
+    $ext      = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+    $allowed  = ['jpg','jpeg','png','gif','pdf','doc','docx','xls','xlsx','csv','txt','zip'];
+    if (!in_array($ext, $allowed, true)) {
+        json_error('File type not allowed: ' . $ext, 400);
+    }
+
+    $filename = uniqid('upload_', true) . '.' . $ext;
+    $dest     = $uploadDir . $filename;
+
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        json_error('Failed to save uploaded file', 500);
+    }
+
+    // Build public URL — derive from REQUEST_URI or use default API_URL base
+    $apiBase  = rtrim(API_URL, '/index.php');
+    $url      = $apiBase . '/uploads/' . $filename;
+
+    json_success(['url' => $url, 'filename' => $filename, 'size' => $file['size']], 'File uploaded', 201);
+}
+
+
+// =============================================================================
 // COLLECTION CRUD HANDLERS
 // =============================================================================
+
+/**
+ * save = upsert (INSERT ... ON DUPLICATE KEY UPDATE)
+ * If body contains `id` matching an existing record → update
+ * Otherwise → insert with generated UUID
+ */
+function handle_col_save(string $method, string $collection, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth)             json_error('Authentication required', 401);
+
+    $table = collection_table_map()[$collection];
+    $db    = getDB();
+
+    // Normalize field names
+    $normalized = normalize_rows($table, [$body]);
+    $body = $normalized[0];
+
+    // Ensure `id` exists
+    if (empty($body['id'])) $body['id'] = gen_uuid();
+
+    // Filter to valid columns only
+    $tableColumns = [];
+    try {
+        $stmt = $db->query("DESCRIBE `{$table}`");
+        $tableColumns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN, 0) : [];
+    } catch (Throwable $e) {}
+
+    $filteredRow = [];
+    foreach ($body as $k => $v) {
+        if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
+        if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
+        if (is_array($v) || is_object($v)) {
+            $filteredRow[$k] = json_encode($v, JSON_UNESCAPED_UNICODE);
+        } elseif (is_scalar($v) || is_null($v)) {
+            $filteredRow[$k] = $v;
+        }
+    }
+
+    if (empty($filteredRow)) json_error('No valid fields provided', 400);
+
+    $columns      = array_keys($filteredRow);
+    $values       = array_values($filteredRow);
+    $colList      = implode(',', array_map(fn($c) => "`{$c}`", $columns));
+    $placeholders = implode(',', array_fill(0, count($columns), '?'));
+    $updateParts  = array_map(fn($c) => "`{$c}` = VALUES(`{$c}`)", $columns);
+    $updateClause = implode(',', $updateParts);
+
+    try {
+        $db->prepare("INSERT INTO `{$table}` ({$colList}) VALUES ({$placeholders}) ON DUPLICATE KEY UPDATE {$updateClause}")
+           ->execute($values);
+        write_changelog($db, $auth, $table, 'save', $filteredRow['id'] ?? null, null, $filteredRow);
+        json_success(['id' => $filteredRow['id']], 'Saved', 200);
+    } catch (Throwable $e) {
+        json_error('Failed to save: ' . $e->getMessage(), 500);
+    }
+}
+
 function handle_col_list(string $method, string $collection, ?array $auth): void {
     if ($method !== 'GET') json_error('Method not allowed', 405);
     if (!$auth) json_error('Authentication required', 401);
@@ -1276,24 +1380,57 @@ function handle_col_list(string $method, string $collection, ?array $auth): void
     $db     = getDB();
     $limit  = isset($_GET['limit'])  ? min((int)$_GET['limit'], 100000) : PHP_INT_MAX;
     $offset = max((int)($_GET['offset'] ?? 0), 0);
+    $page   = max((int)($_GET['page'] ?? 1), 1);
+    if (isset($_GET['page']) && !isset($_GET['offset'])) {
+        $pageSize = isset($_GET['limit']) ? min((int)$_GET['limit'], 100000) : 50;
+        $limit    = $pageSize;
+        $offset   = ($page - 1) * $pageSize;
+    }
     $since  = $_GET['since'] ?? null;
 
     $where  = [];
     $params = [];
 
+    // Session filter — supports sessionId, session, or sess query params
+    $sessionFilter = $_GET['sessionId'] ?? $_GET['session'] ?? $_GET['sess'] ?? null;
+    if ($sessionFilter) {
+        // Check which column exists — sessionId or session
+        try {
+            $cols = $db->query("SHOW COLUMNS FROM `{$table}` LIKE 'sessionId'");
+            if ($cols && $cols->rowCount() > 0) {
+                $where[] = '`sessionId`=?';
+                $params[] = $sessionFilter;
+            } else {
+                $cols2 = $db->query("SHOW COLUMNS FROM `{$table}` LIKE 'session'");
+                if ($cols2 && $cols2->rowCount() > 0) {
+                    $where[] = '`session`=?';
+                    $params[] = $sessionFilter;
+                }
+            }
+        } catch (Throwable $e) {}
+    }
+
     // Common filters
     if (!empty($_GET['search'])) {
         $s = '%' . $_GET['search'] . '%';
         if ($table === 'students') {
-            $where[]  = "(`fullName` LIKE ? OR `admNo` LIKE ? OR `fatherName` LIKE ? OR `motherName` LIKE ? OR `mobile` LIKE ?)";
-            $params   = array_merge($params, [$s,$s,$s,$s,$s]);
+            $where[]  = "(`fullName` LIKE ? OR `name` LIKE ? OR `admNo` LIKE ? OR `fatherName` LIKE ? OR `motherName` LIKE ? OR `mobile` LIKE ?)";
+            $params   = array_merge($params, [$s,$s,$s,$s,$s,$s]);
+        } elseif ($table === 'staff') {
+            $where[]  = "(`fullName` LIKE ? OR `name` LIKE ? OR `empId` LIKE ? OR `mobile` LIKE ?)";
+            $params   = array_merge($params, [$s,$s,$s,$s]);
         } else {
             $where[]  = "(`name` LIKE ? OR `id` LIKE ?)";
             $params   = array_merge($params, [$s,$s]);
         }
     }
-    if (!empty($_GET['class']))   { $where[] = '`class`=?';   $params[] = $_GET['class']; }
-    if (!empty($_GET['section'])) { $where[] = '`section`=?'; $params[] = $_GET['section']; }
+    if (!empty($_GET['class']))     { $where[] = '`class`=?';     $params[] = $_GET['class']; }
+    if (!empty($_GET['section']))   { $where[] = '`section`=?';   $params[] = $_GET['section']; }
+    if (!empty($_GET['classId']))   { $where[] = '`classId`=?';   $params[] = $_GET['classId']; }
+    if (!empty($_GET['sectionId'])) { $where[] = '`sectionId`=?'; $params[] = $_GET['sectionId']; }
+    if (!empty($_GET['status']))    { $where[] = '`status`=?';    $params[] = $_GET['status']; }
+    if (!empty($_GET['studentId'])) { $where[] = '`studentId`=?'; $params[] = $_GET['studentId']; }
+    if (!empty($_GET['staffId']))   { $where[] = '`staffId`=?';   $params[] = $_GET['staffId']; }
 
     if ($since) {
         try {
@@ -1309,13 +1446,19 @@ function handle_col_list(string $method, string $collection, ?array $auth): void
     $limitClause = $limit === PHP_INT_MAX ? '' : " LIMIT {$limit} OFFSET {$offset}";
 
     try {
+        // Get total count for pagination
+        $countSql  = "SELECT COUNT(*) FROM `{$table}`{$whereClause}";
+        $countStmt = $db->prepare($countSql);
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
         $stmt = $db->prepare("SELECT * FROM `{$table}`{$whereClause}{$limitClause}");
         $stmt->execute($params);
         $rows = $stmt->fetchAll();
         $rows = post_process_rows($rows, $table);
-        json_success($rows);
+        json_success(['data' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit === PHP_INT_MAX ? $total : $limit]);
     } catch (Throwable $e) {
-        json_success([]);
+        json_success(['data' => [], 'total' => 0, 'page' => 1, 'limit' => 50]);
     }
 }
 

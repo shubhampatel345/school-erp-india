@@ -14,6 +14,7 @@ import {
   Calendar,
   CheckCircle,
   Clock,
+  Info,
   Plus,
   Trash2,
   XCircle,
@@ -31,7 +32,7 @@ type LeaveType =
   | "Sick Leave"
   | "Earned Leave"
   | "Maternity Leave"
-  | "Unpaid Leave"
+  | "Without Pay"
   | "Other";
 
 interface LeaveRecord {
@@ -55,16 +56,17 @@ const LEAVE_TYPES: LeaveType[] = [
   "Sick Leave",
   "Earned Leave",
   "Maternity Leave",
-  "Unpaid Leave",
+  "Without Pay",
   "Other",
 ];
 
-const LEAVE_BALANCE: Record<string, number> = {
+/** Annual leave entitlement per type */
+const LEAVE_BALANCE: Record<LeaveType, number> = {
   "Casual Leave": 12,
   "Sick Leave": 10,
   "Earned Leave": 15,
   "Maternity Leave": 90,
-  "Unpaid Leave": 0,
+  "Without Pay": 0,
   Other: 0,
 };
 
@@ -91,6 +93,78 @@ function daysBetween(from: string, to: string): number {
   return Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1);
 }
 
+// ── Staff Leave Balance Card ───────────────────────────────
+
+function StaffLeaveBalanceCard({
+  staffMember,
+  records,
+}: {
+  staffMember: Staff;
+  records: LeaveRecord[];
+}) {
+  const staffRecords = records.filter(
+    (r) => r.staffId === staffMember.id && r.status === "Approved",
+  );
+
+  const usedByType: Partial<Record<LeaveType, number>> = {};
+  for (const r of staffRecords) {
+    usedByType[r.leaveType] = (usedByType[r.leaveType] ?? 0) + r.totalDays;
+  }
+
+  const pendingCount = records.filter(
+    (r) => r.staffId === staffMember.id && r.status === "Pending",
+  ).length;
+
+  return (
+    <div className="border border-border rounded-lg p-3 space-y-2 bg-card">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="font-medium text-foreground text-sm">
+            {staffMember.name}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {staffMember.designation}
+          </p>
+        </div>
+        {pendingCount > 0 && (
+          <Badge variant="secondary" className="text-xs">
+            {pendingCount} pending
+          </Badge>
+        )}
+      </div>
+      <div className="grid grid-cols-3 gap-1.5 text-xs">
+        {(["Casual Leave", "Sick Leave", "Earned Leave"] as LeaveType[]).map(
+          (lt) => {
+            const allocated = LEAVE_BALANCE[lt];
+            const used = usedByType[lt] ?? 0;
+            const remaining = Math.max(0, allocated - used);
+            const pct =
+              allocated > 0 ? Math.round((used / allocated) * 100) : 0;
+            return (
+              <div key={lt} className="bg-muted/40 rounded p-1.5">
+                <p className="text-muted-foreground truncate">
+                  {lt.replace(" Leave", "")}
+                </p>
+                <p
+                  className={`font-semibold ${remaining === 0 ? "text-destructive" : remaining < 3 ? "text-amber-600" : "text-foreground"}`}
+                >
+                  {remaining}/{allocated}
+                </p>
+                <div className="h-1 bg-muted rounded-full mt-0.5 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${pct > 80 ? "bg-destructive" : pct > 50 ? "bg-amber-500" : "bg-accent"}`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </div>
+            );
+          },
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────
 
 export default function LeaveManagement() {
@@ -106,6 +180,7 @@ export default function LeaveManagement() {
   const [filterStatus, setFilterStatus] = useState<LeaveStatus | "all">("all");
   const [filterStaff, setFilterStaff] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showBalances, setShowBalances] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Form state
@@ -117,7 +192,7 @@ export default function LeaveManagement() {
 
   // Read from context (server-synced)
   const records = getData("leave_records") as LeaveRecord[];
-  const staff = (getData("staff") as Staff[]).filter(
+  const allStaff = (getData("staff") as Staff[]).filter(
     (s) => (s.status ?? "active") === "active",
   );
 
@@ -131,7 +206,7 @@ export default function LeaveManagement() {
       alert("Please fill all required fields.");
       return;
     }
-    const staffMember = staff.find((s) => s.id === fStaffId);
+    const staffMember = allStaff.find((s) => s.id === fStaffId);
     if (!staffMember) return;
 
     setSaving(true);
@@ -219,17 +294,6 @@ export default function LeaveManagement() {
     [records],
   );
 
-  const staffLeaveBalance = useMemo(() => {
-    const balance: Record<string, Record<string, number>> = {};
-    for (const r of records) {
-      if (r.status !== "Approved") continue;
-      if (!balance[r.staffId]) balance[r.staffId] = {};
-      balance[r.staffId][r.leaveType] =
-        (balance[r.staffId][r.leaveType] ?? 0) + r.totalDays;
-    }
-    return balance;
-  }, [records]);
-
   // ── Render ────────────────────────────────────────────────
 
   return (
@@ -242,17 +306,29 @@ export default function LeaveManagement() {
             Leave Management
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Track and manage staff leave requests
+            Track and manage staff leave requests · Approved leaves are counted
+            as present in Payroll
           </p>
         </div>
-        <Button
-          size="sm"
-          onClick={() => setShowForm(true)}
-          data-ocid="leave.add_button"
-        >
-          <Plus className="w-4 h-4 mr-1" />
-          Apply Leave
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowBalances((v) => !v)}
+            data-ocid="leave.balance_toggle"
+          >
+            <Info className="w-4 h-4 mr-1" />
+            {showBalances ? "Hide" : "Leave Balances"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setShowForm(true)}
+            data-ocid="leave.add_button"
+          >
+            <Plus className="w-4 h-4 mr-1" />
+            Apply Leave
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -285,25 +361,59 @@ export default function LeaveManagement() {
         })}
       </div>
 
-      {/* Leave balance summary */}
+      {/* Payroll integration note */}
+      <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/20 text-sm">
+        <Info className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+        <p className="text-primary/80">
+          <strong>Payroll integration:</strong> Approved leaves are
+          automatically counted as present days when generating payroll.
+          "Without Pay" leaves result in deduction.
+        </p>
+      </div>
+
+      {/* Leave balance cards */}
+      {showBalances && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+            Leave Balance by Staff
+          </p>
+          {allStaff.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No active staff found.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {allStaff.map((s) => (
+                <StaffLeaveBalanceCard
+                  key={s.id}
+                  staffMember={s}
+                  records={records}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Annual entitlement */}
       <Card className="p-4">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">
           Annual Leave Entitlement
         </p>
         <div className="flex flex-wrap gap-3">
-          {(["Casual Leave", "Sick Leave", "Earned Leave"] as LeaveType[]).map(
-            (lt) => (
+          {(Object.entries(LEAVE_BALANCE) as [LeaveType, number][])
+            .filter(([, days]) => days > 0)
+            .map(([lt, days]) => (
               <div
                 key={lt}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 text-sm"
               >
                 <span className="text-muted-foreground">{lt}:</span>
                 <span className="font-semibold text-foreground">
-                  {LEAVE_BALANCE[lt]} days/year
+                  {days} days/year
                 </span>
               </div>
-            ),
-          )}
+            ))}
         </div>
       </Card>
 
@@ -333,7 +443,7 @@ export default function LeaveManagement() {
                 data-ocid="leave.staff_select"
               >
                 <option value="">Select staff</option>
-                {staff.map((s) => (
+                {allStaff.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name ?? s.fullName ?? s.empId} ({s.designation})
                   </option>
@@ -354,6 +464,9 @@ export default function LeaveManagement() {
                   {LEAVE_TYPES.map((t) => (
                     <SelectItem key={t} value={t}>
                       {t}
+                      {LEAVE_BALANCE[t] > 0
+                        ? ` (${LEAVE_BALANCE[t]} days/yr)`
+                        : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -385,9 +498,19 @@ export default function LeaveManagement() {
           </div>
 
           {fFrom && fTo && (
-            <p className="text-sm text-primary font-medium">
-              Total days: {daysBetween(fFrom, fTo)}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-primary font-medium">
+                Total days: {daysBetween(fFrom, fTo)}
+              </p>
+              {fLeaveType === "Without Pay" && (
+                <Badge
+                  variant="outline"
+                  className="text-xs text-destructive border-destructive/40"
+                >
+                  Without Pay — will deduct from payroll
+                </Badge>
+              )}
+            </div>
           )}
 
           <div className="space-y-1.5">
@@ -404,9 +527,7 @@ export default function LeaveManagement() {
           <div className="flex gap-2">
             <Button
               size="sm"
-              onClick={() => {
-                void handleSubmit();
-              }}
+              onClick={() => void handleSubmit()}
               disabled={saving}
               data-ocid="leave.submit_button"
             >
@@ -498,9 +619,6 @@ export default function LeaveManagement() {
               <tbody className="divide-y divide-border">
                 {filtered.map((r, idx) => {
                   const StatusIcon = STATUS_ICONS[r.status];
-                  const usedDays =
-                    staffLeaveBalance[r.staffId]?.[r.leaveType] ?? 0;
-                  const allocated = LEAVE_BALANCE[r.leaveType] ?? 0;
                   return (
                     <tr
                       key={r.id}
@@ -514,17 +632,12 @@ export default function LeaveManagement() {
                         <p className="text-xs text-muted-foreground">
                           {r.designation}
                         </p>
-                        {allocated > 0 && r.status === "Approved" && (
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            Balance:{" "}
-                            <span className="font-medium text-foreground">
-                              {Math.max(0, allocated - usedDays)}/{allocated}
-                            </span>
-                          </p>
-                        )}
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant="secondary" className="text-xs">
+                        <Badge
+                          variant="secondary"
+                          className={`text-xs ${r.leaveType === "Without Pay" ? "border-destructive/40 text-destructive" : ""}`}
+                        >
                           {r.leaveType}
                         </Badge>
                       </td>
@@ -558,9 +671,9 @@ export default function LeaveManagement() {
                                 size="sm"
                                 variant="outline"
                                 className="text-xs h-7 text-accent border-accent/40 hover:bg-accent/10"
-                                onClick={() => {
-                                  void updateStatus(r.id, "Approved");
-                                }}
+                                onClick={() =>
+                                  void updateStatus(r.id, "Approved")
+                                }
                                 data-ocid={`leave.approve_button.${idx + 1}`}
                               >
                                 <CheckCircle className="w-3 h-3 mr-1" /> Approve
@@ -569,9 +682,9 @@ export default function LeaveManagement() {
                                 size="sm"
                                 variant="outline"
                                 className="text-xs h-7 text-destructive border-destructive/40 hover:bg-destructive/10"
-                                onClick={() => {
-                                  void updateStatus(r.id, "Rejected");
-                                }}
+                                onClick={() =>
+                                  void updateStatus(r.id, "Rejected")
+                                }
                                 data-ocid={`leave.reject_button.${idx + 1}`}
                               >
                                 <XCircle className="w-3 h-3 mr-1" /> Reject
@@ -583,9 +696,7 @@ export default function LeaveManagement() {
                             variant="ghost"
                             className="text-destructive hover:text-destructive h-7"
                             aria-label="Delete record"
-                            onClick={() => {
-                              void handleDelete(r.id);
-                            }}
+                            onClick={() => void handleDelete(r.id)}
                             data-ocid={`leave.delete_button.${idx + 1}`}
                           >
                             <Trash2 className="w-3.5 h-3.5" />

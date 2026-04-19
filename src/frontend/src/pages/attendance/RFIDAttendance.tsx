@@ -18,24 +18,28 @@ import {
   Users,
   Zap,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Staff, Student } from "../../types";
-import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
+import type {
+  AttendanceRecord,
+  ClassSection,
+  Staff,
+  Student,
+} from "../../types";
+import { generateId } from "../../utils/localStorage";
 
 interface RFIDAttendanceProps {
   date: string;
   onDateChange: (d: string) => void;
 }
 
-/** Broadcast scan event to WelcomeDisplay via localStorage key */
+/** Broadcast scan event to WelcomeDisplay (same tab) */
 function broadcastScan(
   personId: string,
   personType: "student" | "staff",
   record: AttendanceRecord,
 ) {
-  ls.set("last_scan", { personId, personType, record, ts: Date.now() });
   window.dispatchEvent(
     new CustomEvent("attendance_scan", {
       detail: { personId, personType, record },
@@ -43,95 +47,141 @@ function broadcastScan(
   );
 }
 
+const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+];
+
 export default function RFIDAttendance({
   date,
   onDateChange,
 }: RFIDAttendanceProps) {
-  const { addNotification, currentSession, currentUser } = useApp();
+  const { getData, saveData, addNotification, currentSession, currentUser } =
+    useApp();
   const [query, setQuery] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");
   const [bulkClass, setBulkClass] = useState("");
   const [bulkSection, setBulkSection] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const students = useMemo(
     () =>
-      ls
-        .get<Student[]>("students", [])
-        .filter(
-          (s) =>
-            s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-        ),
-    [currentSession],
+      (getData("students") as Student[]).filter(
+        (s) =>
+          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
+      ),
+    [getData, currentSession],
   );
 
-  const staff = useMemo(() => ls.get<Staff[]>("staff", []), []);
+  const staff = useMemo(() => getData("staff") as Staff[], [getData]);
 
-  const [records, setRecords] = useState<AttendanceRecord[]>(() =>
-    ls.get<AttendanceRecord[]>("attendance", []),
+  const classSections = useMemo(
+    () => getData("classes") as ClassSection[],
+    [getData],
+  );
+
+  const classList = useMemo(() => {
+    if (classSections.length > 0) {
+      const names = classSections.map((c) => c.className);
+      return CLASS_ORDER.filter((c) => names.includes(c)).concat(
+        names.filter((n) => !CLASS_ORDER.includes(n)),
+      );
+    }
+    return CLASS_ORDER;
+  }, [classSections]);
+
+  const sectionList = useMemo(() => {
+    if (!bulkClass) return ["A", "B", "C", "D", "E"];
+    const cs = classSections.find((c) => c.className === bulkClass);
+    return cs?.sections?.length ? cs.sections : ["A", "B", "C", "D", "E"];
+  }, [bulkClass, classSections]);
+
+  const allAttendance = useMemo(
+    () => getData("attendance") as AttendanceRecord[],
+    [getData],
   );
 
   const todayRecords = useMemo(
-    () => records.filter((r) => r.date === date),
-    [records, date],
+    () => allAttendance.filter((r) => r.date === date),
+    [allAttendance, date],
   );
 
-  function saveRecords(updated: AttendanceRecord[]) {
-    setRecords(updated);
-    ls.set("attendance", updated);
-  }
-
   /**
-   * First scan of the day = time-in (Present).
-   * Second scan = time-out (updates existing record with timeOut).
-   * Returns "in" | "out" | "already-out"
+   * First scan = time-in (Present). Second scan = time-out.
    */
-  function handleScan(
-    personId: string,
-    personType: "student" | "staff",
-  ): "in" | "out" | "already-out" {
-    const existingIdx = records.findIndex(
-      (r) =>
-        r.date === date && (r.studentId === personId || r.staffId === personId),
-    );
-    const now = new Date();
-    const timeStr = now.toLocaleTimeString("en-IN", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const handleScan = useCallback(
+    async (
+      personId: string,
+      personType: "student" | "staff",
+    ): Promise<"in" | "out" | "already-out"> => {
+      const existing = allAttendance.find(
+        (r) =>
+          r.date === date &&
+          (r.studentId === personId || r.staffId === personId),
+      );
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
 
-    if (existingIdx === -1) {
-      // First scan → time-in
-      const rec: AttendanceRecord = {
-        id: generateId(),
-        ...(personType === "student"
-          ? { studentId: personId }
-          : { staffId: personId }),
-        date,
-        status: "Present",
-        timeIn: timeStr,
-        markedBy: currentUser?.name ?? "System",
-        type: personType,
-        method: "rfid",
+      if (!existing) {
+        // First scan → time-in
+        const student =
+          personType === "student"
+            ? students.find((s) => s.id === personId)
+            : undefined;
+        const rec: AttendanceRecord = {
+          id: generateId(),
+          ...(personType === "student"
+            ? { studentId: personId }
+            : { staffId: personId }),
+          date,
+          status: "Present",
+          timeIn: timeStr,
+          markedBy: currentUser?.username ?? currentUser?.name ?? "System",
+          type: personType,
+          method: "rfid",
+          sessionId: currentSession?.id,
+          ...(student
+            ? { class: student.class, section: student.section }
+            : {}),
+        };
+        await saveData("attendance", rec as unknown as Record<string, unknown>);
+        broadcastScan(personId, personType, rec);
+        return "in";
+      }
+
+      if (existing.timeOut) return "already-out";
+
+      // Second scan → time-out
+      const updated = {
+        ...(existing as unknown as Record<string, unknown>),
+        timeOut: timeStr,
       };
-      const updated = [...records, rec];
-      saveRecords(updated);
-      broadcastScan(personId, personType, rec);
-      return "in";
-    }
-
-    const existing = records[existingIdx];
-    if (existing.timeOut) {
-      return "already-out";
-    }
-
-    // Second scan → time-out
-    const updated = [...records];
-    updated[existingIdx] = { ...existing, timeOut: timeStr };
-    saveRecords(updated);
-    broadcastScan(personId, personType, updated[existingIdx]);
-    return "out";
-  }
+      await saveData("attendance", updated);
+      broadcastScan(personId, personType, {
+        ...existing,
+        timeOut: timeStr,
+      });
+      return "out";
+    },
+    [allAttendance, date, students, currentUser, currentSession, saveData],
+  );
 
   function handleManualEntry() {
     if (!query.trim()) return;
@@ -140,32 +190,37 @@ export default function RFIDAttendance({
       (s) => s.admNo.toLowerCase() === q || s.fullName.toLowerCase() === q,
     );
     if (student) {
-      const result = handleScan(student.id, "student");
-      if (result === "in") {
-        toast.success(`✅ Time-In: ${student.fullName}`);
-        addNotification(`📍 ${student.fullName} checked in`, "info", "📍");
-      } else if (result === "out") {
-        toast.success(`🚪 Time-Out: ${student.fullName}`);
-        addNotification(`🚪 ${student.fullName} checked out`, "info", "🚪");
-      } else {
-        toast.info(`${student.fullName} already signed in and out today`);
-      }
+      void handleScan(student.id, "student").then((result) => {
+        if (result === "in") {
+          toast.success(`✅ Time-In: ${student.fullName}`);
+          addNotification(`📍 ${student.fullName} checked in`, "info", "📍");
+        } else if (result === "out") {
+          toast.success(`🚪 Time-Out: ${student.fullName}`);
+          addNotification(`🚪 ${student.fullName} checked out`, "info", "🚪");
+        } else {
+          toast.info(`${student.fullName} already signed in and out today`);
+        }
+      });
       setQuery("");
       return;
     }
     const staffMember = staff.find(
-      (s) => s.empId.toLowerCase() === q || s.name.toLowerCase() === q,
+      (s) =>
+        s.empId.toLowerCase() === q ||
+        (s.name ?? s.fullName ?? "").toLowerCase() === q,
     );
     if (staffMember) {
-      const result = handleScan(staffMember.id, "staff");
-      if (result === "in") {
-        toast.success(`✅ Time-In: ${staffMember.name}`);
-        addNotification(`📍 ${staffMember.name} checked in`, "info", "📍");
-      } else if (result === "out") {
-        toast.success(`🚪 Time-Out: ${staffMember.name}`);
-      } else {
-        toast.info(`${staffMember.name} already signed in and out today`);
-      }
+      void handleScan(staffMember.id, "staff").then((result) => {
+        const name = staffMember.name ?? staffMember.fullName ?? "Staff";
+        if (result === "in") {
+          toast.success(`✅ Time-In: ${name}`);
+          addNotification(`📍 ${name} checked in`, "info", "📍");
+        } else if (result === "out") {
+          toast.success(`🚪 Time-Out: ${name}`);
+        } else {
+          toast.info(`${name} already signed in and out today`);
+        }
+      });
       setQuery("");
       return;
     }
@@ -174,35 +229,25 @@ export default function RFIDAttendance({
 
   function simulateRFID() {
     const unmarked = students.filter(
-      (s) => !records.find((r) => r.date === date && r.studentId === s.id),
+      (s) =>
+        !allAttendance.find((r) => r.date === date && r.studentId === s.id),
     );
     if (unmarked.length === 0) {
-      // Simulate a time-out instead
-      const needsOut = students.find((s) => {
-        const rec = records.find(
-          (r) => r.date === date && r.studentId === s.id,
-        );
-        return rec && !rec.timeOut;
-      });
-      if (needsOut) {
-        const result = handleScan(needsOut.id, "student");
-        if (result === "out") {
-          toast.success(`🚪 RFID Time-Out: ${needsOut.fullName}`);
-        }
-        return;
-      }
       toast.info("All students already marked for today");
       return;
     }
     const pick = unmarked[Math.floor(Math.random() * unmarked.length)];
-    const result = handleScan(pick.id, "student");
-    if (result === "in") {
-      toast.success(`📡 RFID Scan: ${pick.fullName} (${pick.admNo}) — Time In`);
-      addNotification(`📡 RFID: ${pick.fullName} checked in`, "info", "📡");
-    }
+    void handleScan(pick.id, "student").then((result) => {
+      if (result === "in") {
+        toast.success(
+          `📡 RFID Scan: ${pick.fullName} (${pick.admNo}) — Time In`,
+        );
+        addNotification(`📡 RFID: ${pick.fullName} checked in`, "info", "📡");
+      }
+    });
   }
 
-  function markAllPresent() {
+  const markAllPresent = useCallback(async () => {
     if (!bulkClass) {
       toast.error("Select a class first");
       return;
@@ -210,48 +255,66 @@ export default function RFIDAttendance({
     const targets = students.filter(
       (s) =>
         s.class === bulkClass &&
-        (bulkSection ? s.section === bulkSection : true) &&
-        !records.find((r) => r.date === date && r.studentId === s.id),
+        (bulkSection && bulkSection !== "all"
+          ? s.section === bulkSection
+          : true) &&
+        !allAttendance.find((r) => r.date === date && r.studentId === s.id),
     );
     if (targets.length === 0) {
       toast.info("All selected students already marked");
       return;
     }
+    setSaving(true);
     const now = new Date();
     const timeStr = now.toLocaleTimeString("en-IN", {
       hour: "2-digit",
       minute: "2-digit",
     });
-    const newRecs: AttendanceRecord[] = targets.map((s) => ({
-      id: generateId(),
-      studentId: s.id,
-      date,
-      status: "Present",
-      timeIn: timeStr,
-      markedBy: currentUser?.name ?? "System",
-      type: "student",
-      method: "rfid",
-    }));
-    const updated = [...records, ...newRecs];
-    saveRecords(updated);
-    toast.success(
-      `Marked ${newRecs.length} students present (Class ${bulkClass}${bulkSection ? `-${bulkSection}` : ""})`,
-    );
-    addNotification(
-      `✅ Bulk attendance saved for Class ${bulkClass}`,
-      "success",
-      "✅",
-    );
-  }
-
-  function saveAttendance() {
-    addNotification(
-      `✅ Attendance saved for ${date} (${todayRecords.length} records)`,
-      "success",
-      "✅",
-    );
-    toast.success("Attendance saved successfully!");
-  }
+    try {
+      const promises = targets.map((s) => {
+        const rec: AttendanceRecord = {
+          id: generateId(),
+          studentId: s.id,
+          date,
+          status: "Present",
+          timeIn: timeStr,
+          markedBy: currentUser?.username ?? currentUser?.name ?? "System",
+          type: "student",
+          method: "rfid",
+          sessionId: currentSession?.id,
+          class: s.class,
+          section: s.section,
+        };
+        return saveData(
+          "attendance",
+          rec as unknown as Record<string, unknown>,
+        );
+      });
+      await Promise.allSettled(promises);
+      toast.success(
+        `Marked ${targets.length} students present (Class ${bulkClass}${bulkSection && bulkSection !== "all" ? `-${bulkSection}` : ""})`,
+      );
+      addNotification(
+        `✅ Bulk attendance saved for Class ${bulkClass}`,
+        "success",
+        "✅",
+      );
+    } catch {
+      toast.error("Some records failed to save. Please retry.");
+    } finally {
+      setSaving(false);
+    }
+  }, [
+    bulkClass,
+    bulkSection,
+    students,
+    allAttendance,
+    date,
+    currentUser,
+    currentSession,
+    saveData,
+    addNotification,
+  ]);
 
   function exportCSV() {
     const rows = [
@@ -285,7 +348,7 @@ export default function RFIDAttendance({
         if (m)
           rows.push([
             m.empId,
-            m.name,
+            m.name ?? m.fullName ?? "",
             "-",
             "-",
             rec.timeIn ?? "",
@@ -312,8 +375,40 @@ export default function RFIDAttendance({
     return true;
   });
 
+  const presentCount = todayRecords.filter(
+    (r) => r.type === "student" && r.status === "Present",
+  ).length;
+
   return (
     <div className="space-y-5">
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3">
+        <Card className="p-4 text-center bg-primary/5 border-primary/20">
+          <p className="text-2xl font-bold font-display text-foreground">
+            {students.length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wide">
+            Total Students
+          </p>
+        </Card>
+        <Card className="p-4 text-center bg-accent/5 border-accent/20">
+          <p className="text-2xl font-bold font-display text-foreground">
+            {presentCount}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wide">
+            Present Today
+          </p>
+        </Card>
+        <Card className="p-4 text-center bg-muted/40">
+          <p className="text-2xl font-bold font-display text-foreground">
+            {todayRecords.length}
+          </p>
+          <p className="text-xs text-muted-foreground mt-0.5 uppercase tracking-wide">
+            Total Scans
+          </p>
+        </Card>
+      </div>
+
       {/* Scan Input Row */}
       <Card className="p-4">
         <div className="flex flex-wrap gap-3 items-center">
@@ -322,7 +417,8 @@ export default function RFIDAttendance({
             value={date}
             onChange={(e) => onDateChange(e.target.value)}
             className="h-9 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-            data-ocid="rfid-date-picker"
+            data-ocid="rfid.date-picker"
+            aria-label="Attendance date"
           />
           <div className="flex flex-1 min-w-56 gap-2">
             <Input
@@ -330,17 +426,20 @@ export default function RFIDAttendance({
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleManualEntry()}
-              data-ocid="rfid-manual-input"
+              data-ocid="rfid.manual.input"
               className="flex-1"
             />
-            <Button onClick={handleManualEntry} data-ocid="rfid-manual-submit">
+            <Button
+              onClick={handleManualEntry}
+              data-ocid="rfid.manual.submit-button"
+            >
               Scan / Mark
             </Button>
           </div>
           <Button
             variant="outline"
             onClick={simulateRFID}
-            data-ocid="rfid-simulate-btn"
+            data-ocid="rfid.simulate.button"
           >
             <Zap className="w-4 h-4 mr-1.5" />
             Simulate RFID
@@ -351,7 +450,7 @@ export default function RFIDAttendance({
         </p>
       </Card>
 
-      {/* Bulk Mark + Export + Save */}
+      {/* Bulk Mark */}
       <Card className="p-4 bg-muted/30">
         <div className="flex flex-wrap gap-3 items-center">
           <Fingerprint className="w-4 h-4 text-muted-foreground" />
@@ -359,43 +458,65 @@ export default function RFIDAttendance({
             Bulk Mark Present:
           </span>
           <Select value={bulkClass} onValueChange={setBulkClass}>
-            <SelectTrigger className="w-28" data-ocid="bulk-class-select">
-              <SelectValue placeholder="Class" />
+            <SelectTrigger className="w-32" data-ocid="rfid.bulk-class.select">
+              <SelectValue placeholder="Select Class" />
             </SelectTrigger>
             <SelectContent>
-              {CLASSES.map((c) => (
+              {classList.map((c) => (
                 <SelectItem key={c} value={c}>
-                  {c}
+                  {["Nursery", "LKG", "UKG"].includes(c) ? c : `Class ${c}`}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
           <Select value={bulkSection} onValueChange={setBulkSection}>
-            <SelectTrigger className="w-24" data-ocid="bulk-section-select">
-              <SelectValue placeholder="Section" />
+            <SelectTrigger
+              className="w-28"
+              data-ocid="rfid.bulk-section.select"
+            >
+              <SelectValue placeholder="All Sections" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
-              {SECTIONS.map((s) => (
+              <SelectItem value="all">All Sections</SelectItem>
+              {sectionList.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s}
+                  Section {s}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Button size="sm" onClick={markAllPresent} data-ocid="bulk-mark-btn">
-            <Users className="w-4 h-4 mr-1.5" /> Mark All
+          <Button
+            size="sm"
+            onClick={() => {
+              void markAllPresent();
+            }}
+            disabled={saving}
+            data-ocid="rfid.bulk-mark.button"
+          >
+            <Users className="w-4 h-4 mr-1.5" />
+            {saving ? "Saving…" : "Mark All Present"}
           </Button>
           <div className="flex-1" />
           <Button
             variant="outline"
             size="sm"
             onClick={exportCSV}
-            data-ocid="rfid-export-csv"
+            data-ocid="rfid.export-csv.button"
           >
             <Download className="w-4 h-4 mr-1.5" /> Export CSV
           </Button>
-          <Button size="sm" onClick={saveAttendance} data-ocid="rfid-save-btn">
+          <Button
+            size="sm"
+            onClick={() => {
+              addNotification(
+                `✅ RFID Attendance saved for ${date} (${todayRecords.length} records)`,
+                "success",
+                "✅",
+              );
+              toast.success("Attendance saved successfully!");
+            }}
+            data-ocid="rfid.save.button"
+          >
             <Save className="w-4 h-4 mr-1.5" /> Save
           </Button>
         </div>
@@ -405,27 +526,30 @@ export default function RFIDAttendance({
       <div className="flex gap-3 items-center flex-wrap">
         <span className="text-sm text-muted-foreground">Filter log:</span>
         <Select value={filterClass} onValueChange={setFilterClass}>
-          <SelectTrigger className="w-32" data-ocid="rfid-filter-class">
+          <SelectTrigger className="w-32" data-ocid="rfid.filter-class.select">
             <SelectValue placeholder="All Classes" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Classes</SelectItem>
-            {CLASSES.map((c) => (
+            {classList.map((c) => (
               <SelectItem key={c} value={c}>
-                {c}
+                {["Nursery", "LKG", "UKG"].includes(c) ? c : `Class ${c}`}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <Select value={filterSection} onValueChange={setFilterSection}>
-          <SelectTrigger className="w-28" data-ocid="rfid-filter-section">
+          <SelectTrigger
+            className="w-28"
+            data-ocid="rfid.filter-section.select"
+          >
             <SelectValue placeholder="All Sections" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Sections</SelectItem>
-            {SECTIONS.map((s) => (
+            {["A", "B", "C", "D", "E"].map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                Section {s}
               </SelectItem>
             ))}
           </SelectContent>
@@ -468,6 +592,7 @@ export default function RFIDAttendance({
                   <td
                     colSpan={7}
                     className="py-12 text-center text-muted-foreground"
+                    data-ocid="rfid.log.empty-state"
                   >
                     <Fingerprint className="w-8 h-8 mx-auto mb-2 opacity-30" />
                     <p>No scan records for {date}</p>
@@ -477,7 +602,7 @@ export default function RFIDAttendance({
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((rec) => {
+                filteredRecords.map((rec, idx) => {
                   const student =
                     rec.type === "student"
                       ? students.find((s) => s.id === rec.studentId)
@@ -492,7 +617,7 @@ export default function RFIDAttendance({
                     <tr
                       key={rec.id}
                       className="border-t border-border hover:bg-muted/30 transition-colors"
-                      data-ocid={`rfid-log-row-${rec.id}`}
+                      data-ocid={`rfid.log.item.${idx + 1}`}
                     >
                       <td className="p-3 font-medium text-foreground">
                         {"fullName" in person ? person.fullName : person.name}

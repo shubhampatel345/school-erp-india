@@ -265,18 +265,19 @@ export default function ClassesSections() {
           </p>
         </div>
         {canWrite && (
-          <div className="flex gap-2">
-            {classes.length === 0 && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={seedDefaults}
-                disabled={saving}
-                data-ocid="classes.load-defaults-btn"
-              >
-                Load Defaults (Nursery–12)
-              </Button>
-            )}
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={seedDefaults}
+              disabled={saving}
+              data-ocid="classes.load-defaults-btn"
+            >
+              {saving ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+              ) : null}
+              Add Standard Classes
+            </Button>
             <Button
               size="sm"
               onClick={openAdd}
@@ -300,7 +301,7 @@ export default function ClassesSections() {
           </p>
           {canWrite && (
             <Button className="mt-4" size="sm" onClick={seedDefaults}>
-              Load Defaults (Nursery–12, A B C)
+              Add Standard Classes (Nursery–12, A B C)
             </Button>
           )}
         </Card>

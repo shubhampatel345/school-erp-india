@@ -25,7 +25,6 @@ import {
   Edit2,
   Plus,
   Trash2,
-  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
@@ -35,7 +34,8 @@ import type {
   HomeworkSubmission,
   Student,
 } from "../types";
-import { CLASSES, generateId } from "../utils/localStorage";
+import { CLASS_ORDER } from "../types";
+import { generateId } from "../utils/localStorage";
 
 interface HWForm {
   class: string;
@@ -45,6 +45,7 @@ interface HWForm {
   description: string;
   dueDate: string;
 }
+
 const EMPTY_FORM: HWForm = {
   class: "",
   section: "",
@@ -55,6 +56,7 @@ const EMPTY_FORM: HWForm = {
 };
 
 function isOverdue(dueDate: string): boolean {
+  if (!dueDate) return false;
   return new Date(dueDate) < new Date(new Date().toDateString());
 }
 
@@ -79,17 +81,32 @@ function HomeworkFormPanel({
     return cs?.sections ?? ["A", "B", "C", "D"];
   }, [form.class, classSections]);
 
+  const sortedClasses = useMemo(() => {
+    const fromDB = classSections.map((c) => c.className);
+    if (fromDB.length > 0)
+      return fromDB.sort(
+        (a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b),
+      );
+    return CLASS_ORDER;
+  }, [classSections]);
+
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label>Class *</Label>
-          <Select value={form.class} onValueChange={(v) => set("class", v)}>
-            <SelectTrigger data-ocid="homework.form.class_select">
+          <Select
+            value={form.class}
+            onValueChange={(v) => {
+              set("class", v);
+              set("section", "");
+            }}
+          >
+            <SelectTrigger data-ocid="homework.form_class_select">
               <SelectValue placeholder="Select class" />
             </SelectTrigger>
             <SelectContent>
-              {CLASSES.map((c) => (
+              {sortedClasses.map((c) => (
                 <SelectItem key={c} value={c}>
                   {c}
                 </SelectItem>
@@ -100,10 +117,11 @@ function HomeworkFormPanel({
         <div>
           <Label>Section</Label>
           <Select value={form.section} onValueChange={(v) => set("section", v)}>
-            <SelectTrigger data-ocid="homework.form.section_select">
-              <SelectValue placeholder="Select section" />
+            <SelectTrigger data-ocid="homework.form_section_select">
+              <SelectValue placeholder="All sections" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="all">All Sections</SelectItem>
               {sections.map((s) => (
                 <SelectItem key={s} value={s}>
                   {s}
@@ -117,7 +135,8 @@ function HomeworkFormPanel({
           <Input
             value={form.subject}
             onChange={(e) => set("subject", e.target.value)}
-            data-ocid="homework.form.subject_input"
+            placeholder="e.g. Mathematics"
+            data-ocid="homework.form_subject_input"
           />
         </div>
         <div>
@@ -133,7 +152,8 @@ function HomeworkFormPanel({
           <Input
             value={form.title}
             onChange={(e) => set("title", e.target.value)}
-            data-ocid="homework.form.title_input"
+            placeholder="Assignment title"
+            data-ocid="homework.form_title_input"
           />
         </div>
         <div className="col-span-2">
@@ -143,7 +163,7 @@ function HomeworkFormPanel({
             onChange={(e) => set("description", e.target.value)}
             rows={3}
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring"
-            data-ocid="homework.form.description_textarea"
+            data-ocid="homework.form_description_textarea"
           />
         </div>
       </div>
@@ -151,7 +171,7 @@ function HomeworkFormPanel({
         <Button
           variant="outline"
           onClick={onClose}
-          data-ocid="homework.form.cancel_button"
+          data-ocid="homework.form_cancel_button"
         >
           Cancel
         </Button>
@@ -161,7 +181,7 @@ function HomeworkFormPanel({
               return;
             onSave(form);
           }}
-          data-ocid="homework.form.submit_button"
+          data-ocid="homework.form_submit_button"
         >
           Save
         </Button>
@@ -187,16 +207,28 @@ export default function HomeworkPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<Homework | null>(null);
   const [filterClass, setFilterClass] = useState("all");
-  const [filterSection, setFilterSection] = useState("all");
-  const [selectedHW, setSelectedHW] = useState<Homework | null>(null);
-
+  const [filterSubject, setFilterSubject] = useState("all");
   const sessionId = currentSession?.id ?? "";
+
+  const sortedClasses = useMemo(() => {
+    const fromDB = classSections.map((c) => c.className);
+    if (fromDB.length > 0)
+      return fromDB.sort(
+        (a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b),
+      );
+    return CLASS_ORDER;
+  }, [classSections]);
+
+  const subjects = useMemo(
+    () => [...new Set(homeworkList.map((h) => h.subject))].sort(),
+    [homeworkList],
+  );
 
   const filtered = useMemo(() => {
     return homeworkList
       .filter((h) => {
         if (filterClass !== "all" && h.class !== filterClass) return false;
-        if (filterSection !== "all" && h.section !== filterSection)
+        if (filterSubject !== "all" && h.subject !== filterSubject)
           return false;
         return true;
       })
@@ -204,7 +236,26 @@ export default function HomeworkPage() {
         (a, b) =>
           new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
       );
-  }, [homeworkList, filterClass, filterSection]);
+  }, [homeworkList, filterClass, filterSubject]);
+
+  // Analytics
+  const analytics = useMemo(() => {
+    const subjectCount: Record<string, number> = {};
+    const overdueCount = homeworkList.filter((h) =>
+      isOverdue(h.dueDate),
+    ).length;
+    const completedCount = homeworkList.filter(
+      (h) => !isOverdue(h.dueDate),
+    ).length;
+    for (const h of homeworkList) {
+      subjectCount[h.subject] = (subjectCount[h.subject] ?? 0) + 1;
+    }
+    const classCount: Record<string, number> = {};
+    for (const h of homeworkList) {
+      classCount[h.class] = (classCount[h.class] ?? 0) + 1;
+    }
+    return { subjectCount, overdueCount, completedCount, classCount };
+  }, [homeworkList]);
 
   const handleSave = async (form: HWForm) => {
     const record: Record<string, unknown> = {
@@ -231,7 +282,6 @@ export default function HomeworkPage() {
   const handleDelete = async (id: string) => {
     if (!confirm("Delete this assignment?")) return;
     await deleteData("homework", id);
-    if (selectedHW?.id === id) setSelectedHW(null);
   };
 
   const toggleSubmission = async (hw: Homework, studentId: string) => {
@@ -241,14 +291,12 @@ export default function HomeworkPage() {
     if (existing) {
       await deleteData("homework_submissions", existing.id);
     } else {
-      const now = new Date().toISOString();
-      const isLate = isOverdue(hw.dueDate);
       await saveData("homework_submissions", {
         id: generateId(),
         homeworkId: hw.id,
         studentId,
-        submittedAt: now,
-        status: isLate ? "late" : "submitted",
+        submittedAt: new Date().toISOString(),
+        status: isOverdue(hw.dueDate) ? "late" : "submitted",
       });
     }
   };
@@ -257,7 +305,7 @@ export default function HomeworkPage() {
     const classStudents = students.filter(
       (s) =>
         s.class === hw.class &&
-        (hw.section === "all" || s.section === hw.section),
+        (hw.section === "all" || !hw.section || s.section === hw.section),
     );
     if (classStudents.length === 0) return 0;
     const subs = submissions.filter((s) => s.homeworkId === hw.id).length;
@@ -280,10 +328,11 @@ export default function HomeworkPage() {
         </div>
         {classStudents.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            No students in {hw.class}-{hw.section}
+            No students in {hw.class}
+            {hw.section && hw.section !== "all" ? `-${hw.section}` : ""}
           </p>
         ) : (
-          <div className="max-h-64 overflow-y-auto space-y-1">
+          <div className="max-h-60 overflow-y-auto space-y-1">
             {classStudents.map((s) => {
               const sub = submissions.find(
                 (sub) => sub.homeworkId === hw.id && sub.studentId === s.id,
@@ -297,7 +346,6 @@ export default function HomeworkPage() {
                     checked={!!sub}
                     onCheckedChange={() => toggleSubmission(hw, s.id)}
                     id={`sub-${hw.id}-${s.id}`}
-                    data-ocid={`homework.submission.${s.id}`}
                   />
                   <label
                     htmlFor={`sub-${hw.id}-${s.id}`}
@@ -337,17 +385,21 @@ export default function HomeworkPage() {
           }}
           data-ocid="homework.add_button"
         >
-          <Plus className="w-4 h-4 mr-1" /> Add Assignment
+          <Plus className="w-4 h-4 mr-1" />
+          Add Assignment
         </Button>
       </div>
 
       <Tabs defaultValue="assignments">
         <TabsList>
-          <TabsTrigger value="assignments" data-ocid="homework.assignments.tab">
+          <TabsTrigger value="assignments" data-ocid="homework.assignments_tab">
             Assignments
           </TabsTrigger>
-          <TabsTrigger value="submissions" data-ocid="homework.submissions.tab">
+          <TabsTrigger value="submissions" data-ocid="homework.submissions_tab">
             Submissions
+          </TabsTrigger>
+          <TabsTrigger value="analytics" data-ocid="homework.analytics_tab">
+            Analytics
           </TabsTrigger>
         </TabsList>
 
@@ -355,30 +407,30 @@ export default function HomeworkPage() {
           <div className="flex gap-2 flex-wrap">
             <Select value={filterClass} onValueChange={setFilterClass}>
               <SelectTrigger
-                className="w-28"
-                data-ocid="homework.filter.class_select"
+                className="w-32"
+                data-ocid="homework.filter_class_select"
               >
                 <SelectValue placeholder="All classes" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Classes</SelectItem>
-                {CLASSES.map((c) => (
+                {sortedClasses.map((c) => (
                   <SelectItem key={c} value={c}>
                     {c}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterSection} onValueChange={setFilterSection}>
+            <Select value={filterSubject} onValueChange={setFilterSubject}>
               <SelectTrigger
-                className="w-28"
-                data-ocid="homework.filter.section_select"
+                className="w-36"
+                data-ocid="homework.filter_subject_select"
               >
-                <SelectValue placeholder="All sections" />
+                <SelectValue placeholder="All subjects" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Sections</SelectItem>
-                {["A", "B", "C", "D", "E"].map((s) => (
+                <SelectItem value="all">All Subjects</SelectItem>
+                {subjects.map((s) => (
                   <SelectItem key={s} value={s}>
                     {s}
                   </SelectItem>
@@ -390,7 +442,7 @@ export default function HomeworkPage() {
           {filtered.length === 0 ? (
             <div
               className="text-center py-16 text-muted-foreground"
-              data-ocid="homework.assignments.empty_state"
+              data-ocid="homework.assignments_empty_state"
             >
               <BookOpen className="w-10 h-10 mx-auto mb-2 opacity-30" />
               <p>No assignments yet</p>
@@ -399,11 +451,10 @@ export default function HomeworkPage() {
             <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
               {filtered.map((hw, i) => {
                 const overdue = isOverdue(hw.dueDate);
-                const rate = getSubmissionRate(hw);
                 return (
                   <Card
                     key={hw.id}
-                    className={`cursor-pointer hover:shadow-md transition-shadow ${overdue ? "border-destructive/40" : ""}`}
+                    className={`hover:shadow-md transition-shadow ${overdue ? "border-destructive/40" : ""}`}
                     data-ocid={`homework.item.${i + 1}`}
                   >
                     <CardContent className="pt-4 pb-3">
@@ -413,11 +464,13 @@ export default function HomeworkPage() {
                             {hw.title}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {hw.subject} • Class {hw.class}
-                            {hw.section ? `-${hw.section}` : ""}
+                            {hw.subject} · Class {hw.class}
+                            {hw.section && hw.section !== "all"
+                              ? `-${hw.section}`
+                              : ""}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            Assigned by: {hw.assignedBy}
+                            By: {hw.assignedBy}
                           </p>
                           <div className="flex items-center gap-1.5 mt-2">
                             {overdue ? (
@@ -425,7 +478,8 @@ export default function HomeworkPage() {
                                 variant="destructive"
                                 className="text-xs flex items-center gap-1"
                               >
-                                <AlertTriangle className="w-3 h-3" /> Overdue
+                                <AlertTriangle className="w-3 h-3" />
+                                Overdue
                               </Badge>
                             ) : (
                               <Badge variant="secondary" className="text-xs">
@@ -433,9 +487,14 @@ export default function HomeworkPage() {
                               </Badge>
                             )}
                             <Badge variant="outline" className="text-xs">
-                              {rate}% submitted
+                              {getSubmissionRate(hw)}% submitted
                             </Badge>
                           </div>
+                          {hw.description && (
+                            <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                              {hw.description}
+                            </p>
+                          )}
                         </div>
                         <div
                           className="flex gap-1 ml-2"
@@ -465,11 +524,6 @@ export default function HomeworkPage() {
                           </Button>
                         </div>
                       </div>
-                      {hw.description && (
-                        <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
-                          {hw.description}
-                        </p>
-                      )}
                     </CardContent>
                   </Card>
                 );
@@ -482,7 +536,7 @@ export default function HomeworkPage() {
           {filtered.length === 0 ? (
             <div
               className="text-center py-16 text-muted-foreground"
-              data-ocid="homework.submissions.empty_state"
+              data-ocid="homework.submissions_empty_state"
             >
               <CheckCircle2 className="w-10 h-10 mx-auto mb-2 opacity-30" />
               <p>No assignments to track submissions for</p>
@@ -494,10 +548,10 @@ export default function HomeworkPage() {
                 data-ocid={`homework.submission_tracker.${i + 1}`}
               >
                 <CardHeader className="pb-2">
-                  <CardTitle className="text-sm flex items-center gap-2">
-                    <Users className="w-4 h-4" />
+                  <CardTitle className="text-sm">
                     {hw.class}
-                    {hw.section ? `-${hw.section}` : ""} — {hw.subject}
+                    {hw.section && hw.section !== "all" ? `-${hw.section}` : ""}{" "}
+                    — {hw.subject}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -507,22 +561,108 @@ export default function HomeworkPage() {
             ))
           )}
         </TabsContent>
-      </Tabs>
 
-      {/* Inline submission tracker when card clicked */}
-      {selectedHW && (
-        <Card className="border-primary/40">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-primary" /> Submission
-              Tracker
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SubmissionTracker hw={selectedHW} />
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="analytics" className="mt-4 space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <Card className="bg-primary/5 border-primary/20">
+              <CardContent className="py-3 text-center">
+                <div className="text-2xl font-bold text-primary">
+                  {homeworkList.length}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Total Assignments
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="bg-destructive/5 border-destructive/20">
+              <CardContent className="py-3 text-center">
+                <div className="text-2xl font-bold text-destructive">
+                  {analytics.overdueCount}
+                </div>
+                <div className="text-xs text-muted-foreground">Overdue</div>
+              </CardContent>
+            </Card>
+            <Card className="bg-green-50 border-green-200">
+              <CardContent className="py-3 text-center">
+                <div className="text-2xl font-bold text-green-700">
+                  {analytics.completedCount}
+                </div>
+                <div className="text-xs text-muted-foreground">On Time</div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Subject-wise Count</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.entries(analytics.subjectCount).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No data yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(analytics.subjectCount)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([sub, count]) => (
+                        <div key={sub} className="flex items-center gap-2">
+                          <span className="text-sm text-foreground w-32 truncate">
+                            {sub}
+                          </span>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div
+                              className="bg-primary h-2 rounded-full"
+                              style={{
+                                width: `${(count / homeworkList.length) * 100}%`,
+                              }}
+                            />
+                          </div>
+                          <Badge variant="secondary" className="text-xs">
+                            {count}
+                          </Badge>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Class-wise Frequency</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {Object.entries(analytics.classCount).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No data yet</p>
+                ) : (
+                  <div className="space-y-2">
+                    {Object.entries(analytics.classCount)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([cls, count]) => (
+                        <div key={cls} className="flex items-center gap-2">
+                          <span className="text-sm text-foreground w-24 truncate">
+                            {cls}
+                          </span>
+                          <div className="flex-1 bg-muted rounded-full h-2">
+                            <div
+                              className="bg-accent h-2 rounded-full"
+                              style={{
+                                width: `${(count / homeworkList.length) * 100}%`,
+                              }}
+                            />
+                          </div>
+                          <Badge variant="secondary" className="text-xs">
+                            {count}
+                          </Badge>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-ocid="homework.dialog">

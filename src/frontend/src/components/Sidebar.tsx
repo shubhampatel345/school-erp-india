@@ -193,7 +193,7 @@ export default function Sidebar({
         </div>
         {!collapsed && (
           <span className="font-display font-bold text-sm text-white truncate leading-tight">
-            SHUBH SCHOOL ERP
+            SCHOOL LEDGER ERP
           </span>
         )}
       </div>
@@ -258,7 +258,7 @@ export default function Sidebar({
             </div>
             <div className="min-w-0">
               <p className="text-[11px] text-white/70 truncate font-medium leading-none">
-                {currentUser?.name ?? "User"}
+                {currentUser?.fullName ?? currentUser?.name ?? "User"}
               </p>
               <p className="text-[10px] text-white/30 mt-0.5 capitalize leading-none">
                 {currentUser?.role ?? ""}

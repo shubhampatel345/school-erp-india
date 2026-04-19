@@ -1,6 +1,6 @@
 <?php
 /**
- * SHUBH SCHOOL ERP — Database Configuration & Helpers v4.0
+ * SCHOOL LEDGER ERP — Database Configuration & Helpers v5.0
  *
  * NO .htaccess dependency. Works on any cPanel server regardless of mod_rewrite.
  * Upload api/index.php + api/config.php to cPanel public_html/api/
@@ -23,10 +23,13 @@ define('DB_NAME',     getenv('DB_NAME')     ?: 'psmkgsco_shubherp_db');
 define('DB_USER',     getenv('DB_USER')     ?: 'psmkgsco_shubherp_user');
 define('DB_PASS',     getenv('DB_PASS')     ?: 'Shubh@420');
 define('DB_CHARSET',  'utf8mb4');
-define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'shubh_erp_jwt_secret_2024_psmkgs');
+define('JWT_SECRET',  getenv('JWT_SECRET')  ?: 'shubh_erp_jwt_secret_2024_psmkgs_school_ledger');
 define('JWT_EXPIRY',  86400);     // 24 hours
 define('JWT_REFRESH', 604800);    // 7 days
-define('API_VERSION', '4.0');
+define('API_VERSION', '5.0');
+define('API_URL',     getenv('API_URL')     ?: 'https://shubh.psmkgs.com/api');
+define('UPLOAD_DIR',  __DIR__ . '/uploads/');
+define('MAX_FILE_SIZE', 5242880); // 5 MB
 
 // ── PDO singleton ─────────────────────────────────────────────────────────────
 function getDB(): PDO {
@@ -47,40 +50,34 @@ function getDB(): PDO {
     return $pdo;
 }
 
+// ── CORS headers (always sent) ────────────────────────────────────────────────
+function send_cors_headers(): void {
+    if (headers_sent()) return;
+    header('Content-Type: application/json; charset=utf-8');
+    header('Access-Control-Allow-Origin: *');
+    header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
+}
+
 // ── Response helpers ──────────────────────────────────────────────────────────
 function json_success($data = null, string $message = 'OK', int $code = 200): void {
-    if (!headers_sent()) {
-        http_response_code($code);
-        header('Content-Type: application/json; charset=utf-8');
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
-    }
-    echo json_encode(['status' => 'ok', 'message' => $message, 'data' => $data]);
+    send_cors_headers();
+    http_response_code($code);
+    echo json_encode(['status' => 'ok', 'message' => $message, 'data' => $data], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 function json_error(string $message, int $code = 400, $data = null): void {
-    if (!headers_sent()) {
-        http_response_code($code);
-        header('Content-Type: application/json; charset=utf-8');
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
-    }
-    echo json_encode(['status' => 'error', 'message' => $message, 'data' => $data]);
+    send_cors_headers();
+    http_response_code($code);
+    echo json_encode(['status' => 'error', 'message' => $message, 'data' => $data], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
 function json_error_coded(string $message, int $httpCode, string $errorCode, $data = null): void {
-    if (!headers_sent()) {
-        http_response_code($httpCode);
-        header('Content-Type: application/json; charset=utf-8');
-        header('Access-Control-Allow-Origin: *');
-        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH');
-        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Auth-Token, X-School-ID');
-    }
-    echo json_encode(['status' => 'error', 'message' => $message, 'code' => $errorCode, 'data' => $data]);
+    send_cors_headers();
+    http_response_code($httpCode);
+    echo json_encode(['status' => 'error', 'message' => $message, 'code' => $errorCode, 'data' => $data], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
@@ -127,7 +124,7 @@ function require_auth(): array {
 
 function require_superadmin(): array {
     $p = require_auth();
-    if (!in_array($p['role'] ?? '', ['superadmin', 'super_admin'], true)) {
+    if (!is_superadmin($p)) {
         json_error_coded('Super Admin access required.', 403, 'FORBIDDEN');
     }
     return $p;
@@ -143,7 +140,7 @@ function hash_password(string $pw): string {
 }
 
 function verify_password(string $pw, string $hash): bool {
-    // Support bcrypt, SHA-256 hex (legacy), and plain text (legacy)
+    // Support bcrypt, SHA-256 hex (legacy), and plain text (legacy fallback)
     if (strpos($hash, '$2') === 0) {
         return password_verify($pw, $hash);
     }
@@ -157,17 +154,12 @@ function verify_password(string $pw, string $hash): bool {
 function now_str(): string { return gmdate('Y-m-d H:i:s'); }
 
 function gen_uuid(): string {
-    return sprintf('%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+    return sprintf(
+        '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
         mt_rand(0, 0xffff), mt_rand(0, 0xffff),
         mt_rand(0, 0xffff),
         mt_rand(0, 0x0fff) | 0x4000,
         mt_rand(0, 0x3fff) | 0x8000,
         mt_rand(0, 0xffff), mt_rand(0, 0xffff), mt_rand(0, 0xffff)
     );
-}
-
-function school_id_from_auth(?array $auth): int {
-    if ($auth && !empty($auth['school_id'])) return (int)$auth['school_id'];
-    if (!empty($_SERVER['HTTP_X_SCHOOL_ID']))  return (int)$_SERVER['HTTP_X_SCHOOL_ID'];
-    return 1;
 }

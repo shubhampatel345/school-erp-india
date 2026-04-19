@@ -37,6 +37,10 @@ export default {
         'sidebar-accent-foreground': 'oklch(var(--sidebar-accent-foreground) / <alpha-value>)',
         'sidebar-border': 'oklch(var(--sidebar-border) / <alpha-value>)',
         'sidebar-ring': 'oklch(var(--sidebar-ring) / <alpha-value>)',
+        success: 'oklch(var(--success) / <alpha-value>)',
+        'success-foreground': 'oklch(var(--success-foreground) / <alpha-value>)',
+        warning: 'oklch(var(--warning) / <alpha-value>)',
+        'warning-foreground': 'oklch(var(--warning-foreground) / <alpha-value>)',
       },
       borderRadius: {
         lg: 'calc(var(--radius) + 4px)',

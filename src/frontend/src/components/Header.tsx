@@ -233,7 +233,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
             <GraduationCap className="w-4 h-4 text-primary-foreground" />
           </div>
           <span className="hidden sm:block font-display font-bold text-sm text-foreground tracking-tight leading-none">
-            SHUBH SCHOOL ERP
+            SCHOOL LEDGER ERP
           </span>
         </div>
 
@@ -438,7 +438,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
             </div>
             <div className="hidden sm:block text-left">
               <div className="text-xs font-semibold text-foreground leading-none font-display">
-                {currentUser?.name ?? "User"}
+                {currentUser?.fullName ?? currentUser?.name ?? "User"}
               </div>
               <div className="text-[10px] text-muted-foreground leading-none mt-0.5">
                 {ROLE_LABELS[currentUser?.role ?? ""] ?? currentUser?.role}
@@ -451,7 +451,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
             <div className="absolute right-0 top-full mt-1 w-52 bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up">
               <div className="px-3 py-3 border-b border-border bg-muted/20">
                 <div className="text-sm font-semibold text-foreground font-display">
-                  {currentUser?.name}
+                  {currentUser?.fullName ?? currentUser?.name}
                 </div>
                 <div className="text-xs text-muted-foreground">
                   {ROLE_LABELS[currentUser?.role ?? ""] ?? currentUser?.role}

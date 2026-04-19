@@ -101,7 +101,7 @@ export default function TeacherTimetable() {
 
   const allStaff = getData("staff") as Staff[];
   const teachers = allStaff.filter(
-    (s) => s.designation === "Teacher" || s.subjects?.length > 0,
+    (s) => s.designation === "Teacher" || (s.subjects?.length ?? 0) > 0,
   );
 
   const classSections = CLASSES.flatMap((c) =>

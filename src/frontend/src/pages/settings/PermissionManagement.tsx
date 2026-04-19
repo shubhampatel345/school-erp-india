@@ -9,14 +9,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CheckCheck, CheckCircle, Copy, Shield } from "lucide-react";
+import { CheckCheck, Loader2, Save, Shield } from "lucide-react";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { Permission, PermissionMatrix, UserRole } from "../../types";
 import { apiUpdatePermissions, getJwt } from "../../utils/api";
 import { ls } from "../../utils/localStorage";
-
-// ── Constants ──────────────────────────────────────────────
 
 const MODULES = [
   { id: "dashboard", label: "Dashboard" },
@@ -36,7 +35,6 @@ const MODULES = [
   { id: "homework", label: "Homework" },
   { id: "certificates", label: "Certificates" },
   { id: "settings", label: "Settings" },
-  { id: "userManagement", label: "User Management" },
 ];
 
 const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
@@ -50,211 +48,160 @@ const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
   { value: "student", label: "Student" },
 ];
 
-type PermField = keyof Omit<Permission, "module">;
-
-const PERM_FIELDS: { key: PermField; label: string; short: string }[] = [
-  { key: "canView", label: "View", short: "V" },
-  { key: "canAdd", label: "Add", short: "A" },
-  { key: "canEdit", label: "Edit", short: "E" },
-  { key: "canDelete", label: "Delete", short: "D" },
-];
-
-// ── Role defaults ──────────────────────────────────────────
-
-function buildDefault(
-  canView: boolean,
-  canAdd: boolean,
-  canEdit: boolean,
-  canDelete: boolean,
-): PermissionMatrix {
-  const matrix: PermissionMatrix = {};
-  for (const m of MODULES) {
-    matrix[m.id] = { module: m.id, canView, canAdd, canEdit, canDelete };
-  }
-  return matrix;
-}
-
-const ROLE_DEFAULTS: Record<string, PermissionMatrix> = {
-  admin: buildDefault(true, true, true, true),
-  teacher: buildDefault(true, false, false, false),
-  receptionist: buildDefault(true, true, false, false),
-  accountant: buildDefault(true, true, false, false),
-  librarian: buildDefault(true, true, false, false),
-  driver: buildDefault(true, false, false, false),
-  parent: buildDefault(true, false, false, false),
-  student: buildDefault(true, false, false, false),
+const DEFAULT_PERMS: Record<
+  UserRole,
+  { view: boolean; add: boolean; edit: boolean; del: boolean }
+> = {
+  superadmin: { view: true, add: true, edit: true, del: true },
+  admin: { view: true, add: true, edit: true, del: true },
+  teacher: { view: true, add: false, edit: false, del: false },
+  receptionist: { view: true, add: true, edit: false, del: false },
+  accountant: { view: true, add: true, edit: false, del: false },
+  librarian: { view: true, add: true, edit: false, del: false },
+  driver: { view: true, add: false, edit: false, del: false },
+  parent: { view: true, add: false, edit: false, del: false },
+  student: { view: true, add: false, edit: false, del: false },
 };
 
-// ── Persistence ────────────────────────────────────────────
+type PermRow = { view: boolean; add: boolean; edit: boolean; del: boolean };
+type RoleMatrix = Record<string, PermRow>;
 
-function getStoredMatrix(role: string): PermissionMatrix {
-  const all = ls.get<Record<string, PermissionMatrix>>("role_permissions", {});
-  return (
-    all[role] ?? ROLE_DEFAULTS[role] ?? buildDefault(false, false, false, false)
+function buildDefaultMatrix(role: UserRole): RoleMatrix {
+  const defaults = DEFAULT_PERMS[role] ?? DEFAULT_PERMS.teacher;
+  const m: RoleMatrix = {};
+  for (const mod of MODULES) {
+    m[mod.id] = { ...defaults };
+  }
+  return m;
+}
+
+function loadMatrix(role: UserRole): RoleMatrix {
+  const saved = ls.get<PermissionMatrix>(
+    `permissions_${role}`,
+    {} as PermissionMatrix,
   );
+  if (Object.keys(saved).length === 0) return buildDefaultMatrix(role);
+  const m: RoleMatrix = {};
+  for (const mod of MODULES) {
+    const perm = saved[mod.id];
+    if (perm) {
+      m[mod.id] = {
+        view: perm.canView,
+        add: perm.canAdd,
+        edit: perm.canEdit,
+        del: perm.canDelete,
+      };
+    } else {
+      const def = DEFAULT_PERMS[role] ?? DEFAULT_PERMS.teacher;
+      m[mod.id] = { ...def };
+    }
+  }
+  return m;
 }
 
-function storeMatrix(role: string, matrix: PermissionMatrix) {
-  const all = ls.get<Record<string, PermissionMatrix>>("role_permissions", {});
-  all[role] = matrix;
-  ls.set("role_permissions", all);
+function toPermissionMatrix(
+  _role: UserRole,
+  matrix: RoleMatrix,
+): PermissionMatrix {
+  const pm: PermissionMatrix = {};
+  for (const [moduleId, row] of Object.entries(matrix)) {
+    pm[moduleId] = {
+      module: moduleId,
+      canView: row.view,
+      canAdd: row.add,
+      canEdit: row.edit,
+      canDelete: row.del,
+    } satisfies Permission;
+  }
+  return pm;
 }
-
-// ── Component ──────────────────────────────────────────────
 
 export default function PermissionManagement() {
-  const { currentUser, hasPermission } = useApp();
-
+  const { currentUser } = useApp();
   const [selectedRole, setSelectedRole] = useState<UserRole>("teacher");
-  const [matrix, setMatrix] = useState<PermissionMatrix>(() =>
-    getStoredMatrix("teacher"),
-  );
-  const [copyFromRole, setCopyFromRole] = useState<UserRole>("admin");
+  const [matrix, setMatrix] = useState<RoleMatrix>(() => loadMatrix("teacher"));
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-
-  // ── Load matrix when role changes (must be before any early return) ───────
 
   useEffect(() => {
-    setMatrix(getStoredMatrix(selectedRole));
-    setSaved(false);
+    setMatrix(loadMatrix(selectedRole));
   }, [selectedRole]);
 
-  // ── Permission guard ──────────────────────────────────────
-
-  const canAccess =
-    hasPermission("userManagement", "canView") ||
-    currentUser?.role === "superadmin";
-  if (!canAccess) {
-    return (
-      <div className="p-10 text-center">
-        <Shield className="w-14 h-14 mx-auto mb-4 text-muted-foreground/30" />
-        <p className="font-medium text-muted-foreground">
-          Super Admin access required.
-        </p>
-      </div>
-    );
+  function toggle(moduleId: string, field: keyof PermRow) {
+    setMatrix((prev) => ({
+      ...prev,
+      [moduleId]: { ...prev[moduleId], [field]: !prev[moduleId][field] },
+    }));
   }
 
-  // ── Toggle a single cell ──────────────────────────────────
-
-  function toggle(moduleId: string, field: PermField) {
-    setMatrix((prev) => {
-      const current = prev[moduleId] ?? {
-        module: moduleId,
-        canView: false,
-        canAdd: false,
-        canEdit: false,
-        canDelete: false,
-      };
-      const updated = { ...current, [field]: !current[field] };
-      // If toggling off canView, also disable add/edit/delete
-      if (field === "canView" && !updated.canView) {
-        updated.canAdd = false;
-        updated.canEdit = false;
-        updated.canDelete = false;
-      }
-      // If toggling on add/edit/delete, also enable canView
-      if (field !== "canView" && updated[field]) {
-        updated.canView = true;
-      }
-      return { ...prev, [moduleId]: updated };
-    });
-    setSaved(false);
+  function setAllForModule(moduleId: string, val: boolean) {
+    setMatrix((prev) => ({
+      ...prev,
+      [moduleId]: { view: val, add: val, edit: val, del: val },
+    }));
   }
 
-  // ── Toggle all in a column ────────────────────────────────
-
-  function toggleColumn(field: PermField) {
-    const allOn = MODULES.every((m) =>
-      matrix[m.id]?.[field] !== false && matrix[m.id]?.[field] !== undefined
-        ? matrix[m.id][field]
-        : (ROLE_DEFAULTS[selectedRole]?.[m.id]?.[field] ?? false),
-    );
+  function setAllForAction(field: keyof PermRow, val: boolean) {
     setMatrix((prev) => {
       const next = { ...prev };
-      for (const m of MODULES) {
-        const current = prev[m.id] ?? {
-          module: m.id,
-          canView: false,
-          canAdd: false,
-          canEdit: false,
-          canDelete: false,
-        };
-        next[m.id] = { ...current, [field]: !allOn };
+      for (const mod of MODULES) {
+        next[mod.id] = { ...next[mod.id], [field]: val };
       }
       return next;
     });
-    setSaved(false);
   }
 
-  // ── Copy from role ────────────────────────────────────────
-
-  function handleCopyFrom() {
-    const source = getStoredMatrix(copyFromRole);
-    setMatrix(source);
-    setSaved(false);
+  function applyDefaultsForRole() {
+    setMatrix(buildDefaultMatrix(selectedRole));
   }
-
-  // ── Save ──────────────────────────────────────────────────
 
   async function handleSave() {
     setSaving(true);
     try {
-      storeMatrix(selectedRole, matrix);
-      const token = getJwt();
-      if (token) {
-        try {
-          await apiUpdatePermissions(
-            selectedRole,
-            matrix as unknown as Record<string, unknown>,
-            token,
-          );
-        } catch {
-          // server unavailable — local save succeeded
-        }
+      const pm = toPermissionMatrix(selectedRole, matrix);
+      ls.set(`permissions_${selectedRole}`, pm);
+
+      const jwt = getJwt();
+      if (jwt) {
+        await apiUpdatePermissions(
+          selectedRole,
+          pm as unknown as Record<string, unknown>,
+          jwt,
+        ).catch(() => {});
       }
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      toast.success(`Permissions for ${selectedRole} saved.`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save permissions.",
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  // ── Current role display ──────────────────────────────────
-
-  const isSuperAdmin = selectedRole === "superadmin";
-
-  function cellValue(moduleId: string, field: PermField): boolean {
-    return matrix[moduleId]?.[field] ?? false;
-  }
+  const isSuperAdmin = currentUser?.role === "superadmin";
 
   return (
-    <div className="p-4 lg:p-6 space-y-4">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+    <div className="p-4 lg:p-6 max-w-5xl space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h3 className="text-base font-semibold text-foreground font-display">
-            Role Permissions
-          </h3>
-          <p className="text-sm text-muted-foreground">
-            Configure module access for each user role
+          <h2 className="text-xl font-display font-semibold text-foreground flex items-center gap-2">
+            <Shield className="w-5 h-5 text-primary" /> Permission Management
+          </h2>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Control what each role can view, add, edit, and delete across all
+            modules.
           </p>
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Role selector */}
+
+        <div className="flex items-center gap-2 flex-wrap">
           <Select
             value={selectedRole}
             onValueChange={(v) => setSelectedRole(v as UserRole)}
           >
-            <SelectTrigger
-              className="w-44"
-              data-ocid="perm_management.role.select"
-            >
+            <SelectTrigger className="w-40" data-ocid="permissions.role.select">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="superadmin">Super Admin</SelectItem>
               {ROLE_OPTIONS.map((r) => (
                 <SelectItem key={r.value} value={r.value}>
                   {r.label}
@@ -262,184 +209,161 @@ export default function PermissionManagement() {
               ))}
             </SelectContent>
           </Select>
-
-          {/* Copy from */}
-          {!isSuperAdmin && (
-            <div className="flex items-center gap-2">
-              <Select
-                value={copyFromRole}
-                onValueChange={(v) => setCopyFromRole(v as UserRole)}
-              >
-                <SelectTrigger
-                  className="w-36"
-                  data-ocid="perm_management.copy_from.select"
-                >
-                  <SelectValue placeholder="Copy from…" />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLE_OPTIONS.filter((r) => r.value !== selectedRole).map(
-                    (r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ),
-                  )}
-                </SelectContent>
-              </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                data-ocid="perm_management.copy_button"
-                onClick={handleCopyFrom}
-              >
-                <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
-              </Button>
-            </div>
-          )}
-
-          {/* Save */}
-          {!isSuperAdmin && (
-            <Button
-              data-ocid="perm_management.save_button"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saved ? (
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle className="w-4 h-4" /> Saved
-                </span>
-              ) : saving ? (
-                "Saving…"
-              ) : (
-                "Save Permissions"
-              )}
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => applyDefaultsForRole()}
+            data-ocid="permissions.reset_defaults.button"
+          >
+            Reset Defaults
+          </Button>
         </div>
       </div>
 
       {/* Super Admin notice */}
-      {isSuperAdmin && (
-        <div
-          className="rounded-xl px-4 py-3 flex items-center gap-3"
-          style={{
-            background: "oklch(0.55 0.14 200 / 0.08)",
-            border: "1px solid oklch(0.55 0.14 200 / 0.20)",
-          }}
-        >
-          <Shield
-            className="w-5 h-5 flex-shrink-0"
-            style={{ color: "oklch(0.55 0.14 200)" }}
-          />
-          <div>
-            <p className="text-sm font-medium text-foreground">
-              Super Admin — Unrestricted Access
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Super Admin has full access to all modules and cannot be
-              restricted.
-            </p>
-          </div>
+      <Card className="p-4 bg-primary/5 border-primary/20">
+        <div className="flex items-center gap-2">
+          <Shield className="w-4 h-4 text-primary" />
+          <p className="text-sm text-foreground font-medium">
+            Super Admin always has full access
+          </p>
         </div>
-      )}
+        <p className="text-xs text-muted-foreground mt-1 ml-6">
+          Super Admin permissions cannot be restricted.
+        </p>
+      </Card>
 
       {/* Matrix */}
       <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/50 border-b border-border">
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground w-48">
-                  Module
-                </th>
-                {PERM_FIELDS.map((f) => (
-                  <th
-                    key={f.key}
-                    className="px-4 py-3 text-center font-semibold text-muted-foreground"
-                  >
-                    {!isSuperAdmin ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleColumn(f.key)}
-                        className="flex flex-col items-center gap-1 mx-auto hover:text-foreground transition-colors"
-                        title={`Toggle all ${f.label}`}
-                        data-ocid={`perm_management.column_${f.key}.toggle`}
-                      >
-                        <CheckCheck className="w-3.5 h-3.5" />
-                        <span className="text-xs">{f.label}</span>
-                      </button>
-                    ) : (
-                      <div className="flex flex-col items-center gap-1">
-                        <span className="text-xs">{f.label}</span>
-                      </div>
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {MODULES.map((mod, i) => (
-                <tr
-                  key={mod.id}
-                  data-ocid={`perm_management.module.${i + 1}`}
-                  className="hover:bg-muted/20 transition-colors"
-                >
-                  <td className="px-4 py-3">
-                    <span className="font-medium text-foreground">
-                      {mod.label}
-                    </span>
-                  </td>
-                  {PERM_FIELDS.map((f) => (
-                    <td key={f.key} className="px-4 py-3 text-center">
-                      {isSuperAdmin ? (
-                        <Badge
-                          className="text-xs border bg-primary/10 text-primary border-primary/20"
-                          variant="outline"
-                        >
-                          ✓
-                        </Badge>
-                      ) : (
-                        <Checkbox
-                          checked={cellValue(mod.id, f.key)}
-                          onCheckedChange={() => toggle(mod.id, f.key)}
-                          data-ocid={`perm_management.${mod.id}_${f.key}.checkbox`}
-                          aria-label={`${mod.label} ${f.label}`}
-                          className="mx-auto"
-                        />
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Header row */}
+        <div className="grid grid-cols-[1fr_repeat(5,auto)] items-center gap-2 px-4 py-2 bg-muted/50 border-b text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+          <span>Module</span>
+          <span className="w-14 text-center">View</span>
+          <span className="w-14 text-center">Add</span>
+          <span className="w-14 text-center">Edit</span>
+          <span className="w-14 text-center">Delete</span>
+          <span className="w-16 text-center">All</span>
         </div>
 
-        {!isSuperAdmin && (
-          <div className="px-4 py-3 bg-muted/30 border-t border-border flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              Changes apply immediately after saving. Users must re-login to see
-              updated permissions.
-            </p>
-            <Button
-              size="sm"
-              data-ocid="perm_management.save_bottom_button"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saved ? (
-                <span className="flex items-center gap-1.5">
-                  <CheckCircle className="w-3.5 h-3.5" /> Saved
+        {/* "Select All" row */}
+        <div className="grid grid-cols-[1fr_repeat(5,auto)] items-center gap-2 px-4 py-2 bg-muted/20 border-b">
+          <span className="text-xs font-semibold text-foreground">
+            Select All
+          </span>
+          {(["view", "add", "edit", "del"] as (keyof PermRow)[]).map(
+            (field) => {
+              const allChecked = MODULES.every((m) => matrix[m.id]?.[field]);
+              return (
+                <div key={field} className="w-14 flex justify-center">
+                  <Checkbox
+                    checked={allChecked}
+                    onCheckedChange={(v) => setAllForAction(field, !!v)}
+                    disabled={!isSuperAdmin}
+                    data-ocid={`permissions.all.${field}.checkbox`}
+                  />
+                </div>
+              );
+            },
+          )}
+          <div className="w-16" />
+        </div>
+
+        {/* Module rows */}
+        <div className="divide-y">
+          {MODULES.map((mod, idx) => {
+            const row = matrix[mod.id] ?? {
+              view: false,
+              add: false,
+              edit: false,
+              del: false,
+            };
+            const allChecked = row.view && row.add && row.edit && row.del;
+            return (
+              <div
+                key={mod.id}
+                className={`grid grid-cols-[1fr_repeat(5,auto)] items-center gap-2 px-4 py-3 transition-colors hover:bg-muted/30 ${idx % 2 === 0 ? "" : "bg-muted/10"}`}
+                data-ocid={`permissions.module.${mod.id}`}
+              >
+                <span className="text-sm font-medium text-foreground">
+                  {mod.label}
                 </span>
-              ) : saving ? (
-                "Saving…"
-              ) : (
-                "Save"
-              )}
-            </Button>
-          </div>
-        )}
+                {(["view", "add", "edit", "del"] as (keyof PermRow)[]).map(
+                  (field) => (
+                    <div key={field} className="w-14 flex justify-center">
+                      <Checkbox
+                        checked={row[field]}
+                        onCheckedChange={() => toggle(mod.id, field)}
+                        disabled={!isSuperAdmin}
+                        data-ocid={`permissions.${mod.id}.${field}.checkbox`}
+                      />
+                    </div>
+                  ),
+                )}
+                <div className="w-16 flex justify-center">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => setAllForModule(mod.id, !allChecked)}
+                    disabled={!isSuperAdmin}
+                    data-ocid={`permissions.${mod.id}.all.toggle`}
+                  >
+                    {allChecked ? "None" : "All"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </Card>
+
+      {/* Legend */}
+      <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+        <Badge variant="outline" className="text-[10px]">
+          View — can read/see data
+        </Badge>
+        <Badge variant="outline" className="text-[10px]">
+          Add — can create new records
+        </Badge>
+        <Badge variant="outline" className="text-[10px]">
+          Edit — can modify existing records
+        </Badge>
+        <Badge variant="outline" className="text-[10px]">
+          Delete — can remove records
+        </Badge>
+      </div>
+
+      {/* Save */}
+      <div className="flex items-center gap-3 justify-end">
+        <Button
+          variant="outline"
+          onClick={() => {
+            applyDefaultsForRole();
+            toast.info("Defaults restored. Click Save to persist.");
+          }}
+          data-ocid="permissions.reset_all.button"
+        >
+          <CheckCheck className="w-4 h-4 mr-2" />
+          Reset All Roles
+        </Button>
+        <Button
+          onClick={() => void handleSave()}
+          disabled={saving || !isSuperAdmin}
+          data-ocid="permissions.save_button"
+        >
+          {saving ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4 mr-2" />
+              Save Permissions
+            </>
+          )}
+        </Button>
+      </div>
     </div>
   );
 }

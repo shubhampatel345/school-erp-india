@@ -130,8 +130,8 @@ export default function FeeRegister() {
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
   const currentSessionId = currentSession?.id ?? null;
 
-  // Read from context
-  const allReceipts = (getData("feeReceipts") as FeeReceipt[])
+  // Read from context — collection key "fee_receipts" matches server MySQL table
+  const allReceipts = (getData("fee_receipts") as FeeReceipt[])
     .filter(
       (r) =>
         !r.isDeleted && (!currentSessionId || r.sessionId === currentSessionId),

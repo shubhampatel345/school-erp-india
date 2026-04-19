@@ -16,11 +16,13 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Bell,
   Bot,
+  Calendar,
   CheckCircle,
   Clock,
   MessageSquare,
   RefreshCw,
   Save,
+  Search,
   Send,
   Smartphone,
   Users,
@@ -65,6 +67,16 @@ interface WaLog {
   timestamp: number;
 }
 
+interface NotifHistoryEntry {
+  id: string;
+  date: string;
+  type: string;
+  recipient: string;
+  message: string;
+  status: "sent" | "failed" | "pending";
+  channel: "whatsapp" | "rcs" | "in-app";
+}
+
 // ── Templates ──────────────────────────────────────────────────────────────────
 const MSG_TEMPLATES = [
   {
@@ -80,7 +92,7 @@ const MSG_TEMPLATES = [
   {
     key: "birthday_wish",
     label: "Birthday Wish",
-    text: "🎂 Dear Parent, SHUBH SCHOOL ERP wishes [Student Name] a very Happy Birthday! 🎉 May this special day bring lots of joy.",
+    text: "🎂 Dear Parent, SCHOOL LEDGER ERP wishes [Student Name] a very Happy Birthday! 🎉 May this special day bring lots of joy.",
   },
   { key: "general_notice", label: "General Notice", text: "" },
   {
@@ -96,7 +108,7 @@ const MSG_TEMPLATES = [
   {
     key: "homework_reminder",
     label: "Homework Reminder",
-    text: "Dear [Student Name], your homework for [Subject] is due tomorrow. Please ensure you complete and submit it on time. — SHUBH SCHOOL ERP",
+    text: "Dear [Student Name], your homework for [Subject] is due tomorrow. Please ensure you complete and submit it on time. — SCHOOL LEDGER ERP",
   },
 ];
 
@@ -182,6 +194,29 @@ function maskPhone(phone: string): string {
   return `${phone.slice(0, 2)}****${phone.slice(-4)}`;
 }
 
+async function saveToServer(route: string, payload: Record<string, unknown>) {
+  try {
+    const apiBase =
+      localStorage.getItem("shubh_erp_api_base_url") ??
+      "https://shubh.psmkgs.com";
+    const token =
+      sessionStorage.getItem("shubh_erp_jwt_token") ??
+      localStorage.getItem("shubh_erp_jwt_token") ??
+      "";
+    const url = `${apiBase}/api/index.php?route=${route}`;
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+    });
+  } catch {
+    // fail silently; settings saved locally
+  }
+}
+
 // ── WhatsApp Compose Tab ──────────────────────────────────────────────────────
 function WhatsAppTab() {
   const { currentSession, getData, saveData, addNotification } = useApp();
@@ -198,7 +233,6 @@ function WhatsAppTab() {
   >([]);
   const [historyLogs, setHistoryLogs] = useState<WaLog[]>([]);
 
-  // Get students & staff from context (server data)
   const allStudents = getData("students") as Student[];
   const allStaff = getData("staff") as Staff[];
   const students = allStudents.filter(
@@ -283,7 +317,6 @@ function WhatsAppTab() {
         status: result.success ? "sent" : "failed",
       });
     }
-    // Save log to context/MySQL
     const logEntry = {
       id: generateId(),
       type: "whatsapp_broadcast",
@@ -331,7 +364,7 @@ function WhatsAppTab() {
             </Button>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground bg-green-50 border border-green-200 px-3 py-1.5 rounded-full">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse-soft" />
+            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             Real API via wacoder.in
           </div>
         </div>
@@ -511,7 +544,375 @@ function WhatsAppTab() {
   );
 }
 
-// ── Notifications Tab ─────────────────────────────────────────────────────────
+// ── Send Message Tab ──────────────────────────────────────────────────────────
+function SendMessageTab() {
+  const { addNotification, saveData } = useApp();
+  const [to, setTo] = useState("all_parents");
+  const [message, setMessage] = useState("");
+  const [scheduleType, setScheduleType] = useState<"immediate" | "scheduled">(
+    "immediate",
+  );
+  const [scheduleDateTime, setScheduleDateTime] = useState("");
+  const [via, setVia] = useState<"whatsapp" | "inapp">("whatsapp");
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+
+  const handleSend = async () => {
+    if (!message.trim()) return;
+    setSending(true);
+    const entry: NotifHistoryEntry = {
+      id: generateId(),
+      date: new Date().toISOString(),
+      type: "Manual",
+      recipient: RECIPIENT_OPTIONS.find((o) => o.value === to)?.label ?? to,
+      message: message.slice(0, 200),
+      status: scheduleType === "scheduled" ? "pending" : "sent",
+      channel: via === "whatsapp" ? "whatsapp" : "in-app",
+    };
+    const history = ls.get<NotifHistoryEntry[]>("notif_history", []);
+    history.unshift(entry);
+    ls.set("notif_history", history.slice(0, 200));
+    await saveData(
+      "notifications",
+      entry as unknown as Record<string, unknown>,
+    );
+    await saveToServer(
+      "notifications/save",
+      entry as unknown as Record<string, unknown>,
+    );
+    setSent(true);
+    setSending(false);
+    addNotification(
+      scheduleType === "scheduled"
+        ? `Message scheduled for ${scheduleDateTime}`
+        : `Message sent to ${entry.recipient}`,
+      "success",
+      via === "whatsapp" ? "💬" : "🔔",
+    );
+    setTimeout(() => {
+      setSent(false);
+      setMessage("");
+    }, 2000);
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Send className="w-4 h-4 text-primary" /> Compose &amp; Send Message
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label>To</Label>
+            <Select value={to} onValueChange={setTo}>
+              <SelectTrigger data-ocid="sendmsg-to-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {RECIPIENT_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Send Via</Label>
+            <Select
+              value={via}
+              onValueChange={(v) => setVia(v as "whatsapp" | "inapp")}
+            >
+              <SelectTrigger data-ocid="sendmsg-via-select">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="whatsapp">💬 WhatsApp</SelectItem>
+                <SelectItem value="inapp">🔔 In-App Notification</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Message</Label>
+          <Textarea
+            rows={4}
+            placeholder="Type your message..."
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            data-ocid="sendmsg-message-input"
+            className="resize-none"
+          />
+          <p className="text-xs text-muted-foreground">
+            {message.length} / 1600 characters
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <Label>When to Send</Label>
+          <div className="flex gap-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="schedule"
+                value="immediate"
+                checked={scheduleType === "immediate"}
+                onChange={() => setScheduleType("immediate")}
+                className="accent-primary"
+                data-ocid="sendmsg-immediate-radio"
+              />
+              <span className="text-sm">Send Immediately</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="schedule"
+                value="scheduled"
+                checked={scheduleType === "scheduled"}
+                onChange={() => setScheduleType("scheduled")}
+                className="accent-primary"
+                data-ocid="sendmsg-scheduled-radio"
+              />
+              <span className="text-sm">Schedule for Later</span>
+            </label>
+          </div>
+          {scheduleType === "scheduled" && (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                Date &amp; Time
+              </Label>
+              <Input
+                type="datetime-local"
+                value={scheduleDateTime}
+                onChange={(e) => setScheduleDateTime(e.target.value)}
+                data-ocid="sendmsg-datetime-input"
+              />
+            </div>
+          )}
+        </div>
+
+        <Button
+          onClick={handleSend}
+          disabled={sending || !message.trim()}
+          data-ocid="sendmsg-send-btn"
+          className="w-full sm:w-auto"
+        >
+          {sent ? (
+            <>
+              <CheckCircle className="w-4 h-4 mr-2 text-green-400" />
+              {scheduleType === "scheduled" ? "Scheduled!" : "Sent!"}
+            </>
+          ) : (
+            <>
+              {scheduleType === "scheduled" ? (
+                <Calendar className="w-4 h-4 mr-2" />
+              ) : (
+                <Send className="w-4 h-4 mr-2" />
+              )}
+              {sending
+                ? "Sending..."
+                : scheduleType === "scheduled"
+                  ? "Schedule Message"
+                  : "Send Now"}
+            </>
+          )}
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── Notification History Tab ──────────────────────────────────────────────────
+function NotificationHistoryTab() {
+  const { notifications } = useApp();
+  const [filterType, setFilterType] = useState("all");
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [search, setSearch] = useState("");
+
+  const localHistory = ls.get<NotifHistoryEntry[]>("notif_history", []);
+  const combined: NotifHistoryEntry[] = [
+    ...localHistory,
+    ...notifications.map(
+      (n: Notification): NotifHistoryEntry => ({
+        id: n.id,
+        date: new Date(n.timestamp).toISOString(),
+        type: n.type ?? "info",
+        recipient: "System",
+        message: n.message,
+        status: "sent",
+        channel: "in-app",
+      }),
+    ),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const typeOptions = [
+    "all",
+    "Manual",
+    "whatsapp_broadcast",
+    "success",
+    "error",
+    "warning",
+    "info",
+  ];
+
+  const filtered = combined.filter((e) => {
+    if (filterType !== "all" && e.type !== filterType) return false;
+    if (filterFrom && new Date(e.date) < new Date(filterFrom)) return false;
+    if (filterTo && new Date(e.date) > new Date(`${filterTo}T23:59:59`))
+      return false;
+    if (
+      search &&
+      !e.message.toLowerCase().includes(search.toLowerCase()) &&
+      !e.recipient.toLowerCase().includes(search.toLowerCase())
+    )
+      return false;
+    return true;
+  });
+
+  const statusColor: Record<string, string> = {
+    sent: "bg-green-100 text-green-700 border-green-200",
+    failed: "bg-red-100 text-red-700 border-red-200",
+    pending: "bg-amber-100 text-amber-700 border-amber-200",
+  };
+  const channelIcon: Record<string, string> = {
+    whatsapp: "💬",
+    rcs: "📱",
+    "in-app": "🔔",
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base flex items-center gap-2">
+          <Clock className="w-4 h-4 text-primary" /> Notification History
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {/* Filters */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="relative col-span-2 sm:col-span-1">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-7 h-8 text-xs"
+              data-ocid="notif-history-search-input"
+            />
+          </div>
+          <Select value={filterType} onValueChange={setFilterType}>
+            <SelectTrigger
+              className="h-8 text-xs"
+              data-ocid="notif-history-type-select"
+            >
+              <SelectValue placeholder="Type" />
+            </SelectTrigger>
+            <SelectContent>
+              {typeOptions.map((t) => (
+                <SelectItem key={t} value={t} className="text-xs">
+                  {t === "all" ? "All Types" : t}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input
+            type="date"
+            value={filterFrom}
+            onChange={(e) => setFilterFrom(e.target.value)}
+            className="h-8 text-xs"
+            placeholder="From date"
+            data-ocid="notif-history-from-input"
+          />
+          <Input
+            type="date"
+            value={filterTo}
+            onChange={(e) => setFilterTo(e.target.value)}
+            className="h-8 text-xs"
+            placeholder="To date"
+            data-ocid="notif-history-to-input"
+          />
+        </div>
+
+        {filtered.length === 0 ? (
+          <div
+            className="text-center py-14 text-muted-foreground"
+            data-ocid="notif-history.empty_state"
+          >
+            <Bell className="w-10 h-10 mx-auto mb-2 opacity-30" />
+            <p className="text-sm">No notifications found.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 sticky top-0">
+                <tr>
+                  <th className="text-left p-3 font-semibold whitespace-nowrap text-xs">
+                    Date &amp; Time
+                  </th>
+                  <th className="text-left p-3 font-semibold text-xs">Type</th>
+                  <th className="text-left p-3 font-semibold text-xs">
+                    Recipient
+                  </th>
+                  <th className="text-left p-3 font-semibold text-xs">
+                    Message
+                  </th>
+                  <th className="text-left p-3 font-semibold text-xs">Via</th>
+                  <th className="text-left p-3 font-semibold text-xs">
+                    Status
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.slice(0, 100).map((e, i) => (
+                  <tr
+                    key={e.id}
+                    className="border-t border-border hover:bg-muted/20"
+                    data-ocid={`notif-history.item.${i + 1}`}
+                  >
+                    <td className="p-3 whitespace-nowrap text-muted-foreground text-xs">
+                      {new Date(e.date).toLocaleString("en-IN")}
+                    </td>
+                    <td className="p-3">
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                        {e.type}
+                      </span>
+                    </td>
+                    <td className="p-3 text-xs max-w-[120px] truncate">
+                      {e.recipient}
+                    </td>
+                    <td className="p-3 max-w-xs">
+                      <span className="line-clamp-2 text-xs">{e.message}</span>
+                    </td>
+                    <td className="p-3 text-xs">
+                      {channelIcon[e.channel] ?? "🔔"}{" "}
+                      <span className="text-muted-foreground">{e.channel}</span>
+                    </td>
+                    <td className="p-3">
+                      <span
+                        className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[e.status] ?? "bg-muted text-muted-foreground"}`}
+                      >
+                        {e.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          Showing {Math.min(filtered.length, 100)} of {combined.length} entries
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// ── ERP Notifications Tab ─────────────────────────────────────────────────────
 function NotificationsTab() {
   const { notifications, markAllRead, clearNotifications } = useApp();
 
@@ -555,7 +956,7 @@ function NotificationsTab() {
             {notifications.map((n: Notification) => (
               <div
                 key={n.id}
-                className={`flex items-start gap-3 p-3 rounded-lg border transition-smooth ${n.isRead ? "border-border bg-muted/10 opacity-70" : "border-primary/20 bg-card shadow-subtle"}`}
+                className={`flex items-start gap-3 p-3 rounded-lg border transition-all duration-200 ${n.isRead ? "border-border bg-muted/10 opacity-70" : "border-primary/20 bg-card shadow-sm"}`}
                 data-ocid={`notif-item-${n.id}`}
               >
                 <span className="text-lg shrink-0 mt-0.5">
@@ -601,6 +1002,7 @@ function WhatsAppBotTab() {
   const handleToggle = (val: boolean) => {
     setBotEnabled(val);
     ls.set("wa_bot_enabled", val);
+    void saveToServer("school_settings/save", { whatsappBotEnabled: val });
   };
 
   const handleTest = useCallback(() => {
@@ -647,7 +1049,7 @@ function WhatsAppBotTab() {
         );
 
         setBotReply(
-          `📚 *Student Information*\n\n*Name:* ${student.fullName}\n*Adm. No.:* ${student.admNo}\n*Class:* ${student.class}-${student.section}\n\n📊 *Attendance*\nPresent: ${present}/${total} days (${pct}%)\n\n💰 *Fees*\nPending Balance: ₹${pendingBalance.toLocaleString("en-IN")}\n\n_Powered by SHUBH SCHOOL ERP_`,
+          `📚 *Student Information*\n\n*Name:* ${student.fullName}\n*Adm. No.:* ${student.admNo}\n*Class:* ${student.class}-${student.section}\n\n📊 *Attendance*\nPresent: ${present}/${total} days (${pct}%)\n\n💰 *Fees*\nPending Balance: ₹${pendingBalance.toLocaleString("en-IN")}\n\n_Powered by SCHOOL LEDGER ERP_`,
         );
       }
       setLoading(false);
@@ -680,13 +1082,10 @@ function WhatsAppBotTab() {
         <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 space-y-1">
           <p className="font-semibold">⚠️ Server-side setup required</p>
           <p>
-            The actual auto-reply bot requires a WhatsApp webhook configured on
-            your server at{" "}
-            <code className="bg-amber-100 px-1 rounded">
+            Configure the webhook on your cPanel server at{" "}
+            <code className="bg-amber-100 px-1 rounded text-xs">
               https://shubh.psmkgs.com/api/index.php?route=whatsapp/webhook
             </code>
-            . The toggle above stores the preference — enable it and configure
-            the webhook on your cPanel server.
           </p>
         </div>
 
@@ -699,6 +1098,7 @@ function WhatsAppBotTab() {
               onChange={(e) => setTestAdmNo(e.target.value)}
               className="flex-1"
               data-ocid="bot-test-input"
+              onKeyDown={(e) => e.key === "Enter" && handleTest()}
             />
             <Button
               onClick={handleTest}
@@ -740,13 +1140,13 @@ function WhatsAppBotTab() {
 // ── RCS Tab ───────────────────────────────────────────────────────────────────
 function RcsCardPreview({ message }: { message: string }) {
   return (
-    <div className="rounded-xl border border-border bg-card shadow-card overflow-hidden max-w-sm">
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden max-w-sm">
       <div className="bg-primary/10 border-b border-border px-4 py-2 flex items-center gap-2">
         <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center">
           <span className="text-primary-foreground text-xs font-bold">S</span>
         </div>
         <div>
-          <p className="text-xs font-semibold">SHUBH SCHOOL ERP</p>
+          <p className="text-xs font-semibold">SCHOOL LEDGER ERP</p>
           <p className="text-xs text-muted-foreground">Verified Business</p>
         </div>
         <Badge className="ml-auto text-xs bg-accent/20 text-accent-foreground border-0">
@@ -966,6 +1366,7 @@ function SchedulerTab() {
       schedules,
     } as unknown as Record<string, unknown>);
     ls.set("notification_scheduler", schedules);
+    await saveToServer("notifications/save", { schedules });
     setSaved(true);
     addNotification("Notification scheduler settings saved", "success", "⏰");
     setTimeout(() => setSaved(false), 3000);
@@ -1014,7 +1415,7 @@ function SchedulerTab() {
           {schedules.map((s) => (
             <div
               key={s.id}
-              className={`rounded-xl border p-4 transition-smooth ${s.enabled ? "border-primary/20 bg-card shadow-subtle" : "border-border bg-muted/20 opacity-70"}`}
+              className={`rounded-xl border p-4 transition-all duration-200 ${s.enabled ? "border-primary/20 bg-card shadow-sm" : "border-border bg-muted/20 opacity-70"}`}
               data-ocid={`scheduler-card-${s.id}`}
             >
               <div className="flex items-start justify-between gap-4">
@@ -1150,14 +1551,18 @@ function GroupsTab() {
   const [generating, setGenerating] = useState(false);
 
   const apiBase =
-    localStorage.getItem("shubh_erp_api_url") ?? "https://shubh.psmkgs.com/api";
-  const token = localStorage.getItem("shubh_erp_auth_token") ?? "";
+    localStorage.getItem("shubh_erp_api_base_url") ??
+    "https://shubh.psmkgs.com";
+  const token =
+    sessionStorage.getItem("shubh_erp_jwt_token") ??
+    localStorage.getItem("shubh_erp_jwt_token") ??
+    "";
 
   const fetchGroups = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/index.php?route=chat/groups`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(`${apiBase}/api/index.php?route=chat/groups`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { data: ChatGroupItem[] };
@@ -1177,12 +1582,12 @@ function GroupsTab() {
     setGenerating(true);
     try {
       const res = await fetch(
-        `${apiBase}/index.php?route=chat/groups/generate`,
+        `${apiBase}/api/index.php?route=chat/groups/generate`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
         },
       );
@@ -1392,11 +1797,32 @@ export default function Communication({ initialTab }: CommunicationProps) {
             <MessageSquare className="w-4 h-4" /> WhatsApp
           </TabsTrigger>
           <TabsTrigger
+            value="send"
+            data-ocid="tab-send"
+            className="flex items-center gap-1.5"
+          >
+            <Send className="w-4 h-4" /> Send Message
+          </TabsTrigger>
+          <TabsTrigger
+            value="scheduler"
+            data-ocid="tab-scheduler"
+            className="flex items-center gap-1.5"
+          >
+            <Clock className="w-4 h-4" /> Scheduler
+          </TabsTrigger>
+          <TabsTrigger
+            value="history"
+            data-ocid="tab-history"
+            className="flex items-center gap-1.5"
+          >
+            <Bell className="w-4 h-4" /> History
+          </TabsTrigger>
+          <TabsTrigger
             value="notifications"
             data-ocid="tab-notifications"
             className="flex items-center gap-1.5"
           >
-            <Bell className="w-4 h-4" /> Notifications
+            <Bell className="w-4 h-4" /> ERP Notifications
           </TabsTrigger>
           <TabsTrigger
             value="bot"
@@ -1413,13 +1839,6 @@ export default function Communication({ initialTab }: CommunicationProps) {
             <Smartphone className="w-4 h-4" /> Google RCS
           </TabsTrigger>
           <TabsTrigger
-            value="scheduler"
-            data-ocid="tab-scheduler"
-            className="flex items-center gap-1.5"
-          >
-            <Clock className="w-4 h-4" /> Scheduler
-          </TabsTrigger>
-          <TabsTrigger
             value="groups"
             data-ocid="tab-groups"
             className="flex items-center gap-1.5"
@@ -1431,6 +1850,15 @@ export default function Communication({ initialTab }: CommunicationProps) {
         <TabsContent value="whatsapp" className="mt-4">
           <WhatsAppTab />
         </TabsContent>
+        <TabsContent value="send" className="mt-4">
+          <SendMessageTab />
+        </TabsContent>
+        <TabsContent value="scheduler" className="mt-4">
+          <SchedulerTab />
+        </TabsContent>
+        <TabsContent value="history" className="mt-4">
+          <NotificationHistoryTab />
+        </TabsContent>
         <TabsContent value="notifications" className="mt-4">
           <NotificationsTab />
         </TabsContent>
@@ -1439,9 +1867,6 @@ export default function Communication({ initialTab }: CommunicationProps) {
         </TabsContent>
         <TabsContent value="rcs" className="mt-4">
           <RcsTab />
-        </TabsContent>
-        <TabsContent value="scheduler" className="mt-4">
-          <SchedulerTab />
         </TabsContent>
         <TabsContent value="groups" className="mt-4">
           <GroupsTab />

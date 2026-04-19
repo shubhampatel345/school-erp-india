@@ -17,6 +17,7 @@ import {
   Info,
   Printer,
   RefreshCw,
+  Save,
   Settings2,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -31,6 +32,17 @@ import {
 
 // ── Types ─────────────────────────────────────────────────
 
+interface PayrollSetup {
+  staffId: string;
+  baseSalary: number;
+  hra: number;
+  da: number;
+  otherAllowance: number;
+  pf: number;
+  esi: number;
+  otherDeduction: number;
+}
+
 interface PayrollRecord {
   id: string;
   staffId: string;
@@ -39,9 +51,18 @@ interface PayrollRecord {
   designation: string;
   month: string;
   year: string;
-  netSalary: number;
+  baseSalary: number;
+  hra: number;
+  da: number;
+  otherAllowance: number;
+  grossSalary: number;
+  pf: number;
+  esi: number;
+  otherDeduction: number;
+  totalDeductions: number;
   workingDays: number;
   presentDays: number;
+  leaveDays: number;
   perDaySalary: number;
   payableSalary: number;
   absentDeduction: number;
@@ -49,6 +70,13 @@ interface PayrollRecord {
   paidDate?: string;
   generatedAt: string;
 }
+
+// ── Sub-tabs ──────────────────────────────────────────────
+const PAYROLL_TABS = [
+  { id: "setup", label: "Payroll Setup" },
+  { id: "generate", label: "Generate Payroll" },
+] as const;
+type PayrollTabId = (typeof PAYROLL_TABS)[number]["id"];
 
 // ── Helpers ───────────────────────────────────────────────
 
@@ -100,19 +128,77 @@ function countPresentDays(
   return count;
 }
 
-function calcRecord(
+function countApprovedLeaveDays(
+  leaves: Array<{
+    staffId: string;
+    fromDate: string;
+    toDate: string;
+    totalDays: number;
+    status: string;
+  }>,
+  staffId: string,
+  monthName: string,
+  year: number,
+): number {
+  const calMonth = monthNameToCalendarIndex(monthName);
+  let count = 0;
+  for (const leave of leaves) {
+    if (leave.staffId !== staffId || leave.status !== "Approved") continue;
+    const from = new Date(leave.fromDate);
+    if (from.getFullYear() === year && from.getMonth() === calMonth) {
+      count += leave.totalDays;
+    }
+  }
+  return count;
+}
+
+function getSetupForStaff(staffId: string): PayrollSetup {
+  const stored = ls.get<Record<string, Partial<PayrollSetup>>>(
+    "payroll_setup",
+    {},
+  );
+  const s = stored[staffId] ?? {};
+  return {
+    staffId,
+    baseSalary: s.baseSalary ?? 0,
+    hra: s.hra ?? 0,
+    da: s.da ?? 0,
+    otherAllowance: s.otherAllowance ?? 0,
+    pf: s.pf ?? 0,
+    esi: s.esi ?? 0,
+    otherDeduction: s.otherDeduction ?? 0,
+  };
+}
+
+function calcPayrollRecord(
   s: Staff,
+  setup: PayrollSetup,
   monthName: string,
   year: string,
   workingDays: number,
   attendance: AttendanceRecord[],
+  leaves: Array<{
+    staffId: string;
+    fromDate: string;
+    toDate: string;
+    totalDays: number;
+    status: string;
+  }>,
 ): PayrollRecord {
-  const netSalary = s.salary ?? 0;
   const calYear = monthCalYear(monthName, year);
   const presentDays = countPresentDays(attendance, s.id, monthName, calYear);
-  const perDaySalary = workingDays > 0 ? netSalary / workingDays : 0;
-  const payableSalary = Math.round(perDaySalary * presentDays);
-  const absentDeduction = netSalary - payableSalary;
+  const leaveDays = countApprovedLeaveDays(leaves, s.id, monthName, calYear);
+  const effectivePresentDays = Math.min(presentDays + leaveDays, workingDays);
+
+  const grossSalary =
+    setup.baseSalary + setup.hra + setup.da + setup.otherAllowance;
+  const totalDeductions = setup.pf + setup.esi + setup.otherDeduction;
+  const perDaySalary = workingDays > 0 ? grossSalary / workingDays : 0;
+  const payableSalary =
+    Math.round(perDaySalary * effectivePresentDays) - totalDeductions;
+  const absentDeduction = Math.round(
+    perDaySalary * Math.max(0, workingDays - effectivePresentDays),
+  );
 
   return {
     id: generateId(),
@@ -122,11 +208,20 @@ function calcRecord(
     designation: s.designation,
     month: monthName,
     year,
-    netSalary,
+    baseSalary: setup.baseSalary,
+    hra: setup.hra,
+    da: setup.da,
+    otherAllowance: setup.otherAllowance,
+    grossSalary,
+    pf: setup.pf,
+    esi: setup.esi,
+    otherDeduction: setup.otherDeduction,
+    totalDeductions,
     workingDays,
     presentDays,
+    leaveDays,
     perDaySalary: Math.round(perDaySalary * 100) / 100,
-    payableSalary,
+    payableSalary: Math.max(0, payableSalary),
     absentDeduction,
     status: "generated",
     generatedAt: new Date().toISOString(),
@@ -141,11 +236,174 @@ function currentAcademicYear(): string {
   return `${y - 1}-${String(y).slice(-2)}`;
 }
 
-// ── Component ─────────────────────────────────────────────
+// ── Payroll Setup Tab ─────────────────────────────────────
+
+interface SetupRowProps {
+  staff: Staff;
+  onSaved: () => void;
+}
+
+function SetupRow({ staff, onSaved }: SetupRowProps) {
+  const setup = getSetupForStaff(staff.id);
+  const [base, setBase] = useState(
+    setup.baseSalary > 0
+      ? String(setup.baseSalary)
+      : (staff.baseSalary ?? staff.salary)
+        ? String(staff.baseSalary ?? staff.salary ?? 0)
+        : "",
+  );
+  const [hra, setHra] = useState(setup.hra > 0 ? String(setup.hra) : "");
+  const [da, setDa] = useState(setup.da > 0 ? String(setup.da) : "");
+  const [otherAllow, setOtherAllow] = useState(
+    setup.otherAllowance > 0 ? String(setup.otherAllowance) : "",
+  );
+  const [pf, setPf] = useState(setup.pf > 0 ? String(setup.pf) : "");
+  const [esi, setEsi] = useState(setup.esi > 0 ? String(setup.esi) : "");
+  const [otherDed, setOtherDed] = useState(
+    setup.otherDeduction > 0 ? String(setup.otherDeduction) : "",
+  );
+  const [saved, setSaved] = useState(false);
+
+  const gross =
+    (Number(base) || 0) +
+    (Number(hra) || 0) +
+    (Number(da) || 0) +
+    (Number(otherAllow) || 0);
+  const ded = (Number(pf) || 0) + (Number(esi) || 0) + (Number(otherDed) || 0);
+  const net = gross - ded;
+
+  function save() {
+    const newSetup: Partial<PayrollSetup> = {
+      baseSalary: Number(base) || 0,
+      hra: Number(hra) || 0,
+      da: Number(da) || 0,
+      otherAllowance: Number(otherAllow) || 0,
+      pf: Number(pf) || 0,
+      esi: Number(esi) || 0,
+      otherDeduction: Number(otherDed) || 0,
+    };
+    const all = ls.get<Record<string, Partial<PayrollSetup>>>(
+      "payroll_setup",
+      {},
+    );
+    all[staff.id] = newSetup;
+    ls.set("payroll_setup", all);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    onSaved();
+  }
+
+  return (
+    <tr className="border-b border-border hover:bg-muted/20 transition-colors">
+      <td className="px-3 py-3">
+        <p className="font-medium text-foreground text-sm">{staff.name}</p>
+        <p className="text-xs text-muted-foreground">
+          {staff.empId} · {staff.designation}
+        </p>
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          type="number"
+          value={base}
+          onChange={(e) => setBase(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          type="number"
+          value={hra}
+          onChange={(e) => setHra(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          type="number"
+          value={da}
+          onChange={(e) => setDa(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2 hidden xl:table-cell">
+        <Input
+          type="number"
+          value={otherAllow}
+          onChange={(e) => setOtherAllow(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2">
+        <Input
+          type="number"
+          value={pf}
+          onChange={(e) => setPf(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2 hidden lg:table-cell">
+        <Input
+          type="number"
+          value={esi}
+          onChange={(e) => setEsi(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-2 py-2 hidden lg:table-cell">
+        <Input
+          type="number"
+          value={otherDed}
+          onChange={(e) => setOtherDed(e.target.value)}
+          className="w-24 h-8 text-sm"
+          placeholder="0"
+          min={0}
+        />
+      </td>
+      <td className="px-3 py-3 text-right font-mono font-semibold text-sm text-primary">
+        ₹{net > 0 ? net.toLocaleString("en-IN") : "—"}
+      </td>
+      <td className="px-3 py-3 text-right">
+        <Button
+          size="sm"
+          variant={saved ? "outline" : "default"}
+          className={`h-8 text-xs ${saved ? "text-accent border-accent/40" : ""}`}
+          onClick={save}
+        >
+          {saved ? (
+            <>
+              <CheckCircle className="w-3 h-3 mr-1 text-accent" />
+              Saved
+            </>
+          ) : (
+            <>
+              <Save className="w-3 h-3 mr-1" />
+              Save
+            </>
+          )}
+        </Button>
+      </td>
+    </tr>
+  );
+}
+
+// ── Main Component ────────────────────────────────────────
 
 export default function Payroll() {
   const { getData, saveData, addNotification } = useApp();
 
+  const [activeTab, setActiveTab] = useState<PayrollTabId>("setup");
   const [defaultWorkingDays, setDefaultWorkingDays] = useState(() =>
     ls.get<number>("payroll_default_wd", 26),
   );
@@ -165,10 +423,17 @@ export default function Payroll() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsWd, setSettingsWd] = useState(String(defaultWorkingDays));
   const [saving, setSaving] = useState(false);
+  const [setupKey, setSetupKey] = useState(0); // force re-read after save
 
-  // Read staff and attendance from context (server-synced)
   const allStaff = getData("staff") as Staff[];
   const attendance = getData("attendance") as AttendanceRecord[];
+  const leaveRecords = getData("leave_records") as Array<{
+    staffId: string;
+    fromDate: string;
+    toDate: string;
+    totalDays: number;
+    status: string;
+  }>;
 
   const activeStaff = allStaff.filter(
     (s) => (s.status ?? "active") === "active",
@@ -179,9 +444,22 @@ export default function Payroll() {
   // ── Generate payroll ──────────────────────────────────────
 
   function generatePayroll() {
-    const newRecords: PayrollRecord[] = activeStaff.map((s) =>
-      calcRecord(s, selectedMonth, academicYear, workingDaysNum, attendance),
-    );
+    const newRecords: PayrollRecord[] = activeStaff.map((s) => {
+      const setup = getSetupForStaff(s.id);
+      // If no payroll setup, fall back to staff salary
+      if (setup.baseSalary === 0 && (s.baseSalary ?? s.salary)) {
+        setup.baseSalary = s.baseSalary ?? s.salary ?? 0;
+      }
+      return calcPayrollRecord(
+        s,
+        setup,
+        selectedMonth,
+        academicYear,
+        workingDaysNum,
+        attendance,
+        leaveRecords,
+      );
+    });
 
     setRecords((prev) => {
       const otherMonths = prev.filter(
@@ -215,7 +493,7 @@ export default function Payroll() {
     );
   }
 
-  // ── Mark paid + save to server ────────────────────────────
+  // ── Mark paid ─────────────────────────────────────────────
 
   async function markPaid(record: PayrollRecord) {
     setSaving(true);
@@ -303,12 +581,20 @@ export default function Payroll() {
       "Designation",
       "Month",
       "Year",
-      "Net Salary",
+      "Base Salary",
+      "HRA",
+      "DA",
+      "Other Allow.",
+      "Gross Salary",
+      "PF",
+      "ESI",
+      "Other Ded.",
+      "Total Deductions",
       "Working Days",
       "Present Days",
+      "Leave Days",
       "Per Day Rate",
       "Payable Salary",
-      "Deduction",
       "Status",
       "Paid Date",
     ];
@@ -318,12 +604,20 @@ export default function Payroll() {
       r.designation,
       r.month,
       r.year,
-      String(r.netSalary),
+      String(r.baseSalary),
+      String(r.hra),
+      String(r.da),
+      String(r.otherAllowance),
+      String(r.grossSalary),
+      String(r.pf),
+      String(r.esi),
+      String(r.otherDeduction),
+      String(r.totalDeductions),
       String(r.workingDays),
       String(r.presentDays),
+      String(r.leaveDays),
       String(r.perDaySalary),
       String(r.payableSalary),
-      String(r.absentDeduction),
       r.status,
       r.paidDate ?? "",
     ]);
@@ -341,9 +635,9 @@ export default function Payroll() {
   function printPayslip(r: PayrollRecord) {
     const school = ls.get<{ name: string; address: string; phone: string }>(
       "school_profile",
-      { name: "SHUBH SCHOOL ERP", address: "", phone: "" },
+      { name: "SCHOOL LEDGER ERP", address: "", phone: "" },
     );
-    const win = window.open("", "_blank", "width=600,height=750");
+    const win = window.open("", "_blank", "width=640,height=800");
     if (!win) return;
     win.document.write(`<!DOCTYPE html><html><head>
       <title>Payslip — ${r.staffName} — ${r.month} ${r.year}</title>
@@ -367,37 +661,77 @@ export default function Payroll() {
         .foot{margin-top:48px;display:flex;justify-content:space-between;font-size:12px}
         .foot div{text-align:center}
         .line{border-top:1px solid #999;width:130px;margin:0 auto 4px}
+        .two-col{display:flex;gap:20px}
+        .two-col>div{flex:1}
       </style></head><body>
-      <div class="hdr"><h1>${school.name}</h1>
-        <p>${school.address}${school.phone ? ` | Ph: ${school.phone}` : ""}</p></div>
+      <div class="hdr">
+        <h1>${school.name}</h1>
+        <p>${school.address}${school.phone ? ` | Ph: ${school.phone}` : ""}</p>
+      </div>
       <div class="title">Salary Slip — ${r.month} ${r.year}</div>
       <table>
         <tr><th>Employee Name</th><td>${r.staffName}</td><th>Employee ID</th><td>${r.empId}</td></tr>
         <tr><th>Designation</th><td>${r.designation}</td><th>Pay Period</th><td>${r.month} ${r.year}</td></tr>
-        <tr><th>Payment Status</th><td><span class="badge">${r.status === "paid" ? "✓ PAID" : "PENDING"}</span>${r.paidDate ? `<span style="font-size:11px;color:#555;margin-left:8px">${r.paidDate}</span>` : ""}</td>
-          <th>Generated On</th><td>${new Date(r.generatedAt).toLocaleDateString("en-IN")}</td></tr>
+        <tr>
+          <th>Payment Status</th>
+          <td><span class="badge">${r.status === "paid" ? "✓ PAID" : "PENDING"}</span>${r.paidDate ? `<span style="font-size:11px;color:#555;margin-left:8px">${r.paidDate}</span>` : ""}</td>
+          <th>Generated On</th>
+          <td>${new Date(r.generatedAt).toLocaleDateString("en-IN")}</td>
+        </tr>
       </table>
-      <table><thead><tr><th class="sh" colspan="2">Attendance Details</th></tr></thead>
+
+      <table>
+        <thead><tr><th class="sh" colspan="4">Attendance</th></tr></thead>
         <tbody>
-          <tr><th style="width:55%">Working Days</th><td style="text-align:right">${r.workingDays} days</td></tr>
-          <tr><th>Days Present</th><td style="text-align:right">${r.presentDays} days</td></tr>
-          <tr><th>Days Absent</th><td style="text-align:right;color:#c62828">${r.workingDays - r.presentDays} days</td></tr>
-          <tr><th>Per Day Rate</th><td style="text-align:right">₹${r.perDaySalary.toLocaleString("en-IN")}</td></tr>
-        </tbody></table>
-      <table><thead><tr><th class="sh" style="width:55%">Earnings</th><th class="sh" style="text-align:right">Amount (₹)</th></tr></thead>
-        <tbody><tr><td>Net Salary (Monthly)</td><td style="text-align:right">₹${r.netSalary.toLocaleString("en-IN")}</td></tr></tbody></table>
-      <table><thead><tr><th class="sh" style="width:55%">Deductions</th><th class="sh" style="text-align:right">Amount (₹)</th></tr></thead>
-        <tbody><tr><td>Absent Deduction (${r.workingDays - r.presentDays} days × ₹${r.perDaySalary})</td>
-          <td style="text-align:right" class="ded">₹${r.absentDeduction.toLocaleString("en-IN")}</td></tr></tbody></table>
-      <table><tfoot><tr class="net"><td style="width:55%">NET PAYABLE SALARY</td>
-        <td style="text-align:right">₹${r.payableSalary.toLocaleString("en-IN")}</td></tr></tfoot></table>
-      <p style="font-size:11px;color:#777;text-align:center;margin-top:4px">
-        ₹${r.netSalary.toLocaleString("en-IN")} × (${r.presentDays}/${r.workingDays}) = ₹${r.payableSalary.toLocaleString("en-IN")}</p>
+          <tr>
+            <th style="width:25%">Working Days</th><td style="width:25%;text-align:right">${r.workingDays}</td>
+            <th style="width:25%">Present Days</th><td style="width:25%;text-align:right">${r.presentDays}</td>
+          </tr>
+          <tr>
+            <th>Leave Days</th><td style="text-align:right">${r.leaveDays}</td>
+            <th>Absent Days</th><td style="text-align:right;color:#c62828">${Math.max(0, r.workingDays - r.presentDays - r.leaveDays)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="two-col">
+        <div>
+          <table>
+            <thead><tr><th class="sh">Earnings</th><th class="sh" style="text-align:right">Amount (₹)</th></tr></thead>
+            <tbody>
+              <tr><td>Basic Salary</td><td style="text-align:right">₹${r.baseSalary.toLocaleString("en-IN")}</td></tr>
+              ${r.hra > 0 ? `<tr><td>HRA</td><td style="text-align:right">₹${r.hra.toLocaleString("en-IN")}</td></tr>` : ""}
+              ${r.da > 0 ? `<tr><td>DA</td><td style="text-align:right">₹${r.da.toLocaleString("en-IN")}</td></tr>` : ""}
+              ${r.otherAllowance > 0 ? `<tr><td>Other Allowance</td><td style="text-align:right">₹${r.otherAllowance.toLocaleString("en-IN")}</td></tr>` : ""}
+              <tr style="font-weight:bold"><td>Gross Salary</td><td style="text-align:right">₹${r.grossSalary.toLocaleString("en-IN")}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div>
+          <table>
+            <thead><tr><th class="sh">Deductions</th><th class="sh" style="text-align:right">Amount (₹)</th></tr></thead>
+            <tbody>
+              ${r.pf > 0 ? `<tr><td>PF</td><td style="text-align:right" class="ded">₹${r.pf.toLocaleString("en-IN")}</td></tr>` : ""}
+              ${r.esi > 0 ? `<tr><td>ESI</td><td style="text-align:right" class="ded">₹${r.esi.toLocaleString("en-IN")}</td></tr>` : ""}
+              ${r.otherDeduction > 0 ? `<tr><td>Other</td><td style="text-align:right" class="ded">₹${r.otherDeduction.toLocaleString("en-IN")}</td></tr>` : ""}
+              ${r.absentDeduction > 0 ? `<tr><td>Absent Ded.</td><td style="text-align:right" class="ded">₹${r.absentDeduction.toLocaleString("en-IN")}</td></tr>` : ""}
+              <tr style="font-weight:bold"><td>Total Deductions</td><td style="text-align:right" class="ded">₹${(r.totalDeductions + r.absentDeduction).toLocaleString("en-IN")}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <table><tfoot><tr class="net">
+        <td style="width:55%">NET PAYABLE SALARY</td>
+        <td style="text-align:right">₹${r.payableSalary.toLocaleString("en-IN")}</td>
+      </tr></tfoot></table>
+
       <div class="foot">
         <div><div class="line"></div>Employee Signature</div>
         <div><div class="line"></div>Accounts / Cashier</div>
         <div><div class="line"></div>Principal / HOD</div>
-      </div></body></html>`);
+      </div>
+      </body></html>`);
     win.document.close();
     win.print();
   }
@@ -405,356 +739,473 @@ export default function Payroll() {
   // ── Render ────────────────────────────────────────────────
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
-        <div>
-          <h2 className="text-xl font-display font-bold text-foreground">
-            Payroll — {academicYear}
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Attendance-based salary calculation
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {monthRecords.length > 0 && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={exportCSV}
-              data-ocid="payroll.export_button"
-            >
-              <Download className="w-4 h-4 mr-1.5" /> Export CSV
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setShowSettings(!showSettings)}
-            data-ocid="payroll.settings_button"
+    <div className="flex flex-col">
+      {/* Sub-tab bar */}
+      <div className="flex gap-1 px-4 lg:px-6 border-b bg-muted/30">
+        {PAYROLL_TABS.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            data-ocid={`payroll.${tab.id}.tab`}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === tab.id
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
           >
-            <Settings2 className="w-4 h-4 mr-1.5" />
-            Settings
-          </Button>
-        </div>
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Settings Panel */}
-      {showSettings && (
-        <Card className="p-5 border-primary/30 bg-primary/5 space-y-4 max-w-md">
-          <p className="font-semibold text-foreground">Payroll Settings</p>
-          <div className="space-y-1.5">
-            <Label htmlFor="wd-default">Default Working Days per Month</Label>
-            <Input
-              id="wd-default"
-              type="number"
-              min={1}
-              max={31}
-              value={settingsWd}
-              onChange={(e) =>
-                setSettingsWd(e.target.value.replace(/^0+(?=\d)/, ""))
-              }
-              className="w-28"
-              data-ocid="payroll.default_wd_input"
-            />
-            <p className="text-xs text-muted-foreground">
-              Standard is 26 days (6-day week). Used when generating payroll.
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button
-              size="sm"
-              onClick={saveSettings}
-              data-ocid="payroll.save_settings_button"
-            >
-              Save Settings
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setShowSettings(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        </Card>
-      )}
-
-      {/* Month Selector */}
-      <Card className="p-4">
-        <div className="flex flex-col sm:flex-row gap-4 items-end flex-wrap">
-          <div className="space-y-1.5">
-            <Label>Select Month</Label>
-            <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="w-40" data-ocid="payroll.month_select">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {MONTHS.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="month-wd">Working Days — {selectedMonth}</Label>
-            <Input
-              id="month-wd"
-              type="number"
-              min={1}
-              max={31}
-              value={monthWorkingDays}
-              onChange={(e) =>
-                setMonthWorkingDays(e.target.value.replace(/^0+(?=\d)/, ""))
-              }
-              className="w-24"
-              data-ocid="payroll.working_days_input"
-            />
-          </div>
-
-          <Button
-            onClick={generatePayroll}
-            data-ocid="payroll.generate_button"
-            className="gap-2"
-          >
-            <RefreshCw className="w-4 h-4" />
-            Generate Payroll
-          </Button>
-
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <Input
-              placeholder="Search staff…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              data-ocid="payroll.search_input"
-            />
-          </div>
-        </div>
-      </Card>
-
-      {/* No attendance warning */}
-      {monthRecords.length > 0 && !hasAttendanceData && (
-        <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 text-amber-800 dark:text-amber-300">
-          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+      {/* ── Setup Tab ──────────────────────────────────────── */}
+      {activeTab === "setup" && (
+        <div className="p-4 lg:p-6 space-y-4">
           <div>
-            <p className="text-sm font-semibold">
-              No Staff Attendance for {selectedMonth}
-            </p>
-            <p className="text-xs mt-0.5 opacity-80">
-              Mark staff attendance in the Attendance module, then click
-              "Generate Payroll" again to recalculate with correct present days.
+            <h2 className="text-xl font-display font-bold text-foreground">
+              Payroll Setup
+            </h2>
+            <p className="text-sm text-muted-foreground mt-0.5">
+              Configure salary components for each staff member. Used when
+              generating payroll.
             </p>
           </div>
-        </div>
-      )}
 
-      {/* Summary */}
-      {monthRecords.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {[
-            { label: "Total Staff", value: displayRecords.length, plain: true },
-            { label: "Total Payable", value: formatCurrency(totalPayable) },
-            { label: "Paid", value: formatCurrency(totalPaid), green: true },
-            {
-              label: "Pending",
-              value: formatCurrency(totalPending),
-              red: true,
-            },
-          ].map((c) => (
-            <Card className="p-4" key={c.label}>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                {c.label}
-              </p>
-              <p
-                className={`text-xl font-bold font-display mt-1 ${
-                  c.green
-                    ? "text-accent"
-                    : c.red
-                      ? "text-destructive"
-                      : "text-foreground"
-                }`}
-              >
-                {c.plain ? c.value : c.value}
+          {activeStaff.length === 0 ? (
+            <Card
+              className="p-12 text-center"
+              data-ocid="payroll.setup.empty_state"
+            >
+              <Info className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
+              <p className="text-muted-foreground font-medium">
+                No active staff found. Add staff from the Staff Directory tab
+                first.
               </p>
             </Card>
-          ))}
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Staff
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground">
+                        Base (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground">
+                        HRA (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground">
+                        DA (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground hidden xl:table-cell">
+                        Other Allow (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground">
+                        PF (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        ESI (₹)
+                      </th>
+                      <th className="text-left px-2 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        Other Ded (₹)
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
+                        Net (₹)
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeStaff.map((s) => (
+                      <SetupRow
+                        key={`${s.id}-${setupKey}`}
+                        staff={s}
+                        onSaved={() => setSetupKey((k) => k + 1)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+
+          <p className="text-xs text-muted-foreground">
+            Tip: You can also set payroll components when adding/editing a staff
+            member from Staff Directory.
+          </p>
         </div>
       )}
 
-      {/* Empty state */}
-      {monthRecords.length === 0 && (
-        <Card className="p-14 text-center" data-ocid="payroll.empty_state">
-          <Info className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
-          <p className="font-semibold text-foreground mb-1">
-            No Payroll Generated for {selectedMonth} {academicYear}
-          </p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {activeStaff.length === 0
-              ? "Add staff from the Staff Directory tab first."
-              : `Click "Generate Payroll" to calculate salaries for all ${activeStaff.length} active staff members.`}
-          </p>
-          {activeStaff.length > 0 && (
-            <Button
-              onClick={generatePayroll}
-              data-ocid="payroll.generate_empty_button"
-            >
-              <RefreshCw className="w-4 h-4 mr-2" />
-              Generate Payroll
-            </Button>
-          )}
-        </Card>
-      )}
+      {/* ── Generate Tab ───────────────────────────────────── */}
+      {activeTab === "generate" && (
+        <div className="p-4 lg:p-6 space-y-5">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+            <div>
+              <h2 className="text-xl font-display font-bold text-foreground">
+                Payroll — {academicYear}
+              </h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                Attendance-based salary calculation with leave integration
+              </p>
+            </div>
+            <div className="flex gap-2">
+              {monthRecords.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportCSV}
+                  data-ocid="payroll.export_button"
+                >
+                  <Download className="w-4 h-4 mr-1.5" /> Export CSV
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSettings(!showSettings)}
+                data-ocid="payroll.settings_button"
+              >
+                <Settings2 className="w-4 h-4 mr-1.5" />
+                Settings
+              </Button>
+            </div>
+          </div>
 
-      {/* Payroll table */}
-      {displayRecords.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                    Staff
-                  </th>
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden sm:table-cell">
-                    Net Salary
-                  </th>
-                  <th className="text-center px-3 py-3 font-semibold text-muted-foreground">
-                    Work Days
-                  </th>
-                  <th className="text-center px-3 py-3 font-semibold text-muted-foreground">
-                    Present
-                  </th>
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden md:table-cell">
-                    Per Day
-                  </th>
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
-                    Payable
-                  </th>
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                    Deduction
-                  </th>
-                  <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                    Status
-                  </th>
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {displayRecords.map((r, idx) => {
-                  const absentDays = r.workingDays - r.presentDays;
-                  return (
-                    <tr
-                      key={r.id}
-                      className="hover:bg-muted/30 transition-colors"
-                      data-ocid={`payroll.item.${idx + 1}`}
-                    >
-                      <td className="px-3 py-3">
-                        <p className="font-medium text-foreground">
-                          {r.staffName}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {r.designation} · {r.empId}
-                        </p>
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono text-sm hidden sm:table-cell">
-                        {formatCurrency(r.netSalary)}
-                      </td>
-                      <td className="px-3 py-3 text-center">{r.workingDays}</td>
-                      <td className="px-3 py-3 text-center">
-                        <span
-                          className={
-                            r.presentDays === 0
-                              ? "text-destructive font-semibold"
-                              : r.presentDays < r.workingDays
-                                ? "text-amber-600 dark:text-amber-400 font-medium"
-                                : "text-accent font-semibold"
-                          }
-                        >
-                          {r.presentDays}
-                        </span>
-                        {absentDays > 0 && (
-                          <span className="text-xs text-muted-foreground ml-1">
-                            ({absentDays}A)
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono text-xs text-muted-foreground hidden md:table-cell">
-                        {formatCurrency(r.perDaySalary)}
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono font-semibold text-foreground">
-                        {formatCurrency(r.payableSalary)}
-                      </td>
-                      <td className="px-3 py-3 text-right font-mono text-sm text-destructive hidden lg:table-cell">
-                        {r.absentDeduction > 0
-                          ? `-${formatCurrency(r.absentDeduction)}`
-                          : "—"}
-                      </td>
-                      <td className="px-3 py-3">
-                        <Badge
-                          variant={
-                            r.status === "paid" ? "default" : "secondary"
-                          }
-                          className={
-                            r.status === "paid"
-                              ? "bg-accent/20 text-accent border-accent/30"
-                              : ""
-                          }
-                        >
-                          {r.status === "paid" ? "Paid" : "Pending"}
-                        </Badge>
-                        {r.paidDate && (
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {r.paidDate}
+          {/* Settings Panel */}
+          {showSettings && (
+            <Card className="p-5 border-primary/30 bg-primary/5 space-y-4 max-w-md">
+              <p className="font-semibold text-foreground">Payroll Settings</p>
+              <div className="space-y-1.5">
+                <Label htmlFor="wd-default">
+                  Default Working Days per Month
+                </Label>
+                <Input
+                  id="wd-default"
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={settingsWd}
+                  onChange={(e) =>
+                    setSettingsWd(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
+                  className="w-28"
+                  data-ocid="payroll.default_wd_input"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Standard is 26 days (6-day week).
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  onClick={saveSettings}
+                  data-ocid="payroll.save_settings_button"
+                >
+                  Save Settings
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setShowSettings(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </Card>
+          )}
+
+          {/* Month Selector */}
+          <Card className="p-4">
+            <div className="flex flex-col sm:flex-row gap-4 items-end flex-wrap">
+              <div className="space-y-1.5">
+                <Label>Select Month</Label>
+                <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+                  <SelectTrigger
+                    className="w-40"
+                    data-ocid="payroll.month_select"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {MONTHS.map((m) => (
+                      <SelectItem key={m} value={m}>
+                        {m}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="month-wd">Working Days — {selectedMonth}</Label>
+                <Input
+                  id="month-wd"
+                  type="number"
+                  min={1}
+                  max={31}
+                  value={monthWorkingDays}
+                  onChange={(e) =>
+                    setMonthWorkingDays(e.target.value.replace(/^0+(?=\d)/, ""))
+                  }
+                  className="w-24"
+                  data-ocid="payroll.working_days_input"
+                />
+              </div>
+
+              <Button
+                onClick={generatePayroll}
+                data-ocid="payroll.generate_button"
+                className="gap-2"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Generate Payroll
+              </Button>
+
+              <div className="flex-1 min-w-[180px] max-w-xs">
+                <Input
+                  placeholder="Search staff…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  data-ocid="payroll.search_input"
+                />
+              </div>
+            </div>
+          </Card>
+
+          {/* No attendance warning */}
+          {monthRecords.length > 0 && !hasAttendanceData && (
+            <div className="flex items-start gap-3 p-4 rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-700 text-amber-800 dark:text-amber-300">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-semibold">
+                  No Staff Attendance for {selectedMonth}
+                </p>
+                <p className="text-xs mt-0.5 opacity-80">
+                  Mark staff attendance in the Attendance module, then click
+                  "Generate Payroll" again to recalculate.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Summary */}
+          {monthRecords.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {[
+                { label: "Total Staff", value: String(displayRecords.length) },
+                { label: "Total Payable", value: formatCurrency(totalPayable) },
+                {
+                  label: "Paid",
+                  value: formatCurrency(totalPaid),
+                  green: true,
+                },
+                {
+                  label: "Pending",
+                  value: formatCurrency(totalPending),
+                  red: true,
+                },
+              ].map((c) => (
+                <Card className="p-4" key={c.label}>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                    {c.label}
+                  </p>
+                  <p
+                    className={`text-xl font-bold font-display mt-1 ${
+                      c.green
+                        ? "text-accent"
+                        : c.red
+                          ? "text-destructive"
+                          : "text-foreground"
+                    }`}
+                  >
+                    {c.value}
+                  </p>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {monthRecords.length === 0 && (
+            <Card className="p-14 text-center" data-ocid="payroll.empty_state">
+              <Info className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
+              <p className="font-semibold text-foreground mb-1">
+                No Payroll Generated for {selectedMonth} {academicYear}
+              </p>
+              <p className="text-sm text-muted-foreground mb-4">
+                {activeStaff.length === 0
+                  ? "Add staff from the Staff Directory tab first."
+                  : `Click "Generate Payroll" to calculate salaries for all ${activeStaff.length} active staff members.`}
+              </p>
+              {activeStaff.length > 0 && (
+                <Button
+                  onClick={generatePayroll}
+                  data-ocid="payroll.generate_empty_button"
+                >
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Generate Payroll
+                </Button>
+              )}
+            </Card>
+          )}
+
+          {/* Payroll table */}
+          {displayRecords.length > 0 && (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Staff
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden md:table-cell">
+                        Gross
+                      </th>
+                      <th className="text-center px-3 py-3 font-semibold text-muted-foreground">
+                        Work Days
+                      </th>
+                      <th className="text-center px-3 py-3 font-semibold text-muted-foreground">
+                        Present
+                      </th>
+                      <th className="text-center px-3 py-3 font-semibold text-muted-foreground hidden sm:table-cell">
+                        Leave
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        Deductions
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
+                        Payable
+                      </th>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Status
+                      </th>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {displayRecords.map((r, idx) => (
+                      <tr
+                        key={r.id}
+                        className="hover:bg-muted/30 transition-colors"
+                        data-ocid={`payroll.item.${idx + 1}`}
+                      >
+                        <td className="px-3 py-3">
+                          <p className="font-medium text-foreground">
+                            {r.staffName}
                           </p>
-                        )}
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="flex items-center gap-1 justify-end">
-                          {r.status !== "paid" && (
+                          <p className="text-xs text-muted-foreground">
+                            {r.designation} · {r.empId}
+                          </p>
+                        </td>
+                        <td className="px-3 py-3 text-right font-mono text-sm hidden md:table-cell">
+                          {formatCurrency(r.grossSalary)}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          {r.workingDays}
+                        </td>
+                        <td className="px-3 py-3 text-center">
+                          <span
+                            className={
+                              r.presentDays === 0
+                                ? "text-destructive font-semibold"
+                                : r.presentDays < r.workingDays
+                                  ? "text-amber-600 dark:text-amber-400 font-medium"
+                                  : "text-accent font-semibold"
+                            }
+                          >
+                            {r.presentDays}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-center hidden sm:table-cell">
+                          <span
+                            className={
+                              r.leaveDays > 0
+                                ? "text-primary font-medium"
+                                : "text-muted-foreground"
+                            }
+                          >
+                            {r.leaveDays}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right font-mono text-sm text-destructive hidden lg:table-cell">
+                          {r.totalDeductions + r.absentDeduction > 0
+                            ? `-${formatCurrency(r.totalDeductions + r.absentDeduction)}`
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right font-mono font-semibold text-foreground">
+                          {formatCurrency(r.payableSalary)}
+                        </td>
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant={
+                              r.status === "paid" ? "default" : "secondary"
+                            }
+                            className={
+                              r.status === "paid"
+                                ? "bg-accent/20 text-accent border-accent/30"
+                                : ""
+                            }
+                          >
+                            {r.status === "paid" ? "Paid" : "Pending"}
+                          </Badge>
+                          {r.paidDate && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {r.paidDate}
+                            </p>
+                          )}
+                        </td>
+                        <td className="px-3 py-3">
+                          <div className="flex items-center gap-1 justify-end">
+                            {r.status !== "paid" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => void markPaid(r)}
+                                disabled={saving}
+                                className="text-accent border-accent/40 hover:bg-accent/10 text-xs h-7"
+                                data-ocid={`payroll.mark_paid_button.${idx + 1}`}
+                              >
+                                <CheckCircle className="w-3 h-3 mr-1" /> Mark
+                                Paid
+                              </Button>
+                            )}
                             <Button
                               size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                void markPaid(r);
-                              }}
-                              disabled={saving}
-                              className="text-accent border-accent/40 hover:bg-accent/10 text-xs h-7"
-                              data-ocid={`payroll.mark_paid_button.${idx + 1}`}
+                              variant="ghost"
+                              onClick={() => printPayslip(r)}
+                              aria-label="Print payslip"
+                              data-ocid={`payroll.print_button.${idx + 1}`}
                             >
-                              <CheckCircle className="w-3 h-3 mr-1" /> Mark Paid
+                              <Printer className="w-3.5 h-3.5" />
                             </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => printPayslip(r)}
-                            aria-label="Print payslip"
-                            data-ocid={`payroll.print_button.${idx + 1}`}
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
 
-      {monthRecords.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Payable = Net Salary × (Present Days / Working Days). Half Day = 0.5
-          days. Late = 1 day. Click "Generate Payroll" to refresh after updating
-          attendance.
-        </p>
+          {monthRecords.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Net Payable = (Gross Salary × Present+Leave Days / Working Days) −
+              Fixed Deductions. Approved leaves count as present. Half Day = 0.5
+              days.
+            </p>
+          )}
+        </div>
       )}
     </div>
   );

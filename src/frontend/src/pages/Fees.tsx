@@ -49,7 +49,7 @@ export default function Fees({ initialTab }: FeesProps) {
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
-            data-ocid={`fees-tab-${tab.id}`}
+            data-ocid={`fees.tab.${tab.id}`}
           >
             {tab.label}
           </button>

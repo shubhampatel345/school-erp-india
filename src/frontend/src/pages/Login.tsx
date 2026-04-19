@@ -11,8 +11,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
-import { backendLogin, isApiConfigured, setJwt } from "../utils/api";
-import { syncEngine } from "../utils/syncEngine";
 
 export default function Login() {
   const { login } = useApp();
@@ -29,28 +27,16 @@ export default function Login() {
     setLoading(true);
 
     try {
-      // If API is configured, try backend login first to get JWT
-      if (isApiConfigured()) {
-        const result = await backendLogin(username.trim(), password.trim());
-        if (result.success && result.token) {
-          setJwt(result.token);
-          syncEngine.setToken(result.token);
-        }
-      }
-
-      // Local credential check (validates role, loads user state)
-      const ok = login(username.trim(), password.trim());
+      // login() checks local credentials first, then falls back to the server API.
+      // It handles JWT storage and dispatch internally.
+      const ok = await login(username.trim(), password.trim());
       if (!ok) {
         setError(
           "Invalid username or password. Please check your credentials and try again.",
         );
       }
     } catch {
-      // Backend unavailable — fall back to local credentials only
-      const ok = login(username.trim(), password.trim());
-      if (!ok) {
-        setError("Invalid username or password.");
-      }
+      setError("Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -83,10 +69,10 @@ export default function Login() {
             className="text-3xl font-bold tracking-tight"
             style={{ fontFamily: "var(--font-display)", color: "white" }}
           >
-            SHUBH SCHOOL ERP
+            SCHOOL LEDGER ERP
           </h1>
           <p style={{ color: "oklch(1 0 0 / 0.55)" }} className="mt-1 text-sm">
-            Comprehensive School Management System
+            Complete School Management System
           </p>
         </div>
 
@@ -357,7 +343,7 @@ export default function Login() {
           className="text-center text-xs mt-5"
           style={{ color: "oklch(1 0 0 / 0.25)" }}
         >
-          © {new Date().getFullYear()} SHUBH SCHOOL ERP. All rights reserved.
+          © {new Date().getFullYear()} SCHOOL LEDGER ERP. All rights reserved.
         </p>
       </div>
     </div>

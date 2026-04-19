@@ -44,7 +44,14 @@ function downloadCSV(filename: string, rows: string[][]): void {
   URL.revokeObjectURL(url);
 }
 
-const HEADS = [
+interface ExpenseHead {
+  id: string;
+  name: string;
+  type: "income" | "expense";
+  monthlyBudget: number;
+}
+
+const DEFAULT_HEADS: string[] = [
   "Salary",
   "Utilities",
   "Maintenance",
@@ -52,23 +59,28 @@ const HEADS = [
   "Food",
   "Transport",
   "Events",
+  "Fees Income",
   "Other",
 ];
 
-interface ExpenseForm {
-  head: string;
+interface EntryForm {
+  headId: string;
+  headName: string;
   amount: string;
   date: string;
   description: string;
   type: "income" | "expense";
+  paymentMode: "Cash" | "Cheque" | "Online";
 }
 
-const EMPTY: ExpenseForm = {
-  head: "",
+const EMPTY_ENTRY: EntryForm = {
+  headId: "",
+  headName: "",
   amount: "",
-  date: "",
+  date: new Date().toISOString().split("T")[0],
   description: "",
   type: "expense",
+  paymentMode: "Cash",
 };
 
 function BarChartSimple({
@@ -85,16 +97,16 @@ function BarChartSimple({
           <div className="w-full flex gap-0.5 items-end h-28">
             <div
               className="flex-1 rounded-t bg-green-400"
-              style={{ height: `${(d.income / max) * 100}px` }}
+              style={{ height: `${(d.income / max) * 100}%` }}
               title={`Income: ${formatCurrency(d.income)}`}
             />
             <div
               className="flex-1 rounded-t bg-red-400"
-              style={{ height: `${(d.expense / max) * 100}px` }}
+              style={{ height: `${(d.expense / max) * 100}%` }}
               title={`Expense: ${formatCurrency(d.expense)}`}
             />
           </div>
-          <span className="text-xs text-muted-foreground truncate w-full text-center">
+          <span className="text-[10px] text-muted-foreground truncate w-full text-center">
             {d.label}
           </span>
         </div>
@@ -103,131 +115,90 @@ function BarChartSimple({
   );
 }
 
-function EntryForm({
-  type,
-  initial,
-  onSave,
-  onClose,
-}: {
-  type: "income" | "expense";
-  initial?: Partial<ExpenseForm>;
-  onSave: (f: ExpenseForm) => void;
-  onClose: () => void;
-}) {
-  const [form, setForm] = useState<ExpenseForm>({ ...EMPTY, type, ...initial });
-  const set = (k: keyof ExpenseForm, v: string) =>
-    setForm((f) => ({ ...f, [k]: v }));
-
-  return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Category/Head *</Label>
-          <Select value={form.head} onValueChange={(v) => set("head", v)}>
-            <SelectTrigger data-ocid="expenses.form.head_select">
-              <SelectValue placeholder="Select head" />
-            </SelectTrigger>
-            <SelectContent>
-              {HEADS.map((h) => (
-                <SelectItem key={h} value={h}>
-                  {h}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Amount (₹) *</Label>
-          <Input
-            type="number"
-            value={form.amount}
-            onChange={(e) => set("amount", e.target.value)}
-            placeholder="0"
-            data-ocid="expenses.form.amount_input"
-          />
-        </div>
-        <div>
-          <Label>Date *</Label>
-          <Input
-            type="date"
-            value={form.date}
-            onChange={(e) => set("date", e.target.value)}
-          />
-        </div>
-        <div>
-          <Label>Description</Label>
-          <Input
-            value={form.description}
-            onChange={(e) => set("description", e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="flex gap-2 justify-end pt-2">
-        <Button
-          variant="outline"
-          onClick={onClose}
-          data-ocid="expenses.form.cancel_button"
-        >
-          Cancel
-        </Button>
-        <Button
-          onClick={() => {
-            if (!form.head || !form.amount || !form.date) return;
-            onSave(form);
-          }}
-          data-ocid="expenses.form.submit_button"
-        >
-          Save
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 export default function Expenses() {
   const { getData, saveData, updateData, deleteData, currentSession } =
     useApp();
   const allExpenses = getData("expenses") as Expense[];
+  const rawHeads = getData("expense_heads") as ExpenseHead[];
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editItem, setEditItem] = useState<Expense | null>(null);
   const [dialogType, setDialogType] = useState<"income" | "expense">("expense");
   const [search, setSearch] = useState("");
+  const [headFilter, setHeadFilter] = useState("all");
   const [budget, setBudget] = useState(50000);
 
+  // Head management
+  const [showHeadModal, setShowHeadModal] = useState(false);
+  const [editHeadId, setEditHeadId] = useState<string | null>(null);
+  const [headForm, setHeadForm] = useState({
+    name: "",
+    type: "expense" as "income" | "expense",
+    monthlyBudget: 0,
+  });
+
   const sessionId = currentSession?.id ?? "";
-  const expenses = allExpenses.filter(
-    (e) => !sessionId || e.sessionId === sessionId || !e.sessionId,
+
+  // Merge server heads with defaults
+  const heads: ExpenseHead[] = useMemo(() => {
+    if (rawHeads.length > 0) return rawHeads;
+    return DEFAULT_HEADS.map((name, i) => ({
+      id: `h${i}`,
+      name,
+      type: i < 7 ? "expense" : ("income" as "income" | "expense"),
+      monthlyBudget: 0,
+    }));
+  }, [rawHeads]);
+
+  const expenses = useMemo(
+    () =>
+      allExpenses.filter(
+        (e) => !sessionId || e.sessionId === sessionId || !e.sessionId,
+      ),
+    [allExpenses, sessionId],
   );
-  const incomeList = expenses.filter((e) => e.type === "income");
-  const expenseList = expenses.filter((e) => e.type === "expense");
+
+  const incomeList = useMemo(
+    () => expenses.filter((e) => e.type === "income"),
+    [expenses],
+  );
+  const expenseList = useMemo(
+    () => expenses.filter((e) => e.type === "expense"),
+    [expenses],
+  );
 
   const filteredExpenses = useMemo(() => {
     const q = search.toLowerCase();
     return expenseList.filter(
       (e) =>
-        e.description?.toLowerCase().includes(q) ||
-        e.category?.toLowerCase().includes(q),
+        (!q ||
+          (e.description ?? "").toLowerCase().includes(q) ||
+          (e.category ?? "").toLowerCase().includes(q)) &&
+        (headFilter === "all" || e.category === headFilter),
     );
-  }, [expenseList, search]);
+  }, [expenseList, search, headFilter]);
 
   const filteredIncome = useMemo(() => {
     const q = search.toLowerCase();
     return incomeList.filter(
       (e) =>
-        e.description?.toLowerCase().includes(q) ||
-        e.category?.toLowerCase().includes(q),
+        (!q ||
+          (e.description ?? "").toLowerCase().includes(q) ||
+          (e.category ?? "").toLowerCase().includes(q)) &&
+        (headFilter === "all" || e.category === headFilter),
     );
-  }, [incomeList, search]);
+  }, [incomeList, search, headFilter]);
 
   const monthlyData = useMemo(() => {
     return MONTHS.map((m) => {
+      const mMonth = m.slice(0, 3);
       const mExpenses = expenses.filter((e) => {
+        if (!e.date) return false;
         const d = new Date(e.date);
-        return d.toLocaleString("en-US", { month: "long" }) === m;
+        return d.toLocaleString("en-US", { month: "short" }) === mMonth;
       });
       return {
-        label: m.slice(0, 3),
+        label: mMonth,
         income: mExpenses
           .filter((e) => e.type === "income")
           .reduce((s, e) => s + e.amount, 0),
@@ -238,8 +209,27 @@ export default function Expenses() {
     });
   }, [expenses]);
 
-  const totalIncome = incomeList.reduce((s, e) => s + e.amount, 0);
-  const totalExpense = expenseList.reduce((s, e) => s + e.amount, 0);
+  const headBreakdown = useMemo(() => {
+    const map: Record<string, { income: number; expense: number }> = {};
+    for (const e of expenses) {
+      const h = e.category ?? "Other";
+      if (!map[h]) map[h] = { income: 0, expense: 0 };
+      if (e.type === "income") map[h].income += e.amount;
+      else map[h].expense += e.amount;
+    }
+    return Object.entries(map)
+      .map(([name, v]) => ({ name, ...v }))
+      .sort((a, b) => b.expense - a.expense);
+  }, [expenses]);
+
+  const totalIncome = useMemo(
+    () => incomeList.reduce((s, e) => s + e.amount, 0),
+    [incomeList],
+  );
+  const totalExpense = useMemo(
+    () => expenseList.reduce((s, e) => s + e.amount, 0),
+    [expenseList],
+  );
   const net = totalIncome - totalExpense;
 
   const openAdd = (type: "income" | "expense") => {
@@ -248,14 +238,40 @@ export default function Expenses() {
     setDialogOpen(true);
   };
 
-  const handleSave = async (form: ExpenseForm) => {
+  const [entryForm, setEntryForm] = useState<EntryForm>(EMPTY_ENTRY);
+  const setField = (k: keyof EntryForm, v: string) =>
+    setEntryForm((f) => ({ ...f, [k]: v }));
+
+  const handleOpenDialog = (type: "income" | "expense", item?: Expense) => {
+    setDialogType(type);
+    if (item) {
+      setEditItem(item);
+      setEntryForm({
+        headId: "",
+        headName: item.category ?? "",
+        amount: String(item.amount),
+        date: item.date,
+        description: item.description ?? "",
+        type: item.type,
+        paymentMode: (item.paymentMode as EntryForm["paymentMode"]) ?? "Cash",
+      });
+    } else {
+      setEditItem(null);
+      setEntryForm({ ...EMPTY_ENTRY, type });
+    }
+    setDialogOpen(true);
+  };
+
+  const handleSave = async () => {
+    if (!entryForm.headName || !entryForm.amount || !entryForm.date) return;
     const record: Record<string, unknown> = {
-      date: form.date,
-      description: form.description,
-      category: form.head,
-      amount: Number(form.amount),
-      type: form.type,
-      sessionId: sessionId,
+      date: entryForm.date,
+      description: entryForm.description,
+      category: entryForm.headName,
+      amount: Number(entryForm.amount),
+      type: entryForm.type,
+      paymentMode: entryForm.paymentMode,
+      sessionId,
     };
     if (editItem) {
       await updateData("expenses", editItem.id, record);
@@ -272,13 +288,25 @@ export default function Expenses() {
     await deleteData("expenses", id);
   };
 
-  const exportCSV = (type: "income" | "expense") => {
-    const list = type === "expense" ? filteredExpenses : filteredIncome;
-    const rows = [
-      ["Date", "Category", "Description", "Amount (₹)"],
-      ...list.map((e) => [e.date, e.category, e.description, String(e.amount)]),
-    ];
-    downloadCSV(`${type}_report.csv`, rows);
+  // Head CRUD
+  const handleSaveHead = async () => {
+    if (!headForm.name.trim()) return;
+    if (editHeadId) {
+      await updateData("expense_heads", editHeadId, {
+        id: editHeadId,
+        ...headForm,
+      });
+    } else {
+      await saveData("expense_heads", {
+        id: generateId(),
+        ...headForm,
+      } as unknown as Record<string, unknown>);
+    }
+    setShowHeadModal(false);
+    setEditHeadId(null);
+  };
+  const handleDeleteHead = async (id: string) => {
+    await deleteData("expense_heads", id);
   };
 
   const EntryList = ({
@@ -289,7 +317,7 @@ export default function Expenses() {
       {list.length === 0 ? (
         <div
           className="py-12 text-center text-muted-foreground"
-          data-ocid={`expenses.${type}.empty_state`}
+          data-ocid={`expenses.${type}_empty_state`}
         >
           <BarChart2 className="w-8 h-8 mx-auto mb-2 opacity-30" />
           <p>No {type} entries yet</p>
@@ -299,17 +327,17 @@ export default function Expenses() {
           <div
             key={e.id}
             className="flex items-center justify-between px-3 py-2.5 rounded-lg border bg-card hover:bg-muted/30 transition-colors"
-            data-ocid={`expenses.${type}.item.${i + 1}`}
+            data-ocid={`expenses.${type}_item.${i + 1}`}
           >
             <div className="min-w-0">
               <p className="text-sm font-medium text-foreground truncate">
                 {e.description || e.category}
               </p>
               <p className="text-xs text-muted-foreground">
-                {e.date} • {e.category}
+                {e.date} · {e.category} · {e.paymentMode ?? "Cash"}
               </p>
             </div>
-            <div className="flex items-center gap-2 ml-2">
+            <div className="flex items-center gap-2 ml-2 shrink-0">
               <span
                 className={`font-mono font-semibold text-sm ${type === "income" ? "text-green-700" : "text-red-600"}`}
               >
@@ -319,11 +347,7 @@ export default function Expenses() {
                 size="icon"
                 variant="ghost"
                 className="h-7 w-7"
-                onClick={() => {
-                  setEditItem(e);
-                  setDialogType(type);
-                  setDialogOpen(true);
-                }}
+                onClick={() => handleOpenDialog(type, e)}
                 data-ocid={`expenses.edit_button.${i + 1}`}
               >
                 <Edit2 className="w-3.5 h-3.5" />
@@ -358,9 +382,7 @@ export default function Expenses() {
       <div className="grid grid-cols-3 gap-3">
         <Card>
           <CardContent className="pt-4 pb-3 text-center">
-            <div className="flex items-center justify-center gap-1 mb-1 text-green-600">
-              <TrendingUp className="w-4 h-4" />
-            </div>
+            <TrendingUp className="w-4 h-4 mx-auto mb-1 text-green-600" />
             <p className="text-xl font-bold font-mono text-green-700">
               {formatCurrency(totalIncome)}
             </p>
@@ -369,9 +391,7 @@ export default function Expenses() {
         </Card>
         <Card>
           <CardContent className="pt-4 pb-3 text-center">
-            <div className="flex items-center justify-center gap-1 mb-1 text-red-600">
-              <TrendingDown className="w-4 h-4" />
-            </div>
+            <TrendingDown className="w-4 h-4 mx-auto mb-1 text-red-600" />
             <p className="text-xl font-bold font-mono text-red-600">
               {formatCurrency(totalExpense)}
             </p>
@@ -400,8 +420,11 @@ export default function Expenses() {
           <TabsTrigger value="income" data-ocid="income.tab">
             Income
           </TabsTrigger>
-          <TabsTrigger value="summary" data-ocid="summary.tab">
-            Summary
+          <TabsTrigger value="heads" data-ocid="expense_heads.tab">
+            Heads
+          </TabsTrigger>
+          <TabsTrigger value="report" data-ocid="expense_report.tab">
+            Monthly Report
           </TabsTrigger>
         </TabsList>
 
@@ -414,19 +437,47 @@ export default function Expenses() {
               className="max-w-xs"
               data-ocid="expenses.search_input"
             />
+            <Select value={headFilter} onValueChange={setHeadFilter}>
+              <SelectTrigger className="w-36">
+                <SelectValue placeholder="All heads" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Heads</SelectItem>
+                {heads
+                  .filter((h) => h.type === "expense")
+                  .map((h) => (
+                    <SelectItem key={h.id} value={h.name}>
+                      {h.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
             <Button
               onClick={() => openAdd("expense")}
               data-ocid="expenses.add_button"
             >
-              <PlusCircle className="w-4 h-4 mr-1" /> Add Expense
+              <PlusCircle className="w-4 h-4 mr-1" />
+              Add Expense
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => exportCSV("expense")}
+              onClick={() =>
+                downloadCSV("expenses.csv", [
+                  ["Date", "Category", "Description", "Amount", "Mode"],
+                  ...filteredExpenses.map((e) => [
+                    e.date,
+                    e.category,
+                    e.description ?? "",
+                    String(e.amount),
+                    e.paymentMode ?? "",
+                  ]),
+                ])
+              }
               data-ocid="expenses.export_button"
             >
-              <Download className="w-4 h-4 mr-1" /> Export
+              <Download className="w-4 h-4 mr-1" />
+              Export
             </Button>
           </div>
           <EntryList list={filteredExpenses} type="expense" />
@@ -445,39 +496,190 @@ export default function Expenses() {
               onClick={() => openAdd("income")}
               data-ocid="income.add_button"
             >
-              <PlusCircle className="w-4 h-4 mr-1" /> Add Income
+              <PlusCircle className="w-4 h-4 mr-1" />
+              Add Income
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => exportCSV("income")}
+              onClick={() =>
+                downloadCSV("income.csv", [
+                  ["Date", "Category", "Description", "Amount", "Mode"],
+                  ...filteredIncome.map((e) => [
+                    e.date,
+                    e.category,
+                    e.description ?? "",
+                    String(e.amount),
+                    e.paymentMode ?? "",
+                  ]),
+                ])
+              }
               data-ocid="income.export_button"
             >
-              <Download className="w-4 h-4 mr-1" /> Export
+              <Download className="w-4 h-4 mr-1" />
+              Export
             </Button>
           </div>
           <EntryList list={filteredIncome} type="income" />
         </TabsContent>
 
-        <TabsContent value="summary" className="mt-4 space-y-4">
+        <TabsContent value="heads" className="mt-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-foreground">
+              Expense / Income Heads
+            </h3>
+            <Button
+              size="sm"
+              onClick={() => {
+                setHeadForm({ name: "", type: "expense", monthlyBudget: 0 });
+                setEditHeadId(null);
+                setShowHeadModal(true);
+              }}
+              data-ocid="expenses.add_head_button"
+            >
+              + Add Head
+            </Button>
+          </div>
+          {heads.length === 0 ? (
+            <p
+              className="text-muted-foreground text-sm py-8 text-center"
+              data-ocid="expenses.heads_empty_state"
+            >
+              No heads yet.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    {["Head Name", "Type", "Monthly Budget", "Actions"].map(
+                      (h) => (
+                        <th
+                          key={h}
+                          className="px-4 py-3 text-left font-semibold text-muted-foreground"
+                        >
+                          {h}
+                        </th>
+                      ),
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {heads.map((h, idx) => (
+                    <tr
+                      key={h.id}
+                      className="border-t border-border hover:bg-muted/30"
+                      data-ocid={`expenses.head.${idx + 1}`}
+                    >
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {h.name}
+                      </td>
+                      <td className="px-4 py-3">
+                        <Badge
+                          variant={
+                            h.type === "income" ? "default" : "secondary"
+                          }
+                        >
+                          {h.type}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        {h.monthlyBudget > 0
+                          ? formatCurrency(h.monthlyBudget)
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setHeadForm({
+                                name: h.name,
+                                type: h.type,
+                                monthlyBudget: h.monthlyBudget,
+                              });
+                              setEditHeadId(h.id);
+                              setShowHeadModal(true);
+                            }}
+                            data-ocid={`expenses.edit_head_button.${idx + 1}`}
+                          >
+                            Edit
+                          </Button>
+                          <Button
+                            variant="destructive"
+                            size="sm"
+                            onClick={() => handleDeleteHead(h.id)}
+                            data-ocid={`expenses.delete_head_button.${idx + 1}`}
+                          >
+                            Delete
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="report" className="mt-4 space-y-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <BarChart2 className="w-4 h-4" /> Monthly Income vs Expense
+                <BarChart2 className="w-4 h-4" />
+                Monthly Income vs Expense
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex gap-4 text-xs mb-2">
                 <span className="flex items-center gap-1">
-                  <span className="w-3 h-3 rounded-sm bg-green-400 inline-block" />{" "}
+                  <span className="w-3 h-3 rounded-sm bg-green-400 inline-block" />
                   Income
                 </span>
                 <span className="flex items-center gap-1">
-                  <span className="w-3 h-3 rounded-sm bg-red-400 inline-block" />{" "}
+                  <span className="w-3 h-3 rounded-sm bg-red-400 inline-block" />
                   Expense
                 </span>
               </div>
               <BarChartSimple data={monthlyData} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-semibold">
+                Head-wise Breakdown
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {headBreakdown.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No data yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {headBreakdown.map((h) => (
+                    <div
+                      key={h.name}
+                      className="flex items-center gap-3 text-sm"
+                    >
+                      <span className="w-32 truncate font-medium text-foreground">
+                        {h.name}
+                      </span>
+                      {h.income > 0 && (
+                        <span className="text-green-700 font-mono">
+                          {formatCurrency(h.income)}
+                        </span>
+                      )}
+                      {h.expense > 0 && (
+                        <span className="text-red-600 font-mono">
+                          -{formatCurrency(h.expense)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -534,7 +736,7 @@ export default function Expenses() {
                       className={`text-xs mt-1 ${pct >= 100 ? "text-destructive" : "text-muted-foreground"}`}
                     >
                       {pct}% of budget used
-                      {pct >= 100 && " — Budget exceeded!"}
+                      {pct >= 100 ? " — Budget exceeded!" : ""}
                     </p>
                   </div>
                 );
@@ -544,6 +746,7 @@ export default function Expenses() {
         </TabsContent>
       </Tabs>
 
+      {/* Add/Edit Entry Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-ocid="expenses.dialog">
           <DialogHeader>
@@ -555,27 +758,179 @@ export default function Expenses() {
                   : "Add Income"}
             </DialogTitle>
           </DialogHeader>
-          <EntryForm
-            type={dialogType}
-            initial={
-              editItem
-                ? {
-                    head: editItem.category,
-                    amount: String(editItem.amount),
-                    date: editItem.date,
-                    description: editItem.description,
-                    type: editItem.type,
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Head / Category *</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={entryForm.headName}
+                  onChange={(e) => setField("headName", e.target.value)}
+                  data-ocid="expenses.form_head_select"
+                >
+                  <option value="">— Select Head —</option>
+                  {heads
+                    .filter((h) => !dialogType || h.type === dialogType)
+                    .map((h) => (
+                      <option key={h.id} value={h.name}>
+                        {h.name}
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <Label>Amount (₹) *</Label>
+                <Input
+                  type="number"
+                  value={entryForm.amount}
+                  onChange={(e) => setField("amount", e.target.value)}
+                  placeholder="0"
+                  data-ocid="expenses.form_amount_input"
+                />
+              </div>
+              <div>
+                <Label>Date *</Label>
+                <Input
+                  type="date"
+                  value={entryForm.date}
+                  onChange={(e) => setField("date", e.target.value)}
+                />
+              </div>
+              <div>
+                <Label>Payment Mode</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={entryForm.paymentMode}
+                  onChange={(e) =>
+                    setField(
+                      "paymentMode",
+                      e.target.value as EntryForm["paymentMode"],
+                    )
                   }
-                : { type: dialogType }
-            }
-            onSave={handleSave}
-            onClose={() => {
-              setDialogOpen(false);
-              setEditItem(null);
-            }}
-          />
+                >
+                  {["Cash", "Cheque", "Online"].map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="col-span-2">
+                <Label>Description</Label>
+                <Input
+                  value={entryForm.description}
+                  onChange={(e) => setField("description", e.target.value)}
+                  data-ocid="expenses.form_description_input"
+                />
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDialogOpen(false);
+                  setEditItem(null);
+                }}
+                data-ocid="expenses.form_cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSave}
+                data-ocid="expenses.form_submit_button"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
+
+      {/* Head Modal */}
+      {showHeadModal && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <Card className="w-full max-w-sm shadow-elevated animate-slide-up">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-base">
+                {editHeadId ? "Edit Head" : "Add Head"}
+              </CardTitle>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowHeadModal(false);
+                  setEditHeadId(null);
+                }}
+                className="text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label>Head Name *</Label>
+                <Input
+                  value={headForm.name}
+                  onChange={(e) =>
+                    setHeadForm((f) => ({ ...f, name: e.target.value }))
+                  }
+                  placeholder="e.g. Salary"
+                  data-ocid="expenses.head_name_input"
+                />
+              </div>
+              <div>
+                <Label>Type</Label>
+                <select
+                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                  value={headForm.type}
+                  onChange={(e) =>
+                    setHeadForm((f) => ({
+                      ...f,
+                      type: e.target.value as "income" | "expense",
+                    }))
+                  }
+                >
+                  <option value="expense">Expense</option>
+                  <option value="income">Income</option>
+                </select>
+              </div>
+              <div>
+                <Label>Monthly Budget (₹)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  value={headForm.monthlyBudget || ""}
+                  onChange={(e) =>
+                    setHeadForm((f) => ({
+                      ...f,
+                      monthlyBudget: Number(e.target.value),
+                    }))
+                  }
+                  placeholder="0 = no budget"
+                />
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  onClick={handleSaveHead}
+                  data-ocid="expenses.head_save_button"
+                >
+                  Save
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowHeadModal(false);
+                    setEditHeadId(null);
+                  }}
+                  data-ocid="expenses.head_cancel_button"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

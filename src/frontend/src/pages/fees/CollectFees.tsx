@@ -221,7 +221,7 @@ function LabelValue({
   label,
   value,
   red,
-}: { label: string; value: string; red?: boolean }) {
+}: { label: string; value: string | undefined; red?: boolean }) {
   return (
     <div className="flex flex-col min-w-0">
       <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider leading-tight">
@@ -302,12 +302,13 @@ export default function CollectFees() {
     currentUser?.role === "accountant";
 
   // All data from context — already fetched from server
+  // Collection keys MUST match server MySQL table names (snake_case)
   const allStudents = (getData("students") as Student[]).filter(
     (s) => s.status === "active",
   );
-  const allReceipts = getData("feeReceipts") as FeeReceipt[];
-  const allHeadings = getData("feeHeadings") as FeeHeading[];
-  const allPlans = getData("feesPlans") as FeesPlan[];
+  const allReceipts = getData("fee_receipts") as FeeReceipt[];
+  const allHeadings = getData("fee_headings") as FeeHeading[];
+  const allPlans = getData("fees_plan") as FeesPlan[];
 
   // ── Receipt number from existing receipts ─────────────────────────────────
   const nextReceiptNo = (): string => {
@@ -659,14 +660,14 @@ export default function CollectFees() {
       paidAmount: receiptAmt,
       balance: newBalance,
       paymentMode,
-      receivedBy: currentUser?.name ?? "Staff",
+      receivedBy: currentUser?.fullName ?? currentUser?.name ?? "Staff",
       receivedByRole: currentUser?.position ?? currentUser?.role ?? "admin",
       sessionId: currentSession.id,
       template: 4,
     };
 
     await saveData(
-      "feeReceipts",
+      "fee_receipts",
       receipt as unknown as Record<string, unknown>,
     );
     addNotification(
@@ -714,7 +715,7 @@ export default function CollectFees() {
   async function handleDeleteReceipt(receiptId: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-    await deleteData("feeReceipts", receiptId);
+    await deleteData("fee_receipts", receiptId);
     if (selectedStudent) loadStudentFees(selectedStudent);
     addNotification("Receipt deleted", "info");
   }
@@ -797,7 +798,7 @@ export default function CollectFees() {
         : [];
     const newBalance = editState.paidAmount - newTotal;
 
-    await updateData("feeReceipts", editState.receiptId, {
+    await updateData("fee_receipts", editState.receiptId, {
       date: editState.date,
       paymentMode: editState.paymentMode,
       items: newItems,

@@ -1,61 +1,70 @@
-# Design Brief — SHUBH SCHOOL ERP
+# SCHOOL LEDGER ERP — Design Brief
 
-**Concept:** Professional Indian school ERP with institutional credibility, trust-focused hierarchy, and mobile-first accessibility.
+**Concept:** Professional institutional authority for Indian school management — fast, clean, data-dense interface with dark navy primary + cyan accent.
 
-## Tone & Purpose
-Authoritative institutional design for educators, administrators, and parents managing school operations across student information, fees, attendance, and timetables. Dual light/dark themes support accessibility and personal preference.
+## Visual Direction
+Authoritative design for educators, admins, parents managing 20+ school operations (students, fees, attendance, HR, transport, inventory). Tone: trust-focused, modern SaaS premium. Context: Indian schools with INR ₹ currency, class structure Nursery→LKG→UKG→1–12, April–March session year. Dark sidebar reduces cognitive load during long admin sessions. Cyan accents highlight critical actions (fees due, mark attendance). No decoration — only functional visual hierarchy.
 
 ## Color Palette (OKLCH)
 
-| Token | Light | Dark | Usage |
-|-------|-------|------|-------|
-| Primary | L0.42 C0.18 H260 (Navy) | L0.72 C0.16 H260 (Light Navy) | CTAs, active states, section headers |
-| Accent | L0.58 C0.16 H150 (Teal/Cyan) | L0.65 C0.15 H150 (Bright Cyan) | Highlights, badges, focus states |
-| Destructive | L0.58 C0.22 H25 (Red) | L0.68 C0.19 H25 (Light Red) | Warnings, delete actions |
-| Background | L0.98 C0.008 H260 (Off-white) | L0.12 C0.01 H260 (Navy-black) | Page canvas |
-| Card | L0.99 C0.004 H260 (Pure white) | L0.16 C0.012 H260 (Navy-grey) | Contained sections, modules |
-| Sidebar | — | L0.14 C0.012 H260 (Dark Navy) | Left navigation bar |
+| Token | Light | Dark | Purpose |
+|-------|-------|------|---------|
+| **Primary** | L0.3 C0.12 H260 (Navy) | L0.72 C0.14 H260 (Light Navy) | CTAs, headers, active states, sidebar links |
+| **Accent** | L0.55 C0.14 H200 (Cyan/Teal) | L0.65 C0.15 H200 (Bright Cyan) | Highlights, badges, action emphasis, tab focus |
+| **Success** | L0.55 C0.18 H142 (Green) | L0.7 C0.16 H142 (Light Green) | Fees paid, attendance present, positive status |
+| **Warning** | L0.68 C0.18 H70 (Amber) | L0.72 C0.15 H70 (Gold) | Fees due, absent, cautions, alerts |
+| **Destructive** | L0.56 C0.22 H25 (Red) | L0.68 C0.2 H25 (Light Red) | Discontinue, delete, critical actions |
+| **Background** | L0.98 C0.006 H260 (Off-white) | L0.12 C0.01 H260 (Navy-black) | Canvas, page background |
+| **Card** | L1 C0 H0 (Pure white) | L0.16 C0.012 H260 (Navy-grey) | Modules, data sections, forms |
+| **Sidebar** | — | L0.1 C0.04 H260 (Deep Navy) | Left navigation, always dark |
 
 ## Typography
-- **Display:** Space Grotesk (bold, geometric, leadership messaging)
-- **Body:** Plus Jakarta Sans (warm, accessible, readable at all sizes)
-- **Mono:** JetBrains Mono (code, receipt numbers, structured data)
-- **Hierarchy:** Display-lg (32/40px), Display-md (28/32px), Text-base (16px), Text-sm (14px), Label (12px)
+- **Display:** Space Grotesk — bold geometric geometric; section headers, module titles, leadership messaging
+- **Body:** Plus Jakarta Sans — warm, accessible, readable at 14px–16px; all prose, forms, tables, UI copy
+- **Mono:** JetBrains Mono — receipt numbers, transaction IDs, data codes, structured ledger entries
+- **Hierarchy:** 40px/Display-lg (hero), 32px/Display-md (section), 18px/Text-base (body), 14px/Text-sm (detail), 12px/Label (inline info)
 
 ## Structural Zones
 
-| Zone | Light | Dark | Details |
-|------|-------|------|---------|
-| Header | bg-card border-b border-border | bg-card border-b border-sidebar-border | Session switcher, user menu, logo |
-| Sidebar | — | bg-sidebar text-sidebar-foreground | Navigation, modules, teal accent links |
-| Content | bg-background | bg-background | Main module grid, cards, forms |
-| Cards | bg-card shadow-card | bg-card shadow-card | Modules, data tables, input groups |
-| Footer | bg-muted/30 border-t border-border | bg-muted/30 border-t border-sidebar-border | Inline help, legal links |
+| Zone | Light | Dark | Treatment |
+|------|-------|------|-----------|
+| **Header** | bg-card border-b-1 border-border | bg-card border-b-1 border-sidebar-border | Session, search, user menu. Elevation: shadow-card |
+| **Sidebar** | hidden | bg-sidebar text-sidebar-foreground, teal accent links | Left nav, collapsible on mobile. Z-index 30. Sticky. |
+| **Content** | bg-background | bg-background | Main module area. Padding 24px mobile / 32px desktop. |
+| **Card sections** | bg-card shadow-card rounded-md | bg-card shadow-card rounded-md | Modules, grids, student info. Padding 16–24px. Gaps 24px. |
+| **Footer** | bg-muted/30 border-t border-border | bg-muted/30 border-t border-sidebar-border | Legal, help links. Padding 16px. |
 
-## Spacing & Rhythm
-Fluid density: 8px base unit with 1rem (16px) section gutters. Cards use 16–24px internal padding. Tight form groups (8px gap), loose section gaps (24px). Mobile-first: full-width cards with 16px edge margin; 768px+ flex grid.
+## Spacing & Density
+8px base unit. Sections: 24px gutters. Card internal: 16–24px. Form rows: 12px gap. Mobile-first: 16px edge margin on cards; 768px+: flex 2–3 col grid. Tables: 12px row height, 8px cell padding. Compact hierarchy for data-heavy interfaces (20+ modules, student grids with 1000s of rows).
 
 ## Component Patterns
-- **Buttons:** Navy primary (fill), teal accent (secondary), minimal destructive. Rounded 6px, 8–12px padding, 14px font.
-- **Forms:** Subtle input borders (0.5px), light focus ring in primary color, inline error labels in destructive red.
-- **Tables:** Striped rows with muted alternation, sticky headers, action icons in accent color.
-- **Modals:** Elevated shadow, scrim overlay (rgba 0 0 0 / 20%), smooth slide-up animation.
+- **Buttons:** Navy bg (`--primary`), white text; teal accent (`--secondary`); destructive red. Rounded 6px. 8–12px padding. 14px font. Smooth transition. No shadow.
+- **Forms:** 1px input borders (`--input`), focus ring in primary, error text in destructive. Placeholder: muted-foreground.
+- **Tables:** Alternating row bg (card/muted), sticky headers, action icons in accent. Striped for visual separation.
+- **Badges/Pills:** Inline status (fees paid: green, due: amber, absent: red). Rounded-full, 8px padding, 12px font.
+- **Modals:** bg-popover, scrim (rgba 0 0 0 / 20%), shadow-elevated, slide-up 250ms ease-out.
+- **Mobile nav:** Fixed bottom, 5 tabs (icon + label), unread red pill badges, safe-area-inset-bottom padding.
 
-## Motion Choreography
-Default smooth transition: 300ms cubic-bezier(0.4, 0, 0.2, 1). Fade-in on page load, slide-up on modals, pulse-soft for live indicators. No bounce or elastic easing.
+## Motion & Animation
+- Default: all 250ms cubic-bezier(0.4, 0, 0.2, 1)
+- Page load: fade-in 250ms
+- Modals/drawers: slide-up 250ms
+- Status indicators: pulse-soft 2s infinite (green sync checkmark, pending badges)
+- No bounce, no elastic, no scatter. Orchestrated, intentional choreography.
 
 ## Signature Detail
-**Navy sidebar with teal-cyan accent links** creates a modern, distinctive institutional aesthetic. Teal button accents and badge highlights provide visual relief and draw attention to critical actions (fees due, mark attendance). Combined with clean typography and subtle shadows, this establishes a premium SaaS aesthetic for school management.
+**Dark navy sidebar + cyan-accented links** creates institutional authority and visual separation from light content area. Cyan badges on fees due, green checkmarks on sync, amber warnings on absences — color-coded status without iconography. Combined with tight spacing, monospace transaction numbers, and subtle shadows, this aesthetic signals premium SaaS for educational data stewardship.
 
 ## Differentiation
-Unlike generic admin dashboards (grey-blue-white), SHUBH uses a bold navy primary backed by teal accents. The sidebar is intentionally dark to create visual separation and reduce cognitive load for long-session users. This aesthetic signals professionalism and trustworthiness appropriate for educational institutions managing sensitive student/financial data.
+Rejects generic admin dashboards (grey-blue-white uniformity). Navy primary + cyan accent + success/warning colors create a distinctive, purpose-built visual system for schools. Dark sidebar enforces focus, reduces fatigue. Structured spacing and typography hierarchy support data-dense UIs (1184 students, 36 staff, 20+ modules). Result: professional, fast, trustworthy — appropriate for institutions managing sensitive student/financial records.
 
 ## Constraints & Rules
-- **No color mixing:** All colors use OKLCH values in CSS variables; no hex literals or arbitrary color classes.
-- **Dark mode parity:** All light-mode tokens have dark-mode equivalents with maintained contrast ratios.
-- **Mobile-first:** All breakpoints scale from 320px (mobile) to 1920px (desktop).
-- **Accessibility:** WCAG AA+ contrast on all text; minimum 44px touch targets; focus rings visible on keyboard navigation.
-- **PWA ready:** System fonts fall back gracefully; all bundled fonts load via font-display: swap.
+- **OKLCH only:** All colors via `oklch(var(--token))`. No hex, no `rgb()`, no arbitrary colors.
+- **Dark mode parity:** Every light token has dark equivalent; contrast ≥ 0.7 L-difference.
+- **Mobile-first:** 320px → 1920px responsive. Sidebar hidden mobile, drawer on tap.
+- **Accessibility:** WCAG AA+ contrast, 44px min touch, visible focus rings, reduced-motion support.
+- **Fonts:** Space Grotesk + Plus Jakarta Sans via bundled .woff2; JetBrains Mono for data. `font-display: swap` for PWA offline support.
+- **No gradients, no gloss:** Flat colors + precise layering + subtle shadows for depth.
 
 ## Chat System (WhatsApp-style)
 

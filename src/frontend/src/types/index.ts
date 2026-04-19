@@ -1,12 +1,10 @@
 // ──────────────────────────────────────────────────────────
-// SHUBH SCHOOL ERP — Complete Type Definitions
+// SCHOOL LEDGER ERP — Complete Type Definitions
 // All field names match PHP API camelCase MySQL columns
 // ──────────────────────────────────────────────────────────
 
 export interface MySQLRecord {
-  /** Numeric auto-increment PK from MySQL. Undefined in local mode. */
   dbId?: number;
-  /** ISO timestamp of last server sync. Undefined in local mode. */
   syncedAt?: string;
 }
 
@@ -21,10 +19,54 @@ export type UserRole =
   | "accountant"
   | "librarian";
 
+export const ROLES: UserRole[] = [
+  "superadmin",
+  "admin",
+  "receptionist",
+  "accountant",
+  "librarian",
+  "driver",
+  "teacher",
+  "parent",
+  "student",
+];
+
 export interface Credentials {
   username: string;
   password: string;
 }
+
+// ──────────────────────────────────────────────────────────
+// Users & Permissions
+// ──────────────────────────────────────────────────────────
+export interface AppUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  /** Preferred display name — use this in new code */
+  fullName?: string;
+  /** Primary display name field — kept for backward compatibility */
+  name: string;
+  mobile?: string;
+  email?: string;
+  studentId?: string;
+  staffId?: string;
+  position?: string;
+  isActive?: boolean;
+}
+
+/** Alias used by AppContext and SyncEngine */
+export type User = AppUser;
+
+export interface Permission {
+  module: string;
+  canView: boolean;
+  canAdd: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+}
+
+export type PermissionMatrix = Record<string, Permission>;
 
 // ──────────────────────────────────────────────────────────
 // Session
@@ -46,20 +88,22 @@ export interface Student extends MySQLRecord {
   id: string;
   admNo: string;
   fullName: string;
-  photo: string;
-  dob: string; // DD/MM/YYYY
+  photo?: string;
+  dob?: string; // DD/MM/YYYY
   gender: "Male" | "Female" | "Other";
   class: string;
   section: string;
-  category: string;
+  category?: string;
+  religion?: string;
+  bloodGroup?: string;
   fatherName: string;
   fatherMobile?: string;
-  motherName: string;
+  motherName?: string;
   motherMobile?: string;
   guardianName?: string;
   guardianMobile: string;
   mobile: string;
-  address: string;
+  address?: string;
   village?: string;
   aadhaarNo?: string;
   srNo?: string;
@@ -70,6 +114,7 @@ export interface Student extends MySQLRecord {
   status: "active" | "discontinued";
   leavingDate?: string;
   leavingReason?: string;
+  /** @deprecated Use leavingReason */
   leavingRemarks?: string;
   sessionId: string;
   transportId?: string;
@@ -78,7 +123,8 @@ export interface Student extends MySQLRecord {
   transportPickup?: string;
   transportMonths?: string[];
   createdAt?: string;
-  credentials: Credentials;
+  updatedAt?: string;
+  credentials?: Credentials;
   remarks?: string;
 }
 
@@ -95,23 +141,30 @@ export interface Staff extends MySQLRecord {
   id: string;
   empId: string;
   name: string;
-  fullName?: string; // alias kept for compatibility
+  fullName?: string;
   designation: string;
   department?: string;
   mobile: string;
-  dob: string; // DD/MM/YYYY
+  dob?: string;
   email?: string;
   address?: string;
+  village?: string;
   qualification?: string;
   joiningDate?: string;
   salary?: number;
+  baseSalary?: number;
   status?: "active" | "inactive";
   photo?: string;
-  subjects: SubjectAssignment[];
+  subjects?: SubjectAssignment[];
   sessionId?: string;
-  credentials: Credentials;
+  credentials?: Credentials;
   classTeacher?: { class: string; section: string };
   position?: string;
+  aadhaarNo?: string;
+  bankAccount?: string;
+  ifscCode?: string;
+  bankName?: string;
+  gender?: "Male" | "Female" | "Other";
 }
 
 export interface ClassTeacher {
@@ -127,9 +180,15 @@ export interface ClassTeacher {
 export interface FeeHeading {
   id: string;
   name: string;
-  months: string[]; // Indian academic months e.g. ['April','May']
+  months: string[];
   applicableClasses?: string[];
   amount: number;
+  accountId?: string;
+  accountName?: string;
+  headType?: "tuition" | "transport" | "other";
+  isActive?: boolean;
+  displayOrder?: number;
+  sessionId?: string;
 }
 
 export interface FeesPlan {
@@ -139,6 +198,8 @@ export interface FeesPlan {
   headingId: string;
   headingName: string;
   amount: number;
+  sessionId?: string;
+  amounts?: Record<string, number>;
 }
 
 export interface OtherCharge {
@@ -172,7 +233,7 @@ export interface FeeReceipt extends MySQLRecord {
   balance?: number;
   paymentMode: "Cash" | "Online" | "Cheque" | "DD" | "UPI";
   receivedBy: string;
-  receivedByRole: string;
+  receivedByRole?: string;
   sessionId: string;
   template?: 1 | 2 | 3 | 4;
   isDeleted?: boolean;
@@ -195,7 +256,6 @@ export interface DiscountEntry {
   amount: number;
   reason: string;
   sessionId: string;
-  /** headingIds + 'transport' that this discount applies to; empty/undefined = all fees (legacy) */
   applicableTo?: string[];
 }
 
@@ -204,15 +264,12 @@ export interface FeeAccount {
   name: string;
 }
 
-// ──────────────────────────────────────────────────────────
-// Old Fee Entry (manual previous-session dues)
-// ──────────────────────────────────────────────────────────
 export interface OldFeeEntry {
   id: string;
   studentId: string;
-  sessionLabel: string; // e.g. "2024-25"
-  month: string; // April … March
-  headingName: string; // fee heading name or "Other"
+  sessionLabel: string;
+  month: string;
+  headingName: string;
   amount: number;
   remarks?: string;
 }
@@ -228,12 +285,14 @@ export interface AttendanceRecord extends MySQLRecord {
   status: "Present" | "Absent" | "Late" | "Half Day";
   timeIn?: string;
   timeOut?: string;
-  markedBy: string;
+  markedBy?: string;
   type: "student" | "staff";
   method?: "manual" | "qr" | "rfid" | "essl";
   class?: string;
   section?: string;
   sessionId?: string;
+  admNo?: string;
+  studentName?: string;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -247,33 +306,6 @@ export interface Notification {
   isRead: boolean;
   icon?: string;
 }
-
-// ──────────────────────────────────────────────────────────
-// Users & Permissions
-// ──────────────────────────────────────────────────────────
-export interface AppUser {
-  id: string;
-  username: string;
-  role: UserRole;
-  name: string;
-  mobile?: string;
-  studentId?: string;
-  staffId?: string;
-  position?: string;
-}
-
-/** Alias used by AppContext and SyncEngine */
-export type User = AppUser;
-
-export interface Permission {
-  module: string;
-  canView: boolean;
-  canAdd: boolean;
-  canEdit: boolean;
-  canDelete: boolean;
-}
-
-export type PermissionMatrix = Record<string, Permission>;
 
 // ──────────────────────────────────────────────────────────
 // Sync Engine
@@ -337,10 +369,11 @@ export interface AllData {
 export interface ClassSection {
   id: string;
   className: string;
-  /** Legacy field — some server records may use 'name' instead of 'className' */
   name?: string;
   sections: string[];
   session?: string;
+  sessionId?: string;
+  displayOrder?: number;
 }
 
 export interface Subject {
@@ -348,6 +381,7 @@ export interface Subject {
   name: string;
   code?: string;
   classes: string[];
+  sessionId?: string;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -369,8 +403,9 @@ export interface TransportRoute {
   routeName: string;
   driverName: string;
   driverMobile: string;
-  pickupPoints: string[];
-  students: string[];
+  pickupPoints: string[] | RoutePickupPoint[];
+  students?: string[];
+  sessionId?: string;
 }
 
 export interface StudentTransport {
@@ -379,15 +414,17 @@ export interface StudentTransport {
   busNo: string;
   routeName: string;
   pickupPoint: string;
+  pickupPointId?: string;
   months?: string[];
+  monthlyFare?: number;
 }
 
 export interface RoutePickupPoint {
   id: string;
   stopName: string;
   order: number;
-  distance: string;
-  fare: number; // monthly fare for this pickup point
+  distance?: string;
+  fare: number;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -479,6 +516,8 @@ export interface InventoryItem {
   purchasePrice: number;
   sellPrice: number;
   unit: string;
+  storeLocation?: string;
+  description?: string;
 }
 
 export interface InventoryPurchase {
@@ -517,6 +556,9 @@ export interface Expense {
   amount: number;
   type: "income" | "expense";
   sessionId: string;
+  paymentMode?: "Cash" | "Cheque" | "Online";
+  headId?: string;
+  headName?: string;
 }
 
 export interface ExpenseHead {
@@ -538,6 +580,7 @@ export interface Homework {
   assignedBy: string;
   createdAt: string;
   sessionId?: string;
+  attachmentUrl?: string;
 }
 
 export interface HomeworkSubmission {
@@ -602,6 +645,45 @@ export interface SchoolProfile {
   pincode: string;
   bank?: BankDetails;
   backgroundImage?: string;
+  dashboardBackground?: string;
+}
+
+// ──────────────────────────────────────────────────────────
+// Payroll
+// ──────────────────────────────────────────────────────────
+export interface PayrollSetup {
+  id: string;
+  staffId: string;
+  empId: string;
+  staffName: string;
+  baseSalary: number;
+  hra: number;
+  da: number;
+  otherAllowance: number;
+  pf: number;
+  esi: number;
+  otherDeduction: number;
+  sessionId: string;
+}
+
+export interface Payslip {
+  id: string;
+  staffId: string;
+  empId: string;
+  staffName: string;
+  month: string;
+  year: number;
+  totalDays: number;
+  presentDays: number;
+  absentDays: number;
+  leaveDays: number;
+  grossSalary: number;
+  deductions: number;
+  netSalary: number;
+  isPaid: boolean;
+  paidDate?: string;
+  sessionId: string;
+  createdAt: string;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -654,8 +736,78 @@ export interface Call {
   id: string;
   from: string;
   to: string;
-  duration: number; // seconds
+  duration: number;
   timestamp: string;
   status: "completed" | "missed" | "rejected";
   direction: "inbound" | "outbound";
 }
+
+// ──────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────
+
+/** Class name ordering for Indian schools */
+export const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
+/** Indian academic year months (April start) */
+export const MONTHS = [
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];
+
+/** Full month names for display */
+export const MONTHS_FULL = [
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+  "January",
+  "February",
+  "March",
+];
+
+/** Transport months — 11 months auto-selected (June deselected) */
+export const DEFAULT_TRANSPORT_MONTHS = [
+  "Apr",
+  "May",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];

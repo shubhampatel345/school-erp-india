@@ -15,6 +15,7 @@ import {
   Edit2,
   Eye,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -26,8 +27,6 @@ import { useApp } from "../../context/AppContext";
 import type { Staff } from "../../types";
 import { generateId } from "../../utils/localStorage";
 import StaffForm from "./StaffForm";
-
-// ── Constants ─────────────────────────────────────────────
 
 interface Props {
   onNavigate?: (page: string) => void;
@@ -43,20 +42,20 @@ const DESIGNATIONS = [
   "Accountant",
   "Librarian",
   "Driver",
-  "Clerk",
   "Peon",
+  "Security",
+  "Cook",
   "Other",
 ];
 
 const DEPARTMENTS = [
   "All",
   "Teaching",
-  "Administration",
+  "Admin",
+  "Support",
   "Accounts",
   "Library",
   "Transport",
-  "Security",
-  "Housekeeping",
 ];
 
 const ALL_COLUMNS = [
@@ -66,9 +65,11 @@ const ALL_COLUMNS = [
   { id: "designation", label: "Designation" },
   { id: "department", label: "Department" },
   { id: "mobile", label: "Mobile" },
+  { id: "gender", label: "Gender" },
   { id: "email", label: "Email" },
   { id: "salary", label: "Salary" },
   { id: "joinDate", label: "Join Date" },
+  { id: "village", label: "Village" },
   { id: "status", label: "Status" },
 ] as const;
 
@@ -81,11 +82,12 @@ const DEFAULT_VISIBLE: ColId[] = [
   "designation",
   "department",
   "mobile",
+  "gender",
   "salary",
   "status",
 ];
 
-// ── Helpers ───────────────────────────────────────────────
+const PAGE_SIZE = 50;
 
 function autoEmpId(existing: Staff[]): string {
   const nums = existing
@@ -126,14 +128,13 @@ function StatusBadge({ status }: { status?: string }) {
   );
 }
 
-// ── Component ─────────────────────────────────────────────
-
 export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   const {
     getData,
     saveData,
     updateData,
     deleteData,
+    refreshCollection,
     addNotification,
     canWrite,
   } = useApp();
@@ -142,6 +143,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   const [filterDesignation, setFilterDesignation] = useState("All");
   const [filterDepartment, setFilterDepartment] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
+  const [filterGender, setFilterGender] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editStaff, setEditStaff] = useState<Staff | undefined>(undefined);
   const [viewStaff, setViewStaff] = useState<Staff | null>(null);
@@ -150,7 +152,23 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   );
   const [showColMenu, setShowColMenu] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [page, setPage] = useState(1);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Refresh from server on mount
+  useEffect(() => {
+    void (async () => {
+      setRefreshing(true);
+      try {
+        await refreshCollection("staff");
+      } catch {
+        // ignore — use cached data
+      } finally {
+        setRefreshing(false);
+      }
+    })();
+  }, [refreshCollection]);
 
   // Re-read from context on every render (reactive to data changes)
   const staff = (getData("staff") as Staff[]).map((s) => ({
@@ -159,7 +177,6 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   }));
 
   useEffect(() => {
-    // Close column menu when clicking outside
     function handleClick(e: MouseEvent) {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-colmenu]")) setShowColMenu(false);
@@ -186,8 +203,21 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
       (filterStatus === "active"
         ? (s.status ?? "active") === "active"
         : s.status === "inactive");
-    return matchSearch && matchDesig && matchDept && matchStatus;
+    const matchGender =
+      filterGender === "All" || (s.gender ?? "") === filterGender;
+    return matchSearch && matchDesig && matchDept && matchStatus && matchGender;
   });
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  // Reset page when filters change
+  const filterKey = `${search}|${filterDesignation}|${filterDepartment}|${filterStatus}|${filterGender}`;
+  const prevFilterKeyRef = useRef(filterKey);
+  if (prevFilterKeyRef.current !== filterKey) {
+    prevFilterKeyRef.current = filterKey;
+    setPage(1);
+  }
 
   // ── CRUD ──────────────────────────────────────────────────
 
@@ -204,7 +234,6 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
           );
           addNotification(`Staff updated: ${s.name}`, "success", "👤");
         } else {
-          // Auto-generate empId if missing
           const empId = s.empId?.trim() || autoEmpId(staff);
           await saveData("staff", {
             ...s,
@@ -243,33 +272,49 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     const headers = [
       "EmpID",
       "Name",
+      "Gender",
       "Designation",
       "Department",
       "Mobile",
+      "AltMobile",
       "DOB",
       "Email",
       "Address",
+      "Village",
       "Qualification",
       "JoiningDate",
-      "Salary",
+      "BaseSalary",
+      "AadhaarNo",
+      "BankAccount",
+      "IFSCCode",
+      "BankName",
       "Status",
     ];
     const rows = staff.map((s) => [
       s.empId ?? "",
       s.name ?? "",
+      s.gender ?? "",
       s.designation ?? "",
       s.department ?? "",
       s.mobile ?? "",
+      (s as unknown as { altMobile?: string }).altMobile ?? "",
       s.dob ?? "",
       s.email ?? "",
       (s.address ?? "").replace(/,/g, " "),
+      s.village ?? "",
       s.qualification ?? "",
       s.joiningDate ?? "",
-      String(s.salary ?? ""),
+      String(s.baseSalary ?? s.salary ?? ""),
+      s.aadhaarNo ?? "",
+      s.bankAccount ?? "",
+      s.ifscCode ?? "",
+      s.bankName ?? "",
       s.status ?? "active",
     ]);
     const csv = [headers, ...rows]
-      .map((r) => r.map((cell) => `"${cell}"`).join(","))
+      .map((r) =>
+        r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+      )
       .join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
@@ -286,51 +331,57 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     reader.onload = async (ev) => {
       try {
         const text = ev.target?.result as string;
-        const lines = text
-          .split("\n")
-          .slice(1)
-          .filter((l) => l.trim());
+        const lines = text.split("\n").filter((l) => l.trim());
+        if (lines.length < 2) {
+          alert("No valid data rows found.");
+          return;
+        }
 
-        const imported: Staff[] = lines.map((line) => {
+        // Parse header row to get column indices
+        const headerLine = lines[0];
+        const headers = headerLine
+          .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+          .map((h) => h.replace(/^"|"$/g, "").trim().toLowerCase());
+
+        const col = (name: string) => headers.indexOf(name.toLowerCase());
+
+        const imported: Staff[] = lines.slice(1).map((line) => {
           const cols = line
             .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
             .map((c) => c.replace(/^"|"$/g, "").trim());
 
-          const [
-            empIdRaw,
-            name,
-            designation,
-            department,
-            mobile,
-            dob,
-            email,
-            address,
-            qualification,
-            joiningDate,
-            salaryRaw,
-            status,
-          ] = cols;
+          const get = (name: string) => cols[col(name)] ?? "";
+          const mobile = get("Mobile");
+          const password = mobile || "password";
 
-          const password = mobile?.trim() ?? "";
           return {
             id: generateId(),
-            empId: empIdRaw?.trim() || autoEmpId(staff),
-            name: name?.trim() ?? "",
-            fullName: name?.trim() ?? "",
-            designation: designation?.trim() || "Other",
-            department: department?.trim() || undefined,
-            mobile: mobile?.trim() ?? "",
-            dob: dob ?? "",
-            email: email?.trim() || undefined,
-            address: address?.trim() || undefined,
-            qualification: qualification?.trim() || undefined,
-            joiningDate: joiningDate?.trim() || undefined,
-            salary: salaryRaw ? Number(salaryRaw) : undefined,
-            status: (status?.trim() === "inactive" ? "inactive" : "active") as
-              | "active"
-              | "inactive",
+            empId: get("EmpID").trim() || autoEmpId(staff),
+            name: get("Name").trim() ?? "",
+            fullName: get("Name").trim() ?? "",
+            gender: (get("Gender") as "Male" | "Female" | "Other") || undefined,
+            designation: get("Designation").trim() || "Other",
+            department: get("Department").trim() || undefined,
+            mobile: mobile,
+            dob: get("DOB") || undefined,
+            email: get("Email").trim() || undefined,
+            address: get("Address").trim() || undefined,
+            village: get("Village").trim() || undefined,
+            qualification: get("Qualification").trim() || undefined,
+            joiningDate: get("JoiningDate").trim() || undefined,
+            baseSalary: get("BaseSalary")
+              ? Number(get("BaseSalary"))
+              : undefined,
+            salary: get("BaseSalary") ? Number(get("BaseSalary")) : undefined,
+            aadhaarNo: get("AadhaarNo").trim() || undefined,
+            bankAccount: get("BankAccount").trim() || undefined,
+            ifscCode: get("IFSCCode").trim() || undefined,
+            bankName: get("BankName").trim() || undefined,
+            status: (get("Status").trim() === "inactive"
+              ? "inactive"
+              : "active") as "active" | "inactive",
             subjects: [],
-            credentials: { username: mobile?.trim() ?? "", password },
+            credentials: { username: mobile, password },
           };
         });
 
@@ -376,6 +427,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   // ── DETAIL VIEW ────────────────────────────────────────────
   if (viewStaff) {
     const current = staff.find((s) => s.id === viewStaff.id) ?? viewStaff;
+    const altMobile = (current as unknown as { altMobile?: string }).altMobile;
     return (
       <div className="p-4 lg:p-6 max-w-2xl mx-auto space-y-5">
         <div className="flex items-center justify-between">
@@ -407,14 +459,19 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               <h3 className="text-lg font-bold text-foreground">
                 {current.name}
               </h3>
-              <div className="flex items-center gap-2 mt-1">
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Badge variant="default" className="text-xs">
                   {current.designation}
                 </Badge>
                 <StatusBadge status={current.status} />
+                {current.gender && (
+                  <Badge variant="outline" className="text-xs">
+                    {current.gender}
+                  </Badge>
+                )}
               </div>
               <p className="text-sm text-muted-foreground mt-1">
-                {current.department}
+                {current.empId} · {current.department}
               </p>
             </div>
           </div>
@@ -424,23 +481,31 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               [
                 ["Emp ID", current.empId],
                 ["Mobile", current.mobile],
+                ["Alt Mobile", altMobile],
                 ["Email", current.email],
                 ["Date of Birth", current.dob],
                 ["Joining Date", current.joiningDate],
                 ["Qualification", current.qualification],
+                ["Village", current.village],
+                ["Address", current.address],
+                ["Aadhaar No.", current.aadhaarNo],
+                ["Bank Account", current.bankAccount],
+                ["IFSC Code", current.ifscCode],
+                ["Bank Name", current.bankName],
                 [
-                  "Net Salary",
-                  current.salary
-                    ? `₹${current.salary.toLocaleString("en-IN")}`
+                  "Base Salary",
+                  (current.baseSalary ?? current.salary)
+                    ? `₹${(current.baseSalary ?? current.salary ?? 0).toLocaleString("en-IN")}`
                     : null,
                 ],
-                ["Address", current.address],
               ] as [string, string | undefined | null][]
             ).map(([label, value]) =>
               value ? (
                 <div key={label}>
                   <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className="font-medium text-foreground">{value}</p>
+                  <p className="font-medium text-foreground break-words">
+                    {value}
+                  </p>
                 </div>
               ) : null,
             )}
@@ -480,7 +545,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={() => handleDelete(current.id)}
+                onClick={() => void handleDelete(current.id)}
                 data-ocid="staff.delete_button"
               >
                 Delete
@@ -538,6 +603,17 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
               ))}
             </SelectContent>
           </Select>
+          <Select value={filterGender} onValueChange={setFilterGender}>
+            <SelectTrigger className="w-32" data-ocid="staff.filter-gender">
+              <SelectValue placeholder="All Gender" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="All">All Gender</SelectItem>
+              <SelectItem value="Male">Male</SelectItem>
+              <SelectItem value="Female">Female</SelectItem>
+              <SelectItem value="Other">Other</SelectItem>
+            </SelectContent>
+          </Select>
           <Select value={filterStatus} onValueChange={setFilterStatus}>
             <SelectTrigger className="w-32" data-ocid="staff.filter-status">
               <SelectValue placeholder="All Status" />
@@ -551,6 +627,23 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         </div>
 
         <div className="flex gap-2 flex-wrap">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setRefreshing(true);
+              void refreshCollection("staff").finally(() =>
+                setRefreshing(false),
+              );
+            }}
+            disabled={refreshing}
+            aria-label="Refresh staff list"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${refreshing ? "animate-spin" : ""}`}
+            />
+          </Button>
+
           {/* Column picker */}
           <div className="relative" data-colmenu>
             <Button
@@ -642,24 +735,36 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
 
       {/* Stats row */}
       {staff.length > 0 && (
-        <div className="flex gap-4 text-sm text-muted-foreground">
+        <div className="flex gap-4 text-sm text-muted-foreground flex-wrap">
           <span className="font-medium text-foreground">
             {staff.length} total
           </span>
           <span className="text-primary">
             {staff.filter((s) => s.designation === "Teacher").length} teachers
           </span>
+          <span>
+            {staff.filter((s) => (s.gender ?? "") === "Female").length} female
+          </span>
           <span className="text-destructive">
             {staff.filter((s) => s.status === "inactive").length} inactive
           </span>
-          <span className="text-muted-foreground">
-            {filtered.length !== staff.length ? `${filtered.length} shown` : ""}
-          </span>
+          {filtered.length !== staff.length && (
+            <span className="text-muted-foreground">
+              {filtered.length} shown
+            </span>
+          )}
         </div>
       )}
 
       {/* Table */}
-      {filtered.length === 0 ? (
+      {refreshing && staff.length === 0 ? (
+        <Card className="p-12 text-center">
+          <div className="flex items-center justify-center gap-2 text-muted-foreground">
+            <RefreshCw className="w-5 h-5 animate-spin" />
+            <span>Loading staff from server…</span>
+          </div>
+        </Card>
+      ) : filtered.length === 0 ? (
         <Card className="p-12 text-center" data-ocid="staff.empty_state">
           <UserCircle className="w-12 h-12 mx-auto mb-3 text-muted-foreground opacity-40" />
           <p className="text-muted-foreground font-medium">
@@ -689,201 +794,269 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
             )}
         </Card>
       ) : (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left px-3 py-3 font-semibold text-muted-foreground w-10">
-                    #
-                  </th>
-                  {visibleCols.has("photo") && (
+        <>
+          <Card className="overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
                     <th className="text-left px-3 py-3 font-semibold text-muted-foreground w-10">
-                      Photo
+                      #
                     </th>
-                  )}
-                  {visibleCols.has("empId") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                      Emp ID
-                    </th>
-                  )}
-                  {visibleCols.has("name") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                      Name
-                    </th>
-                  )}
-                  {visibleCols.has("designation") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                      Designation
-                    </th>
-                  )}
-                  {visibleCols.has("department") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden md:table-cell">
-                      Department
-                    </th>
-                  )}
-                  {visibleCols.has("mobile") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                      Mobile
-                    </th>
-                  )}
-                  {visibleCols.has("email") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                      Email
-                    </th>
-                  )}
-                  {visibleCols.has("salary") && (
-                    <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                      Salary
-                    </th>
-                  )}
-                  {visibleCols.has("joinDate") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
-                      Join Date
-                    </th>
-                  )}
-                  {visibleCols.has("status") && (
-                    <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
-                      Status
-                    </th>
-                  )}
-                  <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.map((s, idx) => (
-                  <tr
-                    key={s.id}
-                    className="hover:bg-muted/30 transition-colors cursor-pointer"
-                    data-ocid={`staff.item.${idx + 1}`}
-                    onDoubleClick={() => setViewStaff(s)}
-                    title="Double-click for full details"
-                  >
-                    <td className="px-3 py-3 text-muted-foreground text-xs">
-                      {idx + 1}
-                    </td>
                     {visibleCols.has("photo") && (
-                      <td className="px-3 py-3">
-                        <StaffAvatar photo={s.photo} name={s.name ?? ""} />
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground w-10">
+                        Photo
+                      </th>
                     )}
                     {visibleCols.has("empId") && (
-                      <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
-                        {s.empId}
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Emp ID
+                      </th>
                     )}
                     {visibleCols.has("name") && (
-                      <td className="px-3 py-3">
-                        <p className="font-medium text-foreground truncate max-w-[160px]">
-                          {s.name}
-                        </p>
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Name
+                      </th>
                     )}
                     {visibleCols.has("designation") && (
-                      <td className="px-3 py-3">
-                        <Badge
-                          variant={
-                            s.designation === "Teacher"
-                              ? "default"
-                              : "secondary"
-                          }
-                          className="text-xs"
-                        >
-                          {s.designation}
-                        </Badge>
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Designation
+                      </th>
                     )}
                     {visibleCols.has("department") && (
-                      <td className="px-3 py-3 text-muted-foreground hidden md:table-cell">
-                        {s.department ?? "—"}
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden md:table-cell">
+                        Department
+                      </th>
                     )}
                     {visibleCols.has("mobile") && (
-                      <td className="px-3 py-3 text-muted-foreground">
-                        {s.mobile}
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Mobile
+                      </th>
+                    )}
+                    {visibleCols.has("gender") && (
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden sm:table-cell">
+                        Gender
+                      </th>
                     )}
                     {visibleCols.has("email") && (
-                      <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs truncate max-w-[150px]">
-                        {s.email ?? "—"}
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        Email
+                      </th>
                     )}
                     {visibleCols.has("salary") && (
-                      <td className="px-3 py-3 text-right font-mono text-sm hidden lg:table-cell">
-                        {s.salary
-                          ? `₹${s.salary.toLocaleString("en-IN")}`
-                          : "—"}
-                      </td>
+                      <th className="text-right px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        Salary
+                      </th>
                     )}
                     {visibleCols.has("joinDate") && (
-                      <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs">
-                        {s.joiningDate ?? "—"}
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden lg:table-cell">
+                        Join Date
+                      </th>
+                    )}
+                    {visibleCols.has("village") && (
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground hidden xl:table-cell">
+                        Village
+                      </th>
                     )}
                     {visibleCols.has("status") && (
-                      <td className="px-3 py-3">
-                        <StatusBadge status={s.status} />
-                      </td>
+                      <th className="text-left px-3 py-3 font-semibold text-muted-foreground">
+                        Status
+                      </th>
                     )}
-                    <td className="px-3 py-3">
-                      <div className="flex items-center gap-1 justify-end">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          aria-label="View details"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setViewStaff(s);
-                          }}
-                          data-ocid={`staff.view_button.${idx + 1}`}
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                        </Button>
-                        {canWrite && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              aria-label="Edit staff"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditStaff({ ...s });
-                                setShowForm(true);
-                              }}
-                              data-ocid={`staff.edit_button.${idx + 1}`}
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              aria-label="Delete staff"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDelete(s.id);
-                              }}
-                              className="text-destructive hover:text-destructive"
-                              data-ocid={`staff.delete_button.${idx + 1}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          </>
-                        )}
-                      </div>
-                    </td>
+                    <th className="text-right px-3 py-3 font-semibold text-muted-foreground">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {paginated.map((s, idx) => (
+                    <tr
+                      key={s.id}
+                      className="hover:bg-muted/30 transition-colors cursor-pointer"
+                      data-ocid={`staff.item.${(page - 1) * PAGE_SIZE + idx + 1}`}
+                      onDoubleClick={() => setViewStaff(s)}
+                      title="Double-click for full details"
+                    >
+                      <td className="px-3 py-3 text-muted-foreground text-xs">
+                        {(page - 1) * PAGE_SIZE + idx + 1}
+                      </td>
+                      {visibleCols.has("photo") && (
+                        <td className="px-3 py-3">
+                          <StaffAvatar photo={s.photo} name={s.name ?? ""} />
+                        </td>
+                      )}
+                      {visibleCols.has("empId") && (
+                        <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                          {s.empId}
+                        </td>
+                      )}
+                      {visibleCols.has("name") && (
+                        <td className="px-3 py-3">
+                          <p className="font-medium text-foreground truncate max-w-[160px]">
+                            {s.name}
+                          </p>
+                        </td>
+                      )}
+                      {visibleCols.has("designation") && (
+                        <td className="px-3 py-3">
+                          <Badge
+                            variant={
+                              s.designation === "Teacher"
+                                ? "default"
+                                : "secondary"
+                            }
+                            className="text-xs"
+                          >
+                            {s.designation}
+                          </Badge>
+                        </td>
+                      )}
+                      {visibleCols.has("department") && (
+                        <td className="px-3 py-3 text-muted-foreground hidden md:table-cell">
+                          {s.department ?? "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("mobile") && (
+                        <td className="px-3 py-3 text-muted-foreground">
+                          {s.mobile}
+                        </td>
+                      )}
+                      {visibleCols.has("gender") && (
+                        <td className="px-3 py-3 text-muted-foreground hidden sm:table-cell">
+                          {s.gender ?? "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("email") && (
+                        <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs truncate max-w-[150px]">
+                          {s.email ?? "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("salary") && (
+                        <td className="px-3 py-3 text-right font-mono text-sm hidden lg:table-cell">
+                          {(s.baseSalary ?? s.salary)
+                            ? `₹${(s.baseSalary ?? s.salary ?? 0).toLocaleString("en-IN")}`
+                            : "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("joinDate") && (
+                        <td className="px-3 py-3 text-muted-foreground hidden lg:table-cell text-xs">
+                          {s.joiningDate ?? "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("village") && (
+                        <td className="px-3 py-3 text-muted-foreground hidden xl:table-cell text-xs">
+                          {s.village ?? "—"}
+                        </td>
+                      )}
+                      {visibleCols.has("status") && (
+                        <td className="px-3 py-3">
+                          <StatusBadge status={s.status} />
+                        </td>
+                      )}
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-1 justify-end">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label="View details"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewStaff(s);
+                            }}
+                            data-ocid={`staff.view_button.${(page - 1) * PAGE_SIZE + idx + 1}`}
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </Button>
+                          {canWrite && (
+                            <>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-label="Edit staff"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditStaff({ ...s });
+                                  setShowForm(true);
+                                }}
+                                data-ocid={`staff.edit_button.${(page - 1) * PAGE_SIZE + idx + 1}`}
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                aria-label="Delete staff"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void handleDelete(s.id);
+                                }}
+                                className="text-destructive hover:text-destructive"
+                                data-ocid={`staff.delete_button.${(page - 1) * PAGE_SIZE + idx + 1}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">
+                Showing {(page - 1) * PAGE_SIZE + 1}–
+                {Math.min(page * PAGE_SIZE, filtered.length)} of{" "}
+                {filtered.length}
+              </span>
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page === 1}
+                  onClick={() => setPage((p) => p - 1)}
+                  data-ocid="staff.pagination_prev"
+                >
+                  ← Prev
+                </Button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const pg =
+                    Math.max(1, Math.min(totalPages - 4, page - 2)) + i;
+                  return (
+                    <Button
+                      key={pg}
+                      variant={page === pg ? "default" : "outline"}
+                      size="sm"
+                      onClick={() => setPage(pg)}
+                    >
+                      {pg}
+                    </Button>
+                  );
+                })}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page === totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                  data-ocid="staff.pagination_next"
+                >
+                  Next →
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <p className="text-xs text-muted-foreground">
-        CSV import columns: EmpID, Name, Designation, Department, Mobile, DOB,
-        Email, Address, Qualification, JoiningDate, Salary, Status —
+        CSV columns: EmpID, Name, Gender, Designation, Department, Mobile,
+        AltMobile, DOB, Email, Address, Village, Qualification, JoiningDate,
+        BaseSalary, AadhaarNo, BankAccount, IFSCCode, BankName, Status —
         double-click a row for full details.
       </p>
     </div>

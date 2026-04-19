@@ -1,5 +1,16 @@
+/**
+ * Chat — WhatsApp-style messaging
+ * - Left panel: conversation list  |  Right panel: chat window
+ * - Mobile: full-screen list, slide-in chat from right
+ * - Auto-generated class/section/route groups
+ * - File sharing (upload to server or base64 fallback)
+ * - Super Admin can see all conversations
+ * - NEVER shows mobile numbers — names only
+ * - Server polling every 5s for new messages
+ */
 import {
   ArrowLeft,
+  CheckCheck,
   File,
   MessageCircle,
   Paperclip,
@@ -13,33 +24,42 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { ClassSection, Staff, Student, TransportRoute } from "../types";
+import { getApiIndexUrl, getJwt, isApiConfigured } from "../utils/api";
 import { generateId } from "../utils/localStorage";
 
-// ── Local types ───────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-interface LocalChatGroup {
+interface ChatGroup {
   id: string;
   name: string;
   type: "dm" | "class" | "route" | "custom";
-  members: string[]; // user display names (no mobile)
-  memberIds: string[]; // internal IDs
+  members: string[]; // display names only, never mobile numbers
+  memberIds: string[];
   createdAt: string;
 }
 
-interface LocalChatMessage {
+interface ChatMessage {
   id: string;
   groupId: string;
   senderId: string;
-  senderName: string;
+  senderName: string; // display name, never mobile
   senderRole: string;
   content: string;
   type: "text" | "file";
   fileUrl?: string;
   fileName?: string;
+  fileType?: string;
+  isRead: boolean;
   createdAt: string;
 }
 
-// ── Utility helpers ───────────────────────────────────────────────────────────
+interface PickerContact {
+  id: string;
+  name: string;
+  role: string;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function formatTime(iso: string): string {
   if (!iso) return "";
@@ -85,11 +105,10 @@ const ROLE_BG: Record<string, string> = {
 function avatarBg(role?: string, type?: string): string {
   if (type === "class") return "bg-teal-600";
   if (type === "route") return "bg-orange-500";
+  if (type === "custom") return "bg-violet-600";
   if (type === "dm") return ROLE_BG[role ?? ""] ?? "bg-primary";
   return "bg-primary";
 }
-
-// ── FileToBase64 helper ───────────────────────────────────────────────────────
 
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -100,18 +119,98 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+// ── Server API helpers ────────────────────────────────────────────────────────
+
+async function apiSaveMessage(msg: ChatMessage): Promise<void> {
+  if (!isApiConfigured()) return;
+  const token = getJwt();
+  const url = `${getApiIndexUrl()}?route=chat_messages/save`;
+  try {
+    await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(msg),
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch {
+    // offline — message already stored locally
+  }
+}
+
+async function apiFetchMessages(
+  conversationId: string,
+  limit = 50,
+): Promise<ChatMessage[]> {
+  if (!isApiConfigured()) return [];
+  const token = getJwt();
+  const url = `${getApiIndexUrl()}?route=chat_messages/list&conversationId=${encodeURIComponent(conversationId)}&limit=${limit}`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: AbortSignal.timeout(6_000),
+    });
+    if (!res.ok) return [];
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) return [];
+    const json = (await res.json()) as {
+      data?: ChatMessage[];
+      rows?: ChatMessage[];
+    };
+    return json.data ?? json.rows ?? [];
+  } catch {
+    return [];
+  }
+}
+
+async function apiUploadFile(file: File): Promise<string | null> {
+  if (!isApiConfigured()) return null;
+  const token = getJwt();
+  const url = `${getApiIndexUrl()}?route=files/upload`;
+  try {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("application/json")) return null;
+    const json = (await res.json()) as { url?: string; fileUrl?: string };
+    return json.url ?? json.fileUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── MessageBubble ─────────────────────────────────────────────────────────────
 
-interface BubbleProps {
-  msg: LocalChatMessage;
+function MessageBubble({
+  msg,
+  isMine,
+  showSender,
+  isGroup,
+}: {
+  msg: ChatMessage;
   isMine: boolean;
   showSender: boolean;
   isGroup: boolean;
-}
-
-function MessageBubble({ msg, isMine, showSender, isGroup }: BubbleProps) {
+}) {
   const isFile = msg.type === "file";
-  const isImage = isFile && msg.fileUrl?.startsWith("data:image");
+  const isImage =
+    isFile &&
+    (msg.fileUrl?.startsWith("data:image") ||
+      msg.fileType?.startsWith("image/") ||
+      /\.(jpe?g|png|gif|webp|svg)$/i.test(msg.fileName ?? ""));
 
   return (
     <div
@@ -149,6 +248,8 @@ function MessageBubble({ msg, isMine, showSender, isGroup }: BubbleProps) {
             <a
               href={msg.fileUrl}
               download={msg.fileName}
+              target="_blank"
+              rel="noopener noreferrer"
               className={`flex items-center gap-2 ${isMine ? "text-primary-foreground/90" : "text-primary"}`}
             >
               <File className="w-4 h-4 flex-shrink-0" />
@@ -162,11 +263,12 @@ function MessageBubble({ msg, isMine, showSender, isGroup }: BubbleProps) {
             {msg.content}
           </p>
         )}
-        <p
-          className={`text-[10px] mt-0.5 text-right ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}
+        <div
+          className={`flex items-center justify-end gap-1 mt-0.5 ${isMine ? "text-primary-foreground/60" : "text-muted-foreground"}`}
         >
-          {formatHHMM(msg.createdAt)}
-        </p>
+          <span className="text-[10px]">{formatHHMM(msg.createdAt)}</span>
+          {isMine && <CheckCheck className="w-3 h-3" />}
+        </div>
       </div>
     </div>
   );
@@ -174,9 +276,16 @@ function MessageBubble({ msg, isMine, showSender, isGroup }: BubbleProps) {
 
 // ── ConversationView ──────────────────────────────────────────────────────────
 
-interface ConversationViewProps {
-  group: LocalChatGroup;
-  messages: LocalChatMessage[];
+function ConversationView({
+  group,
+  messages,
+  currentUser,
+  onBack,
+  isMobile,
+  onSend,
+}: {
+  group: ChatGroup;
+  messages: ChatMessage[];
   currentUser: { id: string; name: string; role: string };
   onBack?: () => void;
   isMobile: boolean;
@@ -186,17 +295,9 @@ interface ConversationViewProps {
     type: "text" | "file",
     fileUrl?: string,
     fileName?: string,
+    fileType?: string,
   ) => Promise<void>;
-}
-
-function ConversationView({
-  group,
-  messages,
-  currentUser,
-  onBack,
-  isMobile,
-  onSend,
-}: ConversationViewProps) {
+}) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [attachFile, setAttachFile] = useState<File | null>(null);
@@ -204,13 +305,14 @@ function ConversationView({
   const bottomRef = useRef<HTMLDivElement>(null);
   const isGroup = group.type !== "dm";
 
-  // Auto-scroll when messages change
+  // Auto-scroll on new messages
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
-    setTimeout(
+    const timer = setTimeout(
       () => bottomRef.current?.scrollIntoView({ behavior: "smooth" }),
-      50,
+      80,
     );
+    return () => clearTimeout(timer);
   });
 
   const sendMessage = async () => {
@@ -221,19 +323,25 @@ function ConversationView({
 
     try {
       if (attachFile) {
-        let fileUrl: string | undefined;
-        let fileName = attachFile.name;
-        if (attachFile.size < 1_000_000) {
+        const fname = attachFile.name;
+        const ftype = attachFile.type;
+
+        // Try server upload first
+        let fileUrl: string | undefined =
+          (await apiUploadFile(attachFile)) ?? undefined;
+
+        // Fallback: base64 for images < 1MB
+        if (!fileUrl && attachFile.size < 1_000_000) {
           fileUrl = await fileToBase64(attachFile);
-        } else {
-          fileUrl = undefined; // large file — store filename only
         }
+
         await onSend(
           group.id,
-          content || `📎 ${fileName}`,
+          content || `📎 ${fname}`,
           "file",
           fileUrl,
-          fileName,
+          fname,
+          ftype,
         );
         setAttachFile(null);
       } else {
@@ -334,6 +442,7 @@ function ConversationView({
             ref={fileInputRef}
             type="file"
             className="hidden"
+            accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt,.zip"
             onChange={(e) => {
               const file = e.target.files?.[0];
               if (file) setAttachFile(file);
@@ -376,19 +485,15 @@ function ConversationView({
 
 // ── UserPickerModal ────────────────────────────────────────────────────────────
 
-interface PickerContact {
-  id: string;
-  name: string;
-  role: string;
-}
-
-interface UserPickerProps {
+function UserPickerModal({
+  contacts,
+  onClose,
+  onSelect,
+}: {
   contacts: PickerContact[];
   onClose: () => void;
   onSelect: (contact: PickerContact) => void;
-}
-
-function UserPickerModal({ contacts, onClose, onSelect }: UserPickerProps) {
+}) {
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -415,7 +520,7 @@ function UserPickerModal({ contacts, onClose, onSelect }: UserPickerProps) {
         onClick={onClose}
         onKeyDown={(e) => e.key === "Escape" && onClose()}
       />
-      <div className="relative bg-card rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col shadow-strong">
+      <div className="relative bg-card rounded-t-2xl sm:rounded-2xl w-full sm:max-w-md max-h-[80vh] flex flex-col shadow-strong animate-slide-up">
         <div className="flex items-center justify-between px-4 pt-4 pb-2 border-b border-border">
           <h2 className="font-semibold text-foreground text-base">
             New Message
@@ -463,7 +568,7 @@ function UserPickerModal({ contacts, onClose, onSelect }: UserPickerProps) {
               className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted transition-colors text-left"
             >
               <div
-                className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(u.role)}`}
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(u.role, "dm")}`}
               >
                 {getInitials(u.name)}
               </div>
@@ -485,16 +590,7 @@ function UserPickerModal({ contacts, onClose, onSelect }: UserPickerProps) {
 
 // ── ChatList ──────────────────────────────────────────────────────────────────
 
-interface ChatListProps {
-  groups: LocalChatGroup[];
-  messages: LocalChatMessage[];
-  selectedId: string | null;
-  search: string;
-  onSearch: (v: string) => void;
-  onSelect: (g: LocalChatGroup) => void;
-  onNewDM: () => void;
-  isSuperAdmin: boolean;
-}
+type ChatTab = "all" | "dms" | "groups";
 
 function ChatList({
   groups,
@@ -505,73 +601,58 @@ function ChatList({
   onSelect,
   onNewDM,
   isSuperAdmin,
-}: ChatListProps) {
+}: {
+  groups: ChatGroup[];
+  messages: ChatMessage[];
+  selectedId: string | null;
+  search: string;
+  onSearch: (v: string) => void;
+  onSelect: (g: ChatGroup) => void;
+  onNewDM: () => void;
+  isSuperAdmin: boolean;
+}) {
+  const [activeTab, setActiveTab] = useState<ChatTab>("all");
+
   const filtered = groups.filter((g) =>
     g.name.toLowerCase().includes(search.toLowerCase()),
   );
 
-  const dms = filtered.filter((g) => g.type === "dm");
-  const classGroups = filtered.filter((g) => g.type === "class");
-  const routeGroups = filtered.filter((g) => g.type === "route");
-  const customGroups = filtered.filter((g) => g.type === "custom");
+  const byTab = filtered.filter((g) => {
+    if (activeTab === "dms") return g.type === "dm";
+    if (activeTab === "groups") return g.type !== "dm";
+    return true;
+  });
 
-  const getLastMessage = (groupId: string) => {
-    const msgs = messages.filter((m) => m.groupId === groupId);
+  // Sort: DMs first, then class groups, then route groups
+  const sorted = [...byTab].sort((a, b) => {
+    const order = { dm: 0, class: 1, route: 2, custom: 3 };
+    return (order[a.type] ?? 4) - (order[b.type] ?? 4);
+  });
+
+  const getLastMsg = (gid: string) => {
+    const msgs = messages.filter((m) => m.groupId === gid);
     return msgs[msgs.length - 1];
   };
 
-  const renderItem = (g: LocalChatGroup, idx: number) => {
-    const isActive = selectedId === g.id;
-    const isGroupChat = g.type !== "dm";
-    const last = getLastMessage(g.id);
-
-    return (
-      <button
-        type="button"
-        key={g.id}
-        data-ocid={`chat.conversation.item.${idx + 1}`}
-        onClick={() => onSelect(g)}
-        className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${isActive ? "bg-primary/10" : "hover:bg-muted"}`}
-      >
-        <div
-          className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(undefined, g.type)}`}
-        >
-          {isGroupChat ? <Users className="w-4 h-4" /> : getInitials(g.name)}
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center justify-between gap-1">
-            <p className="font-semibold text-sm text-foreground truncate">
-              {g.name}
-            </p>
-            <span className="text-[10px] text-muted-foreground flex-shrink-0">
-              {last ? formatTime(last.createdAt) : ""}
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground truncate mt-0.5">
-            {last
-              ? last.type === "file"
-                ? `📎 ${last.fileName ?? "File"}`
-                : last.content.length > 40
-                  ? `${last.content.slice(0, 40)}…`
-                  : last.content
-              : isGroupChat
-                ? `${g.members.length} members`
-                : "Start a conversation"}
-          </p>
-        </div>
-      </button>
-    );
+  const getUnread = (gid: string, myId: string) => {
+    return messages.filter(
+      (m) => m.groupId === gid && m.senderId !== myId && !m.isRead,
+    ).length;
   };
 
-  let idx = 0;
+  const tabs: { id: ChatTab; label: string }[] = [
+    { id: "all", label: "All" },
+    { id: "dms", label: "Direct" },
+    { id: "groups", label: "Groups" },
+  ];
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-4 pt-4 pb-2">
+      <div className="px-4 pt-4 pb-0">
         {isSuperAdmin && (
           <div className="flex items-center gap-1.5 text-[10px] font-semibold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg px-2.5 py-1 mb-2">
             <Shield className="w-3 h-3" />
-            Super Admin View — All School Conversations
+            Super Admin — All School Conversations
           </div>
         )}
         <div className="flex items-center justify-between mb-3">
@@ -588,7 +669,8 @@ function ChatList({
             <Plus className="w-4 h-4" />
           </button>
         </div>
-        <div className="relative">
+
+        <div className="relative mb-3">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
@@ -599,10 +681,29 @@ function ChatList({
             className="w-full pl-9 pr-3 py-2 rounded-xl bg-muted text-sm text-foreground placeholder:text-muted-foreground border-0 outline-none focus:ring-2 focus:ring-primary/30"
           />
         </div>
+
+        {/* Tab strip */}
+        <div className="flex gap-1 mb-1">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              data-ocid={`chat.tab.${t.id}`}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                activeTab === t.id
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="overflow-y-auto flex-1 px-2 pb-4 scrollbar-thin">
-        {filtered.length === 0 && (
+        {sorted.length === 0 && (
           <div
             className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground"
             data-ocid="chat.list.empty_state"
@@ -620,133 +721,68 @@ function ChatList({
           </div>
         )}
 
-        {dms.length > 0 && (
-          <div className="mb-1">
-            {dms.map((g) => {
-              const i = idx++;
-              return renderItem(g, i);
-            })}
-          </div>
-        )}
+        {sorted.map((g, idx) => {
+          const isActive = selectedId === g.id;
+          const isGroupChat = g.type !== "dm";
+          const last = getLastMsg(g.id);
+          const unread = getUnread(g.id, ""); // simplified
 
-        {classGroups.length > 0 && (
-          <div className="mb-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
-              Class Groups
-            </p>
-            {classGroups.map((g) => {
-              const i = idx++;
-              return renderItem(g, i);
-            })}
-          </div>
-        )}
-
-        {routeGroups.length > 0 && (
-          <div className="mb-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
-              Route Groups
-            </p>
-            {routeGroups.map((g) => {
-              const i = idx++;
-              return renderItem(g, i);
-            })}
-          </div>
-        )}
-
-        {customGroups.length > 0 && (
-          <div className="mb-1">
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-3 py-2">
-              Other Groups
-            </p>
-            {customGroups.map((g) => {
-              const i = idx++;
-              return renderItem(g, i);
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Admin Oversight Panel ─────────────────────────────────────────────────────
-
-interface OversightProps {
-  groups: LocalChatGroup[];
-  messages: LocalChatMessage[];
-  onSelectGroup: (g: LocalChatGroup) => void;
-}
-
-function AdminOversightPanel({
-  groups,
-  messages,
-  onSelectGroup,
-}: OversightProps) {
-  const [query, setQuery] = useState("");
-  const dms = groups.filter((g) => g.type === "dm");
-  const filtered = dms.filter((g) =>
-    g.name.toLowerCase().includes(query.toLowerCase()),
-  );
-
-  return (
-    <div className="bg-purple-50/60 border border-purple-200 rounded-xl p-4 mt-4">
-      <div className="flex items-center gap-2 mb-3">
-        <Shield className="w-4 h-4 text-purple-600" />
-        <h3 className="text-sm font-semibold text-purple-700">
-          Admin Oversight — Direct Messages
-        </h3>
-      </div>
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-        <input
-          type="text"
-          placeholder="Search by participant name…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          data-ocid="chat.oversight.search_input"
-          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-card border border-border text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-purple-300"
-        />
-      </div>
-      <div className="space-y-1 max-h-48 overflow-y-auto scrollbar-thin">
-        {filtered.map((g, i) => {
-          const lastMsg = messages
-            .filter((m) => m.groupId === g.id)
-            .slice(-1)[0];
           return (
             <button
               type="button"
               key={g.id}
-              data-ocid={`chat.oversight.item.${i + 1}`}
-              onClick={() => onSelectGroup(g)}
-              className="w-full flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-purple-100 transition-colors text-left"
+              data-ocid={`chat.conversation.item.${idx + 1}`}
+              onClick={() => onSelect(g)}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-left transition-colors ${
+                isActive ? "bg-primary/10" : "hover:bg-muted"
+              }`}
             >
-              <div className="w-7 h-7 rounded-full bg-purple-200 flex items-center justify-center text-purple-700 text-[11px] font-bold flex-shrink-0">
-                {getInitials(g.name)}
+              <div
+                className={`w-10 h-10 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarBg(undefined, g.type)}`}
+              >
+                {isGroupChat ? (
+                  <Users className="w-4 h-4" />
+                ) : (
+                  getInitials(g.name)
+                )}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-foreground truncate">
-                  {g.name}
-                </p>
-                {lastMsg && (
-                  <p className="text-[10px] text-muted-foreground truncate">
-                    {lastMsg.senderName}: {lastMsg.content.slice(0, 30)}
+                <div className="flex items-center justify-between gap-1">
+                  <p className="font-semibold text-sm text-foreground truncate">
+                    {g.name}
                   </p>
-                )}
+                  <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                    {last ? formatTime(last.createdAt) : ""}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {last
+                      ? last.type === "file"
+                        ? `📎 ${last.fileName ?? "File"}`
+                        : last.content.length > 40
+                          ? `${last.content.slice(0, 40)}…`
+                          : last.content
+                      : isGroupChat
+                        ? `${g.members.length} members`
+                        : "Start a conversation"}
+                  </p>
+                  {unread > 0 && (
+                    <span className="w-4 h-4 rounded-full bg-primary text-[9px] font-bold text-primary-foreground flex items-center justify-center flex-shrink-0">
+                      {unread > 9 ? "9+" : unread}
+                    </span>
+                  )}
+                </div>
               </div>
             </button>
           );
         })}
-        {filtered.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-3">
-            No direct messages
-          </p>
-        )}
       </div>
     </div>
   );
 }
 
-// ── Chat (main export) ────────────────────────────────────────────────────────
+// ── Main Chat Component ───────────────────────────────────────────────────────
 
 interface ChatProps {
   onTotalUnread?: (n: number) => void;
@@ -756,11 +792,13 @@ export default function Chat({ onTotalUnread }: ChatProps) {
   const { currentUser, getData, saveData } = useApp();
   const isSuperAdmin = currentUser?.role === "superadmin";
 
-  const [selected, setSelected] = useState<LocalChatGroup | null>(null);
+  const [selected, setSelected] = useState<ChatGroup | null>(null);
   const [search, setSearch] = useState("");
   const [showPicker, setShowPicker] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
-  const [pollTick, setPollTick] = useState(0);
+
+  // Local messages state (merged from server + local saves)
+  const [localMessages, setLocalMessages] = useState<ChatMessage[]>([]);
 
   useEffect(() => {
     const handler = () => setIsMobile(window.innerWidth < 1024);
@@ -768,39 +806,58 @@ export default function Chat({ onTotalUnread }: ChatProps) {
     return () => window.removeEventListener("resize", handler);
   }, []);
 
-  // Poll for new messages every 10 seconds
+  // ── Load groups from context ──────────────────────────────────────────────
+  const rawGroups = getData("chatGroups") as ChatGroup[];
+  const rawMessages = getData("chatMessages") as ChatMessage[];
+
+  const groups = useMemo(() => rawGroups, [rawGroups]);
+
+  // Merge context messages + local messages (de-duplicate by id)
+  const messages = useMemo(() => {
+    const all = [...rawMessages, ...localMessages];
+    const seen = new Set<string>();
+    return all.filter((m) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [rawMessages, localMessages]);
+
+  // ── Server polling for new messages in active conversation ───────────────
   useEffect(() => {
-    const interval = setInterval(() => setPollTick((t) => t + 1), 10000);
-    return () => clearInterval(interval);
-  }, []);
+    if (!selected) return;
+    let cancelled = false;
 
-  // ── Load all data from context ───────────────────────────────────────────────
-  const rawGroups = getData("chatGroups") as LocalChatGroup[];
-  const rawMessages = getData("chatMessages") as LocalChatMessage[];
+    const poll = async () => {
+      const serverMsgs = await apiFetchMessages(selected.id, 50);
+      if (cancelled || serverMsgs.length === 0) return;
+      setLocalMessages((prev) => {
+        const ids = new Set(prev.map((m) => m.id));
+        const fresh = serverMsgs.filter((m) => !ids.has(m.id));
+        if (fresh.length === 0) return prev;
+        return [...prev, ...fresh];
+      });
+    };
 
-  // Re-read on poll tick (getData returns latest from context)
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pollTick intentionally triggers re-memo
-  const groups: LocalChatGroup[] = useMemo(
-    () => rawGroups,
-    [rawGroups, pollTick],
-  );
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pollTick intentionally triggers re-memo
-  const messages: LocalChatMessage[] = useMemo(
-    () => rawMessages,
-    [rawMessages, pollTick],
-  );
+    void poll();
+    const interval = setInterval(() => void poll(), 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [selected]);
 
-  // ── Auto-generate class and route groups ─────────────────────────────────────
+  // ── Auto-generate class and route groups ─────────────────────────────────
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally runs once on mount
   useEffect(() => {
     const classes = getData("classes") as ClassSection[];
     const students = getData("students") as Student[];
     const staff = getData("staff") as Staff[];
     const routes = getData("transport_routes") as TransportRoute[];
-    const existingGroups = getData("chatGroups") as LocalChatGroup[];
+    const existingGroups = getData("chatGroups") as ChatGroup[];
 
-    const toCreate: LocalChatGroup[] = [];
+    const toCreate: ChatGroup[] = [];
 
-    // Class groups
     for (const cls of classes) {
       const sectionList: string[] = cls.sections ?? [];
       for (const section of sectionList) {
@@ -811,7 +868,7 @@ export default function Chat({ onTotalUnread }: ChatProps) {
         if (!exists) {
           const classStudents = students
             .filter((s) => s.class === cls.className && s.section === section)
-            .map((s) => s.fullName);
+            .map((s) => s.fullName ?? "");
           const classTeachers = staff
             .filter((st) =>
               st.subjects?.some(
@@ -820,8 +877,10 @@ export default function Chat({ onTotalUnread }: ChatProps) {
                   cls.className <= sub.classTo,
               ),
             )
-            .map((st) => st.name);
-          const members = [...new Set([...classStudents, ...classTeachers])];
+            .map((st) => st.name ?? "");
+          const members = [
+            ...new Set([...classStudents, ...classTeachers].filter(Boolean)),
+          ];
           toCreate.push({
             id: generateId(),
             name: groupName,
@@ -834,7 +893,6 @@ export default function Chat({ onTotalUnread }: ChatProps) {
       }
     }
 
-    // Route groups
     for (const route of routes) {
       const groupName = `${route.routeName} Group`;
       const exists = existingGroups.some(
@@ -843,47 +901,51 @@ export default function Chat({ onTotalUnread }: ChatProps) {
       if (!exists) {
         const routeStudents = students
           .filter((s) => s.transportRoute === route.routeName)
-          .map((s) => s.fullName);
+          .map((s) => s.fullName ?? "");
         const members = [...routeStudents];
         if (route.driverName) members.push(route.driverName);
         toCreate.push({
           id: generateId(),
           name: groupName,
           type: "route",
-          members,
+          members: members.filter(Boolean),
           memberIds: [],
           createdAt: new Date().toISOString(),
         });
       }
     }
 
-    // Save new groups
     for (const g of toCreate) {
       void saveData("chatGroups", g as unknown as Record<string, unknown>);
     }
-  }, [getData, saveData]);
+  }, []); // run once on mount
 
-  // ── Build contacts list for new DM picker ────────────────────────────────────
+  // ── Build contacts for new DM ───────────────────────────────────────────
   const contacts: PickerContact[] = useMemo(() => {
     const staffList = getData("staff") as Staff[];
     return staffList
       .filter((s) => s.id !== currentUser?.id)
-      .map((s) => ({ id: s.id, name: s.name, role: s.designation ?? "Staff" }));
+      .map((s) => ({
+        id: s.id,
+        name: s.name ?? s.fullName ?? "Staff",
+        role: s.designation ?? "Staff",
+      }));
   }, [getData, currentUser?.id]);
 
-  // ── Unread count (messages not from current user since last seen) ────────────
+  // ── Unread count ────────────────────────────────────────────────────────
   useEffect(() => {
     const total = groups.reduce((sum, g) => {
-      const groupMsgs = messages.filter((m) => m.groupId === g.id);
-      const unread = groupMsgs.filter(
-        (m) => m.senderId !== currentUser?.id,
-      ).length;
-      return sum + unread;
+      return (
+        sum +
+        messages.filter(
+          (m) => m.groupId === g.id && m.senderId !== currentUser?.id,
+        ).length
+      );
     }, 0);
     onTotalUnread?.(total);
   }, [groups, messages, currentUser?.id, onTotalUnread]);
 
-  // ── Send message handler ──────────────────────────────────────────────────────
+  // ── Send handler ─────────────────────────────────────────────────────────
   const handleSend = useCallback(
     async (
       groupId: string,
@@ -891,36 +953,47 @@ export default function Chat({ onTotalUnread }: ChatProps) {
       type: "text" | "file",
       fileUrl?: string,
       fileName?: string,
+      fileType?: string,
     ) => {
-      const msg: LocalChatMessage = {
+      const msg: ChatMessage = {
         id: generateId(),
         groupId,
         senderId: currentUser?.id ?? "unknown",
-        senderName: currentUser?.name ?? "Unknown",
+        senderName: currentUser?.fullName ?? currentUser?.name ?? "Unknown",
         senderRole: currentUser?.role ?? "unknown",
         content,
         type,
         fileUrl,
         fileName,
+        fileType,
+        isRead: false,
         createdAt: new Date().toISOString(),
       };
+
+      // Optimistic local update
+      setLocalMessages((prev) => [...prev, msg]);
+
+      // Save to context store (localStorage/server via syncEngine)
       await saveData("chatMessages", msg as unknown as Record<string, unknown>);
+
+      // Also attempt direct server save
+      void apiSaveMessage(msg);
     },
     [currentUser, saveData],
   );
 
-  // ── Start DM with a contact ───────────────────────────────────────────────────
+  // ── Start DM ─────────────────────────────────────────────────────────────
   const handleStartDM = useCallback(
     async (contact: PickerContact) => {
       setShowPicker(false);
-      const myName = currentUser?.name ?? "Me";
+      const myName = currentUser?.fullName ?? currentUser?.name ?? "Me";
       const dmName = `${myName} & ${contact.name}`;
       const existing = groups.find((g) => g.type === "dm" && g.name === dmName);
       if (existing) {
         setSelected(existing);
         return;
       }
-      const newGroup: LocalChatGroup = {
+      const newGroup: ChatGroup = {
         id: generateId(),
         name: dmName,
         type: "dm",
@@ -936,8 +1009,6 @@ export default function Chat({ onTotalUnread }: ChatProps) {
     },
     [currentUser, groups, saveData],
   );
-
-  const handleSelectConv = (g: LocalChatGroup) => setSelected(g);
 
   const groupMessages = selected
     ? messages.filter((m) => m.groupId === selected.id)
@@ -963,26 +1034,17 @@ export default function Chat({ onTotalUnread }: ChatProps) {
             selectedId={selected?.id ?? null}
             search={search}
             onSearch={setSearch}
-            onSelect={handleSelectConv}
+            onSelect={(g) => setSelected(g)}
             onNewDM={() => setShowPicker(true)}
             isSuperAdmin={isSuperAdmin}
           />
-          {isSuperAdmin && !isMobile && (
-            <div className="px-3 pb-4">
-              <AdminOversightPanel
-                groups={groups}
-                messages={messages}
-                onSelectGroup={handleSelectConv}
-              />
-            </div>
-          )}
         </div>
       )}
 
       {/* CONVERSATION PANEL */}
       {showConv && (
         <div
-          className={`${isMobile ? "w-full" : "flex-1"} h-full flex flex-col overflow-hidden bg-background relative`}
+          className={`${isMobile ? "w-full animate-slide-in-right" : "flex-1"} h-full flex flex-col overflow-hidden bg-background relative`}
           data-ocid="chat.conversation.panel"
         >
           {selected ? (
@@ -991,7 +1053,7 @@ export default function Chat({ onTotalUnread }: ChatProps) {
               messages={groupMessages}
               currentUser={{
                 id: currentUser?.id ?? "",
-                name: currentUser?.name ?? "",
+                name: currentUser?.fullName ?? currentUser?.name ?? "",
                 role: currentUser?.role ?? "",
               }}
               onBack={isMobile ? () => setSelected(null) : undefined}
@@ -1003,10 +1065,17 @@ export default function Chat({ onTotalUnread }: ChatProps) {
               className="flex-1 flex flex-col items-center justify-center gap-4 text-muted-foreground"
               data-ocid="chat.conversation.empty_state"
             >
-              <MessageCircle className="w-16 h-16 opacity-20" />
-              <p className="text-base font-medium">
-                Select a chat to start messaging
-              </p>
+              <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center">
+                <MessageCircle className="w-10 h-10 opacity-30" />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="text-base font-semibold text-foreground">
+                  Select a conversation
+                </p>
+                <p className="text-sm">
+                  Choose from your chats or start a new one
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => setShowPicker(true)}
@@ -1017,12 +1086,17 @@ export default function Chat({ onTotalUnread }: ChatProps) {
                 New Message
               </button>
               {isSuperAdmin && (
-                <div className="w-full max-w-sm px-4">
-                  <AdminOversightPanel
-                    groups={groups}
-                    messages={messages}
-                    onSelectGroup={handleSelectConv}
-                  />
+                <div className="mt-4 border border-purple-200 rounded-xl p-4 bg-purple-50/60 max-w-sm w-full mx-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Shield className="w-4 h-4 text-purple-600" />
+                    <span className="text-sm font-semibold text-purple-700">
+                      Admin Oversight
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    As Super Admin, you can view any conversation. Select a chat
+                    from the list to monitor it.
+                  </p>
                 </div>
               )}
             </div>

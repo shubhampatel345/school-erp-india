@@ -1,16 +1,21 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { CreditCard, IndianRupee, Save } from "lucide-react";
+import { CreditCard, IndianRupee, Loader2, Save } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { useApp } from "../../context/AppContext";
+import { getApiIndexUrl, getJwt, isApiConfigured } from "../../utils/api";
 import { ls } from "../../utils/localStorage";
 
 interface GatewayConfig {
   enabled: boolean;
   upiId: string;
   apiKey: string;
+  secretKey: string;
 }
 
 interface PaymentGateways {
@@ -19,219 +24,256 @@ interface PaymentGateways {
   payu: GatewayConfig;
 }
 
-const DEFAULT_GATEWAYS: PaymentGateways = {
-  gpay: { enabled: false, upiId: "", apiKey: "" },
-  razorpay: { enabled: false, upiId: "", apiKey: "" },
-  payu: { enabled: false, upiId: "", apiKey: "" },
+const DEFAULT: PaymentGateways = {
+  gpay: { enabled: false, upiId: "", apiKey: "", secretKey: "" },
+  razorpay: { enabled: false, upiId: "", apiKey: "", secretKey: "" },
+  payu: { enabled: false, upiId: "", apiKey: "", secretKey: "" },
 };
 
-const GATEWAY_INFO: {
+const GATEWAY_META: {
   id: keyof PaymentGateways;
   label: string;
   description: string;
   icon: string;
-  upiLabel?: string;
-  apiLabel?: string;
-  upiPlaceholder?: string;
-  apiPlaceholder?: string;
+  fields: {
+    key: keyof GatewayConfig;
+    label: string;
+    placeholder: string;
+    type?: string;
+  }[];
 }[] = [
   {
     id: "gpay",
-    label: "Google Pay (GPay / UPI)",
-    description: "Accept UPI payments via Google Pay, PhonePe, BHIM and more",
+    label: "Google Pay / UPI",
+    description: "Accept UPI payments via GPay, PhonePe, BHIM and more",
     icon: "🟢",
-    upiLabel: "UPI ID",
-    upiPlaceholder: "yourschool@okicici",
-    apiLabel: "Merchant ID (optional)",
-    apiPlaceholder: "GPay merchant ID",
+    fields: [
+      { key: "upiId", label: "UPI ID", placeholder: "yourschool@okicici" },
+      {
+        key: "apiKey",
+        label: "Merchant ID (optional)",
+        placeholder: "GPay merchant ID",
+      },
+    ],
   },
   {
     id: "razorpay",
     label: "Razorpay",
-    description: "Cards, UPI, Net Banking, Wallets, EMI",
-    icon: "🔵",
-    upiLabel: "Key ID",
-    upiPlaceholder: "rzp_live_xxxxxxxxxxxxxxxx",
-    apiLabel: "Key Secret",
-    apiPlaceholder: "Razorpay key secret",
+    description:
+      "India's most popular payment gateway — cards, UPI, netbanking",
+    icon: "💳",
+    fields: [
+      { key: "apiKey", label: "Key ID", placeholder: "rzp_live_..." },
+      {
+        key: "secretKey",
+        label: "Secret Key",
+        placeholder: "Razorpay secret key",
+        type: "password",
+      },
+    ],
   },
   {
     id: "payu",
     label: "PayU",
-    description: "Multi-method payment gateway — popular in India",
-    icon: "🟠",
-    upiLabel: "Merchant Key",
-    upiPlaceholder: "PayU merchant key",
-    apiLabel: "Merchant Salt",
-    apiPlaceholder: "PayU merchant salt",
+    description: "PayU payment gateway for schools — EMI, netbanking, UPI",
+    icon: "🏦",
+    fields: [
+      {
+        key: "apiKey",
+        label: "Merchant Key",
+        placeholder: "PayU merchant key",
+      },
+      {
+        key: "secretKey",
+        label: "Salt / Secret",
+        placeholder: "PayU salt",
+        type: "password",
+      },
+    ],
   },
 ];
 
-export default function OnlinePaymentSettings() {
-  const [gateways, setGateways] = useState<PaymentGateways>(() => {
-    const saved = ls.get<Partial<PaymentGateways>>("online_payment_v2", {});
-    return {
-      gpay: { ...DEFAULT_GATEWAYS.gpay, ...(saved.gpay ?? {}) },
-      razorpay: { ...DEFAULT_GATEWAYS.razorpay, ...(saved.razorpay ?? {}) },
-      payu: { ...DEFAULT_GATEWAYS.payu, ...(saved.payu ?? {}) },
-    };
-  });
-  const [saved, setSaved] = useState(false);
+const LS_KEY = "shubh_erp_payment_gateways";
 
-  function update(
+async function saveGatewaysToServer(gateways: PaymentGateways): Promise<void> {
+  if (!isApiConfigured()) return;
+  const indexUrl = getApiIndexUrl();
+  const jwt = getJwt();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (jwt) headers.Authorization = `Bearer ${jwt}`;
+  const res = await fetch(`${indexUrl}?route=school_settings/save`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ id: "payment_gateways", ...gateways }),
+    signal: AbortSignal.timeout(10000),
+  });
+  const text = await res.text();
+  if (text.trimStart().startsWith("<"))
+    throw new Error("Server returned HTML.");
+  const json = JSON.parse(text) as { status?: string; message?: string };
+  if (json.status === "error") throw new Error(json.message ?? "Save failed");
+}
+
+export default function OnlinePaymentSettings() {
+  const { saveData } = useApp();
+
+  const [gateways, setGateways] = useState<PaymentGateways>(() => {
+    const saved = ls.get<PaymentGateways>(LS_KEY, DEFAULT);
+    return { ...DEFAULT, ...saved };
+  });
+  const [saving, setSaving] = useState(false);
+
+  function setGateway<K extends keyof GatewayConfig>(
     id: keyof PaymentGateways,
-    field: keyof GatewayConfig,
-    value: boolean | string,
+    field: K,
+    value: GatewayConfig[K],
   ) {
     setGateways((prev) => ({
       ...prev,
       [id]: { ...prev[id], [field]: value },
     }));
-    setSaved(false);
   }
 
-  function handleSave() {
-    ls.set("online_payment_v2", gateways);
-    // Also update legacy key for compatibility
-    ls.set("online_payment", {
-      gpay: gateways.gpay.enabled,
-      razorpay: gateways.razorpay.enabled,
-      payu: gateways.payu.enabled,
-    });
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2500);
+  async function handleSave() {
+    setSaving(true);
+    try {
+      ls.set(LS_KEY, gateways);
+      await saveData(
+        "payment_gateways",
+        gateways as unknown as Record<string, unknown>,
+      );
+      if (isApiConfigured()) {
+        await saveGatewaysToServer(gateways);
+      }
+      toast.success("Payment gateway settings saved.");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to save settings.",
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
   const enabledCount = Object.values(gateways).filter((g) => g.enabled).length;
 
   return (
-    <div className="p-4 lg:p-6 max-w-2xl space-y-6">
-      {/* Header Info */}
-      <Card className="p-5 flex items-start gap-4 bg-primary/5 border-primary/20">
-        <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center flex-shrink-0">
-          <IndianRupee className="w-5 h-5 text-primary" />
-        </div>
-        <div className="flex-1">
-          <h2 className="font-display font-semibold text-foreground">
-            Online Fee Payment
+    <div className="p-4 lg:p-6 max-w-3xl space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-xl font-display font-semibold text-foreground flex items-center gap-2">
+            <CreditCard className="w-5 h-5 text-primary" /> Online Payment
+            Settings
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Enable payment gateways so parents and students can pay fees online.
-            {enabledCount > 0
-              ? ` ${enabledCount} gateway${enabledCount > 1 ? "s" : ""} active — "Pay Online" will appear in the fee portal.`
-              : " All gateways currently disabled."}
+            {enabledCount === 0
+              ? "No gateways enabled"
+              : `${enabledCount} gateway${enabledCount !== 1 ? "s" : ""} enabled`}
           </p>
         </div>
-      </Card>
-
-      {/* Gateway Cards */}
-      <div className="space-y-4">
-        {GATEWAY_INFO.map((gw) => {
-          const config = gateways[gw.id];
-          return (
-            <Card
-              key={gw.id}
-              className={`p-5 transition-all ${config.enabled ? "border-primary/30" : ""}`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{gw.icon}</span>
-                  <div>
-                    <p className="font-semibold text-foreground">{gw.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {gw.description}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {config.enabled && (
-                    <span className="text-xs font-medium text-accent bg-accent/10 px-2 py-0.5 rounded-full border border-accent/20">
-                      Active
-                    </span>
-                  )}
-                  <Switch
-                    data-ocid={`payment-toggle-${gw.id}`}
-                    checked={config.enabled}
-                    onCheckedChange={(v) => update(gw.id, "enabled", v)}
-                  />
-                </div>
-              </div>
-
-              {config.enabled && (
-                <div className="space-y-3 pt-3 border-t border-border">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {gw.upiLabel && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor={`${gw.id}-upi`} className="text-xs">
-                          {gw.upiLabel}
-                        </Label>
-                        <Input
-                          id={`${gw.id}-upi`}
-                          data-ocid={`payment-${gw.id}-upi`}
-                          value={config.upiId}
-                          onChange={(e) =>
-                            update(gw.id, "upiId", e.target.value)
-                          }
-                          placeholder={gw.upiPlaceholder}
-                          className="text-sm"
-                        />
-                      </div>
-                    )}
-                    {gw.apiLabel && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor={`${gw.id}-api`} className="text-xs">
-                          {gw.apiLabel}
-                        </Label>
-                        <Input
-                          id={`${gw.id}-api`}
-                          data-ocid={`payment-${gw.id}-api`}
-                          type="password"
-                          value={config.apiKey}
-                          onChange={(e) =>
-                            update(gw.id, "apiKey", e.target.value)
-                          }
-                          placeholder={gw.apiPlaceholder}
-                          className="text-sm"
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground bg-muted/50 px-3 py-2 rounded">
-                    ℹ️ Demo integration — configure real API credentials with
-                    your payment provider before going live.
-                  </p>
-                </div>
-              )}
-            </Card>
-          );
-        })}
+        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <IndianRupee className="w-3.5 h-3.5" />
+          <span>All amounts in INR ₹</span>
+        </div>
       </div>
 
-      {enabledCount > 0 && (
-        <Card className="p-4 bg-accent/5 border-accent/20">
-          <div className="flex items-center gap-2 mb-1">
-            <CreditCard className="w-4 h-4 text-accent" />
-            <p className="text-sm text-foreground font-medium">
-              Online Payment Active
-            </p>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Students and parents will see "Pay Online" on their fee screen.
-            Payments will auto-update the Fee Register and generate a receipt.
-          </p>
-        </Card>
-      )}
+      {/* Info Banner */}
+      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-3 text-sm text-blue-700">
+        <p className="font-semibold mb-1">ℹ️ How Online Payments Work</p>
+        <p className="text-xs text-blue-600">
+          Enable a gateway and enter your API credentials. Parents can then pay
+          fees online from the Student Portal. Payments auto-update the Fee
+          Register and generate receipts.
+        </p>
+      </div>
 
-      {/* Save */}
-      <div className="flex justify-end">
+      {GATEWAY_META.map((meta) => {
+        const gw = gateways[meta.id];
+        return (
+          <Card
+            key={meta.id}
+            className={`p-5 space-y-4 transition-smooth ${gw.enabled ? "border-primary/30 bg-primary/5" : ""}`}
+            data-ocid={`payment.${meta.id}.card`}
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{meta.icon}</span>
+                <div>
+                  <p className="font-semibold text-foreground">{meta.label}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {meta.description}
+                  </p>
+                </div>
+                {gw.enabled && (
+                  <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
+                    Active
+                  </Badge>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {gw.enabled ? "Enabled" : "Disabled"}
+                </span>
+                <Switch
+                  checked={gw.enabled}
+                  onCheckedChange={(v) => setGateway(meta.id, "enabled", v)}
+                  data-ocid={`payment.${meta.id}.switch`}
+                />
+              </div>
+            </div>
+
+            {gw.enabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-border animate-slide-up">
+                {meta.fields.map((field) => (
+                  <div key={field.key} className="space-y-1.5">
+                    <Label htmlFor={`${meta.id}-${field.key}`}>
+                      {field.label}
+                    </Label>
+                    <Input
+                      id={`${meta.id}-${field.key}`}
+                      type={field.type ?? "text"}
+                      value={(gw[field.key] as string) ?? ""}
+                      onChange={(e) =>
+                        setGateway(meta.id, field.key, e.target.value)
+                      }
+                      placeholder={field.placeholder}
+                      data-ocid={`payment.${meta.id}.${field.key}.input`}
+                    />
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+
+      {/* Security Note */}
+      <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-xs text-amber-700">
+        🔒 API keys are stored securely. Never share your secret key with
+        anyone. Keys are used only for server-side payment verification.
+      </div>
+
+      <div className="flex justify-end pb-4">
         <Button
-          onClick={handleSave}
-          data-ocid="payment-save"
-          className={saved ? "bg-accent text-accent-foreground" : ""}
+          onClick={() => void handleSave()}
+          disabled={saving}
           size="lg"
+          data-ocid="payment.save_button"
         >
-          <Save className="w-4 h-4 mr-2" />
-          {saved ? "✓ Settings Saved!" : "Save Payment Settings"}
+          {saving ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Saving…
+            </>
+          ) : (
+            <>
+              <Save className="w-4 h-4 mr-2" />
+              Save Payment Settings
+            </>
+          )}
         </Button>
       </div>
     </div>

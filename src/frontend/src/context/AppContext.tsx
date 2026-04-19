@@ -272,7 +272,7 @@ interface AppContextValue {
   /** Legacy compatibility: counts from dataService cache */
   syncCounts: Record<string, number>;
   // Auth
-  login: (username: string, password: string) => boolean;
+  login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   changePassword: (userId: string, newPassword: string) => boolean;
   // Session
@@ -313,6 +313,7 @@ const SUPER_ADMIN: AppUser = {
   id: "su1",
   username: "superadmin",
   role: "superadmin",
+  fullName: "Super Admin",
   name: "Super Admin",
 };
 
@@ -345,7 +346,7 @@ function AppLoading({
         </div>
         <div className="text-center">
           <p className="text-xl font-bold text-foreground font-display tracking-tight">
-            SHUBH SCHOOL ERP
+            SCHOOL LEDGER ERP
           </p>
           {error ? (
             <>
@@ -485,156 +486,198 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [state.currentUser, state.isInitializing, state.token]);
 
   // ── Login ──────────────────────────────────────────────────────────────────
-  const login = useCallback((username: string, password: string): boolean => {
-    // 1. Super Admin
-    if (username === "superadmin") {
-      const passwords = ls.get<Record<string, string>>("user_passwords", {});
-      const validPw = passwords[username] ?? "admin123";
-      if (password !== validPw) return false;
+  const login = useCallback(
+    async (username: string, password: string): Promise<boolean> => {
+      // 1. Super Admin — local check first, then server for JWT
+      if (username === "superadmin") {
+        const passwords = ls.get<Record<string, string>>("user_passwords", {});
+        const validPw = passwords[username] ?? "admin123";
+        if (password !== validPw) return false;
 
-      let token = getJwt();
-      // Try backend login in background to get JWT
-      if (isApiConfigured()) {
-        void backendLogin(username, password).then((res) => {
-          if (res.success && res.token) {
-            setJwt(res.token);
-            syncEngine.setToken(res.token);
-          }
-        });
-        token = token ?? null;
+        let token = getJwt();
+        // Try backend login in background to get JWT
+        if (isApiConfigured()) {
+          void backendLogin(username, password).then((res) => {
+            if (res.success && res.token) {
+              setJwt(res.token);
+              syncEngine.setToken(res.token);
+            }
+          });
+          token = token ?? null;
+        }
+
+        sessionStorage.setItem(
+          "shubh_current_user",
+          JSON.stringify(SUPER_ADMIN),
+        );
+        initStartedRef.current = false;
+        dispatch({ type: "SET_USER", user: SUPER_ADMIN, token });
+        return true;
       }
 
-      sessionStorage.setItem("shubh_current_user", JSON.stringify(SUPER_ADMIN));
-      initStartedRef.current = false;
-      dispatch({ type: "SET_USER", user: SUPER_ADMIN, token });
-      return true;
-    }
+      // 2. Custom staff users (localStorage)
+      const customUsers = ls.get<Array<AppUser & { password?: string }>>(
+        "custom_users",
+        [],
+      );
+      const customUser = customUsers.find((u) => u.username === username);
+      if (customUser) {
+        const passwords = ls.get<Record<string, string>>("user_passwords", {});
+        if (passwords[username] === password) {
+          const displayName =
+            customUser.fullName ?? customUser.name ?? username;
+          const user: AppUser = {
+            id: customUser.id,
+            username: customUser.username,
+            role: customUser.role,
+            fullName: displayName,
+            name: displayName,
+            position: customUser.position,
+          };
+          sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+          initStartedRef.current = false;
+          dispatch({ type: "SET_USER", user, token: null });
+          return true;
+        }
+      }
 
-    // 2. Custom staff users
-    const customUsers = ls.get<Array<AppUser & { password?: string }>>(
-      "custom_users",
-      [],
-    );
-    const customUser = customUsers.find((u) => u.username === username);
-    if (customUser) {
-      const passwords = ls.get<Record<string, string>>("user_passwords", {});
-      if (passwords[username] === password) {
+      // 3. Staff (Teacher/Driver) — username=mobile, password=dob ddmmyyyy
+      const staffList = ls.get<
+        Array<{
+          id: string;
+          name: string;
+          mobile: string;
+          dob: string;
+          designation: string;
+          credentials: Credentials;
+        }>
+      >("staff", []);
+      const staffMember = staffList.find(
+        (s) =>
+          s.credentials?.username === username &&
+          s.credentials?.password === password,
+      );
+      if (staffMember) {
+        const designation = (staffMember.designation ?? "").toLowerCase();
+        const role: UserRole =
+          designation === "driver"
+            ? "driver"
+            : designation === "librarian"
+              ? "librarian"
+              : designation === "accountant"
+                ? "accountant"
+                : designation === "receptionist"
+                  ? "receptionist"
+                  : "teacher";
+        const staffDisplayName = staffMember.name ?? "Staff";
         const user: AppUser = {
-          id: customUser.id,
-          username: customUser.username,
-          role: customUser.role,
-          name: customUser.name,
-          position: customUser.position,
+          id: staffMember.id,
+          username,
+          role,
+          fullName: staffDisplayName,
+          name: staffDisplayName,
+          staffId: staffMember.id,
+          mobile: staffMember.mobile,
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
         dispatch({ type: "SET_USER", user, token: null });
         return true;
       }
-    }
 
-    // 3. Staff (Teacher/Driver) — username=mobile, password=dob ddmmyyyy
-    const staffList = ls.get<
-      Array<{
-        id: string;
-        name: string;
-        mobile: string;
-        dob: string;
-        designation: string;
-        credentials: Credentials;
-      }>
-    >("staff", []);
-    const staffMember = staffList.find(
-      (s) =>
-        s.credentials?.username === username &&
-        s.credentials?.password === password,
-    );
-    if (staffMember) {
-      const designation = (staffMember.designation ?? "").toLowerCase();
-      const role: UserRole =
-        designation === "driver"
-          ? "driver"
-          : designation === "librarian"
-            ? "librarian"
-            : designation === "accountant"
-              ? "accountant"
-              : designation === "receptionist"
-                ? "receptionist"
-                : "teacher";
-      const user: AppUser = {
-        id: staffMember.id,
-        username,
-        role,
-        name: staffMember.name,
-        staffId: staffMember.id,
-        mobile: staffMember.mobile,
-      };
-      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-      initStartedRef.current = false;
-      dispatch({ type: "SET_USER", user, token: null });
-      return true;
-    }
+      // 4. Students — username=admNo, password=dob ddmmyyyy
+      const students = ls.get<
+        Array<{
+          id: string;
+          fullName: string;
+          admNo: string;
+          credentials: Credentials;
+        }>
+      >("students", []);
+      const student = students.find(
+        (s) =>
+          s.credentials?.username === username &&
+          s.credentials?.password === password,
+      );
+      if (student) {
+        const studentDisplayName = student.fullName ?? "Student";
+        const user: AppUser = {
+          id: student.id,
+          username,
+          role: "student",
+          fullName: studentDisplayName,
+          name: studentDisplayName,
+          studentId: student.id,
+        };
+        sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+        initStartedRef.current = false;
+        dispatch({ type: "SET_USER", user, token: null });
+        return true;
+      }
 
-    // 4. Students — username=admNo, password=dob ddmmyyyy
-    const students = ls.get<
-      Array<{
-        id: string;
-        fullName: string;
-        admNo: string;
-        credentials: Credentials;
-      }>
-    >("students", []);
-    const student = students.find(
-      (s) =>
-        s.credentials?.username === username &&
-        s.credentials?.password === password,
-    );
-    if (student) {
-      const user: AppUser = {
-        id: student.id,
-        username,
-        role: "student",
-        name: student.fullName,
-        studentId: student.id,
-      };
-      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-      initStartedRef.current = false;
-      dispatch({ type: "SET_USER", user, token: null });
-      return true;
-    }
+      // 5. Parent — username=guardianMobile, password=guardianMobile
+      const parent = students.find((s) => {
+        const raw = s as unknown as {
+          guardianMobile?: string;
+          fatherMobile?: string;
+        };
+        const mob = raw.guardianMobile ?? raw.fatherMobile ?? "";
+        return mob === username && mob === password && mob.length >= 10;
+      });
+      if (parent) {
+        const raw = parent as unknown as {
+          guardianMobile?: string;
+          fatherMobile?: string;
+          guardianName?: string;
+          fatherName?: string;
+        };
+        const mob = raw.guardianMobile ?? raw.fatherMobile ?? username;
+        const parentDisplayName =
+          raw.guardianName ?? raw.fatherName ?? "Parent";
+        const user: AppUser = {
+          id: `parent_${mob}`,
+          username,
+          role: "parent",
+          fullName: parentDisplayName,
+          name: parentDisplayName,
+          mobile: mob,
+        };
+        sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+        initStartedRef.current = false;
+        dispatch({ type: "SET_USER", user, token: null });
+        return true;
+      }
 
-    // 5. Parent — username=guardianMobile, password=guardianMobile
-    const parent = students.find((s) => {
-      const raw = s as unknown as {
-        guardianMobile?: string;
-        fatherMobile?: string;
-      };
-      const mob = raw.guardianMobile ?? raw.fatherMobile ?? "";
-      return mob === username && mob === password && mob.length >= 10;
-    });
-    if (parent) {
-      const raw = parent as unknown as {
-        guardianMobile?: string;
-        fatherMobile?: string;
-        guardianName?: string;
-        fatherName?: string;
-      };
-      const mob = raw.guardianMobile ?? raw.fatherMobile ?? username;
-      const user: AppUser = {
-        id: `parent_${mob}`,
-        username,
-        role: "parent",
-        name: raw.guardianName ?? raw.fatherName ?? "Parent",
-        mobile: mob,
-      };
-      sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-      initStartedRef.current = false;
-      dispatch({ type: "SET_USER", user, token: null });
-      return true;
-    }
+      // 6. Server-side fallback — validate against MySQL users table.
+      // Used for staff/teachers/parents who exist only on the server (fresh device).
+      if (isApiConfigured()) {
+        try {
+          const result = await backendLogin(username, password);
+          if (result.success && result.token) {
+            setJwt(result.token);
+            syncEngine.setToken(result.token);
+            const serverRole = (result.role ?? "teacher") as UserRole;
+            const user: AppUser = {
+              id: `server_${username}`,
+              username,
+              role: serverRole,
+              fullName: username,
+              name: username,
+            };
+            sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+            initStartedRef.current = false;
+            dispatch({ type: "SET_USER", user, token: result.token });
+            return true;
+          }
+        } catch {
+          // Server unreachable — fall through to return false
+        }
+      }
 
-    return false;
-  }, []);
+      return false;
+    },
+    [],
+  );
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");

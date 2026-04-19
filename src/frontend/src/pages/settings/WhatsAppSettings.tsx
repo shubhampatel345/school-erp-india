@@ -3,6 +3,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import {
   CheckCircle,
@@ -18,10 +25,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { WhatsAppSettings as BaseWhatsAppSettings } from "../../types";
-
-interface WhatsAppSettingsType extends BaseWhatsAppSettings {
-  fromNumber?: string;
-}
+import { getApiIndexUrl, getJwt } from "../../utils/api";
 import {
   getWhatsAppLogs,
   getWhatsAppSettings,
@@ -29,16 +33,66 @@ import {
   sendWhatsApp,
 } from "../../utils/whatsapp";
 
+interface WhatsAppSettingsExtended extends BaseWhatsAppSettings {
+  fromNumber?: string;
+  apiUrl?: string;
+  provider?: string;
+}
+
+const API_PROVIDERS = [
+  { value: "wacoder", label: "wacoder.in (recommended)" },
+  { value: "ultramsg", label: "Ultramsg" },
+  { value: "maytapi", label: "Maytapi" },
+  { value: "custom", label: "Custom Provider" },
+];
+
+const PROVIDER_URLS: Record<string, string> = {
+  wacoder: "https://api.wacoder.in",
+  ultramsg: "https://api.ultramsg.com",
+  maytapi: "https://api.maytapi.com",
+  custom: "",
+};
+
+async function saveSettingsToServer(
+  settings: WhatsAppSettingsExtended,
+): Promise<boolean> {
+  try {
+    const token = getJwt();
+    const url = getApiIndexUrl();
+    const res = await fetch(`${url}?route=school_settings/save`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({
+        key: "whatsapp_settings",
+        value: JSON.stringify(settings),
+        ...settings,
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      status?: string;
+    };
+    return data.status === "success" || res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function WhatsAppSettings() {
   const { saveData } = useApp();
-  const [settings, setSettings] = useState<WhatsAppSettingsType>(
-    () => getWhatsAppSettings() as WhatsAppSettingsType,
-  );
+  const [settings, setSettings] = useState<WhatsAppSettingsExtended>(() => ({
+    provider: "wacoder",
+    apiUrl: "https://api.wacoder.in",
+    fromNumber: "",
+    ...(getWhatsAppSettings() as WhatsAppSettingsExtended),
+  }));
   const [showAppKey, setShowAppKey] = useState(false);
   const [showAuthKey, setShowAuthKey] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testMessage, setTestMessage] = useState(
-    "Test message from SHUBH SCHOOL ERP — WhatsApp integration working ✅",
+    "Test message from SCHOOL LEDGER ERP — WhatsApp integration working ✅",
   );
   const [sending, setSending] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -47,6 +101,11 @@ export default function WhatsAppSettings() {
     message: string;
   } | null>(null);
   const logs = getWhatsAppLogs();
+
+  function handleProviderChange(provider: string) {
+    const url = PROVIDER_URLS[provider] ?? "";
+    setSettings((s) => ({ ...s, provider, apiUrl: url || s.apiUrl }));
+  }
 
   async function handleSave() {
     setSaving(true);
@@ -59,9 +118,14 @@ export default function WhatsAppSettings() {
         type: "whatsapp",
         ...settings,
       } as Record<string, unknown>);
-      toast.success("WhatsApp settings saved to server.");
+      // POST directly to school_settings/save
+      const serverSaved = await saveSettingsToServer(settings);
+      if (serverSaved) {
+        toast.success("WhatsApp settings saved to server ✓");
+      } else {
+        toast.success("Settings saved locally (server sync pending).");
+      }
     } catch {
-      // Saved locally at least
       toast.success("WhatsApp settings saved locally.");
     } finally {
       setSaving(false);
@@ -92,12 +156,12 @@ export default function WhatsAppSettings() {
       <Card className="p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
-              <MessageSquare className="w-5 h-5 text-green-700 dark:text-green-400" />
+            <div className="w-10 h-10 rounded-xl bg-green-100 flex items-center justify-center">
+              <MessageSquare className="w-5 h-5 text-green-700" />
             </div>
             <div>
               <h2 className="font-display font-semibold text-foreground">
-                WhatsApp API (wacoder.in)
+                WhatsApp API Settings
               </h2>
               <p className="text-xs text-muted-foreground">
                 Real WhatsApp messaging for fee reminders, attendance alerts,
@@ -120,28 +184,80 @@ export default function WhatsAppSettings() {
         </div>
 
         {settings.enabled && (
-          <div className="flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2">
+          <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
             <CheckCircle className="w-4 h-4 text-green-600 flex-shrink-0" />
-            <p className="text-xs text-green-700 dark:text-green-400">
-              WhatsApp integration is active — messages will be sent from your
-              wacoder.in account.
+            <p className="text-xs text-green-700">
+              WhatsApp integration is active — messages will be sent via your
+              API provider.
             </p>
           </div>
         )}
 
-        {/* Provider info */}
-        <div className="rounded-lg bg-muted/30 border border-border p-3">
-          <p className="text-xs text-muted-foreground">
-            Using <strong>wacoder.in</strong> as the WhatsApp API provider.{" "}
-            <a
-              href="https://wacoder.in"
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary underline underline-offset-2 inline-flex items-center gap-0.5 text-xs"
+        {/* Provider & API URL */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="wa-provider">API Provider</Label>
+            <Select
+              value={settings.provider ?? "wacoder"}
+              onValueChange={handleProviderChange}
             >
-              Get API keys <ExternalLink className="w-3 h-3" />
-            </a>
-          </p>
+              <SelectTrigger
+                id="wa-provider"
+                data-ocid="whatsapp.provider.select"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {API_PROVIDERS.map((p) => (
+                  <SelectItem key={p.value} value={p.value}>
+                    {p.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="wa-apiurl">
+              API URL
+              <a
+                href="https://wacoder.in"
+                target="_blank"
+                rel="noreferrer"
+                className="ml-2 text-primary underline underline-offset-2 inline-flex items-center gap-0.5 text-xs"
+              >
+                Get API keys <ExternalLink className="w-3 h-3" />
+              </a>
+            </Label>
+            <Input
+              id="wa-apiurl"
+              data-ocid="whatsapp.apiurl.input"
+              value={settings.apiUrl ?? "https://api.wacoder.in"}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, apiUrl: e.target.value }))
+              }
+              placeholder="https://api.wacoder.in"
+              className="font-mono text-xs"
+            />
+          </div>
+        </div>
+
+        {/* From Number */}
+        <div className="space-y-1.5">
+          <Label htmlFor="wa-from">
+            From Number{" "}
+            <span className="text-muted-foreground text-xs font-normal">
+              (School&apos;s WhatsApp number registered with provider)
+            </span>
+          </Label>
+          <Input
+            id="wa-from"
+            data-ocid="whatsapp.from_number.input"
+            placeholder="10-digit number registered with provider (e.g. 9876543210)"
+            value={settings.fromNumber ?? ""}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, fromNumber: e.target.value }))
+            }
+          />
         </div>
 
         {/* API Keys */}
@@ -158,7 +274,7 @@ export default function WhatsAppSettings() {
                   setSettings((s) => ({ ...s, appKey: e.target.value }))
                 }
                 className="pr-10 font-mono text-xs"
-                placeholder="Enter your wacoder.in App Key"
+                placeholder="Enter your API App Key"
               />
               <button
                 type="button"
@@ -187,7 +303,7 @@ export default function WhatsAppSettings() {
                   setSettings((s) => ({ ...s, authKey: e.target.value }))
                 }
                 className="pr-10 font-mono text-xs"
-                placeholder="Enter your wacoder.in Auth Key"
+                placeholder="Enter your API Auth Key"
               />
               <button
                 type="button"
@@ -221,7 +337,7 @@ export default function WhatsAppSettings() {
         </div>
       </Card>
 
-      {/* WhatsApp Bot Webhook */}
+      {/* WhatsApp Bot Webhook info */}
       <Card className="p-6 space-y-4">
         <h3 className="font-semibold text-foreground flex items-center gap-2">
           <Badge variant="secondary" className="text-xs">
@@ -262,18 +378,6 @@ export default function WhatsAppSettings() {
               )}
             </div>
           ))}
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="wa-from">From Number (School WhatsApp)</Label>
-          <Input
-            id="wa-from"
-            data-ocid="whatsapp.from_number.input"
-            placeholder="10-digit number registered with wacoder.in"
-            value={settings.fromNumber ?? ""}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, fromNumber: e.target.value }))
-            }
-          />
         </div>
       </Card>
 

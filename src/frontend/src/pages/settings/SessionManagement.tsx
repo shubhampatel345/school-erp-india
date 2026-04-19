@@ -12,11 +12,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Label } from "@/components/ui/label";
 import {
   Archive,
+  Calendar,
   CheckCircle,
-  FileText,
   GraduationCap,
   Loader2,
   Pencil,
@@ -29,12 +29,18 @@ import { useApp } from "../../context/AppContext";
 import type { Session } from "../../types";
 import { generateId } from "../../utils/localStorage";
 
+function formatYear(label: string): string {
+  const [a, b] = label.split("-");
+  if (a && b) return `${a}–${b}`;
+  return label;
+}
+
 export default function SessionManagement() {
   const {
     currentUser,
     currentSession,
+    sessions,
     switchSession,
-    addNotification,
     getData,
     saveData,
     updateData,
@@ -44,120 +50,143 @@ export default function SessionManagement() {
 
   const isSuperAdmin = currentUser?.role === "superadmin";
 
+  const [localSessions, setLocalSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
+
   const [newLabel, setNewLabel] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [showAddForm, setShowAddForm] = useState(false);
+
   const [editTarget, setEditTarget] = useState<Session | null>(null);
   const [editLabel, setEditLabel] = useState("");
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const [sessions, setSessions] = useState<Session[]>([]);
+  const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
-  // Load sessions from server on mount
+  // Load sessions
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        await refreshCollection("sessions");
-      } catch {
-        // fallback to in-memory
-      } finally {
-        setLoading(false);
-      }
-    }
-    void load();
-  }, [refreshCollection]);
+    void loadSessions();
+  }, []);
 
-  // Sync sessions from context data
-  useEffect(() => {
-    const raw = getData("sessions") as Session[];
-    if (raw.length > 0) {
-      setSessions(raw);
-    } else {
+  async function loadSessions() {
+    setLoading(true);
+    try {
+      await refreshCollection("sessions");
+      const rows = getData("sessions") as Session[];
+      setLocalSessions(rows.length > 0 ? rows : sessions);
+    } catch {
+      setLocalSessions(sessions);
+    } finally {
       setLoading(false);
     }
-  }, [getData]);
+  }
 
-  async function handleCreate() {
+  // Merge context sessions on change
+  useEffect(() => {
+    if (!loading && sessions.length > 0) setLocalSessions(sessions);
+  }, [sessions, loading]);
+
+  async function handleAdd() {
     const label = newLabel.trim();
-    if (!label.match(/^\d{4}-\d{2}$/)) {
-      toast.error("Session label must be in YYYY-YY format (e.g. 2026-27)");
+    if (!label) {
+      toast.error("Session name is required.");
       return;
     }
-    if (sessions.find((s) => s.label === label)) {
-      toast.error("Session already exists.");
+    const yearMatch = label.match(/^(\d{4})-(\d{2,4})$/);
+    if (!yearMatch) {
+      toast.error("Format should be YYYY-YY (e.g. 2025-26)");
       return;
     }
 
-    setSaving(true);
-    const [startStr] = label.split("-");
-    const startYear = Number.parseInt(startStr, 10);
-    const newSession: Session = {
+    setAdding(true);
+    const startYear = Number.parseInt(yearMatch[1]);
+    const endYearFull = startYear + 1;
+    const session: Session = {
       id: generateId(),
       label,
       startYear,
-      endYear: startYear + 1,
+      endYear: endYearFull,
       isArchived: false,
-      isActive: true,
+      isActive: false,
       createdAt: new Date().toISOString(),
     };
 
     try {
-      // Archive all current active sessions
-      for (const s of sessions.filter((x) => x.isActive)) {
-        await updateData("sessions", s.id, {
-          isActive: false,
-          isArchived: true,
-        });
-      }
-      await saveData(
-        "sessions",
-        newSession as unknown as Record<string, unknown>,
-      );
-      switchSession(newSession.id);
-      addNotification(`New session created: ${label}`, "success", "📅");
-      setNewLabel("");
+      await saveData("sessions", session as unknown as Record<string, unknown>);
       toast.success(`Session ${label} created.`);
+      setNewLabel("");
+      setShowAddForm(false);
+      await loadSessions();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to create session.",
       );
     } finally {
-      setSaving(false);
+      setAdding(false);
     }
   }
 
-  async function handleDelete(session: Session) {
-    if (session.isActive) {
-      toast.error("Cannot delete the active session.");
+  async function handleSetCurrent(session: Session) {
+    if (!isSuperAdmin) {
+      toast.error("Only Super Admin can change the current session.");
       return;
     }
-    setSaving(true);
     try {
-      await deleteData("sessions", session.id);
-      toast.success(`Session ${session.label} deleted.`);
+      // Mark all as inactive
+      for (const s of localSessions) {
+        if (s.isActive) {
+          await updateData("sessions", s.id, {
+            isActive: false,
+            isArchived: true,
+          });
+        }
+      }
+      await updateData("sessions", session.id, {
+        isActive: true,
+        isArchived: false,
+      });
+      switchSession(session.id);
+      toast.success(`${session.label} is now the current session.`);
+      await loadSessions();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to delete session.",
+        err instanceof Error ? err.message : "Failed to update session.",
       );
-    } finally {
-      setDeleteTarget(null);
-      setSaving(false);
     }
   }
 
-  async function handleEdit() {
-    if (!editTarget) return;
-    const label = editLabel.trim();
-    if (!label) {
-      toast.error("Session label cannot be empty.");
+  async function handleArchive(session: Session) {
+    if (!isSuperAdmin) {
+      toast.error("Only Super Admin can archive sessions.");
       return;
     }
+    if (session.isActive) {
+      toast.error("Cannot archive the current active session.");
+      return;
+    }
+    try {
+      await updateData("sessions", session.id, {
+        isArchived: true,
+        isActive: false,
+      });
+      toast.success(`${session.label} archived.`);
+      await loadSessions();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to archive session.",
+      );
+    }
+  }
+
+  async function handleSaveEdit() {
+    if (!editTarget || !editLabel.trim()) return;
     setSaving(true);
     try {
-      await updateData("sessions", editTarget.id, { label });
+      await updateData("sessions", editTarget.id, { label: editLabel.trim() });
       toast.success("Session updated.");
       setEditTarget(null);
+      await loadSessions();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to update session.",
@@ -167,257 +196,227 @@ export default function SessionManagement() {
     }
   }
 
-  async function handleSetCurrent(session: Session) {
-    setSaving(true);
+  async function handleDelete() {
+    if (!deleteTarget) return;
+    if (deleteTarget.isActive) {
+      toast.error("Cannot delete the current session.");
+      return;
+    }
+    setDeleting(true);
     try {
-      // Mark all as inactive/archived first, then set selected as active
-      for (const s of sessions.filter(
-        (x) => x.isActive && x.id !== session.id,
-      )) {
-        await updateData("sessions", s.id, {
-          isActive: false,
-          isArchived: true,
-        });
-      }
-      await updateData("sessions", session.id, {
-        isActive: true,
-        isArchived: false,
-      });
-      switchSession(session.id);
-      addNotification(`Switched to session: ${session.label}`, "info", "📅");
-      toast.success(`Active session: ${session.label}`);
+      await deleteData("sessions", deleteTarget.id);
+      toast.success(`Session ${deleteTarget.label} deleted.`);
+      setDeleteTarget(null);
+      await loadSessions();
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to switch session.",
+        err instanceof Error ? err.message : "Failed to delete session.",
       );
     } finally {
-      setSaving(false);
+      setDeleting(false);
     }
   }
 
-  function getStudentCount(sessionId: string): number {
-    const students = getData("students") as Array<{ sessionId?: string }>;
-    return students.filter((s) => s.sessionId === sessionId).length;
-  }
-
-  function getReceiptCount(sessionId: string): number {
-    const receipts = getData("fee_receipts") as Array<{
-      sessionId?: string;
-      isDeleted?: boolean;
-    }>;
-    return receipts.filter((r) => r.sessionId === sessionId && !r.isDeleted)
-      .length;
-  }
-
-  const sorted = [...sessions].sort((a, b) => b.startYear - a.startYear);
+  const sortedSessions = [...localSessions].sort((a, b) => {
+    if (a.isActive) return -1;
+    if (b.isActive) return 1;
+    return b.startYear - a.startYear;
+  });
 
   return (
-    <div className="p-4 lg:p-6 max-w-2xl space-y-6">
-      {/* Current Session Banner */}
-      {currentSession && (
-        <Card className="p-4 bg-primary/5 border-primary/20">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-              <CheckCircle className="w-5 h-5 text-primary" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-semibold text-foreground">
-                Active Session: {currentSession.label}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                All data operations are scoped to this session
-              </p>
-            </div>
-            <div className="flex gap-4 text-right">
-              <div>
-                <p className="text-lg font-bold font-display text-foreground">
-                  {getStudentCount(currentSession.id)}
-                </p>
-                <p className="text-xs text-muted-foreground">Students</p>
-              </div>
-              <div>
-                <p className="text-lg font-bold font-display text-foreground">
-                  {getReceiptCount(currentSession.id)}
-                </p>
-                <p className="text-xs text-muted-foreground">Receipts</p>
-              </div>
-            </div>
-          </div>
-        </Card>
-      )}
-
-      {/* Create New Session — Super Admin only */}
-      {isSuperAdmin && (
-        <Card className="p-5">
-          <h2 className="font-display font-semibold text-foreground mb-1">
-            Create New Session
+    <div className="p-4 lg:p-6 max-w-3xl space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-display font-semibold text-foreground flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-primary" /> Session Management
           </h2>
-          <p className="text-xs text-muted-foreground mb-4">
-            Creating a new session archives the current one. Use Promote
-            Students to move students forward.
+          <p className="text-sm text-muted-foreground mt-1">
+            Current session: <strong>{currentSession?.label ?? "None"}</strong>
           </p>
-          <div className="flex gap-3">
+        </div>
+        {isSuperAdmin && (
+          <Button
+            onClick={() => setShowAddForm(!showAddForm)}
+            data-ocid="sessions.add_button"
+          >
+            <Plus className="w-4 h-4 mr-1.5" /> New Session
+          </Button>
+        )}
+      </div>
+
+      {/* Add Form */}
+      {showAddForm && isSuperAdmin && (
+        <Card className="p-5 space-y-4 border-primary/20 animate-slide-up">
+          <h3 className="font-semibold text-foreground">Create New Session</h3>
+          <div className="space-y-1.5">
+            <Label htmlFor="session-label">Session Name *</Label>
             <Input
-              data-ocid="sessions.label.input"
+              id="session-label"
               placeholder="e.g. 2026-27"
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
-              className="max-w-xs"
-              onKeyDown={(e) => e.key === "Enter" && void handleCreate()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void handleAdd();
+              }}
+              data-ocid="sessions.new_label.input"
             />
+            <p className="text-xs text-muted-foreground">
+              Format: YYYY-YY (e.g. 2026-27)
+            </p>
+          </div>
+          <div className="flex gap-2">
             <Button
-              onClick={() => void handleCreate()}
-              data-ocid="sessions.create.button"
-              disabled={saving || !newLabel.trim()}
+              onClick={() => void handleAdd()}
+              disabled={adding || !newLabel}
+              data-ocid="sessions.new.save_button"
             >
-              {saving ? (
-                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              {adding ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Creating…
+                </>
               ) : (
-                <Plus className="w-4 h-4 mr-1.5" />
+                <>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create Session
+                </>
               )}
-              Create Session
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setShowAddForm(false);
+                setNewLabel("");
+              }}
+              data-ocid="sessions.new.cancel_button"
+            >
+              Cancel
             </Button>
           </div>
         </Card>
       )}
 
-      {/* Session List */}
-      <Card className="overflow-hidden">
-        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-          <h2 className="font-display font-semibold text-foreground">
-            All Sessions
-          </h2>
-          <span className="text-xs text-muted-foreground">
-            {loading
-              ? "Loading…"
-              : `${sessions.length} session${sessions.length !== 1 ? "s" : ""}`}
-          </span>
+      {/* Sessions List */}
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm py-8">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading sessions…
         </div>
-
-        <div className="divide-y divide-border">
-          {loading ? (
-            <div className="px-5 py-6 space-y-4">
-              {[1, 2].map((i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <Skeleton className="w-10 h-10 rounded-xl" />
-                  <div className="flex-1 space-y-1.5">
-                    <Skeleton className="h-4 w-32" />
-                    <Skeleton className="h-3 w-48" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : sorted.length === 0 ? (
-            <div
-              className="px-5 py-8 text-center text-muted-foreground text-sm"
-              data-ocid="sessions.empty_state"
+      ) : sortedSessions.length === 0 ? (
+        <Card className="p-8 text-center" data-ocid="sessions.empty_state">
+          <Calendar className="w-10 h-10 mx-auto text-muted-foreground/40 mb-3" />
+          <p className="font-medium text-muted-foreground">No sessions found</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Create your first session to get started.
+          </p>
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {sortedSessions.map((session, idx) => (
+            <Card
+              key={session.id}
+              className={`p-4 transition-smooth ${session.isActive ? "border-primary/30 bg-primary/5" : ""}`}
+              data-ocid={`sessions.item.${idx + 1}`}
             >
-              No sessions found. Create your first session above.
-            </div>
-          ) : (
-            sorted.map((session, idx) => {
-              const isCurrentActive = currentSession?.id === session.id;
-              return (
-                <div
-                  key={session.id}
-                  className="flex items-center gap-4 px-5 py-4"
-                  data-ocid={`sessions.item.${idx + 1}`}
-                >
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-3">
                   <div
-                    className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                      session.isActive ? "bg-primary/10" : "bg-muted"
-                    }`}
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center ${session.isActive ? "bg-primary/10" : "bg-muted"}`}
                   >
-                    {session.isActive ? (
-                      <CheckCircle className="w-5 h-5 text-primary" />
-                    ) : (
-                      <Archive className="w-5 h-5 text-muted-foreground" />
-                    )}
+                    <Calendar
+                      className={`w-5 h-5 ${session.isActive ? "text-primary" : "text-muted-foreground"}`}
+                    />
                   </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <p className="font-semibold text-foreground">
-                        {session.label}
-                      </p>
-                      {session.isActive && (
-                        <Badge className="text-xs bg-primary/10 text-primary border-primary/20">
-                          Active
-                        </Badge>
-                      )}
-                      {session.isArchived && !session.isActive && (
-                        <Badge variant="secondary" className="text-xs">
-                          Archived
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-4 mt-1">
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <GraduationCap className="w-3 h-3" />{" "}
-                        {getStudentCount(session.id)} students
-                      </span>
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <FileText className="w-3 h-3" />{" "}
-                        {getReceiptCount(session.id)} receipts
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Created:{" "}
-                        {new Date(session.createdAt).toLocaleDateString(
-                          "en-IN",
-                        )}
-                      </span>
-                    </div>
+                  <div>
+                    <p className="font-semibold text-foreground">
+                      {formatYear(session.label)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {session.startYear} – {session.endYear}
+                    </p>
                   </div>
-
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {isCurrentActive ? (
-                      <Badge className="text-xs px-3 py-1 bg-accent/10 text-accent border-accent/20">
+                  <div className="flex gap-1.5 flex-wrap">
+                    {session.isActive && (
+                      <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30">
+                        <CheckCircle className="w-2.5 h-2.5 mr-1" />
                         Current
                       </Badge>
-                    ) : (
+                    )}
+                    {session.isArchived && !session.isActive && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        <Archive className="w-2.5 h-2.5 mr-1" />
+                        Archived
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                {isSuperAdmin && (
+                  <div className="flex gap-1.5 flex-wrap">
+                    {!session.isActive && (
                       <Button
                         size="sm"
                         variant="outline"
-                        data-ocid={`sessions.switch.${idx + 1}`}
                         onClick={() => void handleSetCurrent(session)}
-                        disabled={saving}
+                        data-ocid={`sessions.set_current.${idx + 1}`}
                       >
-                        Set Active
+                        <CheckCircle className="w-3.5 h-3.5 mr-1" />
+                        Set Current
                       </Button>
                     )}
-
-                    {isSuperAdmin && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setEditTarget(session);
+                        setEditLabel(session.label);
+                      }}
+                      data-ocid={`sessions.edit_button.${idx + 1}`}
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    {!session.isActive && (
                       <Button
                         size="sm"
-                        variant="ghost"
-                        onClick={() => {
-                          setEditTarget(session);
-                          setEditLabel(session.label);
-                        }}
-                        aria-label="Edit session"
-                        data-ocid={`sessions.edit_button.${idx + 1}`}
+                        variant="outline"
+                        onClick={() => void handleArchive(session)}
+                        title="Archive session"
+                        data-ocid={`sessions.archive_button.${idx + 1}`}
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <Archive className="w-3.5 h-3.5" />
                       </Button>
                     )}
-
-                    {isSuperAdmin && !session.isActive && (
+                    {!session.isActive && (
                       <Button
                         size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        variant="outline"
+                        className="text-destructive border-destructive/30 hover:bg-destructive/10"
                         onClick={() => setDeleteTarget(session)}
-                        aria-label="Delete session"
                         data-ocid={`sessions.delete_button.${idx + 1}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     )}
                   </div>
-                </div>
-              );
-            })
-          )}
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* Promote Students Info */}
+      <Card className="p-4 bg-muted/30 border-dashed">
+        <div className="flex items-center gap-3">
+          <GraduationCap className="w-8 h-8 text-primary/50" />
+          <div>
+            <p className="text-sm font-medium text-foreground">
+              Promote Students
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Go to Students → Promote Students to bulk-promote to the next
+              session.
+            </p>
+          </div>
         </div>
       </Card>
 
@@ -427,37 +426,46 @@ export default function SessionManagement() {
           <AlertDialogHeader>
             <AlertDialogTitle>Edit Session</AlertDialogTitle>
             <AlertDialogDescription>
-              Change the label for session <strong>{editTarget?.label}</strong>.
+              Update the session name.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="py-2">
-            <Input
-              value={editLabel}
-              onChange={(e) => setEditLabel(e.target.value)}
-              placeholder="e.g. 2025-26"
-              data-ocid="sessions.edit.label.input"
-              onKeyDown={(e) => e.key === "Enter" && void handleEdit()}
-            />
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <Label>Session Name</Label>
+              <Input
+                value={editLabel}
+                onChange={(e) => setEditLabel(e.target.value)}
+                placeholder="e.g. 2026-27"
+                data-ocid="sessions.edit_label.input"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSaveEdit();
+                }}
+              />
+            </div>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel data-ocid="sessions.edit.cancel_button">
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              data-ocid="sessions.edit.confirm_button"
-              onClick={() => void handleEdit()}
+              onClick={() => void handleSaveEdit()}
               disabled={saving}
+              data-ocid="sessions.edit.confirm_button"
             >
               {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
-              ) : null}
-              Save Changes
+                <>
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                "Save Changes"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Delete Confirmation */}
+      {/* Delete Dialog */}
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={() => setDeleteTarget(null)}
@@ -466,9 +474,8 @@ export default function SessionManagement() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Session?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete session{" "}
-              <strong>{deleteTarget?.label}</strong> and all its archived data.
-              This action cannot be undone.
+              Delete <strong>{deleteTarget?.label}</strong>? This cannot be
+              undone. Student records for this session may be affected.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -476,15 +483,16 @@ export default function SessionManagement() {
               Cancel
             </AlertDialogCancel>
             <AlertDialogAction
-              data-ocid="sessions.delete.confirm_button"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteTarget && void handleDelete(deleteTarget)}
-              disabled={saving}
+              onClick={() => void handleDelete()}
+              disabled={deleting}
+              data-ocid="sessions.delete.confirm_button"
             >
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
-              ) : null}
-              Delete
+              {deleting ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                "Delete Session"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
