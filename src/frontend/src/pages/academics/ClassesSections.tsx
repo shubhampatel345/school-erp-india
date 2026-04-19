@@ -3,48 +3,100 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Edit2, LayoutGrid, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Edit2, LayoutGrid, Loader2, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ClassSection } from "../../types";
+import { dataService } from "../../utils/dataService";
 import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
 
 export default function ClassesSections() {
-  const [classes, setClasses] = useState<ClassSection[]>(() =>
-    ls.get<ClassSection[]>("classes", []),
-  );
+  const [classes, setClasses] = useState<ClassSection[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showAddClass, setShowAddClass] = useState(false);
   const [newClassName, setNewClassName] = useState("");
   const [editClass, setEditClass] = useState<ClassSection | null>(null);
   const [addSectionFor, setAddSectionFor] = useState<string | null>(null);
   const [newSection, setNewSection] = useState("");
 
-  function saveClasses(updated: ClassSection[]) {
-    setClasses(updated);
+  // Load classes from server (MySQL) on mount, fall back to localStorage
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    dataService
+      .getAsync<ClassSection>("classes")
+      .then((rows) => {
+        if (cancelled) return;
+        if (rows.length > 0) {
+          setClasses(rows);
+        } else {
+          // Fall back to localStorage if server returns nothing
+          const local = ls.get<ClassSection[]>("classes", []);
+          setClasses(local);
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setClasses(ls.get<ClassSection[]>("classes", []));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Keep localStorage mirror in sync (for offline fallback)
+  function mirrorLocal(updated: ClassSection[]) {
     ls.set("classes", updated);
   }
 
-  function handleAddClass() {
+  async function handleAddClass() {
     if (!newClassName.trim()) return;
     const exists = classes.find(
       (c) => c.className.toLowerCase() === newClassName.trim().toLowerCase(),
     );
-    if (exists) return alert("Class already exists");
+    if (exists) {
+      alert("Class already exists");
+      return;
+    }
     const entry: ClassSection = {
       id: generateId(),
       className: newClassName.trim(),
       sections: [],
     };
-    saveClasses([...classes, entry]);
+    // Optimistic UI update
+    const updated = [...classes, entry];
+    setClasses(updated);
+    mirrorLocal(updated);
     setNewClassName("");
     setShowAddClass(false);
+    // Persist to server — send both name and className so the alias mapping works
+    await dataService.save("classes", {
+      id: entry.id,
+      name: entry.className,
+      className: entry.className,
+      sections: entry.sections,
+      session: ls.get<{ id?: string }>("current_session", {}).id ?? "sess_2025",
+    } as Record<string, unknown>);
+    // Refresh from server so the list reflects what's actually in MySQL
+    dataService
+      .getAsync<ClassSection>("classes")
+      .then((rows) => {
+        if (rows.length > 0) setClasses(rows);
+      })
+      .catch(() => {});
   }
 
-  function handleDeleteClass(id: string) {
+  async function handleDeleteClass(id: string) {
     if (!confirm("Delete this class and all its sections?")) return;
-    saveClasses(classes.filter((c) => c.id !== id));
+    const updated = classes.filter((c) => c.id !== id);
+    setClasses(updated);
+    mirrorLocal(updated);
+    await dataService.delete("classes", id);
   }
 
-  function handleAddSection(classId: string) {
+  async function handleAddSection(classId: string) {
     if (!newSection.trim()) return;
     const updated = classes.map((c) => {
       if (c.id !== classId) return c;
@@ -57,37 +109,83 @@ export default function ClassesSections() {
         sections: [...c.sections, newSection.trim().toUpperCase()],
       };
     });
-    saveClasses(updated as ClassSection[]);
+    setClasses(updated as ClassSection[]);
+    mirrorLocal(updated as ClassSection[]);
     setNewSection("");
     setAddSectionFor(null);
+    // Persist the updated sections array
+    const cls = updated.find((c) => c.id === classId) as
+      | ClassSection
+      | undefined;
+    if (cls) {
+      await dataService.update("classes", classId, {
+        sections: cls.sections,
+      } as Record<string, unknown>);
+    }
   }
 
-  function handleDeleteSection(classId: string, section: string) {
+  async function handleDeleteSection(classId: string, section: string) {
     const updated = classes.map((c) => {
       if (c.id !== classId) return c;
       return { ...c, sections: c.sections.filter((s) => s !== section) };
     });
-    saveClasses(updated);
+    setClasses(updated);
+    mirrorLocal(updated);
+    const cls = updated.find((c) => c.id === classId);
+    if (cls) {
+      await dataService.update("classes", classId, {
+        sections: cls.sections,
+      } as Record<string, unknown>);
+    }
   }
 
-  function handleEditSave() {
+  async function handleEditSave() {
     if (!editClass) return;
-    saveClasses(classes.map((c) => (c.id === editClass.id ? editClass : c)));
+    const updated = classes.map((c) => (c.id === editClass.id ? editClass : c));
+    setClasses(updated);
+    mirrorLocal(updated);
     setEditClass(null);
+    await dataService.update("classes", editClass.id, {
+      name: editClass.className,
+      sections: editClass.sections,
+    } as Record<string, unknown>);
   }
 
-  function seedDefaults() {
+  async function seedDefaults() {
     if (
       classes.length > 0 &&
       !confirm("Replace existing classes with defaults?")
     )
       return;
+    const session =
+      ls.get<{ id?: string }>("current_session", {}).id ?? "sess_2025";
     const defaults: ClassSection[] = CLASSES.map((cls) => ({
       id: generateId(),
       className: cls,
       sections: ["A", "B", "C"],
     }));
-    saveClasses(defaults);
+    setClasses(defaults);
+    mirrorLocal(defaults);
+    // Push each class to server
+    await Promise.allSettled(
+      defaults.map((entry) =>
+        dataService.save("classes", {
+          id: entry.id,
+          name: entry.className,
+          sections: entry.sections,
+          session,
+        } as Record<string, unknown>),
+      ),
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="p-6 flex items-center gap-2 text-muted-foreground">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span>Loading classes…</span>
+      </div>
+    );
   }
 
   return (

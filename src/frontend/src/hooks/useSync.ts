@@ -22,7 +22,6 @@ import {
   isApiConfigured,
 } from "../utils/api";
 import { dataService } from "../utils/dataService";
-
 export type SyncMode =
   | "local" // no API URL set — purely localStorage
   | "connected" // API reachable + data loaded
@@ -59,6 +58,9 @@ export interface SyncState {
 
 const POLL_INTERVAL_MS = 30_000;
 const AUTH_BACKOFF_MS = 30_000;
+// Max time (ms) before we stop showing "Syncing" even if dataService is still loading.
+// After this, the polling state takes priority so the banner doesn't stay permanently.
+const MAX_SYNCING_DISPLAY_MS = 8_000;
 const LS_LAST_SYNC_KEY = "shubh_erp_last_sync_time";
 
 function persistLastSync(ts: Date) {
@@ -115,6 +117,30 @@ export function useSync(): SyncState {
     () => dataService.getMode(),
   );
   const syncedCounts = dataService.getCounts();
+
+  // Track when we first entered "loading" state so we can cap the syncing display
+  const loadingStartRef = useRef<number | null>(null);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+
+  useEffect(() => {
+    if (dsMode === "loading") {
+      if (loadingStartRef.current === null) {
+        loadingStartRef.current = Date.now();
+        setLoadingTimedOut(false);
+      }
+      const elapsed = Date.now() - (loadingStartRef.current ?? Date.now());
+      if (elapsed >= MAX_SYNCING_DISPLAY_MS) {
+        setLoadingTimedOut(true);
+      } else {
+        const remaining = MAX_SYNCING_DISPLAY_MS - elapsed;
+        const t = setTimeout(() => setLoadingTimedOut(true), remaining);
+        return () => clearTimeout(t);
+      }
+    } else {
+      loadingStartRef.current = null;
+      setLoadingTimedOut(false);
+    }
+  }, [dsMode]);
 
   // Stable ref to restart polling at a given interval
   const restartPoll = useCallback(
@@ -262,9 +288,15 @@ export function useSync(): SyncState {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, [runCheck, restartPoll]);
 
-  // Merge DataService loading state into the effective mode
+  // Merge DataService loading state into the effective mode.
+  // If DataService has been "loading" for more than MAX_SYNCING_DISPLAY_MS,
+  // fall back to the polling mode so the banner doesn't stay permanently "Syncing".
   const effectiveMode: SyncMode =
-    dsMode === "loading" ? "syncing" : dsMode === "ready" ? "connected" : mode;
+    dsMode === "loading" && !loadingTimedOut
+      ? "syncing"
+      : dsMode === "ready"
+        ? "connected"
+        : mode;
 
   return {
     mode: effectiveMode,

@@ -761,7 +761,7 @@ export async function saveCollectionItem<T extends Record<string, unknown>>(
 
 export async function updateCollectionItem<T extends Record<string, unknown>>(
   collection: string,
-  id: number,
+  id: string | number,
   item: T,
 ): Promise<void> {
   await apiFetch<void>("PUT", `data/${collection}/${id}`, item);
@@ -769,7 +769,7 @@ export async function updateCollectionItem<T extends Record<string, unknown>>(
 
 export async function deleteCollectionItem(
   collection: string,
-  id: number,
+  id: string | number,
 ): Promise<void> {
   await apiFetch<void>("DELETE", `data/${collection}/${id}`);
 }

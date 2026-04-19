@@ -291,11 +291,16 @@ class DataService {
     const current = existing[idx] as T & WithServerId;
     const merged = { ...current, ...changes } as T & WithServerId;
 
-    if (isApiConfigured() && current._serverId) {
+    // Use _serverId (numeric MySQL autoincrement) if available, otherwise fall
+    // back to the string UUID `id`. Items loaded from server via getAsync() won't
+    // have _serverId but their string `id` is always present and valid in the DB.
+    const apiId: string | number | undefined =
+      current._serverId ?? (localId || undefined);
+    if (isApiConfigured() && apiId) {
       try {
         await updateCollectionItem(
           collection,
-          current._serverId,
+          apiId,
           merged as Record<string, unknown>,
         );
         merged._synced = true;
@@ -320,9 +325,12 @@ class DataService {
       | (Record<string, unknown> & WithServerId)
       | undefined;
 
-    if (isApiConfigured() && item?._serverId) {
+    // Use _serverId if available; fall back to the string UUID `localId`
+    const apiId: string | number | undefined =
+      item?._serverId ?? (localId || undefined);
+    if (isApiConfigured() && apiId) {
       try {
-        await deleteCollectionItem(collection, item._serverId);
+        await deleteCollectionItem(collection, apiId);
       } catch {
         // best-effort
       }

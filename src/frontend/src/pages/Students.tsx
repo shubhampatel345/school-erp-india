@@ -375,7 +375,12 @@ export default function Students({ onNavigate }: StudentsProps) {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   function handleSaved(_student: Student) {
-    reload();
+    // Re-fetch from server so newly added / edited student appears immediately
+    // on all devices (not just from the in-memory cache snapshot).
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => setStudents(rows))
+      .catch(() => reload());
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);

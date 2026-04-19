@@ -147,6 +147,7 @@ function handle_sync_status(int $sid): void {
         'homework','school_sessions','notices','exam_timetables',
         'teacher_timetables','users','school_settings',
         'chat_messages','chat_groups','call_logs','biometric_devices','payroll',
+        'classes',
     ];
 
     try {
@@ -560,6 +561,22 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
         unset($row); // break reference
     }
 
+    // ── Bug fix: className ↔ name mapping for classes table ──────────────────
+    // ClassSection frontend type uses `className`; MySQL column is `name`.
+    if ($table === 'classes') {
+        foreach ($rows as &$row) {
+            if (!is_array($row)) continue;
+            if (isset($row['className']) && (!isset($row['name']) || $row['name'] === null || $row['name'] === '')) {
+                $row['name'] = $row['className'];
+            }
+            // sections array → JSON string for storage
+            if (isset($row['sections']) && is_array($row['sections'])) {
+                $row['sections'] = json_encode($row['sections'], JSON_UNESCAPED_UNICODE);
+            }
+        }
+        unset($row);
+    }
+
     // Cache known columns from live DB schema to prevent SQLSTATE[42S22]
     $tableColumns = [];
     try {
@@ -914,6 +931,16 @@ function handle_data_collection(string $method, string $collection, array $body,
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
             if (!$row) json_error('Record not found', 404);
+            // Decode JSON fields for classes
+            if ($table === 'classes') {
+                if (isset($row['sections']) && is_string($row['sections'])) {
+                    $decoded = json_decode($row['sections'], true);
+                    if (is_array($decoded)) $row['sections'] = $decoded;
+                }
+                if (!isset($row['className']) && isset($row['name'])) {
+                    $row['className'] = $row['name'];
+                }
+            }
             json_success($row);
         } else {
             // No hard limit — return ALL rows. Use offset for pagination if needed.
@@ -926,7 +953,22 @@ function handle_data_collection(string $method, string $collection, array $body,
                     $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
                 }
                 $stmt->execute();
-                json_success($stmt->fetchAll());
+                $rows = $stmt->fetchAll();
+                // Decode JSON fields for classes table
+                if ($table === 'classes') {
+                    foreach ($rows as &$row) {
+                        if (isset($row['sections']) && is_string($row['sections'])) {
+                            $decoded = json_decode($row['sections'], true);
+                            if (is_array($decoded)) $row['sections'] = $decoded;
+                        }
+                        // Expose className alias (frontend ClassSection type uses className)
+                        if (!isset($row['className']) && isset($row['name'])) {
+                            $row['className'] = $row['name'];
+                        }
+                    }
+                    unset($row);
+                }
+                json_success($rows);
             } catch (Throwable $e) {
                 json_success([]);
             }
@@ -934,6 +976,26 @@ function handle_data_collection(string $method, string $collection, array $body,
     }
 
     if ($method === 'POST') {
+        // ── Bug fix: fullName ↔ name mapping for students ────────────────────────
+        // Frontend sends `fullName`; MySQL column is `name`.
+        // Map it here exactly as batchUpsert does.
+        if ($table === 'students') {
+            if (isset($body['fullName']) && (!isset($body['name']) || $body['name'] === null || $body['name'] === '')) {
+                $body['name'] = $body['fullName'];
+            }
+            if (isset($body['name']) && (!isset($body['fullName']) || $body['fullName'] === null || $body['fullName'] === '')) {
+                $body['fullName'] = $body['name'];
+            }
+        }
+        // ── Bug fix: sections array for classes table — JSON-encode it ───────────
+        if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
+            $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
+        }
+        // ── Bug fix: className → name alias for classes table ────────────────────
+        if ($table === 'classes' && isset($body['className']) && (!isset($body['name']) || $body['name'] === '')) {
+            $body['name'] = $body['className'];
+        }
+
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
         $safeCols = array_values(array_filter(
             array_keys($body),
@@ -961,6 +1023,21 @@ function handle_data_collection(string $method, string $collection, array $body,
     if ($method === 'PUT') {
         if (!$id) json_error('Record ID required', 400);
         unset($body['id']);
+        // ── Bug fix: fullName ↔ name mapping for students on update ─────────────
+        if ($table === 'students') {
+            if (isset($body['fullName']) && (!isset($body['name']) || $body['name'] === null || $body['name'] === '')) {
+                $body['name'] = $body['fullName'];
+            }
+        }
+        // ── Bug fix: sections array for classes table — JSON-encode it ───────────
+        if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
+            $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
+        }
+        // ── Bug fix: className → name alias for classes table ────────────────────
+        if ($table === 'classes' && isset($body['className']) && (!isset($body['name']) || $body['name'] === '')) {
+            $body['name'] = $body['className'];
+        }
+
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
         $safeCols = array_values(array_filter(
             array_keys($body),

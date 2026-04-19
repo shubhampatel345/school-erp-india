@@ -545,15 +545,23 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       if (studentHasTransportDue) transportDueStudents++;
     }
 
-    // Count unique classes from session-scoped student data.
-    // serverCounts.classes may be unreliable (NULL names bug), derive from student records.
+    // Count unique classes:
+    // Priority: 1) serverCounts.classes (MySQL COUNT(*) from /sync/status — now includes classes table)
+    //           2) unique class values from loaded student records
+    //           3) localStorage classes array length
     const uniqueClassesFromStudents = new Set(
       sessionStudents.map((s) => s.class).filter(Boolean),
     ).size;
+    const localClassesCount = ls.get<Array<{ id: string }>>(
+      "classes",
+      [],
+    ).length;
     const uniqueClasses =
-      uniqueClassesFromStudents > 0
-        ? uniqueClassesFromStudents
-        : (serverCounts.classes ?? 0);
+      serverCounts.classes != null && serverCounts.classes > 0
+        ? serverCounts.classes
+        : uniqueClassesFromStudents > 0
+          ? uniqueClassesFromStudents
+          : localClassesCount;
 
     const transportRoutes = ls.get<Array<{ id: string }>>(
       "transport_routes_v2",
