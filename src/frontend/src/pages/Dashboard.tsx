@@ -395,11 +395,17 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     const cachedStaff = dataService.get<Staff>("staff");
 
     // Total students: always prefer server count from /sync/status (real MySQL)
-    const totalStudentsCount =
-      serverCounts.students ??
-      cachedStudents.filter(
-        (s) => s.sessionId === sessionId && s.status === "active",
-      ).length;
+    // Show "—" (not 0) when API is configured but server hasn't responded yet
+    const totalStudentsCount: number | "—" =
+      serverCounts.students != null
+        ? serverCounts.students
+        : syncMode === "offline" ||
+            syncMode === "local" ||
+            syncMode === "auth_error"
+          ? cachedStudents.filter(
+              (s) => s.sessionId === sessionId && s.status === "active",
+            ).length
+          : "—"; // API configured, waiting for server response
 
     // Teacher count: filter in-memory staff by designation.
     // Falls back to 0 while staff data is loading (acceptable — staff fetch runs async).
@@ -603,6 +609,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     // The KPI "Total Students" always shows the MySQL count from /sync/status.
     // This ensures the live cPanel site shows 1184 (MySQL) not 0 (empty localStorage).
     const displayStudents = totalStudentsCount;
+    const displayStudentsNum =
+      typeof displayStudents === "number" ? displayStudents : 0;
     const displayStaff = totalStaffCount;
 
     return {
@@ -611,8 +619,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       totalStaff: displayStaff,
       presentCount,
       presentPct:
-        displayStudents > 0
-          ? Math.round((presentCount / displayStudents) * 100)
+        displayStudentsNum > 0
+          ? Math.round((presentCount / displayStudentsNum) * 100)
           : 0,
       collectedToday,
       totalCollectedSession,
@@ -628,7 +636,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       today,
       currentMonthName,
     };
-  }, [sessionId, serverCounts]);
+  }, [sessionId, serverCounts, syncMode]);
 
   const recentReceipts = useMemo(() => {
     const allReceipts =
@@ -1060,7 +1068,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                   </div>
                   <div className="bg-destructive/5 rounded-lg p-3 text-center">
                     <p className="text-2xl font-bold text-destructive font-display">
-                      {stats.students - stats.presentCount}
+                      {typeof stats.students === "number"
+                        ? stats.students - stats.presentCount
+                        : "—"}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Absent

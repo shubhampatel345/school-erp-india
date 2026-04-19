@@ -45,6 +45,7 @@ import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
 import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
+// CLASSES and SECTIONS are still used for the filter bar dropdowns (all possible values)
 
 // ── Column definitions ────────────────────────────────────────────────────────
 interface ColDef {
@@ -172,10 +173,12 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [students, setStudents] = useState<Student[]>([]);
   const [loadingStudents, setLoadingStudents] = useState(true);
 
-  // ── Reload from cache ──────────────────────────────────────────────────────
+  // ── ISSUE 2 FIX: Reload ALWAYS fetches fresh data from server ─────────────
   const reload = useCallback(() => {
-    const ds = dataService.get<Student>("students");
-    setStudents(ds);
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => setStudents(rows))
+      .catch(() => setStudents(dataService.get<Student>("students")));
   }, []);
 
   // ── Fetch fresh data from MySQL on every mount ─────────────────────────────
@@ -387,29 +390,19 @@ export default function Students({ onNavigate }: StudentsProps) {
   }
 
   function handleDelete(student: Student) {
-    // Remove from local state immediately for snappy UX
-    const all = ls
-      .get<Student[]>("students", [])
-      .filter((s) => s.id !== student.id);
-    ls.set("students", all);
-    // Also delete from DataService (API + cache)
-    void dataService.delete("students", student.id);
+    // Delete from DataService (API + cache), then reload from server
+    void dataService.delete("students", student.id).then(() => reload());
     setDeleteConfirm(null);
-    reload();
   }
 
   function handleBulkDelete() {
-    const all = ls
-      .get<Student[]>("students", [])
-      .filter((s) => !selectedIds.has(s.id));
-    ls.set("students", all);
-    // Delete each from server
-    for (const id of selectedIds) {
-      void dataService.delete("students", id);
-    }
+    // Delete each from server, then reload once all are done
+    const deletePromises = Array.from(selectedIds).map((id) =>
+      dataService.delete("students", id),
+    );
+    void Promise.all(deletePromises).then(() => reload());
     setSelectedIds(new Set());
     setBulkDeleteConfirm(false);
-    reload();
   }
 
   function clearFilters() {

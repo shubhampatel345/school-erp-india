@@ -118,9 +118,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Initialize DataService when user is logged in and API is configured.
   // force=true ensures fresh MySQL data is fetched on every login,
   // not just on the first load — this is critical for cross-device sync.
+  // ── ISSUE 4 FIX: After init completes, re-read sessions from server cache ──
   useEffect(() => {
     if (currentUser && isApiConfigured()) {
-      void dataService.init(true);
+      void dataService.init(true).then(() => {
+        // Re-read sessions from the server-fetched cache
+        const serverSessions = dataService.get<Session>("sessions");
+        if (serverSessions.length > 0) {
+          setSessions(serverSessions);
+          // Prefer the currently active session, fall back to first
+          const activeSession =
+            serverSessions.find((s) => s.isActive) ?? serverSessions[0];
+          if (activeSession) {
+            setCurrentSessionId(activeSession.id);
+            ls.set("current_session", activeSession.id);
+          }
+        } else {
+          // Sessions table is empty on server — seed the default session to MySQL
+          const defaultSession: Session = {
+            id: "sess_2025",
+            label: "2025-26",
+            startYear: 2025,
+            endYear: 2026,
+            isArchived: false,
+            isActive: true,
+            createdAt: new Date().toISOString(),
+          };
+          void dataService.save(
+            "sessions",
+            defaultSession as unknown as Record<string, unknown>,
+          );
+          setSessions([defaultSession]);
+          setCurrentSessionId(defaultSession.id);
+          ls.set("sessions", [defaultSession]);
+          ls.set("current_session", defaultSession.id);
+        }
+      });
     }
   }, [currentUser]);
 

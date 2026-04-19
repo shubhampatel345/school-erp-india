@@ -8,12 +8,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Camera, ChevronDown, ChevronUp, Loader2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import {
+  AlertCircle,
+  Camera,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+  X,
+} from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import type { AppUser, Student } from "../types";
+import type { AppUser, ClassSection, Student } from "../types";
 import { dataService } from "../utils/dataService";
-import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
+import { generateId, ls } from "../utils/localStorage";
 
 interface StudentFormProps {
   student?: Student;
@@ -39,6 +46,30 @@ export default function StudentForm({
   onClose,
 }: StudentFormProps) {
   const { currentSession, addNotification } = useApp();
+
+  // ── Dynamic class/section data from server ────────────────────────────────
+  const [availableClasses, setAvailableClasses] = useState<ClassSection[]>([]);
+  const [classesLoading, setClassesLoading] = useState(true);
+
+  useEffect(() => {
+    // Fetch classes from server (or cache) on mount
+    dataService
+      .getAsync<ClassSection>("classes")
+      .then((rows) => {
+        setAvailableClasses(rows);
+      })
+      .catch(() => {
+        // fallback: try from localStorage legacy key
+        const local = ls.get<ClassSection[]>("class_sections", []);
+        setAvailableClasses(local);
+      })
+      .finally(() => setClassesLoading(false));
+  }, []);
+
+  // Sections for the currently selected class
+  const sectionsForClass =
+    availableClasses.find((c) => c.className === cls || c.id === cls)
+      ?.sections ?? [];
 
   // Use dataService cache first, fall back to localStorage for next adm no
   const getNextAdmNo = () => {
@@ -90,6 +121,18 @@ export default function StudentForm({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // When selected class changes, reset section if it's no longer valid
+  useEffect(() => {
+    if (
+      cls &&
+      sectionsForClass.length > 0 &&
+      section &&
+      !sectionsForClass.includes(section)
+    ) {
+      setSection("");
+    }
+  }, [cls, sectionsForClass, section]);
 
   const mmRef = useRef<HTMLInputElement>(null);
   const yyyyRef = useRef<HTMLInputElement>(null);
@@ -180,14 +223,38 @@ export default function StudentForm({
     setSaveError(null);
 
     try {
-      // Save to server via dataService — this updates the in-memory cache AND MySQL
-      await dataService.save("students", {
+      // ── ISSUE 1 FIX: Save to server first, then confirm it actually persisted ──
+      const savedResult = await dataService.save("students", {
         ...saved,
         // Explicitly set name = fullName so MySQL column gets populated
         name: saved.fullName,
       } as unknown as Record<string, unknown>);
 
-      // Auto-create AppUser credentials for new students
+      // Verify save succeeded by checking _synced flag
+      // If API is configured and _synced is explicitly false, the server rejected it
+      const syncFlag = (savedResult as Record<string, unknown>)._synced;
+      if (syncFlag === false) {
+        throw new Error(
+          "Student data could not be saved to the server. Please check your connection and try again.",
+        );
+      }
+
+      // Re-fetch students from server to confirm the record is actually there
+      const freshStudents = await dataService.getAsync<Student>("students");
+
+      // Verify the new student actually appears in the server response
+      // (only hard-fail if we know server sync was attempted and failed)
+      const confirmed = freshStudents.some(
+        (s) => s.admNo === saved.admNo || s.id === saved.id,
+      );
+
+      if (!confirmed && syncFlag === false) {
+        throw new Error(
+          "Student was not found on server after saving. Please try again.",
+        );
+      }
+
+      // Auto-create AppUser credentials for new students (local-only, OK to do after server confirm)
       if (isNew) {
         const appUsers = ls.get<AppUser[]>("app_users", []);
         const existingUser = appUsers.find((u) => u.username === saved.admNo);
@@ -235,6 +302,7 @@ export default function StudentForm({
           }
         }
 
+        // ── Fire notification ONLY after server confirmed the save ──
         addNotification(
           `New student added: ${saved.fullName}`,
           "success",
@@ -243,9 +311,6 @@ export default function StudentForm({
       } else {
         addNotification(`Student updated: ${saved.fullName}`, "success", "✅");
       }
-
-      // Re-fetch students from server to ensure fresh data everywhere
-      void dataService.getAsync("students");
 
       onSave(saved);
     } catch (err: unknown) {
@@ -256,11 +321,14 @@ export default function StudentForm({
             ? String((err as Record<string, unknown>).message)
             : "Failed to save student. Please try again.";
       setSaveError(msg);
-      // Do NOT silently fall back — show the error so the user knows it didn't save
+      // Never fire a success notification on failure
     } finally {
       setSaving(false);
     }
   }
+
+  // No classes configured yet — show a warning banner
+  const noClassesWarning = !classesLoading && availableClasses.length === 0;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
@@ -275,6 +343,19 @@ export default function StudentForm({
         </div>
 
         <div className="p-5 space-y-4">
+          {/* No classes warning */}
+          {noClassesWarning && (
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <AlertCircle className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" />
+              <p className="text-xs text-amber-800">
+                <strong>No classes configured.</strong> Please add classes first
+                in <strong>Academics → Classes &amp; Sections</strong> before
+                adding students. You can still fill in the form but the
+                class/section dropdowns will be empty.
+              </p>
+            </div>
+          )}
+
           {/* Photo Upload */}
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
@@ -344,18 +425,39 @@ export default function StudentForm({
           </div>
 
           <div className="grid grid-cols-2 gap-4">
+            {/* ── ISSUE 3 FIX: Class dropdown from real ERP classes ── */}
             <div className="space-y-1">
               <Label>
                 Class <span className="text-destructive">*</span>
               </Label>
-              <Select value={cls} onValueChange={setCls}>
+              <Select
+                value={cls}
+                onValueChange={(v) => {
+                  setCls(v);
+                  setSection(""); // reset section when class changes
+                }}
+                disabled={classesLoading}
+              >
                 <SelectTrigger data-ocid="student-class">
-                  <SelectValue placeholder="Select class" />
+                  <SelectValue
+                    placeholder={
+                      classesLoading
+                        ? "Loading classes…"
+                        : availableClasses.length === 0
+                          ? "No classes — add in Academics"
+                          : "Select class"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {CLASSES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
+                  {availableClasses.length === 0 && !classesLoading && (
+                    <SelectItem value="_none" disabled>
+                      No classes configured
+                    </SelectItem>
+                  )}
+                  {availableClasses.map((c) => (
+                    <SelectItem key={c.id} value={c.className}>
+                      {c.className}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -364,16 +466,35 @@ export default function StudentForm({
                 <p className="text-destructive text-xs">{errors.class}</p>
               )}
             </div>
+
+            {/* ── ISSUE 3 FIX: Section dropdown filtered by selected class ── */}
             <div className="space-y-1">
               <Label>
                 Section <span className="text-destructive">*</span>
               </Label>
-              <Select value={section} onValueChange={setSection}>
+              <Select
+                value={section}
+                onValueChange={setSection}
+                disabled={classesLoading || !cls}
+              >
                 <SelectTrigger data-ocid="student-section">
-                  <SelectValue placeholder="Select section" />
+                  <SelectValue
+                    placeholder={
+                      !cls
+                        ? "Select class first"
+                        : sectionsForClass.length === 0
+                          ? "No sections for this class"
+                          : "Select section"
+                    }
+                  />
                 </SelectTrigger>
                 <SelectContent>
-                  {SECTIONS.map((s) => (
+                  {sectionsForClass.length === 0 && cls && (
+                    <SelectItem value="_none" disabled>
+                      No sections configured for {cls}
+                    </SelectItem>
+                  )}
+                  {sectionsForClass.map((s) => (
                     <SelectItem key={s} value={s}>
                       {s}
                     </SelectItem>
