@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import { useApp } from "./context/AppContext";
@@ -24,10 +24,37 @@ import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Students from "./pages/Students";
 import Transport from "./pages/Transport";
+import { isApiConfigured } from "./utils/api";
+import { dataService } from "./utils/dataService";
 
 function AppRoutes() {
   const { currentUser } = useApp();
   const [activePage, setActivePage] = useState("dashboard");
+  const [appReady, setAppReady] = useState(false);
+
+  // Server-first loading: after login, wait for initial MySQL data fetch
+  // before rendering any page. This prevents stale/empty data on first load.
+  useEffect(() => {
+    if (!currentUser) {
+      setAppReady(false);
+      return;
+    }
+    if (!isApiConfigured()) {
+      // Offline mode — no server, render immediately
+      setAppReady(true);
+      return;
+    }
+    // If DataService already has data ready (from AppContext init), render
+    if (dataService.isReady()) {
+      setAppReady(true);
+      return;
+    }
+    // Otherwise wait for DataService init to complete then render
+    void dataService.waitForInit().then(() => setAppReady(true));
+    // Safety timeout: never block more than 8 seconds
+    const timer = setTimeout(() => setAppReady(true), 8000);
+    return () => clearTimeout(timer);
+  }, [currentUser]);
 
   if (!currentUser) return <Login />;
 
@@ -93,7 +120,21 @@ function AppRoutes() {
 
   return (
     <Layout activePage={activePage} onNavigate={navigate}>
-      <ErrorBoundary key={activePage}>{renderPage()}</ErrorBoundary>
+      {!appReady ? (
+        <div className="flex flex-col items-center justify-center h-full gap-4 bg-background">
+          <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          <div className="text-center">
+            <p className="text-base font-semibold text-foreground font-display">
+              SHUBH SCHOOL ERP
+            </p>
+            <p className="text-sm text-muted-foreground mt-1">
+              Loading data from server…
+            </p>
+          </div>
+        </div>
+      ) : (
+        <ErrorBoundary key={activePage}>{renderPage()}</ErrorBoundary>
+      )}
     </Layout>
   );
 }

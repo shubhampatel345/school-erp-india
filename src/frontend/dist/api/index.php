@@ -566,12 +566,17 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
     }
 
     // ── Bug fix: className ↔ name mapping for classes table ──────────────────
-    // ClassSection frontend type uses `className`; MySQL column is `name`.
+    // ClassSection frontend type uses `className`; MySQL column now has both `name` and `className`.
     if ($table === 'classes') {
         foreach ($rows as &$row) {
             if (!is_array($row)) continue;
-            if (isset($row['className']) && (!isset($row['name']) || $row['name'] === null || $row['name'] === '')) {
+            // className present → also set name
+            if (isset($row['className']) && $row['className'] !== null && $row['className'] !== '') {
                 $row['name'] = $row['className'];
+            }
+            // name present → also set className
+            if (isset($row['name']) && $row['name'] !== null && $row['name'] !== '') {
+                $row['className'] = $row['name'];
             }
             // sections array → JSON string for storage
             if (isset($row['sections']) && is_array($row['sections'])) {
@@ -932,26 +937,51 @@ function handle_data_collection(string $method, string $collection, array $body,
             $stmt->execute([':id' => $id]);
             $row = $stmt->fetch();
             if (!$row) json_error('Record not found', 404);
-            // Decode JSON fields for classes
-            if ($table === 'classes') {
-                if (isset($row['sections']) && is_string($row['sections'])) {
-                    $decoded = json_decode($row['sections'], true);
-                    if (is_array($decoded)) $row['sections'] = $decoded;
+                // Decode JSON fields for classes
+                if ($table === 'classes') {
+                    if (isset($row['sections']) && is_string($row['sections'])) {
+                        $decoded = json_decode($row['sections'], true);
+                        if (is_array($decoded)) $row['sections'] = $decoded;
+                    }
+                    // Ensure both name and className are populated from each other
+                    if ((!isset($row['className']) || $row['className'] === null || $row['className'] === '') && isset($row['name'])) {
+                        $row['className'] = $row['name'];
+                    }
+                    if ((!isset($row['name']) || $row['name'] === null || $row['name'] === '') && isset($row['className'])) {
+                        $row['name'] = $row['className'];
+                    }
                 }
-                if (!isset($row['className']) && isset($row['name'])) {
-                    $row['className'] = $row['name'];
-                }
-            }
             json_success($row);
         } else {
             // No hard limit — return ALL rows. Use offset for pagination if needed.
             $limit  = isset($_GET['limit']) ? min((int)$_GET['limit'], 100000) : PHP_INT_MAX;
             $offset = max((int)($_GET['offset'] ?? 0), 0);
+            // Delta sync: if ?since= is provided, only return rows updated after that timestamp
+            $since = isset($_GET['since']) ? trim($_GET['since']) : null;
             try {
+                // Build WHERE clause for delta sync
+                $whereClause = '';
+                $whereParams = [];
+                if ($since) {
+                    // Check if table has updatedAt column
+                    try {
+                        $colCheck = $db->query("SHOW COLUMNS FROM `{$table}` LIKE 'updatedAt'");
+                        if ($colCheck && $colCheck->rowCount() > 0) {
+                            $whereClause = ' WHERE `updatedAt` > :since';
+                            $whereParams[':since'] = $since;
+                        }
+                    } catch (Throwable $e) { /* column doesn't exist — ignore since */ }
+                }
                 if ($limit === PHP_INT_MAX) {
-                    $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 18446744073709551615 OFFSET {$offset}");
+                    $sql = "SELECT {$selectExpr} FROM `{$table}`{$whereClause} LIMIT 18446744073709551615 OFFSET {$offset}";
                 } else {
-                    $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
+                    $sql = "SELECT {$selectExpr} FROM `{$table}`{$whereClause} LIMIT {$limit} OFFSET {$offset}";
+                }
+                $stmt = $db->prepare($sql);
+                if (!empty($whereParams)) {
+                    foreach ($whereParams as $pk => $pv) {
+                        $stmt->bindValue($pk, $pv);
+                    }
                 }
                 $stmt->execute();
                 $rows = $stmt->fetchAll();
@@ -963,8 +993,12 @@ function handle_data_collection(string $method, string $collection, array $body,
                             if (is_array($decoded)) $row['sections'] = $decoded;
                         }
                         // Expose className alias (frontend ClassSection type uses className)
-                        if (!isset($row['className']) && isset($row['name'])) {
+                        // Ensure both columns populated from each other
+                        if ((!isset($row['className']) || $row['className'] === null || $row['className'] === '') && isset($row['name'])) {
                             $row['className'] = $row['name'];
+                        }
+                        if ((!isset($row['name']) || $row['name'] === null || $row['name'] === '') && isset($row['className'])) {
+                            $row['name'] = $row['className'];
                         }
                     }
                     unset($row);
@@ -1012,9 +1046,14 @@ function handle_data_collection(string $method, string $collection, array $body,
         if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
             $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
         }
-        // ── Bug fix: className → name alias for classes table ────────────────────
-        if ($table === 'classes' && isset($body['className']) && (!isset($body['name']) || $body['name'] === '')) {
-            $body['name'] = $body['className'];
+        // ── Bug fix: className ↔ name sync for classes table ─────────────────────
+        if ($table === 'classes') {
+            if (isset($body['className']) && $body['className'] !== null && $body['className'] !== '') {
+                $body['name'] = $body['className'];
+            }
+            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
+                $body['className'] = $body['name'];
+            }
         }
         // ── Bug fix: school_sessions — map frontend Session fields ───────────────
         if ($table === 'school_sessions') {
@@ -1058,17 +1097,25 @@ function handle_data_collection(string $method, string $collection, array $body,
         unset($body['id']);
         // ── Bug fix: fullName ↔ name mapping for students on update ─────────────
         if ($table === 'students') {
-            if (isset($body['fullName']) && (!isset($body['name']) || $body['name'] === null || $body['name'] === '')) {
+            if (isset($body['fullName']) && $body['fullName'] !== null && $body['fullName'] !== '') {
                 $body['name'] = $body['fullName'];
+            }
+            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
+                $body['fullName'] = $body['name'];
             }
         }
         // ── Bug fix: sections array for classes table — JSON-encode it ───────────
         if ($table === 'classes' && isset($body['sections']) && is_array($body['sections'])) {
             $body['sections'] = json_encode($body['sections'], JSON_UNESCAPED_UNICODE);
         }
-        // ── Bug fix: className → name alias for classes table ────────────────────
-        if ($table === 'classes' && isset($body['className']) && (!isset($body['name']) || $body['name'] === '')) {
-            $body['name'] = $body['className'];
+        // ── Bug fix: className ↔ name sync for classes table on update ───────────
+        if ($table === 'classes') {
+            if (isset($body['className']) && $body['className'] !== null && $body['className'] !== '') {
+                $body['name'] = $body['className'];
+            }
+            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
+                $body['className'] = $body['name'];
+            }
         }
 
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
@@ -1310,7 +1357,21 @@ function get_table_definitions(): array {
             `leavingDate`      VARCHAR(50),
             `leavingReason`    TEXT,
             `leavingRemarks`   TEXT,
-            `remarks`          TEXT
+            `remarks`          TEXT,
+            `updatedAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `createdAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── classes ───────────────────────────────────────────────────────────
+        // Frontend sends: { id, className, sections } where sections is array→JSON
+        // className stored in BOTH `name` and `className` columns for compatibility
+        'classes' => "CREATE TABLE `classes` (
+            `id`        VARCHAR(36) PRIMARY KEY,
+            `name`      VARCHAR(255),
+            `className` VARCHAR(255),
+            `sections`  TEXT,
+            `session`   VARCHAR(100),
+            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── staff ─────────────────────────────────────────────────────────────

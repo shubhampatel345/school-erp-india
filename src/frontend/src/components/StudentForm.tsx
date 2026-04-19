@@ -40,6 +40,42 @@ function parseDobToParts(dob: string): [string, string, string] {
   return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""];
 }
 
+// ── Class helpers (defined outside component so they are stable references) ──
+
+const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+] as const;
+
+function classDisplayName(name: string): string {
+  const n = Number(name);
+  if (!Number.isNaN(n) && n >= 1 && n <= 12) return `Class ${name}`;
+  return name;
+}
+
+function sortClasses(classes: ClassSection[]): ClassSection[] {
+  return [...classes].sort((a, b) => {
+    const ai = CLASS_ORDER.indexOf(a.className as (typeof CLASS_ORDER)[number]);
+    const bi = CLASS_ORDER.indexOf(b.className as (typeof CLASS_ORDER)[number]);
+    const aIdx = ai === -1 ? CLASS_ORDER.length : ai;
+    const bIdx = bi === -1 ? CLASS_ORDER.length : bi;
+    return aIdx - bIdx;
+  });
+}
+
 export default function StudentForm({
   student,
   onSave,
@@ -58,12 +94,12 @@ export default function StudentForm({
       dataService
         .getAsync<ClassSection>("classes")
         .then((rows) => {
-          setAvailableClasses(Array.isArray(rows) ? rows : []);
+          setAvailableClasses(sortClasses(Array.isArray(rows) ? rows : []));
         })
         .catch(() => {
           try {
             const local = ls.get<ClassSection[]>("class_sections", []);
-            setAvailableClasses(Array.isArray(local) ? local : []);
+            setAvailableClasses(sortClasses(Array.isArray(local) ? local : []));
           } catch {
             setAvailableClasses([]);
           }
@@ -449,7 +485,7 @@ export default function StudentForm({
                   )}
                   {availableClasses.map((c) => (
                     <SelectItem key={c.id} value={c.className}>
-                      {c.className}
+                      {classDisplayName(c.className)}
                     </SelectItem>
                   ))}
                 </SelectContent>

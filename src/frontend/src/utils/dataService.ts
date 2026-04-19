@@ -379,12 +379,14 @@ class DataService {
   /**
    * Wait for DataService initialization to complete.
    * Returns immediately if already ready or offline.
+   * If init is in flight, resolves when it completes.
    */
   waitForInit(): Promise<void> {
     if (this.mode === "ready" || this.mode === "offline")
       return Promise.resolve();
     if (this.initPromise) return this.initPromise;
-    return Promise.resolve();
+    // Not yet started — kick off an init and wait for it
+    return this.init();
   }
 
   /** True only when data has been loaded from the server */
