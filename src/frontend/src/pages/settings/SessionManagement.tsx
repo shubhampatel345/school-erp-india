@@ -12,31 +12,70 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Archive,
   CheckCircle,
   FileText,
   GraduationCap,
+  Loader2,
   Plus,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import type { Session } from "../../types";
-import { ls } from "../../utils/localStorage";
+import { dataService } from "../../utils/dataService";
+import { generateId, ls } from "../../utils/localStorage";
 
 export default function SessionManagement() {
-  const {
-    currentSession,
-    sessions,
-    switchSession,
-    createSession,
-    addNotification,
-  } = useApp();
+  const { currentSession, switchSession, addNotification } = useApp();
+
   const [newLabel, setNewLabel] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  function handleCreate() {
+  // ── Load sessions from server (or localStorage fallback) on mount ──────────
+  useEffect(() => {
+    async function loadSessions() {
+      setLoading(true);
+      try {
+        // Try server first
+        const fromServer = await dataService.getAsync<Session>("sessions");
+        if (fromServer.length > 0) {
+          setSessions(fromServer);
+          ls.set("sessions", fromServer);
+        } else {
+          // Fall back to localStorage; ensure a default session exists
+          const local = ls.get<Session[]>("sessions", []);
+          if (local.length === 0) {
+            const defaultSession: Session = {
+              id: "sess_2025",
+              label: "2025-26",
+              startYear: 2025,
+              endYear: 2026,
+              isArchived: false,
+              isActive: true,
+              createdAt: new Date().toISOString(),
+            };
+            ls.set("sessions", [defaultSession]);
+            setSessions([defaultSession]);
+          } else {
+            setSessions(local);
+          }
+        }
+      } catch {
+        const local = ls.get<Session[]>("sessions", []);
+        setSessions(local.length > 0 ? local : []);
+      } finally {
+        setLoading(false);
+      }
+    }
+    void loadSessions();
+  }, []);
+
+  async function handleCreate() {
     const label = newLabel.trim();
     if (!label.match(/^\d{4}-\d{2}$/)) {
       alert("Session label must be in YYYY-YY format (e.g. 2026-27)");
@@ -47,19 +86,59 @@ export default function SessionManagement() {
       alert("Session already exists");
       return;
     }
-    createSession(label);
+
+    const [startStr] = label.split("-");
+    const startYear = Number.parseInt(startStr, 10);
+    const newSession: Session = {
+      id: generateId(),
+      label,
+      startYear,
+      endYear: startYear + 1,
+      isArchived: false,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+
+    // Archive existing active sessions
+    const updated = sessions.map((s) => ({
+      ...s,
+      isActive: false,
+      isArchived: true,
+    }));
+    const all = [...updated, newSession];
+
+    setSessions(all);
+    ls.set("sessions", all);
+    ls.set("current_session", newSession.id);
+    switchSession(newSession.id);
+
+    // Persist each session to server
+    for (const s of all) {
+      void dataService.save(
+        "sessions",
+        s as unknown as Record<string, unknown>,
+      );
+    }
+
     addNotification(`New session created: ${label}`, "success", "📅");
     setNewLabel("");
   }
 
-  function handleDelete(session: Session) {
+  async function handleDelete(session: Session) {
     if (session.isActive) {
       alert("Cannot delete the active session.");
       return;
     }
-    const allSessions = ls.get<Session[]>("sessions", []);
-    const updated = allSessions.filter((s) => s.id !== session.id);
+    const updated = sessions.filter((s) => s.id !== session.id);
+    setSessions(updated);
     ls.set("sessions", updated);
+
+    // Delete from server
+    try {
+      await dataService.delete("sessions", session.id);
+    } catch {
+      // best-effort
+    }
     setDeleteTarget(null);
   }
 
@@ -67,11 +146,11 @@ export default function SessionManagement() {
     students: number;
     receipts: number;
   } {
-    const students = ls.get<{ sessionId: string }[]>("students", []);
-    const receipts = ls.get<{ sessionId: string; isDeleted?: boolean }[]>(
-      "fee_receipts",
-      [],
-    );
+    const students = dataService.get<{ sessionId: string }>("students");
+    const receipts = dataService.get<{
+      sessionId: string;
+      isDeleted?: boolean;
+    }>("fee_receipts");
     return {
       students: students.filter((s) => s.sessionId === sessionId).length,
       receipts: receipts.filter(
@@ -138,9 +217,12 @@ export default function SessionManagement() {
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             className="max-w-xs"
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+            onKeyDown={(e) => e.key === "Enter" && void handleCreate()}
           />
-          <Button onClick={handleCreate} data-ocid="session-create">
+          <Button
+            onClick={() => void handleCreate()}
+            data-ocid="session-create"
+          >
             <Plus className="w-4 h-4 mr-1.5" /> Create Session
           </Button>
         </div>
@@ -153,101 +235,120 @@ export default function SessionManagement() {
             All Sessions
           </h2>
           <span className="text-xs text-muted-foreground">
-            {sessions.length} session{sessions.length !== 1 ? "s" : ""}
+            {loading
+              ? "Loading…"
+              : `${sessions.length} session${sessions.length !== 1 ? "s" : ""}`}
           </span>
         </div>
         <div className="divide-y divide-border">
-          {sorted.map((session) => {
-            const stats = getSessionStats(session.id);
-            return (
-              <div
-                key={session.id}
-                className="flex items-center gap-4 px-5 py-4"
-              >
+          {loading ? (
+            <div className="px-5 py-6 space-y-4">
+              {[1, 2].map((i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <Skeleton className="w-10 h-10 rounded-xl" />
+                  <div className="flex-1 space-y-1.5">
+                    <Skeleton className="h-4 w-32" />
+                    <Skeleton className="h-3 w-48" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            sorted.map((session) => {
+              const stats = getSessionStats(session.id);
+              const isCurrentActive = currentSession?.id === session.id;
+              return (
                 <div
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    session.isActive ? "bg-primary/10" : "bg-muted"
-                  }`}
+                  key={session.id}
+                  className="flex items-center gap-4 px-5 py-4"
                 >
-                  {session.isActive ? (
-                    <CheckCircle className="w-5 h-5 text-primary" />
-                  ) : (
-                    <Archive className="w-5 h-5 text-muted-foreground" />
-                  )}
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-semibold text-foreground">
-                      {session.label}
-                    </p>
-                    {session.isActive && (
-                      <Badge className="text-xs bg-primary/10 text-primary border-primary/20">
-                        Active
-                      </Badge>
-                    )}
-                    {session.isArchived && !session.isActive && (
-                      <Badge variant="secondary" className="text-xs">
-                        Archived
-                      </Badge>
+                  <div
+                    className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                      session.isActive ? "bg-primary/10" : "bg-muted"
+                    }`}
+                  >
+                    {session.isActive ? (
+                      <CheckCircle className="w-5 h-5 text-primary" />
+                    ) : (
+                      <Archive className="w-5 h-5 text-muted-foreground" />
                     )}
                   </div>
-                  <div className="flex items-center gap-4 mt-1">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <GraduationCap className="w-3 h-3" />
-                      {stats.students} students
-                    </span>
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
-                      <FileText className="w-3 h-3" />
-                      {stats.receipts} receipts
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      Created:{" "}
-                      {new Date(session.createdAt).toLocaleDateString("en-IN")}
-                    </span>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-foreground">
+                        {session.label}
+                      </p>
+                      {session.isActive && (
+                        <Badge className="text-xs bg-primary/10 text-primary border-primary/20">
+                          Active
+                        </Badge>
+                      )}
+                      {session.isArchived && !session.isActive && (
+                        <Badge variant="secondary" className="text-xs">
+                          Archived
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-4 mt-1">
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <GraduationCap className="w-3 h-3" />
+                        {stats.students} students
+                      </span>
+                      <span className="text-xs text-muted-foreground flex items-center gap-1">
+                        <FileText className="w-3 h-3" />
+                        {stats.receipts} receipts
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        Created:{" "}
+                        {new Date(session.createdAt).toLocaleDateString(
+                          "en-IN",
+                        )}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {!isCurrentActive && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        data-ocid={`session-switch-${session.id}`}
+                        onClick={() => {
+                          switchSession(session.id);
+                          addNotification(
+                            `Switched to session: ${session.label}`,
+                            "info",
+                            "📅",
+                          );
+                        }}
+                      >
+                        Switch
+                      </Button>
+                    )}
+                    {isCurrentActive && (
+                      <Badge className="text-xs px-3 py-1 bg-accent/10 text-accent border-accent/20">
+                        Current
+                      </Badge>
+                    )}
+                    {!session.isActive && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => setDeleteTarget(session)}
+                        aria-label="Delete session"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
+              );
+            })
+          )}
 
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  {!session.isActive && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      data-ocid={`session-switch-${session.id}`}
-                      onClick={() => {
-                        switchSession(session.id);
-                        addNotification(
-                          `Switched to session: ${session.label}`,
-                          "info",
-                          "📅",
-                        );
-                      }}
-                    >
-                      Switch
-                    </Button>
-                  )}
-                  {session.isActive && currentSession?.id === session.id && (
-                    <Badge className="text-xs px-3 py-1 bg-accent/10 text-accent border-accent/20">
-                      Current
-                    </Badge>
-                  )}
-                  {!session.isActive && (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => setDeleteTarget(session)}
-                      aria-label="Delete session"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-          {sessions.length === 0 && (
+          {!loading && sessions.length === 0 && (
             <div className="px-5 py-8 text-center text-muted-foreground text-sm">
               No sessions found.
             </div>
@@ -270,12 +371,20 @@ export default function SessionManagement() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel data-ocid="session-delete-cancel">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
+              data-ocid="session-delete-confirm"
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => deleteTarget && handleDelete(deleteTarget)}
+              onClick={() => deleteTarget && void handleDelete(deleteTarget)}
             >
-              Delete
+              {/* Show spinner while deleting */}
+              {deleteTarget ? (
+                "Delete"
+              ) : (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

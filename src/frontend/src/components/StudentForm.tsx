@@ -40,8 +40,12 @@ export default function StudentForm({
 }: StudentFormProps) {
   const { currentSession, addNotification } = useApp();
 
-  const students = ls.get<Student[]>("students", []);
-  const nextAdmNo = () => {
+  // Use dataService cache first, fall back to localStorage for next adm no
+  const getNextAdmNo = () => {
+    const students =
+      dataService.get<Student>("students").length > 0
+        ? dataService.get<Student>("students")
+        : ls.get<Student[]>("students", []);
     if (students.length === 0) return "1001";
     const nums = students
       .map((s) => Number.parseInt(s.admNo.replace(/\D/g, ""), 10))
@@ -50,7 +54,7 @@ export default function StudentForm({
     return String(Math.max(...nums) + 1);
   };
 
-  const [admNo, setAdmNo] = useState(student?.admNo ?? nextAdmNo());
+  const [admNo, setAdmNo] = useState(student?.admNo ?? getNextAdmNo());
   const [fullName, setFullName] = useState(student?.fullName ?? "");
   const [fatherName, setFatherName] = useState(student?.fatherName ?? "");
   const [fatherMobile, setFatherMobile] = useState(student?.fatherMobile ?? "");
@@ -129,7 +133,7 @@ export default function StudentForm({
     return Object.keys(errs).length === 0;
   }
 
-  function handleSave() {
+  async function handleSave() {
     if (!validate()) return;
     const dob = makeDobFromParts(dobParts[0], dobParts[1], dobParts[2]);
     const dobForPassword = `${dobParts[0]}${dobParts[1]}${dobParts[2]}`;
@@ -138,6 +142,7 @@ export default function StudentForm({
     const saved: Student = {
       id: student?.id ?? generateId(),
       admNo: admNo.trim(),
+      // Send both fullName and name so MySQL (which has `name` column) gets the data
       fullName: fullName.trim(),
       fatherName: fatherName.trim(),
       fatherMobile: fatherMobile.trim() || undefined,
@@ -174,79 +179,87 @@ export default function StudentForm({
     setSaving(true);
     setSaveError(null);
 
-    dataService
-      .save("students", saved as unknown as Record<string, unknown>)
-      .then((savedResult) => {
-        // Auto-create AppUser credentials only when adding (not editing)
-        if (isNew) {
-          const appUsers = ls.get<AppUser[]>("app_users", []);
-          const existingUser = appUsers.find((u) => u.username === saved.admNo);
-          if (!existingUser) {
-            const newUser: AppUser = {
-              id: generateId(),
-              username: saved.admNo,
-              role: "student",
-              name: saved.fullName,
-              studentId: saved.id,
-            };
-            appUsers.push(newUser);
-            ls.set("app_users", appUsers);
+    try {
+      // Save to server via dataService — this updates the in-memory cache AND MySQL
+      await dataService.save("students", {
+        ...saved,
+        // Explicitly set name = fullName so MySQL column gets populated
+        name: saved.fullName,
+      } as unknown as Record<string, unknown>);
 
-            const passwords = ls.get<Record<string, string>>(
+      // Auto-create AppUser credentials for new students
+      if (isNew) {
+        const appUsers = ls.get<AppUser[]>("app_users", []);
+        const existingUser = appUsers.find((u) => u.username === saved.admNo);
+        if (!existingUser) {
+          const newUser: AppUser = {
+            id: generateId(),
+            username: saved.admNo,
+            role: "student",
+            name: saved.fullName,
+            studentId: saved.id,
+          };
+          appUsers.push(newUser);
+          ls.set("app_users", appUsers);
+          const passwords = ls.get<Record<string, string>>(
+            "user_passwords",
+            {},
+          );
+          passwords[saved.admNo] = dobForPassword;
+          ls.set("user_passwords", passwords);
+        }
+
+        const parentMobile =
+          fatherMobile.trim() || guardianMobile.trim() || mobile.trim();
+        if (parentMobile) {
+          const allUsers = ls.get<AppUser[]>("app_users", []);
+          const existingParent = allUsers.find(
+            (u) => u.username === parentMobile && u.role === "parent",
+          );
+          if (!existingParent) {
+            const parentUser: AppUser = {
+              id: generateId(),
+              username: parentMobile,
+              role: "parent",
+              name: fatherName.trim() || fullName.trim(),
+              mobile: parentMobile,
+            };
+            allUsers.push(parentUser);
+            ls.set("app_users", allUsers);
+            const passwords2 = ls.get<Record<string, string>>(
               "user_passwords",
               {},
             );
-            passwords[saved.admNo] = dobForPassword;
-            ls.set("user_passwords", passwords);
+            passwords2[parentMobile] = parentMobile;
+            ls.set("user_passwords", passwords2);
           }
-
-          const parentMobile =
-            fatherMobile.trim() || guardianMobile.trim() || mobile.trim();
-          if (parentMobile) {
-            const allUsers = ls.get<AppUser[]>("app_users", []);
-            const existingParent = allUsers.find(
-              (u) => u.username === parentMobile && u.role === "parent",
-            );
-            if (!existingParent) {
-              const parentUser: AppUser = {
-                id: generateId(),
-                username: parentMobile,
-                role: "parent",
-                name: fatherName.trim() || fullName.trim(),
-                mobile: parentMobile,
-              };
-              allUsers.push(parentUser);
-              ls.set("app_users", allUsers);
-              const passwords2 = ls.get<Record<string, string>>(
-                "user_passwords",
-                {},
-              );
-              passwords2[parentMobile] = parentMobile;
-              ls.set("user_passwords", passwords2);
-            }
-          }
-
-          addNotification(
-            `New student added: ${saved.fullName}`,
-            "success",
-            "👤",
-          );
         }
 
-        onSave(saved as Student & typeof savedResult);
-      })
-      .catch((err: unknown) => {
-        const msg =
-          err instanceof Error
-            ? err.message
-            : typeof err === "object" && err !== null && "message" in err
-              ? String((err as Record<string, unknown>).message)
-              : "Failed to save student. Please try again.";
-        setSaveError(msg);
-      })
-      .finally(() => {
-        setSaving(false);
-      });
+        addNotification(
+          `New student added: ${saved.fullName}`,
+          "success",
+          "👤",
+        );
+      } else {
+        addNotification(`Student updated: ${saved.fullName}`, "success", "✅");
+      }
+
+      // Re-fetch students from server to ensure fresh data everywhere
+      void dataService.getAsync("students");
+
+      onSave(saved);
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : typeof err === "object" && err !== null && "message" in err
+            ? String((err as Record<string, unknown>).message)
+            : "Failed to save student. Please try again.";
+      setSaveError(msg);
+      // Do NOT silently fall back — show the error so the user knows it didn't save
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -650,19 +663,19 @@ export default function StudentForm({
             Cancel
           </Button>
           {saveError && (
-            <p className="text-destructive text-xs flex-1 text-right mr-2">
-              {saveError}
+            <p className="text-destructive text-xs flex-1 text-center mr-2 bg-destructive/10 px-3 py-1.5 rounded-md border border-destructive/20">
+              ⚠️ {saveError}
             </p>
           )}
           <Button
-            onClick={handleSave}
+            onClick={() => void handleSave()}
             disabled={saving}
             data-ocid="student-form-save"
           >
             {saving ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Saving…
+                Saving to server…
               </>
             ) : student ? (
               "Save Changes"

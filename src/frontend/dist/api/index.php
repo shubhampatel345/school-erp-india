@@ -544,18 +544,22 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
     $errors = [];
 
     // ── Bug 1 fix: fullName ↔ name mapping for students table ────────────────
-    // The frontend Student type uses `fullName`; the MySQL column is `name`.
-    // Accept both: store as `name`, also return `fullName` alias on reads.
+    // The frontend Student type uses `fullName`; the MySQL column has both `name` and `fullName`.
+    // Accept both and keep them in sync so reads always return fullName correctly.
     if ($table === 'students') {
         foreach ($rows as &$row) {
             if (!is_array($row)) continue;
-            // fullName present but name absent/null → copy to name
-            if (isset($row['fullName']) && (!isset($row['name']) || $row['name'] === null || $row['name'] === '')) {
+            // fullName present → also set name
+            if (isset($row['fullName']) && $row['fullName'] !== null && $row['fullName'] !== '') {
                 $row['name'] = $row['fullName'];
             }
-            // name present but fullName absent → copy to fullName (so batchUpsert filters don't drop it)
-            if (isset($row['name']) && (!isset($row['fullName']) || $row['fullName'] === null || $row['fullName'] === '')) {
+            // name present → also set fullName
+            if (isset($row['name']) && $row['name'] !== null && $row['name'] !== '') {
                 $row['fullName'] = $row['name'];
+            }
+            // sessionId → also set session (schema has both)
+            if (isset($row['sessionId']) && (!isset($row['session']) || $row['session'] === '')) {
+                $row['session'] = $row['sessionId'];
             }
         }
         unset($row); // break reference
@@ -736,10 +740,8 @@ function handle_sync_pull(string $method, ?array $auth, int $sid): void {
     $pull = [];
     foreach ($tables as $table) {
         try {
-            // Bug 1 fix: students table — return both `name` and `fullName` alias
-            $selectExpr = ($table === 'students') ? '*, `name` AS `fullName`' : '*';
-            // No LIMIT — return ALL rows so every device sees the full dataset
-            $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}`");
+            // Both `name` and `fullName` columns now exist in students — no alias needed
+            $stmt = $db->prepare("SELECT * FROM `{$table}`");
             $stmt->execute();
             $rows = $stmt->fetchAll();
             if (!empty($rows)) $pull[$table] = $rows;
@@ -922,9 +924,8 @@ function handle_data_collection(string $method, string $collection, array $body,
     $db    = getDB();
 
     if ($method === 'GET') {
-        // Bug 1 fix: students table has `name` column but frontend expects `fullName`.
-        // Return BOTH: `name` (for raw SQL) and `name AS fullName` alias.
-        $selectExpr = ($table === 'students') ? '*, `name` AS `fullName`' : '*';
+        // Students table now has both `name` and `fullName` columns — return all columns directly
+        $selectExpr = '*';
 
         if ($id !== null) {
             $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` WHERE `id`=:id LIMIT 1");
@@ -968,6 +969,24 @@ function handle_data_collection(string $method, string $collection, array $body,
                     }
                     unset($row);
                 }
+                // Normalize school_sessions rows to match frontend Session type
+                if ($table === 'school_sessions') {
+                    foreach ($rows as &$row) {
+                        if (!isset($row['label']) || $row['label'] === '') {
+                            $row['label'] = $row['name'] ?? '';
+                        }
+                        if (!isset($row['isActive'])) {
+                            $row['isActive'] = (bool)($row['isCurrent'] ?? 0);
+                        }
+                        if (!isset($row['isArchived'])) {
+                            $row['isArchived'] = (bool)($row['archived'] ?? 0);
+                        }
+                        if (!isset($row['startYear'])) $row['startYear'] = 0;
+                        if (!isset($row['endYear']))   $row['endYear']   = 0;
+                        if (!isset($row['createdAt'])) $row['createdAt'] = '';
+                    }
+                    unset($row);
+                }
                 json_success($rows);
             } catch (Throwable $e) {
                 json_success([]);
@@ -976,15 +995,17 @@ function handle_data_collection(string $method, string $collection, array $body,
     }
 
     if ($method === 'POST') {
-        // ── Bug fix: fullName ↔ name mapping for students ────────────────────────
-        // Frontend sends `fullName`; MySQL column is `name`.
-        // Map it here exactly as batchUpsert does.
+        // ── Bug fix: fullName ↔ name sync for students ───────────────────────────
         if ($table === 'students') {
-            if (isset($body['fullName']) && (!isset($body['name']) || $body['name'] === null || $body['name'] === '')) {
+            if (isset($body['fullName']) && $body['fullName'] !== null && $body['fullName'] !== '') {
                 $body['name'] = $body['fullName'];
             }
-            if (isset($body['name']) && (!isset($body['fullName']) || $body['fullName'] === null || $body['fullName'] === '')) {
+            if (isset($body['name']) && $body['name'] !== null && $body['name'] !== '') {
                 $body['fullName'] = $body['name'];
+            }
+            // sessionId → session
+            if (isset($body['sessionId']) && (!isset($body['session']) || $body['session'] === '')) {
+                $body['session'] = $body['sessionId'];
             }
         }
         // ── Bug fix: sections array for classes table — JSON-encode it ───────────
@@ -994,6 +1015,18 @@ function handle_data_collection(string $method, string $collection, array $body,
         // ── Bug fix: className → name alias for classes table ────────────────────
         if ($table === 'classes' && isset($body['className']) && (!isset($body['name']) || $body['name'] === '')) {
             $body['name'] = $body['className'];
+        }
+        // ── Bug fix: school_sessions — map frontend Session fields ───────────────
+        if ($table === 'school_sessions') {
+            if (isset($body['label']) && (!isset($body['name']) || $body['name'] === '')) {
+                $body['name'] = $body['label'];
+            }
+            if (isset($body['isActive'])) {
+                $body['isCurrent'] = $body['isActive'] ? 1 : 0;
+            }
+            if (isset($body['isArchived'])) {
+                $body['archived'] = $body['isArchived'] ? 1 : 0;
+            }
         }
 
         $body     = array_filter($body, fn($v) => is_scalar($v) || is_null($v));
@@ -1227,10 +1260,13 @@ function get_table_definitions(): array {
 
         // ── students ──────────────────────────────────────────────────────────
         // Column names match EXACTLY what the frontend JS sends (camelCase)
+        // BOTH `name` and `fullName` columns exist so reads/writes work regardless
+        // of which field the frontend sends. batchUpsert copies fullName→name.
         'students' => "CREATE TABLE `students` (
             `id`               VARCHAR(36) PRIMARY KEY,
             `admNo`            VARCHAR(100),
             `name`             VARCHAR(255),
+            `fullName`         VARCHAR(255),
             `dob`              VARCHAR(50),
             `gender`           VARCHAR(20),
             `class`            VARCHAR(100),
@@ -1239,17 +1275,22 @@ function get_table_definitions(): array {
             `motherName`       VARCHAR(255),
             `fatherMobile`     VARCHAR(50),
             `motherMobile`     VARCHAR(50),
+            `mobile`           VARCHAR(50),
+            `guardianMobile`   VARCHAR(50),
             `address`          TEXT,
             `village`          VARCHAR(255),
             `category`         VARCHAR(100),
             `photo`            TEXT,
+            `aadhaarNo`        VARCHAR(50),
             `aadharNo`         VARCHAR(50),
             `srNo`             VARCHAR(100),
             `penNo`            VARCHAR(100),
             `apaarNo`          VARCHAR(100),
             `previousSchool`   VARCHAR(255),
             `admissionDate`    VARCHAR(50),
-            `status`           VARCHAR(50) DEFAULT 'Active',
+            `status`           VARCHAR(50) DEFAULT 'active',
+            `sessionId`        VARCHAR(100),
+            `session`          VARCHAR(100),
             `routeId`          VARCHAR(36),
             `pickupPointId`    VARCHAR(36),
             `busNo`            VARCHAR(50),
@@ -1258,7 +1299,6 @@ function get_table_definitions(): array {
             `discountAppliedTo` TEXT,
             `primaryMobile`    VARCHAR(50),
             `siblingGroup`     VARCHAR(36),
-            `session`          VARCHAR(100),
             `bloodGroup`       VARCHAR(20),
             `religion`         VARCHAR(100),
             `caste`            VARCHAR(100),
@@ -1266,7 +1306,11 @@ function get_table_definitions(): array {
             `annualIncome`     VARCHAR(100),
             `email`            VARCHAR(255),
             `alternatePhone`   VARCHAR(50),
-            `emergencyContact` VARCHAR(50)
+            `emergencyContact` VARCHAR(50),
+            `leavingDate`      VARCHAR(50),
+            `leavingReason`    TEXT,
+            `leavingRemarks`   TEXT,
+            `remarks`          TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── staff ─────────────────────────────────────────────────────────────
@@ -1482,13 +1526,20 @@ function get_table_definitions(): array {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── school_sessions ───────────────────────────────────────────────────
+        // Columns match frontend Session type: label, isActive, isArchived, startYear, endYear
         'school_sessions' => "CREATE TABLE `school_sessions` (
-            `id`        VARCHAR(36) PRIMARY KEY,
-            `name`      VARCHAR(100),
-            `startDate` VARCHAR(50),
-            `endDate`   VARCHAR(50),
-            `isCurrent` TINYINT(1) DEFAULT 0,
-            `archived`  TINYINT(1) DEFAULT 0
+            `id`         VARCHAR(36) PRIMARY KEY,
+            `label`      VARCHAR(100),
+            `name`       VARCHAR(100),
+            `startYear`  INT DEFAULT 0,
+            `endYear`    INT DEFAULT 0,
+            `startDate`  VARCHAR(50),
+            `endDate`    VARCHAR(50),
+            `isActive`   TINYINT(1) DEFAULT 0,
+            `isCurrent`  TINYINT(1) DEFAULT 0,
+            `isArchived` TINYINT(1) DEFAULT 0,
+            `archived`   TINYINT(1) DEFAULT 0,
+            `createdAt`  VARCHAR(50)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         // ── notices ───────────────────────────────────────────────────────────

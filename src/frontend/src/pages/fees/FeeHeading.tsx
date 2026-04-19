@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -8,77 +8,89 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
+import { Skeleton } from "../../components/ui/skeleton";
 import { useApp } from "../../context/AppContext";
 import type { FeeHeading } from "../../types";
 import { dataService } from "../../utils/dataService";
-import { CLASSES, MONTHS, generateId, ls } from "../../utils/localStorage";
+import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
 
 export default function FeeHeadingPage() {
   const { isReadOnly, currentUser } = useApp();
+  const [headings, setHeadings] = useState<FeeHeading[]>([]);
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [selectedMonths, setSelectedMonths] = useState<string[]>([]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
-
-  // Subscribe to DataService so the list re-renders after server writes
-  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
-    dataService.getMode(),
-  );
-  const headingsDs = dataService.get<FeeHeading>("fee_heads");
-  const headingsDs2 = dataService.get<FeeHeading>("fee_headings");
-  const dsHeadings = headingsDs.length > 0 ? headingsDs : headingsDs2;
-  const headings =
-    dsHeadings.length > 0
-      ? dsHeadings
-      : ls.get<FeeHeading[]>("fee_headings", []);
+  const [saving, setSaving] = useState(false);
 
   const canEdit =
     currentUser?.role === "superadmin" ||
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  useEffect(() => {
-    // Warm up cache from localStorage on first render if dataService not ready
-    void dataService.refresh("fee_headings").catch(() => {
-      /* best-effort */
-    });
+  // ── Fetch headings from server on mount (getAsync always hits the server) ─────
+  const loadHeadings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const fromServer = await dataService.getAsync<FeeHeading>("fee_headings");
+      if (fromServer.length > 0) {
+        setHeadings(fromServer);
+      } else {
+        const fromAlt = await dataService.getAsync<FeeHeading>("fee_heads");
+        setHeadings(fromAlt);
+      }
+    } catch {
+      setHeadings(dataService.get<FeeHeading>("fee_headings"));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void loadHeadings();
+  }, [loadHeadings]);
 
   async function save() {
     if (!name.trim() || selectedMonths.length === 0) return;
-    if (editId) {
-      const existing = headings.find((h) => h.id === editId);
-      if (!existing) return;
-      const updated: FeeHeading = {
-        ...existing,
-        name: name.trim(),
-        months: selectedMonths,
-        applicableClasses:
-          selectedClasses.length > 0 ? selectedClasses : undefined,
-      };
-      // Save via DataService FIRST (server-first write, updates cache + ls)
-      await dataService.update(
-        "fee_headings",
-        editId,
-        updated as unknown as Record<string, unknown>,
-      );
-    } else {
-      const h: FeeHeading = {
-        id: generateId(),
-        name: name.trim(),
-        months: selectedMonths,
-        applicableClasses:
-          selectedClasses.length > 0 ? selectedClasses : undefined,
-        amount: 0,
-      };
-      // Save via DataService FIRST (server-first write, updates cache + ls)
-      await dataService.save(
-        "fee_headings",
-        h as unknown as Record<string, unknown>,
-      );
+    setSaving(true);
+    try {
+      if (editId) {
+        const existing = headings.find((h) => h.id === editId);
+        if (!existing) return;
+        const updated: FeeHeading = {
+          ...existing,
+          name: name.trim(),
+          months: selectedMonths,
+          applicableClasses:
+            selectedClasses.length > 0 ? selectedClasses : undefined,
+        };
+        await dataService.update(
+          "fee_headings",
+          editId,
+          updated as unknown as Record<string, unknown>,
+        );
+      } else {
+        const h: FeeHeading = {
+          id: generateId(),
+          name: name.trim(),
+          months: selectedMonths,
+          applicableClasses:
+            selectedClasses.length > 0 ? selectedClasses : undefined,
+          amount: 0,
+        };
+        await dataService.save(
+          "fee_headings",
+          h as unknown as Record<string, unknown>,
+        );
+      }
+      // Re-fetch from server after save to confirm persisted data
+      await loadHeadings();
+      resetForm();
+    } finally {
+      setSaving(false);
     }
-    resetForm();
   }
 
   async function deleteHeading(id: string) {
@@ -88,8 +100,9 @@ export default function FeeHeadingPage() {
       )
     )
       return;
-    // Delete via DataService (server-first)
     await dataService.delete("fee_headings", id);
+    // Re-fetch from server to reflect deletion
+    await loadHeadings();
   }
 
   function openEdit(h: FeeHeading) {
@@ -144,8 +157,21 @@ export default function FeeHeadingPage() {
         )}
       </div>
 
-      {headings.length === 0 ? (
-        <div className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground">
+      {loading ? (
+        <div className="bg-card border border-border rounded-xl p-6 space-y-3">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex items-center gap-4">
+              <Skeleton className="h-4 w-8" />
+              <Skeleton className="h-4 w-40" />
+              <Skeleton className="h-4 w-56" />
+            </div>
+          ))}
+        </div>
+      ) : headings.length === 0 ? (
+        <div
+          className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground"
+          data-ocid="fee-headings.empty_state"
+        >
           <p className="text-lg mb-1">No fee headings yet</p>
           <p className="text-sm">
             Add headings like Tuition Fee, Lab Fee, etc.
@@ -174,13 +200,18 @@ export default function FeeHeadingPage() {
                 <tr
                   key={h.id}
                   className="border-t border-border hover:bg-muted/20"
-                  data-ocid="fee-heading-row"
+                  data-ocid={`fee-heading-row.item.${idx + 1}`}
                 >
                   <td className="px-4 py-3 text-muted-foreground">{idx + 1}</td>
                   <td className="px-4 py-3 font-medium">{h.name}</td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {h.months.map((m) => (
+                      {(Array.isArray(h.months)
+                        ? h.months
+                        : typeof h.months === "string"
+                          ? JSON.parse(h.months as unknown as string)
+                          : []
+                      ).map((m: string) => (
                         <Badge key={m} variant="secondary" className="text-xs">
                           {m.slice(0, 3)}
                         </Badge>
@@ -190,14 +221,34 @@ export default function FeeHeadingPage() {
                   <td className="px-4 py-3">
                     {h.applicableClasses && h.applicableClasses.length > 0 ? (
                       <div className="flex flex-wrap gap-1">
-                        {h.applicableClasses.slice(0, 5).map((c) => (
-                          <Badge key={c} variant="outline" className="text-xs">
-                            {c}
-                          </Badge>
-                        ))}
-                        {h.applicableClasses.length > 5 && (
+                        {(Array.isArray(h.applicableClasses)
+                          ? h.applicableClasses
+                          : typeof h.applicableClasses === "string"
+                            ? JSON.parse(
+                                h.applicableClasses as unknown as string,
+                              )
+                            : []
+                        )
+                          .slice(0, 5)
+                          .map((c: string) => (
+                            <Badge
+                              key={c}
+                              variant="outline"
+                              className="text-xs"
+                            >
+                              {c}
+                            </Badge>
+                          ))}
+                        {(Array.isArray(h.applicableClasses)
+                          ? h.applicableClasses
+                          : []
+                        ).length > 5 && (
                           <Badge variant="outline" className="text-xs">
-                            +{h.applicableClasses.length - 5}
+                            +
+                            {(Array.isArray(h.applicableClasses)
+                              ? h.applicableClasses
+                              : []
+                            ).length - 5}
                           </Badge>
                         )}
                       </div>
@@ -215,7 +266,7 @@ export default function FeeHeadingPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => openEdit(h)}
-                            data-ocid="edit-fee-heading-btn"
+                            data-ocid={`edit-fee-heading-btn.${idx + 1}`}
                           >
                             Edit
                           </Button>
@@ -223,8 +274,8 @@ export default function FeeHeadingPage() {
                             size="sm"
                             variant="outline"
                             className="text-red-600 border-red-200 hover:bg-red-50"
-                            onClick={() => deleteHeading(h.id)}
-                            data-ocid="delete-fee-heading-btn"
+                            onClick={() => void deleteHeading(h.id)}
+                            data-ocid={`delete-fee-heading-btn.${idx + 1}`}
                           >
                             Delete
                           </Button>
@@ -345,15 +396,15 @@ export default function FeeHeadingPage() {
             </div>
 
             <div className="flex gap-2 justify-end pt-2">
-              <Button variant="outline" onClick={resetForm}>
+              <Button variant="outline" onClick={resetForm} disabled={saving}>
                 Cancel
               </Button>
               <Button
-                onClick={save}
-                disabled={!name.trim() || selectedMonths.length === 0}
+                onClick={() => void save()}
+                disabled={!name.trim() || selectedMonths.length === 0 || saving}
                 data-ocid="save-fee-heading-btn"
               >
-                {editId ? "Update" : "Add"} Heading
+                {saving ? "Saving…" : editId ? "Update Heading" : "Add Heading"}
               </Button>
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { Button } from "@/components/ui/button";
-import { Download, FileSpreadsheet, Upload, X } from "lucide-react";
-import { useRef } from "react";
+import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
+import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
 import { dataService } from "../utils/dataService";
@@ -86,39 +86,28 @@ function parseCSVLine(line: string): string[] {
 
 /**
  * Convert a DOB value to DD/MM/YYYY for export, regardless of input format.
- * Supports: YYYY-MM-DD, DD/MM/YYYY, DD-MM-YYYY, ddmmyyyy (8 digits).
  */
 function normaliseExportDob(raw: string): string {
   if (!raw) return "";
-  // Already DD/MM/YYYY
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
-  // ISO: YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
     const [y, m, d] = raw.split("-");
     return `${d}/${m}/${y}`;
   }
-  // DD-MM-YYYY
   if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
     const [d, m, y] = raw.split("-");
     return `${d}/${m}/${y}`;
   }
-  // 8-digit ddmmyyyy
   if (/^\d{8}$/.test(raw)) {
     return `${raw.slice(0, 2)}/${raw.slice(2, 4)}/${raw.slice(4)}`;
   }
   return raw;
 }
 
-/**
- * Convert a DOB value from CSV to password format ddmmyyyy.
- * Input is expected as DD/MM/YYYY (how we export it).
- */
 function dobToPassword(dob: string): string {
   if (!dob) return "";
-  // DD/MM/YYYY → ddmmyyyy
   const m = dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
   if (m) return `${m[1]}${m[2]}${m[3]}`;
-  // Already 8 digits
   if (/^\d{8}$/.test(dob.replace(/\D/g, ""))) return dob.replace(/\D/g, "");
   return dob.replace(/\D/g, "");
 }
@@ -126,11 +115,22 @@ function dobToPassword(dob: string): string {
 export default function StudentImportExport({ onClose, onImported }: Props) {
   const { currentSession, addNotification } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{
+    saved: number;
+    total: number;
+    failed: number;
+  } | null>(null);
 
   // ─── EXPORT ──────────────────────────────────────────────────────────────────
 
   function handleExport() {
-    const students = ls.get<Student[]>("students", []);
+    // Prefer server cache, fall back to localStorage
+    const students =
+      dataService.get<Student>("students").length > 0
+        ? dataService.get<Student>("students")
+        : ls.get<Student[]>("students", []);
+
     if (students.length === 0) {
       addNotification("No students to export", "warning");
       return;
@@ -200,7 +200,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       const text = ev.target?.result as string;
       const lines = text.split(/\r?\n/).filter((l) => l.trim());
       if (lines.length < 2) {
@@ -228,10 +228,8 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
         class: col("class"),
         section: col("section"),
         mobile: (() => {
-          // "Mobile" must not match "Father Mobile" or "Mother Mobile" or "Guardian Mobile"
           const idx = headerCols.findIndex((h) => h === "mobile");
           if (idx >= 0) return idx;
-          // Fallback: find a "mobile" that isn't prefixed
           return headerCols.findIndex(
             (h) =>
               h.includes("mobile") &&
@@ -251,9 +249,14 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
         admissionDate: col("admission date"),
       };
 
-      const existing = ls.get<Student[]>("students", []);
+      // Get existing students from server cache (fall back to localStorage)
+      const existing =
+        dataService.get<Student>("students").length > 0
+          ? [...dataService.get<Student>("students")]
+          : [...ls.get<Student[]>("students", [])];
+
       const sessionId = currentSession?.id ?? "sess_2025";
-      let count = 0;
+      const studentsToSave: Student[] = [];
 
       for (let i = 1; i < lines.length; i++) {
         const cols = parseCSVLine(lines[i]);
@@ -262,7 +265,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
         const admNo = get(idxMap.admNo);
         if (!admNo) continue;
 
-        const dob = get(idxMap.dob); // Will be DD/MM/YYYY from our export
+        const dob = get(idxMap.dob);
         const dobPassword = dobToPassword(dob);
 
         const rawGender = get(idxMap.gender);
@@ -304,6 +307,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
           sessionId,
         };
 
+        // Upsert into local array (for localStorage mirroring)
         const dupIdx = existing.findIndex((s) => s.admNo === admNo);
         if (dupIdx >= 0) {
           existing[dupIdx] = {
@@ -311,21 +315,60 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
             ...student,
             id: existing[dupIdx].id,
           };
+          studentsToSave.push(existing[dupIdx]);
         } else {
           existing.push(student);
+          studentsToSave.push(student);
         }
-        count++;
       }
 
-      ls.set("students", existing);
-      // Sync all imported students to server
-      for (const s of existing) {
-        void dataService.save(
-          "students",
-          s as unknown as Record<string, unknown>,
-        );
+      if (studentsToSave.length === 0) {
+        addNotification("No valid student rows found in CSV", "warning");
+        return;
       }
-      addNotification(`Imported ${count} students`, "success", "📤");
+
+      // Update localStorage immediately for instant UI feedback
+      ls.set("students", existing);
+      dataService.setAll("students", existing);
+
+      // Now await ALL server saves — never fire-and-forget
+      setImporting(true);
+      setImportProgress({ saved: 0, total: studentsToSave.length, failed: 0 });
+
+      let saved = 0;
+      let failed = 0;
+      const CHUNK = 50; // Save in chunks to show progress
+
+      for (let i = 0; i < studentsToSave.length; i += CHUNK) {
+        const chunk = studentsToSave.slice(i, i + CHUNK);
+        const results = await Promise.allSettled(
+          chunk.map((s) =>
+            dataService.save("students", {
+              ...s,
+              name: s.fullName, // ensure MySQL `name` column gets populated
+            } as unknown as Record<string, unknown>),
+          ),
+        );
+        for (const r of results) {
+          if (r.status === "fulfilled") saved++;
+          else failed++;
+        }
+        setImportProgress({ saved, total: studentsToSave.length, failed });
+      }
+
+      setImporting(false);
+      setImportProgress(null);
+
+      const msg =
+        failed === 0
+          ? `✅ Imported ${saved} students to server`
+          : `Imported ${saved} students (${failed} failed — check server connection)`;
+      addNotification(msg, failed === 0 ? "success" : "warning", "📤");
+
+      // Re-fetch from server to confirm data is saved
+      void dataService.getAsync("students");
+
+      // Only call onImported AFTER all saves are confirmed
       onImported();
       onClose();
     };
@@ -354,7 +397,12 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
           <h2 className="text-lg font-semibold font-display text-foreground">
             Import / Export Students
           </h2>
-          <Button variant="ghost" size="icon" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClose}
+            disabled={importing}
+          >
             <X className="w-4 h-4" />
           </Button>
         </div>
@@ -375,6 +423,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
               className="w-full"
               variant="outline"
               data-ocid="students-export-btn"
+              disabled={importing}
             >
               <Download className="w-4 h-4 mr-2" /> Export CSV
             </Button>
@@ -388,18 +437,51 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
             </h3>
             <p className="text-sm text-muted-foreground">
               Upload a CSV matching the column structure. Existing students
-              (matched by Adm.No) are updated. Credentials are auto-created:
-              username = Adm.No, password = DOB as{" "}
-              <span className="font-mono">ddmmyyyy</span>.
+              (matched by Adm.No) are updated. All saves go to the server — data
+              will appear on all devices after import.
             </p>
+
+            {/* Progress indicator */}
+            {importing && importProgress && (
+              <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Saving {importProgress.saved} / {importProgress.total}{" "}
+                  students to server…
+                </div>
+                <div className="h-2 bg-muted rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.round((importProgress.saved / importProgress.total) * 100)}%`,
+                    }}
+                  />
+                </div>
+                {importProgress.failed > 0 && (
+                  <p className="text-xs text-destructive">
+                    {importProgress.failed} failed — check server connection
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex gap-2">
               <Button
                 onClick={() => fileRef.current?.click()}
                 className="flex-1"
                 variant="outline"
                 data-ocid="students-import-btn"
+                disabled={importing}
               >
-                <Upload className="w-4 h-4 mr-2" /> Choose CSV File
+                {importing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Importing…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" /> Choose CSV File
+                  </>
+                )}
               </Button>
               <Button
                 onClick={handleDownloadTemplate}
@@ -408,6 +490,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
                 title="Download sample template"
                 data-ocid="students-template-btn"
                 className="shrink-0 border border-border"
+                disabled={importing}
               >
                 <FileSpreadsheet className="w-4 h-4" />
               </Button>
@@ -421,7 +504,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
               type="file"
               accept=".csv"
               className="hidden"
-              onChange={handleImport}
+              onChange={(e) => void handleImport(e)}
             />
           </div>
 
