@@ -581,18 +581,24 @@ export interface CollectionListResult<T> {
   offset: number;
 }
 
-export async function fetchCollection<T>(
+/**
+ * Fetch a single page from the server.
+ * Returns { rows, total } where total is the server's total count for this collection.
+ */
+async function fetchCollectionPage<T>(
   collection: string,
+  offset: number,
+  pageSize: number,
   filters?: Record<string, string | number>,
-): Promise<T[]> {
+): Promise<{ rows: T[]; total: number }> {
   const params = new URLSearchParams({
-    limit: "500",
+    limit: String(pageSize),
+    offset: String(offset),
     ...Object.fromEntries(
       Object.entries(filters ?? {}).map(([k, v]) => [k, String(v)]),
     ),
   });
 
-  // Build the full URL manually to combine route= and additional params
   const indexUrl = getApiIndexUrl();
   const url = `${indexUrl}?route=data/${collection}&${params.toString()}`;
 
@@ -617,22 +623,97 @@ export async function fetchCollection<T>(
 
   const parsed = await safeParseJson<{
     status?: string;
+    total?: number;
     data?: CollectionListResult<T> | T[];
     rows?: T[];
   }>(res);
 
   // Support multiple response shapes:
-  // { data: [...] }          — from handle_data_collection (json_success(array))
-  // { data: { rows: [...] } } — legacy paginated shape
-  // { rows: [...] }           — direct rows
-  if (Array.isArray(parsed.data)) return parsed.data as T[];
-  if (
+  // { data: [...] }           — json_success(array)
+  // { data: { rows, total } } — paginated shape
+  // { rows: [...], total }    — direct rows
+  let rows: T[];
+  let total = 0;
+
+  if (Array.isArray(parsed.data)) {
+    rows = parsed.data as T[];
+    total = parsed.total ?? rows.length;
+  } else if (
     parsed.data &&
     Array.isArray((parsed.data as CollectionListResult<T>).rows)
-  )
-    return (parsed.data as CollectionListResult<T>).rows;
-  if (Array.isArray(parsed.rows)) return parsed.rows;
-  return [];
+  ) {
+    const paged = parsed.data as CollectionListResult<T>;
+    rows = paged.rows;
+    total = paged.total ?? rows.length;
+  } else if (Array.isArray(parsed.rows)) {
+    rows = parsed.rows;
+    total = parsed.total ?? rows.length;
+  } else {
+    rows = [];
+    total = 0;
+  }
+
+  return { rows, total };
+}
+
+/**
+ * Fetch ALL rows for a collection from the server, using pagination to bypass
+ * any server-side per-request row limits (e.g. a PHP LIMIT 500 cap).
+ *
+ * Strategy:
+ *  1. Fetch first page (PAGE_SIZE rows).
+ *  2. If the server reports `total > PAGE_SIZE`, fetch remaining pages in parallel.
+ *  3. Deduplicate by `id` field and return the merged array.
+ *
+ * This is the root cause fix for "MySQL has 1184 students but app shows 500":
+ * the PHP server was silently capping results at 500 rows per request.
+ */
+const PAGE_SIZE = 500; // match server default — we'll always loop past it
+
+export async function fetchCollection<T>(
+  collection: string,
+  filters?: Record<string, string | number>,
+): Promise<T[]> {
+  // Fetch first page — this also tells us the server's total count
+  const first = await fetchCollectionPage<T>(collection, 0, PAGE_SIZE, filters);
+
+  if (first.rows.length === 0) return [];
+
+  // If the server returned fewer rows than reported total, fetch remaining pages
+  const total = first.total;
+  if (total <= first.rows.length) {
+    // All rows fit in the first page — no further requests needed
+    return first.rows;
+  }
+
+  // Calculate remaining pages and fetch them concurrently
+  const remainingOffsets: number[] = [];
+  for (let offset = PAGE_SIZE; offset < total; offset += PAGE_SIZE) {
+    remainingOffsets.push(offset);
+  }
+
+  const pageResults = await Promise.allSettled(
+    remainingOffsets.map((offset) =>
+      fetchCollectionPage<T>(collection, offset, PAGE_SIZE, filters),
+    ),
+  );
+
+  const allRows: T[] = [...first.rows];
+  for (const result of pageResults) {
+    if (result.status === "fulfilled") {
+      allRows.push(...result.value.rows);
+    }
+  }
+
+  // Deduplicate by `id` — keep last occurrence (most recent page wins)
+  const seen = new Map<unknown, T>();
+  for (const row of allRows) {
+    const r = row as Record<string, unknown>;
+    const key = r.id ?? r.admNo ?? r.empId ?? JSON.stringify(row);
+    seen.set(key, row);
+  }
+
+  return Array.from(seen.values());
 }
 
 export async function saveCollectionItem<T extends Record<string, unknown>>(

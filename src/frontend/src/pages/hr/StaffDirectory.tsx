@@ -19,7 +19,7 @@ import {
   Upload,
   UserCircle,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Staff } from "../../types";
 import { dataService } from "../../utils/dataService";
 import { generateId, ls } from "../../utils/localStorage";
@@ -72,19 +72,33 @@ const DESIGNATIONS = [
   "Other",
 ];
 
-/** Read staff from localStorage — always fresh from storage */
+/** Read staff from DataService cache (server-synced) */
 function loadStaff(): Staff[] {
-  return ls.get<Staff[]>("staff", []);
+  const ds = dataService.get<Staff>("staff");
+  return ds.length > 0 ? ds : ls.get<Staff[]>("staff", []);
 }
 
 export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
-  const [staff, setStaff] = useState<Staff[]>(loadStaff);
+  const [staff, setStaff] = useState<Staff[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(true);
   const [search, setSearch] = useState("");
   const [filterDesignation, setFilterDesignation] = useState("All");
   const [showForm, setShowForm] = useState(false);
   const [editStaff, setEditStaff] = useState<Staff | undefined>(undefined);
   const [viewStaff, setViewStaff] = useState<Staff | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Server-first load: always fetch fresh from MySQL on mount
+  useEffect(() => {
+    setLoadingStaff(true);
+    dataService
+      .getAsync<Staff>("staff")
+      .then((rows) => {
+        setStaff(rows.length > 0 ? rows : loadStaff());
+      })
+      .catch(() => setStaff(loadStaff()))
+      .finally(() => setLoadingStaff(false));
+  }, []);
 
   const filtered = staff.filter((s) => {
     const q = search.toLowerCase();
@@ -437,6 +451,11 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   // ── LIST VIEW ──────────────────────────────────────────
   return (
     <div className="p-4 lg:p-6 space-y-4">
+      {loadingStaff && (
+        <div className="text-center py-6 text-muted-foreground text-sm">
+          Loading staff from server…
+        </div>
+      )}
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
         <div className="flex flex-col sm:flex-row gap-2 flex-1">

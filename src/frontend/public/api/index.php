@@ -101,6 +101,15 @@ try {
     if ($route === 'settings/school') { handle_settings_school($method, $body, $auth, $sid); }
     if ($route === 'settings/users')  { handle_settings_users($method, $body, $auth, $sid); }
 
+    // --- stats ----------------------------------------------------------------
+    if ($route === 'stats') { handle_stats($auth); }
+
+    // --- staff/count — quick staff + teacher count for dashboard ----------------
+    if ($route === 'staff/count') { handle_staff_count($auth); }
+
+    // --- students/count -------------------------------------------------------
+    if ($route === 'students/count') { handle_students_count($auth); }
+
     // --- data/{collection} generic CRUD --------------------------------------
     if (preg_match('#^data/([a-z_]+)$#', $route, $m)) {
         handle_data_collection($method, $m[1], $body, $auth, $sid, null);
@@ -569,12 +578,18 @@ function batchUpsert(PDO $pdo, string $table, array $rows): array {
         }
 
         // Keep only scalar/null values and valid identifier column names
+        // Arrays are JSON-encoded so sections/months/etc are stored as JSON strings
         $filteredRow = [];
         foreach ($row as $k => $v) {
             if (!preg_match('/^[a-zA-Z0-9_]+$/', (string)$k)) continue;
             if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
-            if (!is_scalar($v) && !is_null($v)) continue;
-            $filteredRow[$k] = $v;
+            if (is_array($v) || is_object($v)) {
+                // Encode arrays/objects to JSON string (e.g. sections, months, amounts)
+                $filteredRow[$k] = json_encode($v, JSON_UNESCAPED_UNICODE);
+            } elseif (is_scalar($v) || is_null($v)) {
+                $filteredRow[$k] = $v;
+            }
+            // skip resources and other non-storable types
         }
 
         if (empty($filteredRow)) {
@@ -706,11 +721,8 @@ function handle_sync_pull(string $method, ?array $auth, int $sid): void {
         try {
             // Bug 1 fix: students table — return both `name` and `fullName` alias
             $selectExpr = ($table === 'students') ? '*, `name` AS `fullName`' : '*';
-            if ($since) {
-                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 1000");
-            } else {
-                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 1000");
-            }
+            // No LIMIT — return ALL rows so every device sees the full dataset
+            $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}`");
             $stmt->execute();
             $rows = $stmt->fetchAll();
             if (!empty($rows)) $pull[$table] = $rows;
@@ -738,7 +750,8 @@ function handle_backup_export(string $method, ?array $auth, int $sid): void {
 
     foreach ($tables as $table) {
         try {
-            $stmt = $db->prepare("SELECT * FROM `{$table}` LIMIT 5000");
+            // No LIMIT — export ALL rows for a complete backup
+            $stmt = $db->prepare("SELECT * FROM `{$table}`");
             $stmt->execute();
             $export['tables'][$table] = $stmt->fetchAll();
         } catch (Throwable $e) {
@@ -903,10 +916,15 @@ function handle_data_collection(string $method, string $collection, array $body,
             if (!$row) json_error('Record not found', 404);
             json_success($row);
         } else {
-            $limit  = min((int)($_GET['limit'] ?? 1000), 5000);
+            // No hard limit — return ALL rows. Use offset for pagination if needed.
+            $limit  = isset($_GET['limit']) ? min((int)$_GET['limit'], 100000) : PHP_INT_MAX;
             $offset = max((int)($_GET['offset'] ?? 0), 0);
             try {
-                $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
+                if ($limit === PHP_INT_MAX) {
+                    $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT 18446744073709551615 OFFSET {$offset}");
+                } else {
+                    $stmt = $db->prepare("SELECT {$selectExpr} FROM `{$table}` LIMIT {$limit} OFFSET {$offset}");
+                }
                 $stmt->execute();
                 json_success($stmt->fetchAll());
             } catch (Throwable $e) {
@@ -974,6 +992,99 @@ function handle_data_collection(string $method, string $collection, array $body,
     }
 
     json_error('Method not allowed', 405);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STATS — dashboard counts from all main tables
+// ─────────────────────────────────────────────────────────────────────────────
+function handle_stats(?array $auth): void {
+    // Stats are public (no auth required) so dashboard can show counts without login
+    try {
+        $db = getDB();
+    } catch (Throwable $e) {
+        json_error('Database not available', 503);
+    }
+
+    $counts = [];
+
+    // students
+    try {
+        $stmt = $db->query("SELECT COUNT(*) FROM `students`");
+        $counts['students'] = $stmt ? (int)$stmt->fetchColumn() : 0;
+    } catch (Throwable $e) { $counts['students'] = 0; }
+
+    // staff total
+    try {
+        $stmt = $db->query("SELECT COUNT(*) FROM `staff`");
+        $counts['staff'] = $stmt ? (int)$stmt->fetchColumn() : 0;
+    } catch (Throwable $e) { $counts['staff'] = 0; }
+
+    // teachers — staff rows whose designation contains 'teacher', 'PGT', 'TGT', or 'PRT' (case-insensitive)
+    try {
+        $stmt = $db->query(
+            "SELECT COUNT(*) FROM `staff` WHERE "
+            . "LOWER(`designation`) LIKE '%teacher%' "
+            . "OR LOWER(`designation`) IN ('pgt','tgt','prt')"
+        );
+        $counts['teachers'] = $stmt ? (int)$stmt->fetchColumn() : 0;
+    } catch (Throwable $e) { $counts['teachers'] = 0; }
+
+    // fee_receipts
+    try {
+        $stmt = $db->query("SELECT COUNT(*) FROM `fee_receipts`");
+        $counts['fees'] = $stmt ? (int)$stmt->fetchColumn() : 0;
+    } catch (Throwable $e) { $counts['fees'] = 0; }
+
+    // attendance
+    try {
+        $stmt = $db->query("SELECT COUNT(*) FROM `attendance`");
+        $counts['attendance'] = $stmt ? (int)$stmt->fetchColumn() : 0;
+    } catch (Throwable $e) { $counts['attendance'] = 0; }
+
+    json_success($counts, 'Stats fetched');
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STAFF/COUNT — returns total staff count + teacher sub-count from MySQL
+// ─────────────────────────────────────────────────────────────────────────────
+function handle_staff_count(?array $auth): void {
+    try {
+        $db = getDB();
+
+        $totalStmt = $db->query("SELECT COUNT(*) FROM `staff`");
+        $total = $totalStmt ? (int)$totalStmt->fetchColumn() : 0;
+
+        $teacherStmt = $db->query(
+            "SELECT COUNT(*) FROM `staff` WHERE "
+            . "LOWER(`designation`) LIKE '%teacher%' "
+            . "OR LOWER(`designation`) IN ('pgt','tgt','prt')"
+        );
+        $teachers = $teacherStmt ? (int)$teacherStmt->fetchColumn() : 0;
+
+        json_success([
+            'total'    => $total,
+            'teachers' => $teachers,
+        ], 'Staff count fetched');
+    } catch (Throwable $e) {
+        json_success(['total' => 0, 'teachers' => 0], 'Staff table not ready');
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// STUDENTS/COUNT — quick count for dashboard stat cards
+// ─────────────────────────────────────────────────────────────────────────────
+function handle_students_count(?array $auth): void {
+    try {
+        $db   = getDB();
+        $stmt = $db->query("SELECT COUNT(*) FROM `students`");
+        $count = $stmt ? (int)$stmt->fetchColumn() : 0;
+        json_success(['count' => $count], 'Student count fetched');
+    } catch (Throwable $e) {
+        json_success(['count' => 0], 'Students table not ready');
+    }
 }
 
 

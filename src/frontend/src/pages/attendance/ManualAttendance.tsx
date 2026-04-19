@@ -18,7 +18,7 @@ import {
   UserX,
   Users,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Student, TransportRoute } from "../../types";
@@ -78,15 +78,22 @@ export default function ManualAttendance({
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showRouteBreakdown, setShowRouteBreakdown] = useState(false);
+  const [allStudentsData, setAllStudentsData] = useState<Student[]>([]);
+
+  // Server-first: load students from MySQL on mount
+  useEffect(() => {
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => setAllStudentsData(rows))
+      .catch(() => setAllStudentsData(dataService.get<Student>("students")));
+  }, []);
 
   const allStudents = useMemo(() => {
-    const ds = dataService.get<Student>("students");
-    const list = ds.length > 0 ? ds : ls.get<Student[]>("students", []);
-    return list.filter(
+    return allStudentsData.filter(
       (s) =>
         s.sessionId === (currentSession?.id ?? "") && s.status === "active",
     );
-  }, [currentSession]);
+  }, [allStudentsData, currentSession]);
 
   const routes = useMemo(
     () => ls.get<TransportRoute[]>("transport_routes", []),
@@ -100,9 +107,7 @@ export default function ManualAttendance({
   // Summary stats (from all records today)
   const todayRecords = useMemo(() => {
     const ds = dataService.get<AttendanceRecord>("attendance");
-    const all =
-      ds.length > 0 ? ds : ls.get<AttendanceRecord[]>("attendance", []);
-    return all.filter((r) => r.date === date && r.type === "student");
+    return ds.filter((r) => r.date === date && r.type === "student");
   }, [date]);
 
   const presentTodayIds = useMemo(

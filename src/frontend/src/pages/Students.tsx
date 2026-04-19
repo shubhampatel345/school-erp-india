@@ -43,7 +43,6 @@ import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
-import { isApiConfigured } from "../utils/api";
 import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, ls } from "../utils/localStorage";
 
@@ -169,45 +168,45 @@ interface StudentsProps {
 export default function Students({ onNavigate }: StudentsProps) {
   const { currentSession, canWrite, currentUser } = useApp();
 
-  // Subscribe to DataService so the grid re-renders after any server write
-  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
-    dataService.getMode(),
-  );
-
   // ── State ──────────────────────────────────────────────────────────────────
-  const [students, setStudents] = useState<Student[]>(() => {
-    // Initial state: prefer DataService cache, fall back to localStorage.
-    // The mount effect below will immediately overwrite with fresh server data.
-    const ds = dataService.get<Student>("students");
-    return ds.length > 0 ? ds : ls.get<Student[]>("students", []);
-  });
+  const [students, setStudents] = useState<Student[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(true);
 
   // ── Reload from cache ──────────────────────────────────────────────────────
   const reload = useCallback(() => {
     const ds = dataService.get<Student>("students");
-    setStudents(ds.length > 0 ? ds : ls.get<Student[]>("students", []));
+    setStudents(ds);
   }, []);
 
   // ── Fetch fresh data from MySQL on every mount ─────────────────────────────
-  // Fix for "1184 students in MySQL but ERP shows 0":
-  // Always pull from the server when the page opens, regardless of what's in
-  // the local cache. This ensures every device always sees the real MySQL data.
+  // Server is the ONLY source of truth. Never initialize from localStorage.
+  // Every device worldwide always sees the real MySQL data on mount.
   useEffect(() => {
-    if (isApiConfigured()) {
-      void dataService
-        .refreshFromServer<Student>("students")
-        .then((rows) => {
-          if (rows.length > 0) {
-            setStudents(rows);
-          } else {
-            reload();
-          }
-        })
-        .catch(() => reload());
-    } else {
+    setLoadingStudents(true);
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => {
+        setStudents(rows);
+      })
+      .catch(() => {
+        // Last resort: use whatever is in cache
+        setStudents(dataService.get<Student>("students"));
+      })
+      .finally(() => setLoadingStudents(false));
+  }, []); // runs once on mount
+
+  // Re-render when DataService notifies (e.g. after a save/delete/sync)
+  useSyncExternalStore(dataService.subscribe.bind(dataService), () =>
+    dataService.getMode(),
+  );
+  // When DS notifies, sync local state from cache (avoids stale display after writes)
+  useEffect(() => {
+    if (!loadingStudents) {
       reload();
     }
-  }, [reload]); // reload is stable (useCallback with []) — runs once on mount
+    // subscribe snapshot changes are not in deps by design; reload + loadingStudents are stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reload, loadingStudents]);
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
   const [filterSection, setFilterSection] = useState("all");

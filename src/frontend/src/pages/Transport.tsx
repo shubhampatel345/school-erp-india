@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import {
@@ -11,6 +11,7 @@ import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { useApp } from "../context/AppContext";
 import type { Staff, Student } from "../types";
+import { dataService } from "../utils/dataService";
 import { CLASSES, SECTIONS, generateId, ls } from "../utils/localStorage";
 
 // ── Types ──────────────────────────────────────────────────
@@ -104,12 +105,21 @@ export default function Transport() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // ── Data ──────────────────────────────────────────────────
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
+
+  // Server-first: load students from MySQL on mount
+  useEffect(() => {
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => setAllStudents(rows))
+      .catch(() => setAllStudents(dataService.get<Student>("students")));
+  }, []);
+
   const allStaff = ls.get<Staff[]>("staff", []);
   const drivers = allStaff.filter(
     (s) => s.designation?.toLowerCase() === "driver",
   );
 
-  const allStudents = ls.get<Student[]>("students", []);
   const activeStudents = allStudents.filter((s) => s.status !== "discontinued");
   const filteredStudents = activeStudents.filter((s) => {
     const q = studentSearch.toLowerCase();

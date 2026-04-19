@@ -73,7 +73,7 @@ interface EditReceiptState {
 function getAllReceipts(): FeeReceipt[] {
   const ds = dataService.get<FeeReceipt>("fee_receipts");
   if (ds.length > 0) return ds;
-  // Fallback to localStorage when DataService cache is empty (offline mode)
+  // Fallback to localStorage only in offline mode (API not configured)
   return ls.get<FeeReceipt[]>("fee_receipts", []);
 }
 
@@ -500,26 +500,33 @@ export default function CollectFees() {
 
   // ── Load students + handle preload from global search ─────────────────────
   useEffect(() => {
-    // Prefer DataService (server-synced) for students
-    const dsStudents = dataService.get<Student>("students");
-    const loaded = (
-      dsStudents.length > 0 ? dsStudents : ls.get<Student[]>("students", [])
-    ).filter((s) => s.status === "active");
-    setAllStudents(loaded);
+    // Always fetch from server first — this is the source of truth
+    dataService
+      .getAsync<Student>("students")
+      .then((rows) => {
+        const loaded = rows.filter((s) => s.status === "active");
+        setAllStudents(loaded);
 
-    // Check if navigated here from global search with a pre-selected student
-    const preloadId = sessionStorage.getItem("collectFees_preload");
-    if (preloadId) {
-      sessionStorage.removeItem("collectFees_preload");
-      const student = loaded.find((s) => s.id === preloadId);
-      if (student) {
-        setSelectedStudent(student);
-        setAdmNoInput(student.admNo);
-        setShowDropdown(false);
-        setErrorMsg("");
-        setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-      }
-    }
+        // Check if navigated here from global search with a pre-selected student
+        const preloadId = sessionStorage.getItem("collectFees_preload");
+        if (preloadId) {
+          sessionStorage.removeItem("collectFees_preload");
+          const student = loaded.find((s) => s.id === preloadId);
+          if (student) {
+            setSelectedStudent(student);
+            setAdmNoInput(student.admNo);
+            setShowDropdown(false);
+            setErrorMsg("");
+            setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+          }
+        }
+      })
+      .catch(() => {
+        // Fallback: use cache
+        const dsStudents = dataService.get<Student>("students");
+        const loaded = dsStudents.filter((s) => s.status === "active");
+        setAllStudents(loaded);
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

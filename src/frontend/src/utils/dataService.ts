@@ -77,6 +77,8 @@ class DataService {
   private counts: Record<string, number> = {};
   /** Timestamp of the last successful full-server sync (ms) */
   private lastSyncMs = 0;
+  /** Per-collection in-flight fetch promises (avoids duplicate parallel fetches) */
+  private fetchPromises: Map<string, Promise<unknown[]>> = new Map();
 
   /** Subscribe to cache changes (re-render consumers) */
   subscribe(fn: () => void): () => void {
@@ -160,36 +162,68 @@ class DataService {
     this.notify();
   }
 
-  /** Get all records from a collection (from cache, fallback to localStorage) */
+  /** Get all records from a collection (from cache only — no localStorage fallback when API configured) */
   get<T>(collection: string): T[] {
     if (this.cache.has(collection)) {
       return this.cache.get(collection) as T[];
     }
-    return ls.get<T[]>(this.lsKey(collection), []);
+    // Only fall back to localStorage in offline mode (API not configured)
+    if (!isApiConfigured()) {
+      return ls.get<T[]>(this.lsKey(collection), []);
+    }
+    // API is configured but cache is empty — return empty rather than stale localStorage
+    // (component should call getAsync() to get real server data)
+    return [];
+  }
+
+  /**
+   * Fetch a collection asynchronously — always from the server when API is configured.
+   * This is the PRIMARY read method for all page components.
+   * - If the API is configured: fetches fresh data from MySQL, updates cache + localStorage
+   * - If the API is not configured: returns localStorage data
+   * - Deduplicates concurrent calls (only one fetch per collection at a time)
+   */
+  async getAsync<T>(collection: string): Promise<T[]> {
+    if (!isApiConfigured()) {
+      return ls.get<T[]>(this.lsKey(collection), []);
+    }
+    return this.refreshFromServer<T>(collection);
   }
 
   /**
    * Fetch a single collection DIRECTLY from the server, update cache + localStorage,
    * and return the fresh rows. Falls back to cache if API is unreachable.
    *
-   * This is the fix for "ERP shows 0 students on Device B":
-   * Call this on component mount so every page load pulls fresh MySQL data.
+   * Deduplicates parallel calls — if a fetch for this collection is already in flight,
+   * returns the same promise instead of firing a duplicate request.
    */
   async refreshFromServer<T>(collection: string): Promise<T[]> {
     if (!isApiConfigured()) {
       return this.get<T>(collection);
     }
-    try {
-      const rows = await fetchCollection<T>(collection);
-      this.cache.set(collection, rows as unknown[]);
-      this.counts[collection] = rows.length;
-      ls.set(this.lsKey(collection), rows);
-      this.notify();
-      return rows;
-    } catch {
-      // Return whatever is in cache / localStorage
-      return this.get<T>(collection);
+    // Dedup: if already fetching this collection, await the same promise
+    const existing = this.fetchPromises.get(collection);
+    if (existing) {
+      return existing as Promise<T[]>;
     }
+    const promise = fetchCollection<T>(collection)
+      .then((rows) => {
+        this.cache.set(collection, rows as unknown[]);
+        this.counts[collection] = rows.length;
+        ls.set(this.lsKey(collection), rows);
+        this.notify();
+        return rows;
+      })
+      .catch(() => {
+        // Return whatever is in cache / localStorage as last resort
+        const cached = this.cache.get(collection) as T[] | undefined;
+        return cached ?? ls.get<T[]>(this.lsKey(collection), []);
+      })
+      .finally(() => {
+        this.fetchPromises.delete(collection);
+      });
+    this.fetchPromises.set(collection, promise as Promise<unknown[]>);
+    return promise;
   }
 
   /**
