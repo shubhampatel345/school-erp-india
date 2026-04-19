@@ -2,13 +2,11 @@
  * SHUBH SCHOOL ERP — SyncEngine
  *
  * WhatsApp-style data sync:
- * - On app startup: fetch ALL collections from MySQL in one pass
+ * - On app startup: show app immediately using localStorage cache, then fetch from MySQL
  * - On user action (add/edit/delete): immediately push ONLY that record to server
+ * - localStorage cache: every collection cached with timestamp, loaded instantly on open
  * - If offline: queue pending changes, flush when connection restored
  * - Sync indicator only turns green when server confirms data is saved
- *
- * All data lives in React state (loaded from server on login).
- * Never use localStorage as primary data store.
  */
 
 import type { SyncStatus } from "../types";
@@ -31,6 +29,49 @@ interface PendingChange {
   retries: number;
 }
 
+// ── localStorage cache helpers ────────────────────────────────────────────────
+
+const CACHE_PREFIX = "erp_cache_";
+const CACHE_VERSION_KEY = "erp_cache_version";
+const CACHE_VERSION = "v3"; // bump when schema changes to invalidate all caches
+
+interface CacheEntry {
+  ts: number;
+  data: unknown[];
+}
+
+function writeCacheCollection(collection: string, data: unknown[]) {
+  try {
+    const entry: CacheEntry = { ts: Date.now(), data };
+    localStorage.setItem(`${CACHE_PREFIX}${collection}`, JSON.stringify(entry));
+  } catch {
+    // storage full or unavailable — silently ignore
+  }
+}
+
+function readCacheCollection(collection: string): unknown[] | null {
+  try {
+    const version = localStorage.getItem(CACHE_VERSION_KEY);
+    if (version !== CACHE_VERSION) return null; // stale version — ignore
+    const raw = localStorage.getItem(`${CACHE_PREFIX}${collection}`);
+    if (!raw) return null;
+    const entry = JSON.parse(raw) as CacheEntry;
+    return Array.isArray(entry.data) ? entry.data : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCacheVersion() {
+  try {
+    localStorage.setItem(CACHE_VERSION_KEY, CACHE_VERSION);
+  } catch {
+    // ignore
+  }
+}
+
+// ── SyncEngine ────────────────────────────────────────────────────────────────
+
 class SyncEngine {
   private token: string | null = null;
   private syncStatus: SyncStatus = {
@@ -46,7 +87,6 @@ class SyncEngine {
   private isOnline = true;
   private allDataCache: Record<string, unknown[]> = {};
 
-  /** Subscribe to sync status changes. Returns unsubscribe function. */
   subscribe(callback: () => void): () => void {
     this.subscribers.add(callback);
     return () => this.subscribers.delete(callback);
@@ -75,8 +115,10 @@ class SyncEngine {
 
   /**
    * Called on app startup after login.
-   * Fetches ALL collections from MySQL, stores in memory cache.
-   * Never shows partial data — returns ONLY after full load.
+   *
+   * NEW: Immediately loads from localStorage cache so the app renders instantly.
+   * Then fetches fresh data from MySQL in the background.
+   * Subscribers are notified twice: once with cached data, once with fresh data.
    */
   async initialize(token: string): Promise<Record<string, unknown[]>> {
     this.token = token;
@@ -86,12 +128,48 @@ class SyncEngine {
       return {};
     }
 
-    this.setStatus("loading");
+    // ── Step 1: Load from localStorage cache immediately (instant) ──────────
+    const cachedData: Record<string, unknown[]> = {};
+    for (const [key] of Object.entries(this.allDataCache)) {
+      const cached = readCacheCollection(key);
+      if (cached) cachedData[key] = cached;
+    }
+    // Also scan known collection names from the cache prefix
+    const knownCollections = this.getKnownCollectionNames();
+    for (const name of knownCollections) {
+      const cached = readCacheCollection(name);
+      if (cached && !cachedData[name]) {
+        cachedData[name] = cached;
+      }
+    }
 
+    if (Object.keys(cachedData).length > 0) {
+      this.allDataCache = cachedData;
+      this.setStatus("loading"); // show "Cached" state while fetching fresh
+      // Return cached data immediately so app renders without waiting
+      // Background fetch will update via notify()
+      void this.fetchFreshData(token);
+      return cachedData;
+    }
+
+    // ── Step 2: No cache — full blocking load (first time or cache cleared) ──
+    this.setStatus("loading");
+    return this.fetchFreshData(token);
+  }
+
+  private async fetchFreshData(
+    token: string,
+  ): Promise<Record<string, unknown[]>> {
     try {
       const data = await apiFetchAll(token);
       this.allDataCache = data;
       this.isOnline = true;
+
+      // Persist to localStorage cache for next startup
+      for (const [collection, records] of Object.entries(data)) {
+        writeCacheCollection(collection, records);
+      }
+      writeCacheVersion();
 
       // Get server counts from sync/status for accurate dashboard numbers
       try {
@@ -113,17 +191,48 @@ class SyncEngine {
         this.setStatus("synced", null, counts);
       }
 
-      // Start polling every 60 seconds for status check
       this.startPolling();
-
       return data;
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to load data from server";
       this.isOnline = false;
       this.setStatus("error", msg);
-      return {};
+      return this.allDataCache; // return cached data as fallback
     }
+  }
+
+  /** List of collection names known to have been cached */
+  private getKnownCollectionNames(): string[] {
+    return [
+      "students",
+      "staff",
+      "attendance",
+      "fee_receipts",
+      "fees_plan",
+      "fee_heads",
+      "fee_headings",
+      "fee_balances",
+      "transport_routes",
+      "pickup_points",
+      "inventory_items",
+      "expenses",
+      "expense_heads",
+      "homework",
+      "alumni",
+      "sessions",
+      "classes",
+      "sections",
+      "subjects",
+      "notifications",
+      "biometric_devices",
+      "payroll_setup",
+      "payslips",
+      "whatsapp_logs",
+      "old_fee_entries",
+      "student_transport",
+      "student_discounts",
+    ];
   }
 
   /**
@@ -137,13 +246,11 @@ class SyncEngine {
     action: "create" | "update" | "delete",
   ): Promise<Record<string, unknown>> {
     if (!isApiConfigured()) {
-      // Update cache locally and notify (offline mode)
       this.updateCache(collection, record, action);
       return record;
     }
 
     if (!this.isOnline) {
-      // Queue for later
       this.queuePendingChange(collection, record, action);
       this.updateCache(collection, record, action);
       return record;
@@ -162,6 +269,8 @@ class SyncEngine {
         const saved = { ...record, _serverId: result.id, _synced: true };
         this.updateCache(collection, saved, "update");
         this.setStatus("synced");
+        // Update cache for this collection
+        writeCacheCollection(collection, this.allDataCache[collection] ?? []);
         return saved;
       }
       if (action === "update" && id != null) {
@@ -169,11 +278,13 @@ class SyncEngine {
         const updated = { ...record, _synced: true };
         this.updateCache(collection, updated, "update");
         this.setStatus("synced");
+        writeCacheCollection(collection, this.allDataCache[collection] ?? []);
         return updated;
       }
       if (action === "delete" && id != null) {
         await apiDeleteRecord(collection, id, token);
         this.setStatus("synced");
+        writeCacheCollection(collection, this.allDataCache[collection] ?? []);
         return record;
       }
 
@@ -181,7 +292,6 @@ class SyncEngine {
       return record;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Save failed";
-      // Don't revert optimistic update — queue for retry
       this.queuePendingChange(collection, record, action);
       this.setStatus("error", msg);
       throw err;
@@ -209,14 +319,11 @@ class SyncEngine {
     this.notify();
   }
 
-  /** Flush offline queue when connection restored */
   async flushPendingChanges(): Promise<void> {
     if (this.pendingChanges.size === 0) return;
     if (!isApiConfigured() || !this.isOnline) return;
 
     const token = this.token ?? null;
-
-    // Group by collection for batch efficiency
     const byCollection = new Map<string, PendingChange[]>();
     for (const change of this.pendingChanges.values()) {
       const arr = byCollection.get(change.collection) ?? [];
@@ -232,30 +339,23 @@ class SyncEngine {
       if (records.length > 0) {
         try {
           await apiBatchRecords(collection, records, token);
-          // Remove from pending
           for (const change of changes) {
             if (change.action !== "delete") {
               this.pendingChanges.delete(change.id);
             }
           }
         } catch {
-          // Increment retries, remove after 3 failures
           for (const change of changes) {
             change.retries++;
-            if (change.retries >= 3) {
-              this.pendingChanges.delete(change.id);
-            }
+            if (change.retries >= 3) this.pendingChanges.delete(change.id);
           }
         }
       }
 
-      // Handle deletes individually
       for (const change of changes.filter((c) => c.action === "delete")) {
         try {
           const id = change.record.id as string | number;
-          if (id != null) {
-            await apiDeleteRecord(collection, id, token);
-          }
+          if (id != null) await apiDeleteRecord(collection, id, token);
           this.pendingChanges.delete(change.id);
         } catch {
           change.retries++;
@@ -271,7 +371,6 @@ class SyncEngine {
     this.notify();
   }
 
-  /** Update in-memory cache for a record change */
   updateCache(
     collection: string,
     record: Record<string, unknown>,
@@ -295,14 +394,12 @@ class SyncEngine {
         this.allDataCache[collection] = [...existing, record];
       }
     } else {
-      // update
       const idx = existing.findIndex((r) => r.id === id);
       if (idx >= 0) {
         this.allDataCache[collection] = existing.map((r, i) =>
           i === idx ? { ...r, ...record } : r,
         );
       } else {
-        // Not found — add it
         this.allDataCache[collection] = [...existing, record];
       }
     }
@@ -310,18 +407,16 @@ class SyncEngine {
     this.notify();
   }
 
-  /** Replace an entire collection in the cache (e.g. after bulk import) */
   setCollectionCache(collection: string, records: unknown[]) {
     this.allDataCache[collection] = records;
+    writeCacheCollection(collection, records);
     this.notify();
   }
 
-  /** Get cached records for a collection */
   getCache(collection: string): unknown[] {
     return this.allDataCache[collection] ?? [];
   }
 
-  /** Get all cached data */
   getAllCache(): Record<string, unknown[]> {
     return this.allDataCache;
   }
@@ -368,7 +463,6 @@ class SyncEngine {
     }
   }
 
-  /** Refresh a single collection from the server */
   async refreshCollection(collection: string): Promise<unknown[]> {
     if (!isApiConfigured() || !this.token) {
       return this.getCache(collection);
@@ -377,6 +471,7 @@ class SyncEngine {
       const { fetchCollection } = await import("./api");
       const rows = await fetchCollection<unknown>(collection);
       this.allDataCache[collection] = rows;
+      writeCacheCollection(collection, rows);
       this.notify();
       return rows;
     } catch {
@@ -384,7 +479,6 @@ class SyncEngine {
     }
   }
 
-  /** Reset all state (used on logout) */
   reset() {
     this.token = null;
     this.allDataCache = {};
@@ -405,6 +499,5 @@ class SyncEngine {
   }
 }
 
-/** Singleton SyncEngine instance */
 export const syncEngine = new SyncEngine();
 export type { SyncEngine };

@@ -19,6 +19,8 @@ import {
   ArrowUp,
   ArrowUpDown,
   Cake,
+  ChevronLeft,
+  ChevronRight,
   Columns3,
   Download,
   List,
@@ -31,12 +33,15 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SkeletonTableRows } from "../components/SkeletonComponents";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { ClassSection, Student } from "../types";
 import { ls } from "../utils/localStorage";
+
+const ITEMS_PER_PAGE = 50;
 
 // ── Column definitions ────────────────────────────────────────────────────────
 interface ColDef {
@@ -241,6 +246,8 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [showBirthdays, setShowBirthdays] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  /** Pagination */
+  const [currentPage, setCurrentPage] = useState(1);
 
   const canManage =
     currentUser?.role === "superadmin" ||
@@ -389,6 +396,17 @@ export default function Students({ onNavigate }: StudentsProps) {
     [visibleCols],
   );
 
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedStudents = useMemo(() => {
+    const start = (safePage - 1) * ITEMS_PER_PAGE;
+    return filtered.slice(start, start + ITEMS_PER_PAGE);
+  }, [filtered, safePage]);
+  const paginationStart =
+    filtered.length === 0 ? 0 : (safePage - 1) * ITEMS_PER_PAGE + 1;
+  const paginationEnd = Math.min(safePage * ITEMS_PER_PAGE, filtered.length);
+
   // Birthdays
   const today = new Date();
   const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
@@ -471,6 +489,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     setFilterGender("all");
     setFilterCategory("all");
     setFilterRoute("all");
+    setCurrentPage(1);
   }
 
   function handlePrint() {
@@ -633,7 +652,11 @@ export default function Students({ onNavigate }: StudentsProps) {
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
               {currentSession && `Session ${currentSession.label} · `}
-              Showing {filtered.length} of {students.length} students
+              {filtered.length < students.length
+                ? `${filtered.length} of ${students.length} students`
+                : `${students.length} students`}
+              {filtered.length > ITEMS_PER_PAGE &&
+                ` · Page ${safePage} of ${totalPages}`}
               {isRefreshing && (
                 <span className="ml-2 text-primary animate-pulse">
                   Syncing…
@@ -721,7 +744,10 @@ export default function Students({ onNavigate }: StudentsProps) {
               className="pl-8 h-8 text-xs"
               placeholder="Search name, Adm.No, father, mother, mobile…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setCurrentPage(1);
+              }}
               data-ocid="students-search"
             />
           </div>
@@ -732,6 +758,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             onValueChange={(v) => {
               setFilterClass(v);
               setFilterSection("all");
+              setCurrentPage(1);
             }}
           >
             <SelectTrigger
@@ -753,7 +780,10 @@ export default function Students({ onNavigate }: StudentsProps) {
           {/* Section filter */}
           <Select
             value={filterSection}
-            onValueChange={setFilterSection}
+            onValueChange={(v) => {
+              setFilterSection(v);
+              setCurrentPage(1);
+            }}
             disabled={filterClass === "all"}
           >
             <SelectTrigger
@@ -772,7 +802,13 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          <Select value={filterStatus} onValueChange={setFilterStatus}>
+          <Select
+            value={filterStatus}
+            onValueChange={(v) => {
+              setFilterStatus(v);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-28 h-8 text-xs">
               <SelectValue placeholder="Status" />
             </SelectTrigger>
@@ -783,7 +819,13 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          <Select value={filterGender} onValueChange={setFilterGender}>
+          <Select
+            value={filterGender}
+            onValueChange={(v) => {
+              setFilterGender(v);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-24 h-8 text-xs">
               <SelectValue placeholder="Gender" />
             </SelectTrigger>
@@ -795,7 +837,13 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          <Select value={filterCategory} onValueChange={setFilterCategory}>
+          <Select
+            value={filterCategory}
+            onValueChange={(v) => {
+              setFilterCategory(v);
+              setCurrentPage(1);
+            }}
+          >
             <SelectTrigger className="w-28 h-8 text-xs">
               <SelectValue placeholder="Category" />
             </SelectTrigger>
@@ -1004,21 +1052,9 @@ export default function Students({ onNavigate }: StudentsProps) {
           </thead>
 
           <tbody>
-            {/* Loading skeleton */}
+            {/* Loading skeleton — show while initial load is in progress */}
             {isRefreshing && students.length === 0 && (
-              <tr>
-                <td
-                  colSpan={activeVisibleCols.length + 2}
-                  className="py-16 text-center text-muted-foreground"
-                >
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                    <span className="text-sm">
-                      Loading students from server…
-                    </span>
-                  </div>
-                </td>
-              </tr>
+              <SkeletonTableRows rows={10} cols={activeVisibleCols.length} />
             )}
 
             {!isRefreshing && filtered.length === 0 && (
@@ -1049,9 +1085,11 @@ export default function Students({ onNavigate }: StudentsProps) {
               </tr>
             )}
 
-            {filtered.map((student, idx) => {
+            {paginatedStudents.map((student, idx) => {
               const isDiscontinued = student.status === "discontinued";
               const isChecked = selectedIds.has(student.id);
+              // idx relative to current page for data-ocid numbering
+              const globalIdx = (safePage - 1) * ITEMS_PER_PAGE + idx;
               return (
                 <tr
                   key={student.id}
@@ -1068,7 +1106,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                           : "bg-muted/10 hover:bg-muted/30",
                   ].join(" ")}
                   style={{ height: "36px" }}
-                  data-ocid={`students.item.${idx + 1}`}
+                  data-ocid={`students.item.${globalIdx + 1}`}
                   onDoubleClick={() => setSelectedStudent(student)}
                 >
                   <td className="w-8 px-2 border-r border-border/40">
@@ -1099,7 +1137,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                           size="icon"
                           className="w-6 h-6 text-muted-foreground hover:text-primary"
                           aria-label="Edit student"
-                          data-ocid={`students.edit_button.${idx + 1}`}
+                          data-ocid={`students.edit_button.${globalIdx + 1}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setEditStudent(student);
@@ -1123,7 +1161,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                           size="icon"
                           className="w-6 h-6 text-muted-foreground hover:text-destructive"
                           aria-label="Delete student"
-                          data-ocid={`students.delete_button.${idx + 1}`}
+                          data-ocid={`students.delete_button.${globalIdx + 1}`}
                           onClick={(e) => {
                             e.stopPropagation();
                             setDeleteConfirm(student);
@@ -1140,6 +1178,71 @@ export default function Students({ onNavigate }: StudentsProps) {
           </tbody>
         </table>
       </div>
+
+      {/* Pagination Controls */}
+      {filtered.length > ITEMS_PER_PAGE && (
+        <div className="flex-shrink-0 border-t border-border bg-card px-4 py-2 flex items-center justify-between gap-3">
+          <span className="text-xs text-muted-foreground">
+            Showing {paginationStart}–{paginationEnd} of {filtered.length}{" "}
+            students
+          </span>
+          <div className="flex items-center gap-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={safePage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              data-ocid="students.pagination_prev"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 mr-1" /> Prev
+            </Button>
+            {/* Page number pills — show up to 5 around current page */}
+            {(() => {
+              const items = Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter(
+                  (p) =>
+                    p === 1 ||
+                    p === totalPages ||
+                    (p >= safePage - 1 && p <= safePage + 1),
+                )
+                .reduce<Array<number | string>>((acc, p, i, arr) => {
+                  if (i > 0 && (arr[i - 1] as number) < p - 1)
+                    acc.push(`ellipsis-${p}`);
+                  acc.push(p);
+                  return acc;
+                }, []);
+              return items.map((p) =>
+                typeof p === "string" ? (
+                  <span key={p} className="text-xs text-muted-foreground px-1">
+                    …
+                  </span>
+                ) : (
+                  <Button
+                    key={`page-${p}`}
+                    variant={p === safePage ? "default" : "outline"}
+                    size="sm"
+                    className="h-7 w-7 p-0 text-xs"
+                    onClick={() => setCurrentPage(p)}
+                  >
+                    {p}
+                  </Button>
+                ),
+              );
+            })()}
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              disabled={safePage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              data-ocid="students.pagination_next"
+            >
+              Next <ChevronRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Print Dialog */}
       {showPrintDialog && (

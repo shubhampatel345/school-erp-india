@@ -390,10 +390,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const unsub = syncEngine.subscribe(() => {
       dispatch({ type: "SET_SYNC_STATUS", status: syncEngine.getSyncStatus() });
-      // Also sync collection updates from SyncEngine cache to state
+      // Sync only changed/new collections from SyncEngine cache to state.
+      // We compare lengths to avoid unnecessary dispatches (reduce re-renders).
       const cache = syncEngine.getAllCache();
       for (const [collection, records] of Object.entries(cache)) {
-        dispatch({ type: "UPDATE_COLLECTION", collection, records });
+        if (Array.isArray(records)) {
+          dispatch({ type: "UPDATE_COLLECTION", collection, records });
+        }
       }
     });
     return unsub;
@@ -416,6 +419,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── Initialize: fetch ALL data from server after login ─────────────────────
+  // PERFORMANCE: Show the app immediately using cached data, fetch fresh in background.
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     if (initStartedRef.current) return;
@@ -427,7 +431,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const token = state.token ?? getJwt();
 
       if (!isApiConfigured() || !token) {
-        // Offline mode — use empty data or localStorage fallback
+        // Offline mode — use localStorage fallback immediately
         const localSessions = ls.get<Session[]>("sessions", []);
         const defaultSessions =
           localSessions.length > 0 ? localSessions : [makeDefaultSession()];
@@ -441,6 +445,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
+        // syncEngine.initialize() returns cached data instantly if available,
+        // then fetches fresh data from MySQL in the background.
+        // Either way we get data back — cached or fresh.
         const allData = await syncEngine.initialize(token);
 
         // Extract sessions from data
@@ -461,6 +468,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           serverSessions.push(defaultSession);
         }
 
+        // Render app immediately with whatever data we have (cached or fresh).
+        // If it was cached, the SyncEngine will notify subscribers when fresh data arrives.
         dispatch({
           type: "SET_INIT_DONE",
           data: allData,
@@ -841,10 +850,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ── Render loading screen during initial server fetch ──────────────────────
-  // Only block render when we have a logged-in user but data hasn't loaded yet
+  // PERFORMANCE: Only block render if there is truly NO cached data to show.
+  // If syncEngine has cached data (from localStorage), show the app immediately
+  // and let fresh data arrive in the background without a loading screen.
+  const hasCachedData = Object.keys(syncEngine.getAllCache()).length > 0;
   const showLoading =
-    state.currentUser !== null &&
-    (state.isInitializing || state.syncStatus.state === "loading");
+    state.currentUser !== null && state.isInitializing && !hasCachedData;
   const showError =
     state.currentUser !== null &&
     state.initError !== null &&

@@ -3,7 +3,7 @@ import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
-import { CLASSES, generateId, ls } from "../../utils/localStorage";
+import { CLASSES, generateId } from "../../utils/localStorage";
 
 function safeArray<T>(v: T[] | string | undefined): T[] {
   if (Array.isArray(v)) return v;
@@ -36,7 +36,11 @@ export default function FeesPlanPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  const isSuperAdmin = currentUser?.role === "superadmin";
+  // Allow superadmin, admin, and accountant to edit fee plans
+  const canEdit =
+    currentUser?.role === "superadmin" ||
+    currentUser?.role === "admin" ||
+    currentUser?.role === "accountant";
 
   // Read from context (already loaded from server)
   const rawHeadings = getData("feeHeadings") as FeeHeading[];
@@ -50,12 +54,10 @@ export default function FeesPlanPage() {
 
   const plans = getData("feesPlans") as FeesPlan[];
 
-  // Class sections: prefer context/server, fallback to localStorage
+  // Class sections: prefer context/server using "classes" collection (same as other modules)
   const classSections: ClassSection[] = (() => {
-    const cs = getData("classSections") as ClassSection[];
+    const cs = getData("classes") as ClassSection[];
     if (cs.length > 0) return cs;
-    const lsCs = ls.get<ClassSection[]>("class_sections", []);
-    if (lsCs.length > 0) return lsCs;
     return CLASSES.map((c) => ({
       id: c,
       className: c,
@@ -66,7 +68,11 @@ export default function FeesPlanPage() {
   // When class changes, initialize edit values from existing plans
   useEffect(() => {
     if (!selectedClass || headings.length === 0) return;
-    const cs = classSections.find((c) => c.className === selectedClass);
+    const cs = classSections.find(
+      (c) =>
+        (c.className ?? (c as unknown as { name?: string }).name ?? "") ===
+        selectedClass,
+    );
     if (!cs) return;
 
     const applicableHeadings = headings.filter(
@@ -100,7 +106,7 @@ export default function FeesPlanPage() {
     headingId: string,
     value: string,
   ) {
-    if (!isSuperAdmin) return;
+    if (!canEdit) return;
     setEditValues((prev) => ({
       ...prev,
       [section]: { ...prev[section], [headingId]: value },
@@ -108,7 +114,7 @@ export default function FeesPlanPage() {
   }
 
   async function handleSave() {
-    if (!selectedClass || !isSuperAdmin) return;
+    if (!selectedClass || !canEdit) return;
     setSaving(true);
     const cs = classSections.find((c) => c.className === selectedClass);
     if (!cs) {
@@ -172,7 +178,11 @@ export default function FeesPlanPage() {
   }
 
   const activeSections = (() => {
-    const cs = classSections.find((c) => c.className === selectedClass);
+    const cs = classSections.find(
+      (c) =>
+        (c.className ?? (c as unknown as { name?: string }).name ?? "") ===
+        selectedClass,
+    );
     if (!cs) return [];
     return safeArray<string>(cs.sections as unknown as string[]);
   })();
@@ -191,7 +201,7 @@ export default function FeesPlanPage() {
       <div>
         <h3 className="font-semibold text-foreground">Fees Plan</h3>
         <p className="text-sm text-muted-foreground">
-          Set section-wise fee amounts per heading. Super Admin only.
+          Set section-wise fee amounts per heading. Admin and above only.
         </p>
       </div>
 
@@ -206,9 +216,19 @@ export default function FeesPlanPage() {
         </div>
       ) : (
         <>
-          {/* Class selector */}
+          {/* Class selector — show configured classes from context, fallback to static list */}
           <div className="flex gap-2 flex-wrap">
-            {CLASSES.map((cls) => (
+            {(classSections.length > 0
+              ? classSections
+                  .map(
+                    (c) =>
+                      (c.className ??
+                        (c as unknown as { name?: string }).name ??
+                        "") as string,
+                  )
+                  .filter(Boolean)
+              : CLASSES
+            ).map((cls) => (
               <button
                 key={cls}
                 type="button"
@@ -238,7 +258,7 @@ export default function FeesPlanPage() {
                     </p>
                   )}
                 </div>
-                {isSuperAdmin && !isReadOnly && activeHeadings.length > 0 && (
+                {canEdit && !isReadOnly && activeHeadings.length > 0 && (
                   <Button
                     onClick={() => void handleSave()}
                     disabled={saving}
@@ -297,7 +317,7 @@ export default function FeesPlanPage() {
                                       e.target.value,
                                     )
                                   }
-                                  disabled={!isSuperAdmin || isReadOnly}
+                                  disabled={!canEdit || isReadOnly}
                                   className="h-8 text-center text-sm w-20"
                                   placeholder="0"
                                   data-ocid="fees-plan-amount-input"
@@ -316,9 +336,9 @@ export default function FeesPlanPage() {
                 </div>
               )}
 
-              {!isSuperAdmin && (
+              {!canEdit && (
                 <div className="p-3 bg-amber-50 border-t border-amber-200 text-amber-700 text-sm text-center">
-                  Only Super Admin can edit fee amounts.
+                  Only Super Admin, Admin, or Accountant can edit fee amounts.
                 </div>
               )}
             </div>
