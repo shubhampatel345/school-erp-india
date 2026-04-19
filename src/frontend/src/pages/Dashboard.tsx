@@ -21,12 +21,12 @@ import {
   WifiOff,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import type React from "react";
 import { useApp } from "../context/AppContext";
 import { useSync } from "../hooks/useSync";
 import type { AttendanceRecord, FeeReceipt, Staff, Student } from "../types";
-import { fetchSyncStatus, isApiConfigured } from "../utils/api";
+import { isApiConfigured } from "../utils/api";
 import { dataService } from "../utils/dataService";
 import { MONTHS, formatCurrency, ls } from "../utils/localStorage";
 
@@ -96,17 +96,23 @@ function SyncBar() {
     isPolling,
     serverInfo,
     needsAuth,
+    serverCounts,
     syncedCounts,
   } = useSync();
   const [showTooltip, setShowTooltip] = useState(false);
 
-  // Build a human-readable count summary
+  // Build a human-readable count summary from real MySQL counts (/sync/status).
+  // Fall back to in-memory cache counts when serverCounts not yet populated.
+  const displayCounts =
+    Object.keys(serverCounts).length > 0 ? serverCounts : syncedCounts;
+
   const countSummary = (() => {
     const parts: string[] = [];
-    if (syncedCounts.students) parts.push(`${syncedCounts.students} students`);
-    if (syncedCounts.fee_receipts)
-      parts.push(`${syncedCounts.fee_receipts} receipts`);
-    if (syncedCounts.staff) parts.push(`${syncedCounts.staff} staff`);
+    if (displayCounts.students)
+      parts.push(`${displayCounts.students} students`);
+    if (displayCounts.fee_receipts)
+      parts.push(`${displayCounts.fee_receipts} receipts`);
+    if (displayCounts.staff) parts.push(`${displayCounts.staff} staff`);
     return parts.join(", ");
   })();
 
@@ -159,7 +165,6 @@ function SyncBar() {
 
   const cfg = barConfig[mode] ?? barConfig.offline;
 
-  // Navigate to settings when auth is required
   function handleAuthClick() {
     const event = new CustomEvent("erp:navigate", { detail: "settings" });
     window.dispatchEvent(event);
@@ -286,9 +291,9 @@ function SyncBar() {
                 )}
                 <div className="mt-1 pt-1 border-t border-border/50">
                   <p className="font-medium text-foreground mb-0.5">
-                    Records synced from server:
+                    Records in MySQL (from server):
                   </p>
-                  {Object.entries(syncedCounts)
+                  {Object.entries(displayCounts)
                     .filter(([, count]) => count > 0)
                     .map(([col, count]) => (
                       <p key={col} className="flex justify-between">
@@ -350,58 +355,22 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const sessionId = currentSession?.id ?? "";
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
-  // Server counts from /sync/status — real MySQL row counts shown on KPI cards
-  const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
-  const [serverCountsLoaded, setServerCountsLoaded] = useState(false);
-  // Directly fetched students + staff from the server for accurate counts on fresh devices
-  const [serverStudents, setServerStudents] = useState<Student[]>([]);
-  const [serverStaff, setServerStaff] = useState<Staff[]>([]);
+  /**
+   * useSync gives us:
+   *   serverCounts — real MySQL COUNT(*) from /sync/status (arrives in ~1s, no auth needed)
+   *   mode         — connection state
+   * This is the PRIMARY source for dashboard stat cards.
+   * On a fresh device with empty localStorage, serverCounts will populate within ~1s
+   * and the stat cards will update immediately — no need to wait for full data fetch.
+   */
+  const { serverCounts, mode: syncMode } = useSync();
 
-  useEffect(() => {
-    if (!isApiConfigured()) {
-      setServerCountsLoaded(true);
-      return;
-    }
-
-    // 1. Fetch /sync/status for quick counts
-    fetchSyncStatus()
-      .then((res) => {
-        if (res.status === "ok" && res.counts) {
-          setServerCounts(res.counts);
-        }
-      })
-      .catch(() => {
-        /* ignore, fall back to local counts */
-      })
-      .finally(() => setServerCountsLoaded(true));
-
-    // 2. Fetch actual students from server so this device always shows real data
-    //    even when localStorage is empty (fresh device / incognito / other browser).
-    dataService
-      .getAsync<Student>("students")
-      .then((rows) => {
-        if (rows.length > 0) {
-          setServerStudents(rows);
-        }
-      })
-      .catch(() => {
-        /* ignore */
-      });
-
-    // 3. Fetch actual staff from server — needed for accurate teacher count.
-    //    Do NOT estimate from serverCounts.staff (e.g. Math.round(staff * 0.6)).
-    //    Always fetch the real records and filter by designation.
-    dataService
-      .getAsync<Staff>("staff")
-      .then((rows) => {
-        if (rows.length > 0) {
-          setServerStaff(rows);
-        }
-      })
-      .catch(() => {
-        /* ignore */
-      });
-  }, []);
+  // Whether we have received a response from /sync/status yet
+  const serverCountsLoaded =
+    Object.keys(serverCounts).length > 0 ||
+    syncMode === "offline" ||
+    syncMode === "local" ||
+    syncMode === "auth_error";
 
   const schoolSettings = useMemo(
     () =>
@@ -413,43 +382,45 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   );
 
   const stats = useMemo(() => {
-    // Use server counts from /sync/status for the KPI cards (real MySQL data)
-    // Fall back to DataService cache for local-only mode
-    // serverStudents has real data fetched directly from MySQL (even on fresh devices)
+    /**
+     * STAT RESOLUTION PRIORITY
+     * 1. serverCounts (MySQL COUNT(*) from /sync/status) — ALWAYS accurate, available fast
+     * 2. DataService in-memory cache — populated after full data fetch
+     * 3. localStorage — local-only fallback
+     *
+     * For counts (students, staff) we ALWAYS use serverCounts when available.
+     * For teacher count we filter the in-memory staff array (designation-based).
+     */
     const cachedStudents = dataService.get<Student>("students");
-    const allStudents =
-      serverStudents.length > 0 ? serverStudents : cachedStudents;
     const cachedStaff = dataService.get<Staff>("staff");
-    // serverStaff: directly fetched from MySQL on mount — used for accurate teacher count.
-    // Never estimate from serverCounts.staff (e.g. Math.round(staff * 0.6)) — always use real records.
-    const allStaff = serverStaff.length > 0 ? serverStaff : cachedStaff;
 
-    // Total students: prefer server count (MySQL row count), then server-fetched students,
-    // finally fall back to local cache count filtered by session
+    // Total students: always prefer server count from /sync/status (real MySQL)
     const totalStudentsCount =
       serverCounts.students ??
-      (allStudents.length > 0
-        ? allStudents.filter(
-            (s) => s.sessionId === sessionId && s.status === "active",
-          ).length
-        : 0);
+      cachedStudents.filter(
+        (s) => s.sessionId === sessionId && s.status === "active",
+      ).length;
 
-    // Teacher count: filter fetched staff records by designation (case-insensitive).
-    // Use allStaff (server-fetched) so fresh devices see the correct count.
-    // Fall back to serverCounts.staff only for total staff (not for teacher sub-count).
-    const totalTeachersCount = allStaff.filter(
+    // Teacher count: filter in-memory staff by designation.
+    // Falls back to 0 while staff data is loading (acceptable — staff fetch runs async).
+    const totalTeachersCount = cachedStaff.filter(
       (s) =>
         s.designation?.toLowerCase().includes("teacher") ||
         s.designation?.toLowerCase() === "pgt" ||
         s.designation?.toLowerCase() === "tgt" ||
         s.designation?.toLowerCase() === "prt",
     ).length;
-    const totalStaffCount =
-      allStaff.length > 0 ? allStaff.length : (serverCounts.staff ?? 0);
 
-    const students = allStudents.filter(
+    // Total staff: prefer MySQL count, then in-memory cache
+    const totalStaffCount =
+      serverCounts.staff ?? (cachedStaff.length > 0 ? cachedStaff.length : 0);
+
+    // Active students in current session (for attendance / dues calculation)
+    // Use cached data for session-scoped filtering; server count for the KPI card
+    const sessionStudents = cachedStudents.filter(
       (s) => s.sessionId === sessionId && s.status === "active",
     );
+
     const today = new Date().toISOString().split("T")[0];
     const allAttendance = dataService.get<AttendanceRecord>("attendance");
     const todayAttendance = allAttendance.filter(
@@ -517,7 +488,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     let transportDueStudents = 0;
     let totalTransportDue = 0;
 
-    for (const s of students) {
+    for (const s of sessionStudents) {
       let studentHasFeesDue = false;
       let studentHasTransportDue = false;
 
@@ -574,27 +545,23 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       if (studentHasTransportDue) transportDueStudents++;
     }
 
-    // Count unique classes from actual student data (server-fetched).
-    // Do NOT use serverCounts.classes — that table has NULL names due to a field
-    // mapping bug, making its count unreliable. Students' `class` field is always
-    // populated correctly, so deriving the count from there is the correct approach.
+    // Count unique classes from session-scoped student data.
+    // serverCounts.classes may be unreliable (NULL names bug), derive from student records.
     const uniqueClassesFromStudents = new Set(
-      allStudents
-        .filter((s) => s.sessionId === sessionId && s.status === "active")
-        .map((s) => s.class)
-        .filter(Boolean),
+      sessionStudents.map((s) => s.class).filter(Boolean),
     ).size;
     const uniqueClasses =
       uniqueClassesFromStudents > 0
         ? uniqueClassesFromStudents
         : (serverCounts.classes ?? 0);
+
     const transportRoutes = ls.get<Array<{ id: string }>>(
       "transport_routes_v2",
       [],
     );
 
     const classCounts: Record<string, { present: number; total: number }> = {};
-    for (const s of students) {
+    for (const s of sessionStudents) {
       const key = `Class ${s.class}`;
       if (!classCounts[key]) classCounts[key] = { present: 0, total: 0 };
       classCounts[key].total++;
@@ -606,7 +573,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       Array<{ studentId: string; routeName: string; busNo: string }>
     >("student_transport_v2", []);
     const routeCounts: Record<string, { present: number; total: number }> = {};
-    for (const s of students) {
+    for (const s of sessionStudents) {
       const transport = studentTransports.find((t) => t.studentId === s.id);
       const routeKey = transport
         ? `Bus ${transport.busNo} – ${(transport as unknown as { routeName?: string }).routeName ?? ""}`
@@ -625,22 +592,19 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           : new Date().getMonth() + 9
       ];
 
-    // Precise teacher count from allStaff (server-fetched records with real designations)
-    const teachersCount = totalTeachersCount;
+    // The KPI "Total Students" always shows the MySQL count from /sync/status.
+    // This ensures the live cPanel site shows 1184 (MySQL) not 0 (empty localStorage).
+    const displayStudents = totalStudentsCount;
+    const displayStaff = totalStaffCount;
 
     return {
-      students:
-        serverCountsLoaded && serverCounts.students
-          ? serverCounts.students
-          : totalStudentsCount,
-      teachers: teachersCount,
-      totalStaff: totalStaffCount,
+      students: displayStudents,
+      teachers: totalTeachersCount,
+      totalStaff: displayStaff,
       presentCount,
       presentPct:
-        (serverCounts.students ?? students.length) > 0
-          ? Math.round(
-              (presentCount / (serverCounts.students ?? students.length)) * 100,
-            )
+        displayStudents > 0
+          ? Math.round((presentCount / displayStudents) * 100)
           : 0,
       collectedToday,
       totalCollectedSession,
@@ -656,13 +620,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       today,
       currentMonthName,
     };
-  }, [
-    sessionId,
-    serverCounts,
-    serverCountsLoaded,
-    serverStudents,
-    serverStaff,
-  ]);
+  }, [sessionId, serverCounts]);
 
   const recentReceipts = useMemo(() => {
     const allReceipts =
@@ -708,6 +666,9 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       color: "bg-orange-100 text-orange-700 hover:bg-orange-200",
     },
   ];
+
+  // Only show loading skeleton if API is configured and we haven't received counts yet
+  const showLoadingSkeleton = isApiConfigured() && !serverCountsLoaded;
 
   return (
     <div className="flex flex-col gap-0">
@@ -781,14 +742,16 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           <StatCard
             label="Total Students"
             value={
-              !serverCountsLoaded ? (
+              showLoadingSkeleton ? (
                 <Skeleton className="h-7 w-20" />
               ) : (
                 stats.students
               )
             }
             sub={
-              serverCountsLoaded ? "Active enrollments" : "Loading from server…"
+              showLoadingSkeleton
+                ? "Loading from server…"
+                : "Active enrollments"
             }
             icon={Users}
             color="bg-primary"
@@ -797,7 +760,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           />
           <StatCard
             label="Total Teachers"
-            value={stats.teachers}
+            value={
+              showLoadingSkeleton ? (
+                <Skeleton className="h-7 w-16" />
+              ) : (
+                stats.teachers
+              )
+            }
             sub={`${stats.totalStaff} total staff`}
             icon={GraduationCap}
             color="bg-purple-600"

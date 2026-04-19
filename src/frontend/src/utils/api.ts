@@ -657,44 +657,78 @@ async function fetchCollectionPage<T>(
 }
 
 /**
- * Fetch ALL rows for a collection from the server, using pagination to bypass
- * any server-side per-request row limits (e.g. a PHP LIMIT 500 cap).
+ * Fetch ALL rows for a collection from the server.
  *
  * Strategy:
- *  1. Fetch first page (PAGE_SIZE rows).
- *  2. If the server reports `total > PAGE_SIZE`, fetch remaining pages in parallel.
+ *  1. Fetch with a very large page size (BULK_PAGE_SIZE = 5000) in one request
+ *     so most collections fit in a single round-trip.
+ *  2. If the server reports `total > BULK_PAGE_SIZE` (very large collections),
+ *     fetch remaining pages in parallel using BULK_PAGE_SIZE chunks.
  *  3. Deduplicate by `id` field and return the merged array.
  *
- * This is the root cause fix for "MySQL has 1184 students but app shows 500":
- * the PHP server was silently capping results at 500 rows per request.
+ * Why BULK_PAGE_SIZE instead of 500:
+ *   The PHP API returns a plain array without a total count when limit > rows.
+ *   With PAGE_SIZE=500, if the server returns exactly 500 rows, `total` defaults
+ *   to 500 (rows.length) and pagination stops — leaving 684 students missing.
+ *   Using 5000 means a single request will capture all records for most schools.
  */
-const PAGE_SIZE = 500; // match server default — we'll always loop past it
+const BULK_PAGE_SIZE = 5000;
 
 export async function fetchCollection<T>(
   collection: string,
   filters?: Record<string, string | number>,
 ): Promise<T[]> {
-  // Fetch first page — this also tells us the server's total count
-  const first = await fetchCollectionPage<T>(collection, 0, PAGE_SIZE, filters);
+  // Fetch one large page — this captures all records for most collections
+  const first = await fetchCollectionPage<T>(
+    collection,
+    0,
+    BULK_PAGE_SIZE,
+    filters,
+  );
 
   if (first.rows.length === 0) return [];
 
-  // If the server returned fewer rows than reported total, fetch remaining pages
-  const total = first.total;
-  if (total <= first.rows.length) {
-    // All rows fit in the first page — no further requests needed
+  // If server returned fewer rows than the bulk page size, we have everything
+  if (first.rows.length < BULK_PAGE_SIZE) {
     return first.rows;
   }
 
-  // Calculate remaining pages and fetch them concurrently
+  // Server returned a full BULK_PAGE_SIZE — there may be more rows.
+  // Use the reported total (if available) or keep fetching until we get a partial page.
+  const reportedTotal = first.total > first.rows.length ? first.total : 0;
+
+  if (reportedTotal === 0) {
+    // No total reported — keep fetching sequential pages until we get a partial page
+    // (rare: only schools with > 5000 records in one collection reach this path)
+    const allRows: T[] = [...first.rows];
+    let offset = BULK_PAGE_SIZE;
+    for (;;) {
+      const page = await fetchCollectionPage<T>(
+        collection,
+        offset,
+        BULK_PAGE_SIZE,
+        filters,
+      );
+      allRows.push(...page.rows);
+      if (page.rows.length < BULK_PAGE_SIZE) break;
+      offset += BULK_PAGE_SIZE;
+    }
+    return deduplicateRows(allRows);
+  }
+
+  // We have a reliable total — fetch remaining pages concurrently
   const remainingOffsets: number[] = [];
-  for (let offset = PAGE_SIZE; offset < total; offset += PAGE_SIZE) {
+  for (
+    let offset = BULK_PAGE_SIZE;
+    offset < reportedTotal;
+    offset += BULK_PAGE_SIZE
+  ) {
     remainingOffsets.push(offset);
   }
 
   const pageResults = await Promise.allSettled(
     remainingOffsets.map((offset) =>
-      fetchCollectionPage<T>(collection, offset, PAGE_SIZE, filters),
+      fetchCollectionPage<T>(collection, offset, BULK_PAGE_SIZE, filters),
     ),
   );
 
@@ -705,14 +739,16 @@ export async function fetchCollection<T>(
     }
   }
 
-  // Deduplicate by `id` — keep last occurrence (most recent page wins)
+  return deduplicateRows(allRows);
+}
+
+function deduplicateRows<T>(rows: T[]): T[] {
   const seen = new Map<unknown, T>();
-  for (const row of allRows) {
+  for (const row of rows) {
     const r = row as Record<string, unknown>;
     const key = r.id ?? r.admNo ?? r.empId ?? JSON.stringify(row);
     seen.set(key, row);
   }
-
   return Array.from(seen.values());
 }
 

@@ -2,7 +2,7 @@
  * SHUBH SCHOOL ERP — API Sync Status Hook
  *
  * Polls /api/sync/status every 30 s when an API URL is configured.
- * Also exposes syncedCounts from the DataService for the dashboard display.
+ * Exposes serverCounts from /sync/status (real MySQL COUNT(*)) for dashboard.
  * Returns live connection state consumed by Dashboard and other components.
  *
  * Special handling: if the server returns "Super Admin only" the hook
@@ -42,7 +42,16 @@ export interface SyncState {
     db_version?: string;
     last_backup?: string;
   } | null;
-  /** Counts of synced records per collection e.g. {students: 142, fee_receipts: 890} */
+  /**
+   * Real MySQL COUNT(*) per collection — taken directly from /sync/status response.
+   * These are the authoritative counts to display on dashboard stat cards.
+   * On fresh devices with empty localStorage this will still show the correct counts.
+   */
+  serverCounts: Record<string, number>;
+  /**
+   * In-memory cache counts from DataService (may be partial if fetch is still in flight).
+   * Use serverCounts for display; use syncedCounts only for the tooltip breakdown.
+   */
   syncedCounts: Record<string, number>;
   /** Manually trigger an immediate sync + data refresh */
   triggerSync: () => Promise<void>;
@@ -91,11 +100,16 @@ export function useSync(): SyncState {
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
   const [needsAuth, setNeedsAuth] = useState(false);
   const [serverInfo, setServerInfo] = useState<SyncState["serverInfo"]>(null);
+  /**
+   * Real MySQL counts from /sync/status — the authoritative source for all stat displays.
+   * Populated on every successful poll (typically within 1-2s of page load).
+   */
+  const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(true);
 
-  // Subscribe to DataService for live counts
+  // Subscribe to DataService for live cache counts (tooltip breakdown only)
   const dsMode = useSyncExternalStore(
     dataService.subscribe.bind(dataService),
     () => dataService.getMode(),
@@ -128,8 +142,6 @@ export function useSync(): SyncState {
       if (!activeRef.current) return;
 
       if (result.status === "ok") {
-        // Only set connected if server responds with ok status
-        // counts may be undefined on first run (tables just created)
         const now = new Date();
         setMode("connected");
         setLastSyncTime(now);
@@ -141,6 +153,11 @@ export function useSync(): SyncState {
           db_version: result.db_version,
           last_backup: result.last_backup,
         });
+        // Store the real MySQL counts from /sync/status for dashboard stat cards.
+        // These come from COUNT(*) queries on the server — always accurate.
+        if (result.counts && Object.keys(result.counts).length > 0) {
+          setServerCounts(result.counts);
+        }
         // Restore normal poll interval after auth recovery
         restartPoll(POLL_INTERVAL_MS, runCheck);
         // Trigger DataService to load/refresh all collections when connected.
@@ -202,6 +219,7 @@ export function useSync(): SyncState {
     function handleFocus() {
       if (isApiConfigured()) {
         void dataService.init(true);
+        void runCheck();
       }
     }
     window.addEventListener("focus", handleFocus);
@@ -256,6 +274,7 @@ export function useSync(): SyncState {
     isPolling: effectiveMode === "syncing",
     needsAuth,
     serverInfo,
+    serverCounts,
     syncedCounts,
     triggerSync: runCheck,
   };
