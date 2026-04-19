@@ -110,23 +110,6 @@ function getPaidMonths(
   return paid;
 }
 
-function getAllPaidMonths(studentId: string, sessionId: string): string[] {
-  const receipts = getAllReceipts();
-  const paid: string[] = [];
-  for (const r of receipts) {
-    if (
-      r.studentId === studentId &&
-      r.sessionId === sessionId &&
-      !r.isDeleted
-    ) {
-      for (const item of r.items) {
-        if (!paid.includes(item.month)) paid.push(item.month);
-      }
-    }
-  }
-  return paid;
-}
-
 /** Get old balance — prefer DataService fee_balances, fallback to localStorage */
 function getOldBalance(studentId: string): number {
   // Try DataService fee_balances collection first (server-synced)
@@ -451,6 +434,10 @@ export default function CollectFees() {
   const [rows, setRows] = useState<ReceiptRow[]>([]);
   const [oldBalance, setOldBalance] = useState(0); // negative = credit
   const [receiptHistory, setReceiptHistory] = useState<FeeReceipt[]>([]);
+  const [feeLoadingState, setFeeLoadingState] = useState<
+    "idle" | "loading" | "loaded" | "error" | "empty"
+  >("idle");
+  const [feeLoadError, setFeeLoadError] = useState("");
 
   // ── Month panel ───────────────────────────────────────────────────────────
   const [panelMonths, setPanelMonths] = useState<string[]>([]);
@@ -533,11 +520,14 @@ export default function CollectFees() {
   // ── Load fees when student is preloaded (from global search) ──────────────
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
   useEffect(() => {
+    // Only fire for preload path — selectStudent() calls loadStudentFees() directly,
+    // so only trigger here when selectedStudent was set from the preload sessionStorage
+    // path (rows will still be empty at that point). Guarded to prevent double-call.
     if (selectedStudent && currentSession && rows.length === 0) {
       loadStudentFees(selectedStudent);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedStudent, currentSession]);
+  }, [selectedStudent?.id, currentSession?.id]);
 
   // ── Live search ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -617,102 +607,184 @@ export default function CollectFees() {
     return { fare: pp?.fare ?? 0, pickupName: assignment.pickupPointName };
   }
 
-  // ── Load fees for selected student ────────────────────────────────────────
-  function loadStudentFees(student: Student) {
+  // ── Load fees for selected student (async — always fetches fresh from server) ────
+  async function loadStudentFees(student: Student) {
     if (!currentSession) return;
-    // Prefer DataService (server-synced) for fee headings and plans
-    const headingsDs = dataService.get<FeeHeading>("fee_heads");
-    const headings =
-      headingsDs.length > 0
-        ? headingsDs
-        : ls.get<FeeHeading[]>("fee_headings", []);
-    const plansDs = dataService.get<FeesPlan>("fees_plan");
-    const plans =
-      plansDs.length > 0 ? plansDs : ls.get<FeesPlan[]>("fees_plan", []);
 
-    const applicablePlans = plans.filter(
-      (p) => p.classId === student.class && p.sectionId === student.section,
-    );
+    setFeeLoadingState("loading");
+    setFeeLoadError("");
 
-    const newRows: ReceiptRow[] = [];
-    for (const plan of applicablePlans) {
-      const heading = headings.find((h) => h.id === plan.headingId);
-      if (!heading || plan.amount === 0) continue;
-      if (
-        heading.applicableClasses &&
-        heading.applicableClasses.length > 0 &&
-        !heading.applicableClasses.includes(student.class)
-      )
-        continue;
+    try {
+      // Always fetch fresh from server — this is the fix for blank screen on live browser.
+      // dataService.get() returns [] when cache is empty (first load on a new device).
+      // dataService.getAsync() always fetches from MySQL if API is configured.
+      const [headingsRaw, plansRaw] = await Promise.all([
+        dataService.getAsync<FeeHeading>("fee_heads"),
+        dataService.getAsync<FeesPlan>("fees_plan"),
+      ]);
 
-      const paidMonths = getPaidMonths(
-        student.id,
-        heading.id,
-        currentSession.id,
+      // Filter out any NULL/invalid headings that may have come from a bad push
+      const headings = headingsRaw.filter(
+        (h) =>
+          h?.id != null &&
+          h?.name != null &&
+          typeof h.name === "string" &&
+          h.name.trim() !== "" &&
+          Array.isArray(h.months) &&
+          h.months.length > 0,
       );
-      newRows.push({
-        headingId: heading.id,
-        headingName: heading.name,
-        applicableMonths: heading.months,
-        amount: plan.amount,
-        paidMonths,
-        checked: true,
-      });
-    }
 
-    // ── Transport Fee row ──────────────────────────────────────────────────
-    const { fare: transportFare, pickupName } = getTransportFare(student);
-    const TRANSPORT_HEADING_ID = `transport_${student.id}`;
-    const studentTransportMonths =
-      ls.get<Record<string, string[]>>("student_transport_months", {})[
-        student.id
-      ] ?? MONTHS;
-
-    if (transportFare > 0) {
-      const paidTransportMonths = getPaidMonths(
-        student.id,
-        TRANSPORT_HEADING_ID,
-        currentSession.id,
+      const plans = plansRaw.filter(
+        (p) => p?.headingId != null && p?.classId != null,
       );
-      newRows.push({
-        headingId: TRANSPORT_HEADING_ID,
-        headingName: `Transport Fee (${pickupName})`,
-        applicableMonths: studentTransportMonths,
-        amount: transportFare,
-        paidMonths: paidTransportMonths,
-        checked: true,
-        isTransport: true,
-      });
+
+      const applicablePlans = plans.filter(
+        (p) => p.classId === student.class && p.sectionId === student.section,
+      );
+
+      const newRows: ReceiptRow[] = [];
+      for (const plan of applicablePlans) {
+        const heading = headings.find((h) => h.id === plan.headingId);
+        // Skip headings with null/missing name or months (bad server data)
+        if (!heading) continue;
+        if (!heading.name || heading.name.trim() === "") continue;
+        if (!Array.isArray(heading.months) || heading.months.length === 0)
+          continue;
+        if (!plan.amount || plan.amount === 0) continue;
+        if (
+          heading.applicableClasses &&
+          heading.applicableClasses.length > 0 &&
+          !heading.applicableClasses.includes(student.class)
+        )
+          continue;
+
+        const paidMonths = getPaidMonths(
+          student.id,
+          heading.id,
+          currentSession.id,
+        );
+        newRows.push({
+          headingId: heading.id,
+          headingName: heading.name,
+          applicableMonths: heading.months,
+          amount: plan.amount,
+          paidMonths,
+          checked: true,
+        });
+      }
+
+      // ── Transport Fee row ──────────────────────────────────────────────────
+      const { fare: transportFare, pickupName } = getTransportFare(student);
+      const TRANSPORT_HEADING_ID = `transport_${student.id}`;
+      const studentTransportMonths =
+        ls.get<Record<string, string[]>>("student_transport_months", {})[
+          student.id
+        ] ?? MONTHS;
+
+      if (transportFare > 0) {
+        const paidTransportMonths = getPaidMonths(
+          student.id,
+          TRANSPORT_HEADING_ID,
+          currentSession.id,
+        );
+        newRows.push({
+          headingId: TRANSPORT_HEADING_ID,
+          headingName: `Transport Fee (${pickupName})`,
+          applicableMonths: studentTransportMonths,
+          amount: transportFare,
+          paidMonths: paidTransportMonths,
+          checked: true,
+          isTransport: true,
+        });
+      }
+
+      setRows(newRows);
+
+      // ── Auto-select months: April through current calendar month ──────────
+      // Map JS month (0=Jan) to academic year index (April=0):
+      //   Apr=0, May=1, Jun=2, Jul=3, Aug=4, Sep=5, Oct=6, Nov=7, Dec=8, Jan=9, Feb=10, Mar=11
+      const jsMonth = new Date().getMonth(); // 0=Jan … 11=Dec
+      const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
+      // Select all MONTHS from index 0 (April) through currentAcademicIdx inclusive,
+      // but only those that are applicable to this student's fee plan.
+      const applicableSet = new Set(
+        newRows.flatMap((row) => row.applicableMonths),
+      );
+      const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
+        applicableSet.has(m),
+      );
+      // Fallback: if no applicable months in the auto range (e.g. all paid already
+      // or fee plan not yet configured), still show the applicable month list so
+      // the grid is never blank — user can then deselect as needed.
+      const monthsToSelect =
+        autoSelected.length > 0
+          ? autoSelected
+          : MONTHS.filter((m) => applicableSet.has(m));
+      setPanelMonths(monthsToSelect);
+      setCellAmounts({});
+
+      const bal = getOldBalance(student.id);
+      setOldBalance(bal);
+      setLateFees(0);
+      setConcessionPct(0);
+      setConcessionAmt(0);
+      setRemarks("");
+
+      const history = getAllReceipts()
+        .filter(
+          (r) =>
+            r.studentId === student.id &&
+            r.sessionId === currentSession.id &&
+            !r.isDeleted,
+        )
+        .sort((a, b) => b.date.localeCompare(a.date));
+      setReceiptHistory(history);
+
+      // Set final state: empty means no fee plan configured, loaded means rows found
+      setFeeLoadingState(newRows.length === 0 ? "empty" : "loaded");
+    } catch (err) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to load fee data";
+      setFeeLoadError(msg);
+      setFeeLoadingState("error");
+      // Still try to show whatever is in the local cache so the screen is not blank
+      const cachedHeadings = dataService.get<FeeHeading>("fee_heads");
+      const cachedPlans = dataService.get<FeesPlan>("fees_plan");
+      if (cachedHeadings.length > 0 && cachedPlans.length > 0) {
+        // Re-run with cached data (sync path)
+        const applicablePlans = cachedPlans.filter(
+          (p) => p.classId === student.class && p.sectionId === student.section,
+        );
+        const fallbackRows: ReceiptRow[] = [];
+        for (const plan of applicablePlans) {
+          const heading = cachedHeadings.find((h) => h.id === plan.headingId);
+          if (
+            !heading ||
+            !heading.name ||
+            !Array.isArray(heading.months) ||
+            heading.months.length === 0
+          )
+            continue;
+          if (!plan.amount || plan.amount === 0) continue;
+          fallbackRows.push({
+            headingId: heading.id,
+            headingName: heading.name,
+            applicableMonths: heading.months,
+            amount: plan.amount,
+            paidMonths: getPaidMonths(
+              student.id,
+              heading.id,
+              currentSession.id,
+            ),
+            checked: true,
+          });
+        }
+        if (fallbackRows.length > 0) {
+          setRows(fallbackRows);
+          setFeeLoadingState("loaded");
+        }
+      }
     }
-
-    setRows(newRows);
-
-    void getAllPaidMonths(student.id, currentSession.id);
-    const unpaidMonths = MONTHS.filter((m) =>
-      newRows.some(
-        (row) =>
-          row.applicableMonths.includes(m) && !row.paidMonths.includes(m),
-      ),
-    );
-    setPanelMonths(unpaidMonths);
-    setCellAmounts({});
-
-    const bal = getOldBalance(student.id);
-    setOldBalance(bal);
-    setLateFees(0);
-    setConcessionPct(0);
-    setConcessionAmt(0);
-    setRemarks("");
-
-    const history = getAllReceipts()
-      .filter(
-        (r) =>
-          r.studentId === student.id &&
-          r.sessionId === currentSession.id &&
-          !r.isDeleted,
-      )
-      .sort((a, b) => b.date.localeCompare(a.date));
-    setReceiptHistory(history);
   }
 
   function selectStudent(student: Student) {
@@ -720,10 +792,12 @@ export default function CollectFees() {
     setAdmNoInput(student.admNo);
     setShowDropdown(false);
     setErrorMsg("");
+    setFeeLoadingState("idle");
+    setFeeLoadError("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
     // Refresh receipt number in case more receipts were saved since last load
     setReceiptNo(getNextReceiptNo());
-    loadStudentFees(student);
+    void loadStudentFees(student);
   }
 
   function clearStudent() {
@@ -1674,7 +1748,73 @@ export default function CollectFees() {
           id="fee-grid-section"
           className="bg-card border border-border border-t-0 shadow-sm overflow-hidden"
         >
-          {rows.length === 0 ? (
+          {/* Loading state — shown while fetching fee data from server */}
+          {feeLoadingState === "loading" && (
+            <div
+              className="p-8 flex flex-col items-center justify-center gap-3 text-muted-foreground"
+              data-ocid="fee-grid-loading"
+            >
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              <p className="text-sm font-medium">
+                Loading fee data from server…
+              </p>
+              <p className="text-xs text-muted-foreground/70">
+                Fetching fee headings and plans for {selectedStudent.class}-
+                {selectedStudent.section}
+              </p>
+            </div>
+          )}
+
+          {/* Error state — API fetch failed */}
+          {feeLoadingState === "error" && (
+            <div className="p-6 text-center" data-ocid="fee-grid-error">
+              <div className="text-3xl mb-2">⚠️</div>
+              <p className="text-sm font-semibold text-red-600 mb-1">
+                Failed to load fee data
+              </p>
+              <p className="text-xs text-muted-foreground mb-3">
+                {feeLoadError ||
+                  "Could not fetch fee headings from the server. Check your server connection."}
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadStudentFees(selectedStudent)}
+                className="px-4 py-1.5 text-xs font-bold rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                data-ocid="fee-grid-retry-btn"
+              >
+                🔄 Retry
+              </button>
+            </div>
+          )}
+
+          {/* Empty state — no fee plan configured for this class */}
+          {feeLoadingState === "empty" && (
+            <div
+              className="p-8 text-center text-muted-foreground"
+              data-ocid="fee-grid-empty"
+            >
+              <div className="text-3xl mb-2">📋</div>
+              <p className="text-sm font-medium mb-1">
+                No fee headings configured for Class {selectedStudent.class}-
+                {selectedStudent.section}
+              </p>
+              <p className="text-xs text-muted-foreground/70 mb-3">
+                Go to <strong>Fees → Fee Master</strong> and add fee plans for
+                this class/section first.
+              </p>
+              <button
+                type="button"
+                onClick={() => void loadStudentFees(selectedStudent)}
+                className="px-3 py-1 text-xs font-semibold rounded border border-border hover:bg-muted/50 transition-colors"
+                data-ocid="fee-grid-refresh-btn"
+              >
+                🔄 Refresh
+              </button>
+            </div>
+          )}
+
+          {/* Idle (initial) state before any student loaded */}
+          {feeLoadingState === "idle" && rows.length === 0 && (
             <div className="p-8 text-center text-muted-foreground">
               <p className="text-sm font-medium mb-1">
                 No fee headings configured
@@ -1684,7 +1824,10 @@ export default function CollectFees() {
                 {selectedStudent.class}-{selectedStudent.section} first.
               </p>
             </div>
-          ) : (
+          )}
+
+          {/* Fee grid — shown when rows are loaded */}
+          {feeLoadingState === "loaded" && rows.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
                 <thead>
@@ -1918,8 +2061,6 @@ export default function CollectFees() {
           )}
         </div>
       )}
-
-      {/* ── SUMMARY + PAYMENT BAR ── */}
       {selectedStudent && rows.length > 0 && (
         <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
           <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
