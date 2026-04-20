@@ -17,12 +17,15 @@ import Fees from "./pages/Fees";
 import HR from "./pages/HR";
 import HomeworkPage from "./pages/Homework";
 import Inventory from "./pages/Inventory";
+import Library from "./pages/Library";
 import Login from "./pages/Login";
 import PromoteStudents from "./pages/PromoteStudents";
 import Reports from "./pages/Reports";
 import Settings from "./pages/Settings";
 import Students from "./pages/Students";
 import Transport from "./pages/Transport";
+import VirtualClasses from "./pages/VirtualClasses";
+import StudentAnalytics from "./pages/analytics/StudentAnalytics";
 
 function AppRoutes() {
   const { currentUser } = useApp();
@@ -37,16 +40,19 @@ function AppRoutes() {
     if (activePage === "students") return <Students onNavigate={navigate} />;
     if (activePage === "attendance") return <Attendance />;
     if (activePage === "calling") return <Calling />;
+    if (activePage === "virtualclasses") return <VirtualClasses />;
     if (activePage === "chat") return <Chat />;
     if (activePage === "promote") return <PromoteStudents />;
     if (activePage === "transport") return <Transport />;
     if (activePage === "inventory") return <Inventory />;
+    if (activePage === "library") return <Library />;
     if (activePage === "expenses") return <Expenses />;
     if (activePage === "homework") return <HomeworkPage />;
     if (activePage === "certificates") return <Certificates />;
     if (activePage === "alumni") return <AlumniPage />;
     if (activePage === "reports") return <Reports />;
     if (activePage === "documentation") return <Documentation />;
+    if (activePage === "analytics") return <StudentAnalytics />;
 
     if (activePage.startsWith("fees") || activePage === "fees") {
       const tab = activePage.includes("/")

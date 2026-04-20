@@ -1238,3 +1238,153 @@ export async function testConnection(
     return { connected: false, latencyMs, error: msg };
   }
 }
+
+// ── Broadcast helper (wacoder.in WhatsApp API, rate-limited 5/sec) ────────────
+
+import type {
+  BroadcastCampaign,
+  PushNotificationPayload,
+} from "../types/index";
+
+const BROADCAST_RATE_LIMIT_PER_SEC = 5;
+
+export async function apiSendBroadcast(
+  campaign: BroadcastCampaign,
+  phoneNumbers: string[],
+): Promise<{ sent: number; failed: number }> {
+  let sent = 0;
+  let failed = 0;
+
+  const whatsAppSettings = (() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("shubh_erp_whatsapp_settings") ?? "{}",
+      ) as { appKey?: string; authKey?: string; enabled?: boolean };
+    } catch {
+      return {};
+    }
+  })();
+
+  const { appKey, authKey } = whatsAppSettings;
+
+  // Process in batches of BROADCAST_RATE_LIMIT_PER_SEC
+  for (let i = 0; i < phoneNumbers.length; i += BROADCAST_RATE_LIMIT_PER_SEC) {
+    const batch = phoneNumbers.slice(i, i + BROADCAST_RATE_LIMIT_PER_SEC);
+
+    const batchStart = performance.now();
+
+    await Promise.allSettled(
+      batch.map(async (phone) => {
+        try {
+          if (appKey && authKey) {
+            // Real wacoder.in WhatsApp API
+            const res = await fetch(
+              `https://wacoder.in/api/send?route=api&appkey=${appKey}&authkey=${authKey}&to=${encodeURIComponent(phone)}&message=${encodeURIComponent(campaign.message)}`,
+              {
+                method: "GET",
+                signal: AbortSignal.timeout(8_000),
+              },
+            );
+            if (res.ok) sent++;
+            else failed++;
+          } else {
+            // Log to server-side broadcast endpoint if no WhatsApp credentials
+            await apiFetch<unknown>("POST", "broadcast/send", {
+              campaignId: campaign.id,
+              phone,
+              message: campaign.message,
+              channel: campaign.channel,
+            });
+            sent++;
+          }
+        } catch {
+          failed++;
+        }
+      }),
+    );
+
+    // Enforce rate limit: wait out remainder of 1-second window
+    const elapsed = performance.now() - batchStart;
+    if (
+      elapsed < 1000 &&
+      i + BROADCAST_RATE_LIMIT_PER_SEC < phoneNumbers.length
+    ) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 1000 - elapsed));
+    }
+  }
+
+  // Persist campaign result to server
+  try {
+    await apiFetch<unknown>("PUT", `data/broadcast_campaigns/${campaign.id}`, {
+      ...campaign,
+      sentAt: new Date().toISOString(),
+      status: failed === phoneNumbers.length ? "failed" : "sent",
+      delivered: sent,
+      failed,
+    });
+  } catch {
+    // Non-critical — the sends still happened
+  }
+
+  return { sent, failed };
+}
+
+// ── Student Analytics helper ───────────────────────────────
+
+import type { StudentAnalytics } from "../types/index";
+
+export async function apiFetchStudentAnalytics(
+  studentId: string,
+): Promise<StudentAnalytics> {
+  const result = await apiFetch<Record<string, unknown>>(
+    "GET",
+    `analytics/student/${encodeURIComponent(studentId)}`,
+  );
+  const data = (result.data ?? result) as Record<string, unknown>;
+
+  return {
+    studentId,
+    marksHistory: (data.marksHistory as StudentAnalytics["marksHistory"]) ?? [],
+    attendanceSummary:
+      (data.attendanceSummary as StudentAnalytics["attendanceSummary"]) ?? [],
+    feesHistory: (data.feesHistory as StudentAnalytics["feesHistory"]) ?? [],
+  };
+}
+
+// ── Push Notification helper (Web Push Notification API) ───
+
+export async function apiSendPushNotification(
+  payload: PushNotificationPayload,
+  userIds: string[],
+): Promise<{ sent: number; failed: number }> {
+  if (!("Notification" in window)) {
+    return { sent: 0, failed: userIds.length };
+  }
+
+  // First: attempt server-side push (sends to all subscribed devices)
+  try {
+    const result = await apiFetch<{ sent?: number; failed?: number }>(
+      "POST",
+      "push/send",
+      { payload, userIds },
+    );
+    return {
+      sent: result.sent ?? userIds.length,
+      failed: result.failed ?? 0,
+    };
+  } catch {
+    // Fallback: show a local Notification if permission already granted
+    if (Notification.permission === "granted") {
+      try {
+        new Notification(payload.title, {
+          body: payload.body,
+          icon: payload.icon ?? "/icons/icon-192.png",
+        });
+        return { sent: 1, failed: 0 };
+      } catch {
+        return { sent: 0, failed: 1 };
+      }
+    }
+    return { sent: 0, failed: userIds.length };
+  }
+}

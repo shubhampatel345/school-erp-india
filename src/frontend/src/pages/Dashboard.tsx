@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   AlertCircle,
   ArrowUpRight,
+  BarChart2,
   Bus,
   CalendarCheck,
   CheckCircle2,
@@ -12,11 +13,13 @@ import {
   GraduationCap,
   IndianRupee,
   Info,
+  LineChart,
   Loader2,
   Plus,
   RefreshCw,
   Server,
   ShieldAlert,
+  TrendingUp,
   Users,
   WifiOff,
   X,
@@ -974,6 +977,55 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
                 </Button>
               );
             })}
+          </div>
+        </Card>
+
+        {/* Student Performance Analytics widget */}
+        <Card
+          className="p-5 border-primary/20 bg-gradient-to-r from-primary/5 via-background to-accent/5 cursor-pointer hover:shadow-elevated transition-shadow"
+          onClick={() => onNavigate("analytics")}
+          data-ocid="dashboard.analytics.card"
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="w-11 h-11 rounded-xl bg-primary/15 flex items-center justify-center flex-shrink-0">
+                <LineChart className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="font-display font-semibold text-foreground">
+                  Student Performance Analytics
+                </h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  View detailed charts for marks trends, attendance %, and fees
+                  history per student
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-shrink-0 ml-4">
+              <div className="hidden sm:flex items-center gap-2">
+                <div className="flex items-center gap-1.5 bg-muted/60 rounded-lg px-3 py-1.5">
+                  <BarChart2 className="w-3.5 h-3.5 text-primary" />
+                  <span className="text-xs font-medium text-foreground">
+                    Marks Trend
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 bg-muted/60 rounded-lg px-3 py-1.5">
+                  <TrendingUp className="w-3.5 h-3.5 text-accent" />
+                  <span className="text-xs font-medium text-foreground">
+                    Attendance %
+                  </span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="border-primary/30 text-primary hover:bg-primary/10"
+                data-ocid="dashboard.analytics.view_button"
+              >
+                View Analytics
+                <ArrowUpRight className="w-3.5 h-3.5 ml-1" />
+              </Button>
+            </div>
           </div>
         </Card>
 

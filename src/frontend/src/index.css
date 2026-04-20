@@ -129,6 +129,17 @@
 }
 
 @layer utilities {
+  /* Hide spinner arrows on number inputs */
+  .no-spinner::-webkit-inner-spin-button,
+  .no-spinner::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
+  }
+  .no-spinner {
+    -moz-appearance: textfield;
+  }
+
   .transition-smooth {
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }

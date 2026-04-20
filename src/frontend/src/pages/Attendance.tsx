@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import {
+  Brain,
   ClipboardList,
   Cpu,
   Fingerprint,
@@ -10,6 +11,7 @@ import {
 import { useState } from "react";
 import AttendanceSummary from "./attendance/AttendanceSummary";
 import BiometricDevices from "./attendance/BiometricDevices";
+import FaceAttendance from "./attendance/FaceAttendance";
 import ManualAttendance from "./attendance/ManualAttendance";
 import QRAttendance from "./attendance/QRAttendance";
 import RFIDAttendance from "./attendance/RFIDAttendance";
@@ -19,6 +21,7 @@ const TABS = [
   { id: "manual", label: "Manual Entry", icon: ClipboardList },
   { id: "rfid", label: "RFID / Biometric", icon: Fingerprint },
   { id: "qr", label: "QR Scanner", icon: QrCode },
+  { id: "face", label: "Face Recognition", icon: Brain },
   { id: "display", label: "Welcome Display", icon: Monitor },
   { id: "summary", label: "Summary", icon: PieChart },
   { id: "biometric", label: "Biometric Devices", icon: Cpu },
@@ -74,12 +77,22 @@ export default function Attendance() {
                     ? "RFID"
                     : tab.id === "qr"
                       ? "QR"
-                      : tab.id === "display"
-                        ? "Display"
-                        : tab.id === "biometric"
-                          ? "Devices"
-                          : "Summary"}
+                      : tab.id === "face"
+                        ? "Face"
+                        : tab.id === "display"
+                          ? "Display"
+                          : tab.id === "biometric"
+                            ? "Devices"
+                            : "Summary"}
               </span>
+              {tab.id === "face" && (
+                <Badge
+                  variant="secondary"
+                  className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
+                >
+                  AI
+                </Badge>
+              )}
               {tab.id === "display" && (
                 <Badge
                   variant="secondary"
@@ -109,6 +122,7 @@ export default function Attendance() {
           <RFIDAttendance date={date} onDateChange={setDate} />
         )}
         {activeTab === "qr" && <QRAttendance date={date} />}
+        {activeTab === "face" && <FaceAttendance date={date} />}
         {activeTab === "display" && <WelcomeDisplay />}
         {activeTab === "summary" && (
           <AttendanceSummary date={date} onDateChange={setDate} />

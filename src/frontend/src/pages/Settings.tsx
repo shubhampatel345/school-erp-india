@@ -1,5 +1,6 @@
 import {
   Bell,
+  BellRing,
   Bot,
   Clock,
   CreditCard,
@@ -18,6 +19,7 @@ import DataManagement from "./settings/DataManagement";
 import NotificationScheduler from "./settings/NotificationScheduler";
 import OnlinePaymentSettings from "./settings/OnlinePaymentSettings";
 import PermissionManagement from "./settings/PermissionManagement";
+import PushNotifications from "./settings/PushNotifications";
 import SchoolProfile from "./settings/SchoolProfile";
 import SessionManagement from "./settings/SessionManagement";
 import SystemUpdate from "./settings/SystemUpdate";
@@ -50,6 +52,7 @@ const TABS = [
   },
   { id: "payment", label: "Online Payment", icon: CreditCard },
   { id: "notifications", label: "Notification Scheduler", icon: Bell },
+  { id: "push", label: "Push Notifications", icon: BellRing },
   { id: "themes", label: "Themes", icon: Palette },
   {
     id: "data",
@@ -76,6 +79,7 @@ const SETTINGS_TAB_MAP: Record<string, string> = {
   whatsapp: "whatsapp",
   "online-payment": "payment",
   notifications: "notifications",
+  push: "push",
   users: "users",
   permissions: "permissions",
   data: "data",
@@ -150,6 +154,7 @@ export default function Settings({
         {activeTab === "whatsapp-bot" && isSuperAdmin && <WhatsAppAutoReply />}
         {activeTab === "payment" && <OnlinePaymentSettings />}
         {activeTab === "notifications" && <NotificationScheduler />}
+        {activeTab === "push" && <PushNotifications />}
         {activeTab === "themes" && <ThemeSettings />}
         {activeTab === "data" && isSuperAdmin && <DataManagement />}
         {activeTab === "update" && isSuperAdmin && <SystemUpdate />}

@@ -22,6 +22,10 @@ import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, ClassSection, Student } from "../../types";
 import { generateId } from "../../utils/localStorage";
+import {
+  getPushPreferences,
+  sendLocalNotification,
+} from "../../utils/notifications";
 
 interface ManualAttendanceProps {
   date: string;
@@ -254,6 +258,20 @@ export default function ManualAttendance({
         "success",
         "✅",
       );
+
+      // Send local push notifications for absent students
+      const pushPrefs = getPushPreferences();
+      if (pushPrefs.attendanceAbsent) {
+        const absentRows = rows.filter((r) => r.status === "Absent");
+        for (const row of absentRows) {
+          sendLocalNotification(
+            "Attendance Alert",
+            `${row.student.fullName} was marked absent today (${date})`,
+            "attendance",
+            "/",
+          );
+        }
+      }
 
       // Update existingId so re-saves become updates
       setRows((prev) =>

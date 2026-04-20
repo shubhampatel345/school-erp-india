@@ -80,6 +80,26 @@ function buildQRData(r: FeeReceipt): string {
   return `Receipt:${r.receiptNo}|Student:${r.studentName}|Adm:${r.admNo}|Class:${r.class}-${r.section}|Amount:${r.totalAmount}|Date:${r.date}|Mode:${r.paymentMode}|Months:${months}`;
 }
 
+function buildUpiLink(
+  vpa: string,
+  schoolName: string,
+  amount: number,
+  studentName: string,
+): string {
+  const params = new URLSearchParams({
+    pa: vpa,
+    pn: schoolName,
+    am: amount.toFixed(2),
+    cu: "INR",
+    tn: `Fees ${studentName}`,
+  });
+  return `upi://pay?${params.toString()}`;
+}
+
+function getUpiQrImageUrl(upiLink: string): string {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}&margin=10&bgcolor=ffffff`;
+}
+
 function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
   const school = ls.get<SchoolProfile>("school_profile", {
     name: "SHUBH SCHOOL ERP",
@@ -216,6 +236,236 @@ function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
   }, 400);
 }
 
+// ── UPI QR Section ────────────────────────────────────────────────────────────
+function UpiQrSection({
+  netPayable,
+  studentName,
+  onPaymentDone,
+}: {
+  netPayable: number;
+  studentName: string;
+  onPaymentDone: (utr: string) => void;
+}) {
+  const [vpa, setVpa] = useState(() =>
+    ls.get<string>("schoolUpiVpa", "school@upi"),
+  );
+  const [showVpaEdit, setShowVpaEdit] = useState(false);
+  const [vpaInput, setVpaInput] = useState(vpa);
+  const [showUtrDialog, setShowUtrDialog] = useState(false);
+  const [utrInput, setUtrInput] = useState("");
+
+  const school = ls.get<{ name: string }>("school_profile", { name: "School" });
+  const upiLink = buildUpiLink(vpa, school.name, netPayable, studentName);
+  const qrUrl = getUpiQrImageUrl(upiLink);
+
+  function saveVpa() {
+    ls.set("schoolUpiVpa", vpaInput.trim());
+    setVpa(vpaInput.trim());
+    setShowVpaEdit(false);
+  }
+
+  function handleOpenGpay() {
+    window.location.href = upiLink;
+  }
+
+  function handleConfirm() {
+    onPaymentDone(utrInput.trim());
+    setShowUtrDialog(false);
+    setUtrInput("");
+  }
+
+  if (netPayable <= 0) return null;
+
+  return (
+    <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
+      <div className="px-3 py-2 bg-gradient-to-r from-indigo-50 to-violet-50 border-b border-border flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-base">📱</span>
+          <span className="text-xs font-bold text-indigo-800 uppercase tracking-wider">
+            Pay via UPI
+          </span>
+        </div>
+        <button
+          type="button"
+          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+          onClick={() => {
+            setVpaInput(vpa);
+            setShowVpaEdit(true);
+          }}
+          data-ocid="upi-settings-btn"
+        >
+          ⚙ UPI Settings
+        </button>
+      </div>
+
+      <div className="p-4 flex flex-wrap gap-6 items-start">
+        {/* QR Code */}
+        <div className="flex flex-col items-center gap-2">
+          <div className="border-2 border-indigo-200 rounded-xl p-2 bg-white shadow-sm">
+            <img
+              src={qrUrl}
+              alt="UPI QR Code"
+              width={200}
+              height={200}
+              className="block"
+              data-ocid="upi-qr-image"
+            />
+          </div>
+          <p className="text-[10px] text-muted-foreground text-center max-w-[200px]">
+            Scan with GPay / PhonePe / Paytm / Any UPI App
+          </p>
+          <div className="text-xl font-extrabold text-indigo-700 tracking-tight">
+            ₹{netPayable.toLocaleString("en-IN")}
+          </div>
+          <div className="text-[10px] text-muted-foreground">
+            UPI ID:{" "}
+            <span className="font-mono font-semibold text-foreground">
+              {vpa}
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-3 justify-center min-w-[180px]">
+          <button
+            type="button"
+            onClick={handleOpenGpay}
+            className="flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm"
+            data-ocid="open-gpay-btn"
+          >
+            <span>📲</span> Open GPay
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowUtrDialog(true)}
+            className="flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border-2 border-green-500 text-green-700 text-sm font-bold hover:bg-green-50 transition-colors"
+            data-ocid="upi-payment-done-btn"
+          >
+            <span>✅</span> Payment Done
+          </button>
+          <div className="text-[10px] text-muted-foreground leading-relaxed bg-muted/40 rounded-lg p-2.5">
+            <p className="font-semibold text-foreground mb-1">How to pay:</p>
+            <ol className="list-decimal list-inside space-y-0.5">
+              <li>Open any UPI app on phone</li>
+              <li>Scan the QR code above</li>
+              <li>Confirm ₹{netPayable.toLocaleString("en-IN")} payment</li>
+              <li>Click "Payment Done" button</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+
+      {/* VPA Edit Dialog */}
+      <Dialog open={showVpaEdit} onOpenChange={setShowVpaEdit}>
+        <DialogContent className="max-w-sm" data-ocid="upi-settings-dialog">
+          <DialogHeader>
+            <DialogTitle>⚙ UPI Settings</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div>
+              <label
+                htmlFor="upi-vpa-input"
+                className="text-sm font-medium block mb-1"
+              >
+                School UPI VPA (Virtual Payment Address)
+              </label>
+              <input
+                id="upi-vpa-input"
+                type="text"
+                value={vpaInput}
+                onChange={(e) => setVpaInput(e.target.value)}
+                placeholder="e.g. school@okicici or 9876543210@upi"
+                className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                data-ocid="upi-vpa-input"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                This is the UPI ID where parents send payments. Get it from your
+                bank's UPI app.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowVpaEdit(false)}
+                data-ocid="upi-settings-cancel-btn"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={saveVpa}
+                disabled={!vpaInput.trim()}
+                data-ocid="upi-settings-save-btn"
+              >
+                Save
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* UTR Confirmation Dialog */}
+      <Dialog open={showUtrDialog} onOpenChange={setShowUtrDialog}>
+        <DialogContent className="max-w-sm" data-ocid="upi-utr-dialog">
+          <DialogHeader>
+            <DialogTitle>✅ Confirm UPI Payment</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="bg-green-50 border border-green-200 rounded-lg p-3 text-sm text-green-800">
+              <p className="font-semibold">
+                Amount: ₹{netPayable.toLocaleString("en-IN")}
+              </p>
+              <p className="text-green-700 text-xs mt-0.5">for {studentName}</p>
+            </div>
+            <div>
+              <label
+                htmlFor="utr-input"
+                className="text-sm font-medium block mb-1"
+              >
+                UTR / Transaction ID{" "}
+                <span className="text-muted-foreground font-normal text-xs">
+                  (optional)
+                </span>
+              </label>
+              <input
+                id="utr-input"
+                type="text"
+                value={utrInput}
+                onChange={(e) => setUtrInput(e.target.value)}
+                placeholder="e.g. 403612345678 (from UPI app)"
+                className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                data-ocid="upi-utr-input"
+              />
+              <p className="text-[10px] text-muted-foreground mt-1">
+                Find UTR in your UPI app transaction details.
+              </p>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowUtrDialog(false)}
+                data-ocid="upi-utr-cancel-btn"
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleConfirm}
+                className="bg-green-600 hover:bg-green-700 text-white"
+                data-ocid="upi-utr-confirm-btn"
+              >
+                ✅ Confirm & Save Receipt
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ── Sub-components ────────────────────────────────────────────────────────────
 function LabelValue({
   label,
@@ -302,7 +552,6 @@ export default function CollectFees() {
     currentUser?.role === "accountant";
 
   // All data from context — already fetched from server
-  // Collection keys MUST match server MySQL table names (snake_case)
   const allStudents = (getData("students") as Student[]).filter(
     (s) => s.status === "active",
   );
@@ -310,7 +559,7 @@ export default function CollectFees() {
   const allHeadings = getData("fee_headings") as FeeHeading[];
   const allPlans = getData("fees_plan") as FeesPlan[];
 
-  // ── Receipt number from existing receipts ─────────────────────────────────
+  // ── Receipt number ─────────────────────────────────────────────────────────
   const nextReceiptNo = (): string => {
     const yy = String(new Date().getFullYear()).slice(-2);
     const seq = (allReceipts.filter((r) => !r.isDeleted).length + 1)
@@ -320,7 +569,7 @@ export default function CollectFees() {
   };
   const [receiptNo, setReceiptNo] = useState(() => nextReceiptNo());
 
-  // ── Preload from sessionStorage (global search navigation) ─────────────────
+  // ── Preload from sessionStorage ────────────────────────────────────────────
   // biome-ignore lint/correctness/useExhaustiveDependencies: one-time preload on mount
   useEffect(() => {
     const preloadId = sessionStorage.getItem("collectFees_preload");
@@ -396,7 +645,7 @@ export default function CollectFees() {
     return { fare: pp?.fare ?? 0, pickupName: assignment.pickupPointName };
   }
 
-  // ── Paid months lookup from context receipts ───────────────────────────────
+  // ── Paid months ────────────────────────────────────────────────────────────
   function getPaidMonths(studentId: string, headingId: string): string[] {
     const sessionId = currentSession?.id ?? "";
     const paid: string[] = [];
@@ -415,7 +664,7 @@ export default function CollectFees() {
     return paid;
   }
 
-  // ── Old balance from context receipts ─────────────────────────────────────
+  // ── Old balance ────────────────────────────────────────────────────────────
   function calcOldBalance(studentId: string): number {
     const sessionId = currentSession?.id ?? "";
     const remaining = allReceipts
@@ -431,7 +680,7 @@ export default function CollectFees() {
     return last.balance ?? 0;
   }
 
-  // ── Load fees for selected student (synchronous — uses context data) ───────
+  // ── Load fees for selected student ────────────────────────────────────────
   function loadStudentFees(student: Student) {
     if (!currentSession) return;
     setFeeLoadState("loading");
@@ -523,9 +772,10 @@ export default function CollectFees() {
   }
 
   function selectStudent(student: Student) {
-    setSelectedStudent(student);
-    setAdmNoInput(student.admNo);
     setShowDropdown(false);
+    setAdmNoInput("");
+    setFilteredStudents([]);
+    setSelectedStudent(student);
     setErrorMsg("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
     setReceiptNo(nextReceiptNo());
@@ -599,7 +849,7 @@ export default function CollectFees() {
   }, [netFees]);
 
   // ── Save receipt ───────────────────────────────────────────────────────────
-  async function handleSave() {
+  async function handleSave(upiUtr?: string) {
     if (!selectedStudent || !currentSession || isReadOnly) return;
     setErrorMsg("");
 
@@ -643,6 +893,10 @@ export default function CollectFees() {
       otherCharge.label && otherCharge.paidAmount > 0 ? [otherCharge] : [];
     const newBalance = balanceAmt;
 
+    // If coming from UPI, override payment mode
+    const finalMode: FeeReceipt["paymentMode"] = upiUtr ? "UPI" : paymentMode;
+    const finalRemarks = upiUtr ? `UTR: ${upiUtr}` : remarks;
+
     const receipt: FeeReceipt = {
       id: generateId(),
       receiptNo,
@@ -659,11 +913,12 @@ export default function CollectFees() {
       totalAmount: netFees,
       paidAmount: receiptAmt,
       balance: newBalance,
-      paymentMode,
+      paymentMode: finalMode,
       receivedBy: currentUser?.fullName ?? currentUser?.name ?? "Staff",
       receivedByRole: currentUser?.position ?? currentUser?.role ?? "admin",
       sessionId: currentSession.id,
       template: 4,
+      ...(finalRemarks ? { notes: finalRemarks } : {}),
     };
 
     await saveData(
@@ -830,7 +1085,7 @@ export default function CollectFees() {
   const isOldCredit = oldBalance < 0;
   const isOldDue = oldBalance > 0;
 
-  // Receipt history from context
+  // Receipt history
   const receiptHistory = allReceipts
     .filter(
       (r) =>
@@ -1461,7 +1716,7 @@ export default function CollectFees() {
                                     },
                                   }));
                                 }}
-                                className="w-[48px] h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                                className="w-[48px] h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                                 disabled={!row.checked}
                               />
                             </td>
@@ -1508,7 +1763,7 @@ export default function CollectFees() {
                             paidAmount: Math.max(0, Number(e.target.value)),
                           }))
                         }
-                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                         data-ocid="other-charge-paid"
                       />
                     </td>
@@ -1638,7 +1893,7 @@ export default function CollectFees() {
                   onChange={(e) =>
                     setLateFees(Math.max(0, Number(e.target.value)))
                   }
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                   data-ocid="late-fees-input"
                 />
               </div>
@@ -1658,7 +1913,7 @@ export default function CollectFees() {
                   onChange={(e) =>
                     setConcessionAmt(Math.max(0, Number(e.target.value)))
                   }
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                   data-ocid="concession-amt-input"
                 />
               </div>
@@ -1693,7 +1948,7 @@ export default function CollectFees() {
                   onChange={(e) =>
                     setReceiptAmt(Math.max(0, Number(e.target.value)))
                   }
-                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
+                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 no-spinner"
                   data-ocid="receipt-amt-input"
                 />
               </div>
@@ -1784,6 +2039,15 @@ export default function CollectFees() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* ── UPI QR PAYMENT ── */}
+      {selectedStudent && !isReadOnly && canEdit && (
+        <UpiQrSection
+          netPayable={netFees}
+          studentName={selectedStudent.fullName}
+          onPaymentDone={(utr) => void handleSave(utr)}
+        />
       )}
 
       {/* ── PAYMENT HISTORY ── */}
@@ -2092,7 +2356,7 @@ export default function CollectFees() {
                         s ? { ...s, paidAmount: Number(e.target.value) } : s,
                       )
                     }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                   />
                 </div>
                 <div>
@@ -2112,7 +2376,7 @@ export default function CollectFees() {
                         s ? { ...s, discount: Number(e.target.value) } : s,
                       )
                     }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
                   />
                 </div>
               </div>

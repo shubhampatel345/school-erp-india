@@ -20,6 +20,7 @@ import {
   CheckCircle,
   Clock,
   MessageSquare,
+  Radio,
   RefreshCw,
   Save,
   Search,
@@ -39,6 +40,7 @@ import {
   getWhatsAppLogs,
   sendWhatsApp,
 } from "../utils/whatsapp";
+import { BulkBroadcast } from "./communication/BulkBroadcast";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 interface NotifSchedule {
@@ -1845,6 +1847,13 @@ export default function Communication({ initialTab }: CommunicationProps) {
           >
             <Users className="w-4 h-4" /> Groups
           </TabsTrigger>
+          <TabsTrigger
+            value="broadcast"
+            data-ocid="tab-broadcast"
+            className="flex items-center gap-1.5"
+          >
+            <Radio className="w-4 h-4" /> Broadcast
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="whatsapp" className="mt-4">
@@ -1870,6 +1879,9 @@ export default function Communication({ initialTab }: CommunicationProps) {
         </TabsContent>
         <TabsContent value="groups" className="mt-4">
           <GroupsTab />
+        </TabsContent>
+        <TabsContent value="broadcast" className="mt-4">
+          <BulkBroadcast />
         </TabsContent>
       </Tabs>
     </div>

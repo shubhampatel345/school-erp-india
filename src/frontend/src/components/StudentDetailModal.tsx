@@ -2131,13 +2131,17 @@ export default function StudentDetailModal({
                       </p>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student.credentials?.username}
+                          {student?.credentials?.username ??
+                            student?.admNo ??
+                            "—"}
                         </p>
                         <button
                           type="button"
                           onClick={() =>
                             copyToClipboard(
-                              student.credentials?.username ?? "",
+                              student?.credentials?.username ??
+                                student?.admNo ??
+                                "",
                               "user",
                             )
                           }
@@ -2157,13 +2161,13 @@ export default function StudentDetailModal({
                       </p>
                       <div className="flex items-center gap-2">
                         <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student.credentials?.password}
+                          {student?.credentials?.password ?? "—"}
                         </p>
                         <button
                           type="button"
                           onClick={() =>
                             copyToClipboard(
-                              student.credentials?.password ?? "",
+                              student?.credentials?.password ?? "",
                               "pass",
                             )
                           }

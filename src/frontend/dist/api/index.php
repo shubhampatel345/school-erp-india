@@ -141,6 +141,33 @@ try {
         if ($route === "{$col}/batch")  { handle_col_batch($method, $col, $body, $auth); }
     }
 
+    // ── face recognition attendance ──────────────────────────────────────────────
+    if ($route === 'face_descriptors')       { handle_face_descriptors($method, $body, $auth); }
+    if ($route === 'face_attendance')        { handle_face_attendance($method, $body, $auth); }
+
+    // ── library ──────────────────────────────────────────────────────────────────
+    if ($route === 'library_books')          { handle_library_books($method, $body, $auth); }
+    if ($route === 'book_issues')            { handle_book_issues($method, $body, $auth); }
+
+    // ── online exams ─────────────────────────────────────────────────────────────
+    if ($route === 'online_exams')           { handle_online_exams($method, $body, $auth); }
+    if ($route === 'exam_attempts')          { handle_exam_attempts($method, $body, $auth); }
+
+    // ── GPS transport tracking ───────────────────────────────────────────────────
+    if ($route === 'driver_location')        { handle_driver_location($method, $body, $auth); }
+    if ($route === 'transport_trips')        { handle_transport_trips($method, $body, $auth); }
+
+    // ── broadcast ────────────────────────────────────────────────────────────────
+    if ($route === 'broadcast_campaigns')    { handle_broadcast_campaigns($method, $body, $auth); }
+    if ($route === 'broadcast/send')         { handle_broadcast_send($method, $body, $auth); }
+
+    // ── push notifications ───────────────────────────────────────────────────────
+    if ($route === 'push_subscriptions')     { handle_push_subscriptions($method, $body, $auth); }
+    if ($route === 'push_notifications/send'){ handle_push_notifications_send($method, $body, $auth); }
+
+    // ── student analytics ────────────────────────────────────────────────────────
+    if ($route === 'analytics/student')      { handle_analytics_student($method, $auth); }
+
     // ── legacy data/{collection} generic CRUD ────────────────────────────────────
     if (preg_match('#^data/([a-zA-Z0-9_]+)$#', $route, $m)) {
         handle_data_collection($method, $m[1], $body, $auth, null);
@@ -648,6 +675,31 @@ function post_process_rows(array $rows, string $table): array {
             if (empty($row['fullName']) && !empty($row['name'])) $row['fullName'] = $row['name'];
             if (empty($row['name']) && !empty($row['fullName'])) $row['name'] = $row['fullName'];
         }
+        if ($table === 'fees_plan') {
+            // Decode amounts JSON → object so frontend parseAmounts() receives a real object
+            if (isset($row['amounts']) && is_string($row['amounts']) && $row['amounts'] !== '') {
+                $decoded = json_decode($row['amounts'], true);
+                if (is_array($decoded)) $row['amounts'] = $decoded;
+            }
+            // Ensure classId / sectionId aliases are populated
+            if (empty($row['classId'])   && !empty($row['class']))   $row['classId']   = $row['class'];
+            if (empty($row['class'])     && !empty($row['classId'])) $row['class']     = $row['classId'];
+            if (empty($row['sectionId']) && !empty($row['section'])) $row['sectionId'] = $row['section'];
+            if (empty($row['section'])   && !empty($row['sectionId'])) $row['section'] = $row['sectionId'];
+        }
+        if ($table === 'fee_headings') {
+            // Decode JSON array fields
+            foreach (['months', 'applicableClasses'] as $field) {
+                if (isset($row[$field]) && is_string($row[$field]) && $row[$field] !== '') {
+                    $d = json_decode($row[$field], true);
+                    if (is_array($d)) $row[$field] = $d;
+                }
+            }
+            // Default isActive to true if column not present in older tables
+            if (!array_key_exists('isActive', $row)) $row['isActive'] = true;
+            else $row['isActive'] = (bool)$row['isActive'];
+            $row['displayOrder'] = (int)($row['displayOrder'] ?? 0);
+        }
     }
     unset($row);
     return $rows;
@@ -834,6 +886,22 @@ function normalize_rows(string $table, array $rows): array {
             if (!empty($row['label']) && empty($row['name'])) $row['name'] = $row['label'];
             if (isset($row['isActive']))   $row['isCurrent']  = $row['isActive']  ? 1 : 0;
             if (isset($row['isArchived'])) $row['archived']   = $row['isArchived'] ? 1 : 0;
+        }
+        if ($table === 'fees_plan') {
+            // Ensure classId / class aliases are both set
+            if (!empty($row['classId'])   && empty($row['class']))    $row['class']    = $row['classId'];
+            if (!empty($row['class'])     && empty($row['classId']))  $row['classId']  = $row['class'];
+            if (!empty($row['className']) && empty($row['classId']))  $row['classId']  = $row['className'];
+            if (!empty($row['sectionId']) && empty($row['section']))  $row['section']  = $row['sectionId'];
+            if (!empty($row['section'])   && empty($row['sectionId']))$row['sectionId']= $row['section'];
+            // sessionId ↔ session
+            if (!empty($row['sessionId']) && empty($row['session']))  $row['session']  = $row['sessionId'];
+            if (!empty($row['session'])   && empty($row['sessionId']))$row['sessionId']= $row['session'];
+        }
+        if ($table === 'fee_headings') {
+            // sessionId ↔ session
+            if (!empty($row['sessionId']) && empty($row['session']))  $row['session']  = $row['sessionId'];
+            if (!empty($row['session'])   && empty($row['sessionId']))$row['sessionId']= $row['session'];
         }
         // Generic: JSON-encode any remaining array values
         foreach ($row as $k => &$v) {
@@ -1715,6 +1783,775 @@ function handle_data_collection(string $method, string $collection, array $body,
 
 
 // =============================================================================
+// FACE RECOGNITION ATTENDANCE
+// =============================================================================
+function handle_face_descriptors(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        try {
+            $stmt = $db->query("SELECT * FROM `face_descriptors`");
+            json_success($stmt->fetchAll(), 'Face descriptors fetched');
+        } catch (Throwable $e) {
+            json_success([], 'No data');
+        }
+    }
+
+    if ($method === 'POST') {
+        $id             = $body['id'] ?? gen_uuid();
+        $studentId      = $body['studentId'] ?? '';
+        $descriptorData = is_array($body['descriptorData'] ?? null)
+            ? json_encode($body['descriptorData'], JSON_UNESCAPED_UNICODE)
+            : ($body['descriptorData'] ?? '');
+        $enrolledAt     = $body['enrolledAt'] ?? now_str();
+        if (!$studentId) json_error('studentId is required', 400);
+        try {
+            $db->prepare("INSERT INTO `face_descriptors` (`id`,`studentId`,`descriptorData`,`enrolledAt`)
+                VALUES (?,?,?,?)
+                ON DUPLICATE KEY UPDATE `descriptorData`=VALUES(`descriptorData`), `enrolledAt`=VALUES(`enrolledAt`)")
+               ->execute([$id, $studentId, $descriptorData, $enrolledAt]);
+            write_changelog($db, $auth, 'face_descriptors', 'save', $id, null, ['studentId' => $studentId]);
+            json_success(['id' => $id], 'Descriptor saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_face_attendance(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['studentId'])) { $where[] = '`studentId`=?'; $params[] = $_GET['studentId']; }
+        if (!empty($_GET['date']))      { $where[] = '`attendanceDate`=?'; $params[] = $_GET['date']; }
+        if (!empty($_GET['startDate'])) { $where[] = '`attendanceDate`>=?'; $params[] = $_GET['startDate']; }
+        if (!empty($_GET['endDate']))   { $where[] = '`attendanceDate`<=?'; $params[] = $_GET['endDate']; }
+        $limit  = min((int)($_GET['limit'] ?? 500), 5000);
+        $offset = max((int)($_GET['offset'] ?? 0), 0);
+        $wc     = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        try {
+            $total = (int)$db->prepare("SELECT COUNT(*) FROM `face_attendance`{$wc}")->execute($params) ? 0 : 0;
+            $cStmt = $db->prepare("SELECT COUNT(*) FROM `face_attendance`{$wc}");
+            $cStmt->execute($params);
+            $total = (int)$cStmt->fetchColumn();
+            $stmt  = $db->prepare("SELECT * FROM `face_attendance`{$wc} ORDER BY `timestamp` DESC LIMIT {$limit} OFFSET {$offset}");
+            $stmt->execute($params);
+            json_success(['data' => $stmt->fetchAll(), 'total' => $total]);
+        } catch (Throwable $e) {
+            json_success(['data' => [], 'total' => 0]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id             = $body['id'] ?? gen_uuid();
+        $studentId      = $body['studentId'] ?? '';
+        $confidence     = (float)($body['confidence'] ?? 0);
+        $mth            = $body['method'] ?? 'face_recognition';
+        $attDate        = $body['attendanceDate'] ?? date('Y-m-d');
+        $ts             = $body['timestamp'] ?? now_str();
+        $sessionId      = $body['sessionId'] ?? '';
+        if (!$studentId) json_error('studentId is required', 400);
+        try {
+            $db->prepare("INSERT INTO `face_attendance` (`id`,`studentId`,`confidence`,`method`,`attendanceDate`,`timestamp`,`sessionId`)
+                VALUES (?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `confidence`=VALUES(`confidence`), `method`=VALUES(`method`), `timestamp`=VALUES(`timestamp`)")
+               ->execute([$id, $studentId, $confidence, $mth, $attDate, $ts, $sessionId]);
+            write_changelog($db, $auth, 'face_attendance', 'create', $id, null, ['studentId' => $studentId, 'date' => $attDate]);
+            json_success(['id' => $id], 'Attendance recorded', 201);
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+
+// =============================================================================
+// LIBRARY
+// =============================================================================
+function handle_library_books(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['search'])) {
+            $s = '%' . $_GET['search'] . '%';
+            $where[]  = "(`title` LIKE ? OR `author` LIKE ? OR `isbn` LIKE ? OR `category` LIKE ?)";
+            $params   = array_merge($params, [$s,$s,$s,$s]);
+        }
+        if (!empty($_GET['category'])) { $where[] = '`category`=?'; $params[] = $_GET['category']; }
+        $limit  = min((int)($_GET['limit'] ?? 500), 10000);
+        $offset = max((int)($_GET['offset'] ?? 0), 0);
+        $wc     = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        try {
+            $cStmt = $db->prepare("SELECT COUNT(*) FROM `library_books`{$wc}");
+            $cStmt->execute($params);
+            $total = (int)$cStmt->fetchColumn();
+            $stmt  = $db->prepare("SELECT * FROM `library_books`{$wc} ORDER BY `title` ASC LIMIT {$limit} OFFSET {$offset}");
+            $stmt->execute($params);
+            json_success(['data' => $stmt->fetchAll(), 'total' => $total]);
+        } catch (Throwable $e) {
+            json_success(['data' => [], 'total' => 0]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id           = $body['id'] ?? gen_uuid();
+        $isbn         = $body['isbn'] ?? '';
+        $title        = $body['title'] ?? '';
+        $author       = $body['author'] ?? '';
+        $publisher    = $body['publisher'] ?? '';
+        $category     = $body['category'] ?? '';
+        $totalQty     = (int)($body['totalQty'] ?? 1);
+        $availableQty = (int)($body['availableQty'] ?? $totalQty);
+        $location     = $body['location'] ?? '';
+        $addedAt      = $body['addedAt'] ?? now_str();
+        if (!$title) json_error('title is required', 400);
+        try {
+            $db->prepare("INSERT INTO `library_books` (`id`,`isbn`,`title`,`author`,`publisher`,`category`,`totalQty`,`availableQty`,`location`,`addedAt`)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `isbn`=VALUES(`isbn`),`title`=VALUES(`title`),`author`=VALUES(`author`),
+                `publisher`=VALUES(`publisher`),`category`=VALUES(`category`),`totalQty`=VALUES(`totalQty`),
+                `availableQty`=VALUES(`availableQty`),`location`=VALUES(`location`)")
+               ->execute([$id,$isbn,$title,$author,$publisher,$category,$totalQty,$availableQty,$location,$addedAt]);
+            write_changelog($db, $auth, 'library_books', 'save', $id, null, ['title' => $title]);
+            json_success(['id' => $id], 'Book saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_book_issues(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['studentId'])) { $where[] = '`studentId`=?'; $params[] = $_GET['studentId']; }
+        if (!empty($_GET['bookId']))    { $where[] = '`bookId`=?'; $params[] = $_GET['bookId']; }
+        if (!empty($_GET['status']))    { $where[] = '`status`=?'; $params[] = $_GET['status']; }
+        $limit  = min((int)($_GET['limit'] ?? 500), 10000);
+        $offset = max((int)($_GET['offset'] ?? 0), 0);
+        $wc     = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        try {
+            $cStmt = $db->prepare("SELECT COUNT(*) FROM `book_issues`{$wc}");
+            $cStmt->execute($params);
+            $total = (int)$cStmt->fetchColumn();
+            $stmt  = $db->prepare("SELECT * FROM `book_issues`{$wc} ORDER BY `issueDate` DESC LIMIT {$limit} OFFSET {$offset}");
+            $stmt->execute($params);
+            json_success(['data' => $stmt->fetchAll(), 'total' => $total]);
+        } catch (Throwable $e) {
+            json_success(['data' => [], 'total' => 0]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id         = $body['id'] ?? gen_uuid();
+        $bookId     = $body['bookId'] ?? '';
+        $studentId  = $body['studentId'] ?? '';
+        $issueDate  = $body['issueDate'] ?? date('Y-m-d');
+        $dueDate    = $body['dueDate'] ?? date('Y-m-d', strtotime('+14 days'));
+        $returnDate = $body['returnDate'] ?? null;
+        $fine       = (float)($body['fine'] ?? 0);
+        $status     = $body['status'] ?? 'issued';
+        if (!$bookId || !$studentId) json_error('bookId and studentId are required', 400);
+        try {
+            $db->prepare("INSERT INTO `book_issues` (`id`,`bookId`,`studentId`,`issueDate`,`dueDate`,`returnDate`,`fine`,`status`)
+                VALUES (?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `returnDate`=VALUES(`returnDate`),`fine`=VALUES(`fine`),`status`=VALUES(`status`)")
+               ->execute([$id,$bookId,$studentId,$issueDate,$dueDate,$returnDate,$fine,$status]);
+            // Update available qty if returning
+            if ($status === 'returned') {
+                $db->prepare("UPDATE `library_books` SET `availableQty`=`availableQty`+1 WHERE `id`=?")->execute([$bookId]);
+            } elseif ($status === 'issued') {
+                $db->prepare("UPDATE `library_books` SET `availableQty`=GREATEST(0,`availableQty`-1) WHERE `id`=?")->execute([$bookId]);
+            }
+            write_changelog($db, $auth, 'book_issues', 'save', $id, null, ['bookId' => $bookId, 'studentId' => $studentId, 'status' => $status]);
+            json_success(['id' => $id], 'Book issue saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+
+// =============================================================================
+// ONLINE EXAMS
+// =============================================================================
+function handle_online_exams(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['classId']))  { $where[] = '`classId`=?'; $params[] = $_GET['classId']; }
+        if (!empty($_GET['status']))   { $where[] = '`status`=?'; $params[] = $_GET['status']; }
+        if (!empty($_GET['session']))  { $where[] = '`session`=?'; $params[] = $_GET['session']; }
+        $wc    = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $limit = min((int)($_GET['limit'] ?? 200), 5000);
+        $off   = max((int)($_GET['offset'] ?? 0), 0);
+        try {
+            $stmt = $db->prepare("SELECT `id`,`title`,`subject`,`classId`,`sections`,`duration`,`totalMarks`,`passPercentage`,`startTime`,`endTime`,`status`,`createdBy` FROM `online_exams`{$wc} ORDER BY `startTime` DESC LIMIT {$limit} OFFSET {$off}");
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                if (isset($r['sections']) && is_string($r['sections'])) {
+                    $d = json_decode($r['sections'], true);
+                    if (is_array($d)) $r['sections'] = $d;
+                }
+            }
+            unset($r);
+            json_success($rows);
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id             = $body['id'] ?? gen_uuid();
+        $title          = $body['title'] ?? '';
+        $subject        = $body['subject'] ?? '';
+        $classId        = $body['classId'] ?? '';
+        $sections       = is_array($body['sections'] ?? null) ? json_encode($body['sections']) : ($body['sections'] ?? '');
+        $duration       = (int)($body['duration'] ?? 60);
+        $totalMarks     = (int)($body['totalMarks'] ?? 100);
+        $passPercent    = (int)($body['passPercentage'] ?? 33);
+        $startTime      = $body['startTime'] ?? now_str();
+        $endTime        = $body['endTime'] ?? now_str();
+        $questionsData  = is_array($body['questionsData'] ?? null) ? json_encode($body['questionsData'], JSON_UNESCAPED_UNICODE) : ($body['questionsData'] ?? '[]');
+        $status         = $body['status'] ?? 'draft';
+        $createdBy      = $body['createdBy'] ?? ($auth['username'] ?? '');
+        $session        = $body['session'] ?? ($body['sessionId'] ?? '');
+        if (!$title) json_error('title is required', 400);
+        try {
+            $db->prepare("INSERT INTO `online_exams` (`id`,`title`,`subject`,`classId`,`sections`,`duration`,`totalMarks`,`passPercentage`,`startTime`,`endTime`,`questionsData`,`status`,`createdBy`,`session`)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`subject`=VALUES(`subject`),`sections`=VALUES(`sections`),
+                `duration`=VALUES(`duration`),`totalMarks`=VALUES(`totalMarks`),`passPercentage`=VALUES(`passPercentage`),
+                `startTime`=VALUES(`startTime`),`endTime`=VALUES(`endTime`),`questionsData`=VALUES(`questionsData`),`status`=VALUES(`status`)")
+               ->execute([$id,$title,$subject,$classId,$sections,$duration,$totalMarks,$passPercent,$startTime,$endTime,$questionsData,$status,$createdBy,$session]);
+            write_changelog($db, $auth, 'online_exams', 'save', $id, null, ['title' => $title, 'classId' => $classId]);
+            json_success(['id' => $id], 'Exam saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_exam_attempts(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['examId']))    { $where[] = '`examId`=?'; $params[] = $_GET['examId']; }
+        if (!empty($_GET['studentId'])) { $where[] = '`studentId`=?'; $params[] = $_GET['studentId']; }
+        $wc   = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $lim  = min((int)($_GET['limit'] ?? 500), 10000);
+        $off  = max((int)($_GET['offset'] ?? 0), 0);
+        try {
+            $stmt = $db->prepare("SELECT `id`,`examId`,`studentId`,`score`,`totalMarks`,`percentage`,`passed`,`startedAt`,`submittedAt`,`timeTaken` FROM `exam_attempts`{$wc} ORDER BY `submittedAt` DESC LIMIT {$lim} OFFSET {$off}");
+            $stmt->execute($params);
+            json_success($stmt->fetchAll());
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        // Auto-grade: calculate score from answers vs questionsData
+        $id          = $body['id'] ?? gen_uuid();
+        $examId      = $body['examId'] ?? '';
+        $studentId   = $body['studentId'] ?? '';
+        $answersData = is_array($body['answersData'] ?? null) ? json_encode($body['answersData'], JSON_UNESCAPED_UNICODE) : ($body['answersData'] ?? '{}');
+        $startedAt   = $body['startedAt'] ?? now_str();
+        $submittedAt = $body['submittedAt'] ?? now_str();
+        $timeTaken   = (int)($body['timeTaken'] ?? 0);
+        if (!$examId || !$studentId) json_error('examId and studentId are required', 400);
+
+        // Fetch exam for auto-grading
+        $score      = (float)($body['score'] ?? 0);
+        $totalMarks = (int)($body['totalMarks'] ?? 0);
+        $percent    = 0.0;
+        $passed     = 0;
+        try {
+            $examStmt = $db->prepare("SELECT `questionsData`,`totalMarks`,`passPercentage` FROM `online_exams` WHERE `id`=? LIMIT 1");
+            $examStmt->execute([$examId]);
+            $exam = $examStmt->fetch();
+            if ($exam) {
+                $totalMarks  = (int)$exam['totalMarks'];
+                $questions   = json_decode($exam['questionsData'] ?? '[]', true) ?: [];
+                $answers     = json_decode($answersData, true) ?: [];
+                // Auto-grade MCQ: each correct = (totalMarks / questionCount) points
+                if (!empty($questions)) {
+                    $perQ  = $totalMarks / count($questions);
+                    $score = 0;
+                    foreach ($questions as $q) {
+                        $qId     = $q['id'] ?? $q['qid'] ?? '';
+                        $correct = $q['correctAnswer'] ?? $q['correct'] ?? '';
+                        $given   = $answers[$qId] ?? $answers[(string)$qId] ?? '';
+                        if ($given !== '' && (string)$given === (string)$correct) {
+                            $score += $perQ;
+                        }
+                    }
+                }
+                $percent = $totalMarks > 0 ? round(($score / $totalMarks) * 100, 2) : 0;
+                $passed  = $percent >= (int)$exam['passPercentage'] ? 1 : 0;
+            }
+        } catch (Throwable $e) {}
+
+        try {
+            $db->prepare("INSERT INTO `exam_attempts` (`id`,`examId`,`studentId`,`answersData`,`score`,`totalMarks`,`percentage`,`passed`,`startedAt`,`submittedAt`,`timeTaken`)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `answersData`=VALUES(`answersData`),`score`=VALUES(`score`),
+                `percentage`=VALUES(`percentage`),`passed`=VALUES(`passed`),`submittedAt`=VALUES(`submittedAt`),`timeTaken`=VALUES(`timeTaken`)")
+               ->execute([$id,$examId,$studentId,$answersData,$score,$totalMarks,$percent,$passed,$startedAt,$submittedAt,$timeTaken]);
+            write_changelog($db, $auth, 'exam_attempts', 'submit', $id, null, ['examId' => $examId, 'studentId' => $studentId, 'score' => $score]);
+            json_success(['id' => $id, 'score' => $score, 'totalMarks' => $totalMarks, 'percentage' => $percent, 'passed' => (bool)$passed], 'Attempt submitted');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+
+// =============================================================================
+// GPS TRANSPORT TRACKING
+// =============================================================================
+function handle_driver_location(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $routeId = $_GET['routeId'] ?? '';
+        try {
+            if ($routeId) {
+                $stmt = $db->prepare("SELECT * FROM `driver_locations` WHERE `routeId`=? AND `isActive`=1 ORDER BY `timestamp` DESC LIMIT 1");
+                $stmt->execute([$routeId]);
+            } else {
+                $stmt = $db->query("SELECT * FROM `driver_locations` WHERE `isActive`=1 ORDER BY `timestamp` DESC LIMIT 50");
+            }
+            $rows = $stmt ? $stmt->fetchAll() : [];
+            json_success($rows);
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $driverId  = $body['driverId'] ?? ($auth['user_id'] ?? '');
+        $routeId   = $body['routeId'] ?? '';
+        $lat       = (float)($body['latitude'] ?? 0);
+        $lng       = (float)($body['longitude'] ?? 0);
+        $accuracy  = (float)($body['accuracy'] ?? 0);
+        $ts        = $body['timestamp'] ?? now_str();
+        $isActive  = isset($body['isActive']) ? (int)(bool)$body['isActive'] : 1;
+        if (!$routeId) json_error('routeId is required', 400);
+        $id = gen_uuid();
+        try {
+            // Deactivate previous locations for this driver/route
+            $db->prepare("UPDATE `driver_locations` SET `isActive`=0 WHERE `driverId`=? AND `routeId`=?")
+               ->execute([$driverId, $routeId]);
+            $db->prepare("INSERT INTO `driver_locations` (`id`,`driverId`,`routeId`,`latitude`,`longitude`,`accuracy`,`timestamp`,`isActive`)
+                VALUES (?,?,?,?,?,?,?,?)")
+               ->execute([$id,$driverId,$routeId,$lat,$lng,$accuracy,$ts,$isActive]);
+            json_success(['id' => $id, 'latitude' => $lat, 'longitude' => $lng], 'Location updated');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_transport_trips(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['routeId']))   { $where[] = '`routeId`=?'; $params[] = $_GET['routeId']; }
+        if (!empty($_GET['driverId']))  { $where[] = '`driverId`=?'; $params[] = $_GET['driverId']; }
+        if (!empty($_GET['status']))    { $where[] = '`status`=?'; $params[] = $_GET['status']; }
+        $wc   = $where ? ' WHERE ' . implode(' AND ', $where) : '';
+        $lim  = min((int)($_GET['limit'] ?? 100), 5000);
+        $off  = max((int)($_GET['offset'] ?? 0), 0);
+        try {
+            $stmt = $db->prepare("SELECT * FROM `transport_trips`{$wc} ORDER BY `startTime` DESC LIMIT {$lim} OFFSET {$off}");
+            $stmt->execute($params);
+            json_success($stmt->fetchAll());
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id        = $body['id'] ?? gen_uuid();
+        $routeId   = $body['routeId'] ?? '';
+        $driverId  = $body['driverId'] ?? ($auth['user_id'] ?? '');
+        $startTime = $body['startTime'] ?? now_str();
+        $endTime   = $body['endTime'] ?? null;
+        $status    = $body['status'] ?? 'active';
+        if (!$routeId) json_error('routeId is required', 400);
+        try {
+            $db->prepare("INSERT INTO `transport_trips` (`id`,`routeId`,`driverId`,`startTime`,`endTime`,`status`)
+                VALUES (?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `endTime`=VALUES(`endTime`),`status`=VALUES(`status`)")
+               ->execute([$id,$routeId,$driverId,$startTime,$endTime,$status]);
+            write_changelog($db, $auth, 'transport_trips', 'save', $id, null, ['routeId' => $routeId, 'status' => $status]);
+            json_success(['id' => $id], 'Trip saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+
+// =============================================================================
+// BROADCAST CAMPAIGNS
+// =============================================================================
+function handle_broadcast_campaigns(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $limit = min((int)($_GET['limit'] ?? 100), 5000);
+        $off   = max((int)($_GET['offset'] ?? 0), 0);
+        try {
+            $stmt = $db->prepare("SELECT * FROM `broadcast_campaigns` ORDER BY `createdAt` DESC LIMIT {$limit} OFFSET {$off}");
+            $stmt->execute();
+            $rows = $stmt->fetchAll();
+            foreach ($rows as &$r) {
+                if (isset($r['recipientsData']) && is_string($r['recipientsData'])) {
+                    $d = json_decode($r['recipientsData'], true);
+                    if (is_array($d)) $r['recipientsData'] = $d;
+                }
+            }
+            unset($r);
+            json_success($rows);
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id               = $body['id'] ?? gen_uuid();
+        $title            = $body['title'] ?? '';
+        $channel          = $body['channel'] ?? 'whatsapp';
+        $recipientsData   = is_array($body['recipientsData'] ?? null) ? json_encode($body['recipientsData']) : ($body['recipientsData'] ?? '[]');
+        $template         = $body['template'] ?? '';
+        $message          = $body['message'] ?? '';
+        $scheduledAt      = $body['scheduledAt'] ?? null;
+        $status           = $body['status'] ?? 'draft';
+        $totalRecipients  = (int)($body['totalRecipients'] ?? 0);
+        $createdBy        = $body['createdBy'] ?? ($auth['username'] ?? '');
+        if (!$title) json_error('title is required', 400);
+        try {
+            $db->prepare("INSERT INTO `broadcast_campaigns` (`id`,`title`,`channel`,`recipientsData`,`template`,`message`,`scheduledAt`,`status`,`totalRecipients`,`delivered`,`failed`,`createdBy`)
+                VALUES (?,?,?,?,?,?,?,?,?,0,0,?)
+                ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`channel`=VALUES(`channel`),`recipientsData`=VALUES(`recipientsData`),
+                `template`=VALUES(`template`),`message`=VALUES(`message`),`scheduledAt`=VALUES(`scheduledAt`),`status`=VALUES(`status`),`totalRecipients`=VALUES(`totalRecipients`)")
+               ->execute([$id,$title,$channel,$recipientsData,$template,$message,$scheduledAt,$status,$totalRecipients,$createdBy]);
+            write_changelog($db, $auth, 'broadcast_campaigns', 'save', $id, null, ['title' => $title, 'channel' => $channel]);
+            json_success(['id' => $id], 'Campaign saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_broadcast_send(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $campaignId = $body['campaignId'] ?? '';
+    $message    = $body['message'] ?? '';
+    $recipients = $body['recipients'] ?? [];
+    $channel    = $body['channel'] ?? 'whatsapp';
+    if (!$message) json_error('message is required', 400);
+    if (empty($recipients)) json_error('recipients array is required', 400);
+
+    $db = getDB();
+
+    // Fetch WhatsApp credentials from school_settings
+    $waApiUrl  = '';
+    $waApiKey  = '';
+    try {
+        $s = $db->query("SELECT `key`,`value` FROM `school_settings` WHERE `key` IN ('wa_api_url','wa_api_key','whatsapp_api_url','whatsapp_api_key')");
+        if ($s) {
+            foreach ($s->fetchAll() as $row) {
+                if (in_array($row['key'], ['wa_api_url', 'whatsapp_api_url'], true)) $waApiUrl = $row['value'];
+                if (in_array($row['key'], ['wa_api_key', 'whatsapp_api_key'], true)) $waApiKey = $row['value'];
+            }
+        }
+    } catch (Throwable $e) {}
+
+    $delivered = 0;
+    $failed    = 0;
+    $errors    = [];
+
+    if ($channel === 'whatsapp' && $waApiUrl) {
+        // Rate-limited WhatsApp sends: max 1 per 0.5s to avoid API throttle
+        foreach ($recipients as $i => $recipient) {
+            $mobile = is_array($recipient) ? ($recipient['mobile'] ?? $recipient['phone'] ?? '') : $recipient;
+            if (!$mobile) { $failed++; continue; }
+            // Strip non-digits, ensure 91 prefix for India
+            $mobile = preg_replace('/[^0-9]/', '', $mobile);
+            if (strlen($mobile) === 10) $mobile = '91' . $mobile;
+            try {
+                $ctx = stream_context_create(['http' => [
+                    'method'  => 'POST',
+                    'header'  => "Content-Type: application/json\r\nAuthorization: Bearer {$waApiKey}\r\n",
+                    'content' => json_encode(['number' => $mobile, 'message' => $message]),
+                    'timeout' => 5,
+                ]]);
+                $resp = @file_get_contents($waApiUrl . '/send', false, $ctx);
+                if ($resp !== false) {
+                    $respData = json_decode($resp, true);
+                    if (isset($respData['status']) && $respData['status'] === 'success') {
+                        $delivered++;
+                    } else {
+                        $failed++;
+                        if (count($errors) < 5) $errors[] = "Mobile {$mobile}: " . ($respData['message'] ?? 'Send failed');
+                    }
+                } else {
+                    $failed++;
+                }
+            } catch (Throwable $e) {
+                $failed++;
+            }
+            // Rate limit: 500ms between messages
+            if (($i + 1) < count($recipients)) usleep(500000);
+        }
+    } else {
+        // In-app notifications fallback when no WhatsApp config
+        foreach ($recipients as $recipient) {
+            $userId = is_array($recipient) ? ($recipient['userId'] ?? $recipient['id'] ?? '') : $recipient;
+            if (!$userId) { $failed++; continue; }
+            try {
+                $db->prepare("INSERT INTO `notifications` (`id`,`userId`,`title`,`message`,`type`,`isRead`,`timestamp`)
+                    VALUES (UUID(),?,'Broadcast',?,?,0,?)")
+                   ->execute([$userId, $message, $channel, now_str()]);
+                $delivered++;
+            } catch (Throwable $e) {
+                $failed++;
+            }
+        }
+    }
+
+    // Update campaign stats if campaignId provided
+    if ($campaignId) {
+        try {
+            $db->prepare("UPDATE `broadcast_campaigns` SET `delivered`=?,`failed`=?,`sentAt`=?,`status`='sent' WHERE `id`=?")
+               ->execute([$delivered, $failed, now_str(), $campaignId]);
+        } catch (Throwable $e) {}
+    }
+
+    write_changelog($db, $auth, 'broadcast_campaigns', 'send', $campaignId ?: gen_uuid(), null, ['channel' => $channel, 'delivered' => $delivered, 'failed' => $failed]);
+    json_success(['delivered' => $delivered, 'failed' => $failed, 'total' => count($recipients), 'errors' => $errors], "Broadcast sent: {$delivered} delivered, {$failed} failed");
+}
+
+
+// =============================================================================
+// PUSH SUBSCRIPTIONS & PUSH NOTIFICATIONS
+// =============================================================================
+function handle_push_subscriptions(string $method, array $body, ?array $auth): void {
+    if (!$auth) json_error('Authentication required', 401);
+    $db = getDB();
+
+    if ($method === 'GET') {
+        $userId = $_GET['userId'] ?? ($auth['user_id'] ?? '');
+        try {
+            $stmt = $db->prepare("SELECT * FROM `push_subscriptions` WHERE `userId`=?");
+            $stmt->execute([$userId]);
+            json_success($stmt->fetchAll());
+        } catch (Throwable $e) {
+            json_success([]);
+        }
+    }
+
+    if ($method === 'POST') {
+        $id       = $body['id'] ?? gen_uuid();
+        $userId   = $body['userId'] ?? ($auth['user_id'] ?? '');
+        $endpoint = $body['endpoint'] ?? '';
+        $p256dh   = $body['p256dhKey'] ?? $body['p256dh'] ?? '';
+        $authKey  = $body['authKey'] ?? $body['auth'] ?? '';
+        $role     = $body['role'] ?? ($auth['role'] ?? '');
+        if (!$endpoint) json_error('endpoint is required', 400);
+        try {
+            $db->prepare("INSERT INTO `push_subscriptions` (`id`,`userId`,`endpoint`,`p256dhKey`,`authKey`,`role`,`createdAt`)
+                VALUES (?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE `p256dhKey`=VALUES(`p256dhKey`),`authKey`=VALUES(`authKey`),`role`=VALUES(`role`)")
+               ->execute([$id, $userId, $endpoint, $p256dh, $authKey, $role, now_str()]);
+            json_success(['id' => $id], 'Subscription saved');
+        } catch (Throwable $e) {
+            json_error('Failed: ' . $e->getMessage(), 500);
+        }
+    }
+
+    json_error('Method not allowed', 405);
+}
+
+function handle_push_notifications_send(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $userId   = $body['userId'] ?? null;
+    $role     = $body['role'] ?? null;
+    $title    = $body['title'] ?? 'Notification';
+    $message  = $body['message'] ?? '';
+    $type     = $body['type'] ?? 'info';
+
+    if (!$message) json_error('message is required', 400);
+
+    $db       = getDB();
+    $inserted = 0;
+
+    try {
+        if ($userId) {
+            // Single user
+            $db->prepare("INSERT INTO `notifications` (`id`,`userId`,`title`,`message`,`type`,`isRead`,`timestamp`,`createdAt`)
+                VALUES (UUID(),?,?,?,?,0,?,?)")
+               ->execute([$userId, $title, $message, $type, now_str(), now_str()]);
+            $inserted = 1;
+        } elseif ($role) {
+            // All users with a specific role
+            $users = $db->prepare("SELECT `id` FROM `users` WHERE `role`=?");
+            $users->execute([$role]);
+            $stmt = $db->prepare("INSERT INTO `notifications` (`id`,`userId`,`title`,`message`,`type`,`isRead`,`timestamp`,`createdAt`) VALUES (UUID(),?,?,?,?,0,?,?)");
+            foreach ($users->fetchAll() as $u) {
+                $stmt->execute([$u['id'], $title, $message, $type, now_str(), now_str()]);
+                $inserted++;
+            }
+        } else {
+            // Broadcast to all users
+            $users = $db->query("SELECT `id` FROM `users`");
+            $stmt  = $db->prepare("INSERT INTO `notifications` (`id`,`userId`,`title`,`message`,`type`,`isRead`,`timestamp`,`createdAt`) VALUES (UUID(),?,?,?,?,0,?,?)");
+            foreach ($users->fetchAll() as $u) {
+                $stmt->execute([$u['id'], $title, $message, $type, now_str(), now_str()]);
+                $inserted++;
+            }
+        }
+    } catch (Throwable $e) {
+        json_error('Failed to send notifications: ' . $e->getMessage(), 500);
+    }
+
+    json_success(['sent' => $inserted], "Notification sent to {$inserted} user(s)");
+}
+
+
+// =============================================================================
+// STUDENT PERFORMANCE ANALYTICS
+// =============================================================================
+function handle_analytics_student(string $method, ?array $auth): void {
+    if ($method !== 'GET') json_error('Method not allowed', 405);
+    if (!$auth) json_error('Authentication required', 401);
+
+    $studentId = $_GET['studentId'] ?? '';
+    if (!$studentId) json_error('studentId is required', 400);
+
+    $db = getDB();
+
+    // ── Marks history from exam_attempts ──────────────────────────────────────
+    $marksHistory = [];
+    try {
+        $stmt = $db->prepare("
+            SELECT ea.`score`, ea.`totalMarks`, ea.`percentage`, ea.`passed`, ea.`submittedAt`,
+                   oe.`title` AS examTitle, oe.`subject`
+            FROM `exam_attempts` ea
+            LEFT JOIN `online_exams` oe ON oe.`id` = ea.`examId`
+            WHERE ea.`studentId` = ?
+            ORDER BY ea.`submittedAt` ASC
+        ");
+        $stmt->execute([$studentId]);
+        $marksHistory = $stmt->fetchAll();
+    } catch (Throwable $e) {}
+
+    // ── Attendance summary from attendance records ────────────────────────────
+    $attendanceSummary = ['total' => 0, 'present' => 0, 'absent' => 0, 'late' => 0, 'percentage' => 0];
+    try {
+        $stmt = $db->prepare("SELECT `status`, COUNT(*) AS cnt FROM `attendance` WHERE `studentId`=? GROUP BY `status`");
+        $stmt->execute([$studentId]);
+        $rows  = $stmt->fetchAll();
+        $total = 0;
+        $pres  = 0;
+        foreach ($rows as $r) {
+            $total += (int)$r['cnt'];
+            $status = strtolower($r['status'] ?? '');
+            if ($status === 'present') $pres += (int)$r['cnt'];
+            elseif (strpos($status, 'late') !== false) {
+                $attendanceSummary['late'] += (int)$r['cnt'];
+                $pres += (int)$r['cnt']; // count late as present for %
+            } elseif ($status === 'absent') {
+                $attendanceSummary['absent'] += (int)$r['cnt'];
+            }
+        }
+        $attendanceSummary['total']      = $total;
+        $attendanceSummary['present']    = $pres;
+        $attendanceSummary['percentage'] = $total > 0 ? round(($pres / $total) * 100, 1) : 0;
+    } catch (Throwable $e) {}
+
+    // ── Fees history from fee_receipts ────────────────────────────────────────
+    $feesHistory = [];
+    try {
+        $stmt = $db->prepare("SELECT `receiptNo`,`totalAmount`,`paidAmount`,`balance`,`paymentMode`,`paymentDate`,`date`,`months`,`session` FROM `fee_receipts` WHERE `studentId`=? ORDER BY `createdAt` DESC LIMIT 50");
+        $stmt->execute([$studentId]);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            if (isset($r['months']) && is_string($r['months'])) {
+                $d = json_decode($r['months'], true);
+                if (is_array($d)) $r['months'] = $d;
+            }
+        }
+        unset($r);
+        $feesHistory = $rows;
+    } catch (Throwable $e) {}
+
+    // ── Face-recognition attendance (separate from manual) ───────────────────
+    $faceAttendance = [];
+    try {
+        $stmt = $db->prepare("SELECT `attendanceDate`,`confidence`,`method`,`timestamp` FROM `face_attendance` WHERE `studentId`=? ORDER BY `attendanceDate` DESC LIMIT 100");
+        $stmt->execute([$studentId]);
+        $faceAttendance = $stmt->fetchAll();
+    } catch (Throwable $e) {}
+
+    json_success([
+        'studentId'         => $studentId,
+        'marksHistory'      => $marksHistory,
+        'attendanceSummary' => $attendanceSummary,
+        'feesHistory'       => $feesHistory,
+        'faceAttendance'    => $faceAttendance,
+    ], 'Analytics fetched');
+}
+
+
+// =============================================================================
 // COLLECTION → TABLE MAP
 // =============================================================================
 function collection_table_map(): array {
@@ -1792,6 +2629,32 @@ function collection_table_map(): array {
         'school_settings'        => 'school_settings',
         // Changelog
         'changelog'              => 'changelog',
+        // Face recognition
+        'face_descriptors'       => 'face_descriptors',
+        'faceDescriptors'        => 'face_descriptors',
+        'face_attendance'        => 'face_attendance',
+        'faceAttendance'         => 'face_attendance',
+        // Library
+        'library_books'          => 'library_books',
+        'libraryBooks'           => 'library_books',
+        'book_issues'            => 'book_issues',
+        'bookIssues'             => 'book_issues',
+        // Online exams
+        'online_exams'           => 'online_exams',
+        'onlineExams'            => 'online_exams',
+        'exam_attempts'          => 'exam_attempts',
+        'examAttempts'           => 'exam_attempts',
+        // GPS tracking
+        'driver_locations'       => 'driver_locations',
+        'driverLocations'        => 'driver_locations',
+        'transport_trips'        => 'transport_trips',
+        'transportTrips'         => 'transport_trips',
+        // Broadcast
+        'broadcast_campaigns'    => 'broadcast_campaigns',
+        'broadcastCampaigns'     => 'broadcast_campaigns',
+        // Push subscriptions
+        'push_subscriptions'     => 'push_subscriptions',
+        'pushSubscriptions'      => 'push_subscriptions',
     ];
 }
 
@@ -1906,18 +2769,22 @@ function get_table_definitions(): array {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         'fees_plan' => "CREATE TABLE `fees_plan` (
-            `id`        VARCHAR(36) PRIMARY KEY,
-            `classId`   VARCHAR(100),
-            `class`     VARCHAR(100),
-            `sectionId` VARCHAR(50),
-            `section`   VARCHAR(50),
-            `headingId` VARCHAR(36),
-            `amounts`   TEXT,
-            `amount`    DECIMAL(12,2) DEFAULT 0,
-            `months`    TEXT,
-            `session`   VARCHAR(100),
-            `updatedAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-            `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `classId`     VARCHAR(100),
+            `class`       VARCHAR(100),
+            `className`   VARCHAR(100),
+            `sectionId`   VARCHAR(50),
+            `section`     VARCHAR(50),
+            `sectionName` VARCHAR(50),
+            `headingId`   VARCHAR(36),
+            `headingName` VARCHAR(255),
+            `amounts`     TEXT,
+            `amount`      DECIMAL(12,2) DEFAULT 0,
+            `months`      TEXT,
+            `sessionId`   VARCHAR(100),
+            `session`     VARCHAR(100),
+            `updatedAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         'fee_headings' => "CREATE TABLE `fee_headings` (
@@ -1928,6 +2795,12 @@ function get_table_definitions(): array {
             `amount`            DECIMAL(12,2) DEFAULT 0,
             `months`            TEXT,
             `applicableClasses` TEXT,
+            `isActive`          TINYINT(1) DEFAULT 1,
+            `displayOrder`      INT DEFAULT 0,
+            `accountId`         VARCHAR(36),
+            `accountName`       VARCHAR(255),
+            `headType`          VARCHAR(50),
+            `sessionId`         VARCHAR(100),
             `session`           VARCHAR(100),
             `createdAt`         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             `updatedAt`         TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -2297,6 +3170,146 @@ function get_table_definitions(): array {
             `createdAt` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             INDEX `idx_module` (`module`),
             INDEX `idx_createdAt` (`createdAt`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        // ── NEW v5 feature tables ──────────────────────────────────────────────
+
+        'face_descriptors' => "CREATE TABLE IF NOT EXISTS `face_descriptors` (
+            `id`             VARCHAR(50) PRIMARY KEY,
+            `studentId`      VARCHAR(50) NOT NULL,
+            `descriptorData` LONGTEXT,
+            `enrolledAt`     DATETIME,
+            INDEX `idx_studentId` (`studentId`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'face_attendance' => "CREATE TABLE IF NOT EXISTS `face_attendance` (
+            `id`             VARCHAR(50) PRIMARY KEY,
+            `studentId`      VARCHAR(50) NOT NULL,
+            `confidence`     DECIMAL(4,3) DEFAULT 0,
+            `method`         VARCHAR(20) DEFAULT 'face_recognition',
+            `attendanceDate` DATE,
+            `timestamp`      DATETIME,
+            `sessionId`      VARCHAR(50),
+            INDEX `idx_studentId` (`studentId`),
+            INDEX `idx_date` (`attendanceDate`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'library_books' => "CREATE TABLE IF NOT EXISTS `library_books` (
+            `id`           VARCHAR(50) PRIMARY KEY,
+            `isbn`         VARCHAR(50),
+            `title`        VARCHAR(255) NOT NULL,
+            `author`       VARCHAR(255),
+            `publisher`    VARCHAR(255),
+            `category`     VARCHAR(100),
+            `totalQty`     INT DEFAULT 1,
+            `availableQty` INT DEFAULT 1,
+            `location`     VARCHAR(100),
+            `addedAt`      DATETIME,
+            INDEX `idx_isbn` (`isbn`),
+            INDEX `idx_category` (`category`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'book_issues' => "CREATE TABLE IF NOT EXISTS `book_issues` (
+            `id`         VARCHAR(50) PRIMARY KEY,
+            `bookId`     VARCHAR(50) NOT NULL,
+            `studentId`  VARCHAR(50) NOT NULL,
+            `issueDate`  DATE,
+            `dueDate`    DATE,
+            `returnDate` DATE,
+            `fine`       DECIMAL(10,2) DEFAULT 0,
+            `status`     VARCHAR(20) DEFAULT 'issued',
+            INDEX `idx_bookId` (`bookId`),
+            INDEX `idx_studentId` (`studentId`),
+            INDEX `idx_status` (`status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'online_exams' => "CREATE TABLE IF NOT EXISTS `online_exams` (
+            `id`             VARCHAR(50) PRIMARY KEY,
+            `title`          VARCHAR(255) NOT NULL,
+            `subject`        VARCHAR(100),
+            `classId`        VARCHAR(50),
+            `sections`       TEXT,
+            `duration`       INT DEFAULT 60,
+            `totalMarks`     INT DEFAULT 100,
+            `passPercentage` INT DEFAULT 33,
+            `startTime`      DATETIME,
+            `endTime`        DATETIME,
+            `questionsData`  LONGTEXT,
+            `status`         VARCHAR(20) DEFAULT 'draft',
+            `createdBy`      VARCHAR(100),
+            `session`        VARCHAR(100),
+            INDEX `idx_classId` (`classId`),
+            INDEX `idx_status` (`status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'exam_attempts' => "CREATE TABLE IF NOT EXISTS `exam_attempts` (
+            `id`          VARCHAR(50) PRIMARY KEY,
+            `examId`      VARCHAR(50) NOT NULL,
+            `studentId`   VARCHAR(50) NOT NULL,
+            `answersData` TEXT,
+            `score`       DECIMAL(6,2) DEFAULT 0,
+            `totalMarks`  INT DEFAULT 0,
+            `percentage`  DECIMAL(5,2) DEFAULT 0,
+            `passed`      TINYINT(1) DEFAULT 0,
+            `startedAt`   DATETIME,
+            `submittedAt` DATETIME,
+            `timeTaken`   INT DEFAULT 0,
+            UNIQUE KEY `uq_exam_student` (`examId`,`studentId`),
+            INDEX `idx_examId` (`examId`),
+            INDEX `idx_studentId` (`studentId`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'driver_locations' => "CREATE TABLE IF NOT EXISTS `driver_locations` (
+            `id`        VARCHAR(50) PRIMARY KEY,
+            `driverId`  VARCHAR(50),
+            `routeId`   VARCHAR(50),
+            `latitude`  DECIMAL(10,8) DEFAULT 0,
+            `longitude` DECIMAL(11,8) DEFAULT 0,
+            `accuracy`  DECIMAL(8,2) DEFAULT 0,
+            `timestamp` DATETIME,
+            `isActive`  TINYINT(1) DEFAULT 1,
+            INDEX `idx_routeId` (`routeId`),
+            INDEX `idx_driverId` (`driverId`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'transport_trips' => "CREATE TABLE IF NOT EXISTS `transport_trips` (
+            `id`        VARCHAR(50) PRIMARY KEY,
+            `routeId`   VARCHAR(50),
+            `driverId`  VARCHAR(50),
+            `startTime` DATETIME,
+            `endTime`   DATETIME,
+            `status`    VARCHAR(20) DEFAULT 'active',
+            INDEX `idx_routeId` (`routeId`),
+            INDEX `idx_driverId` (`driverId`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'broadcast_campaigns' => "CREATE TABLE IF NOT EXISTS `broadcast_campaigns` (
+            `id`               VARCHAR(50) PRIMARY KEY,
+            `title`            VARCHAR(255) NOT NULL,
+            `channel`          VARCHAR(20) DEFAULT 'whatsapp',
+            `recipientsData`   TEXT,
+            `template`         VARCHAR(255),
+            `message`          TEXT,
+            `scheduledAt`      DATETIME,
+            `sentAt`           DATETIME,
+            `status`           VARCHAR(20) DEFAULT 'draft',
+            `totalRecipients`  INT DEFAULT 0,
+            `delivered`        INT DEFAULT 0,
+            `failed`           INT DEFAULT 0,
+            `createdBy`        VARCHAR(100),
+            `createdAt`        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_status` (`status`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'push_subscriptions' => "CREATE TABLE IF NOT EXISTS `push_subscriptions` (
+            `id`        VARCHAR(50) PRIMARY KEY,
+            `userId`    VARCHAR(50) NOT NULL,
+            `endpoint`  TEXT NOT NULL,
+            `p256dhKey` TEXT,
+            `authKey`   TEXT,
+            `role`      VARCHAR(50),
+            `createdAt` DATETIME,
+            INDEX `idx_userId` (`userId`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
     ];
 }

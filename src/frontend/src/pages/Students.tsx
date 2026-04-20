@@ -1107,7 +1107,13 @@ export default function Students({ onNavigate }: StudentsProps) {
                   ].join(" ")}
                   style={{ height: "36px" }}
                   data-ocid={`students.item.${globalIdx + 1}`}
-                  onDoubleClick={() => setSelectedStudent(student)}
+                  onDoubleClick={() => {
+                    try {
+                      setSelectedStudent(student);
+                    } catch {
+                      // guard against undefined student properties
+                    }
+                  }}
                 >
                   <td className="w-8 px-2 border-r border-border/40">
                     <Checkbox

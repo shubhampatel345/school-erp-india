@@ -2,6 +2,7 @@ import {
   Award,
   BarChart3,
   BookOpen,
+  BookText,
   Bus,
   CalendarCheck,
   ClipboardList,
@@ -10,6 +11,7 @@ import {
   HelpCircle,
   IndianRupee,
   LayoutDashboard,
+  LineChart,
   MessageCircle,
   MessageSquare,
   Package,
@@ -19,6 +21,7 @@ import {
   UserCheck,
   UserCog,
   Users,
+  Video,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
@@ -78,6 +81,12 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["superadmin", "admin", "librarian"],
   },
   {
+    id: "library",
+    label: "Library",
+    icon: BookText,
+    roles: ["superadmin", "admin", "librarian", "teacher"],
+  },
+  {
     id: "examinations",
     label: "Examinations",
     icon: FileText,
@@ -88,6 +97,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Communication",
     icon: MessageSquare,
     roles: ["superadmin", "admin"],
+  },
+  {
+    id: "virtualclasses",
+    label: "Virtual Classes",
+    icon: Video,
+    roles: ["superadmin", "admin", "teacher"],
   },
   { id: "chat", label: "Chat", icon: MessageCircle },
   {
@@ -107,6 +122,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "Reports",
     icon: BarChart3,
     roles: ["superadmin", "admin"],
+  },
+  {
+    id: "analytics",
+    label: "Performance Analytics",
+    icon: LineChart,
+    roles: ["superadmin", "admin", "teacher", "parent", "student"],
   },
   {
     id: "alumni",

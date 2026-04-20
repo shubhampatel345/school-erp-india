@@ -1,8 +1,16 @@
-import { BookOpen, CalendarDays, FileText, UserCheck } from "lucide-react";
+import {
+  BookOpen,
+  CalendarDays,
+  FileText,
+  MonitorPlay,
+  UserCheck,
+} from "lucide-react";
 import { useState } from "react";
+import { Badge } from "../components/ui/badge";
 import AdmitCards from "./examinations/AdmitCards";
 import ExamResults from "./examinations/ExamResults";
 import ExamTimetableMaker from "./examinations/ExamTimetableMaker";
+import OnlineTests from "./examinations/OnlineTests";
 import TeacherTimetable from "./examinations/TeacherTimetable";
 
 const TABS = [
@@ -10,6 +18,7 @@ const TABS = [
   { id: "teacher", label: "Teacher Timetable", icon: UserCheck },
   { id: "results", label: "Exam Results", icon: BookOpen },
   { id: "admitcards", label: "Admit Cards", icon: FileText },
+  { id: "online", label: "Online Tests", icon: MonitorPlay },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -30,7 +39,8 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
           Examinations
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">
-          Exam timetables, teacher schedules, results and admit cards
+          Exam timetables, teacher schedules, results, admit cards and online
+          tests with auto-grading
         </p>
       </div>
 
@@ -57,6 +67,14 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
             >
               <Icon size={15} />
               {tab.label}
+              {tab.id === "online" && (
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] px-1.5 py-0 ml-0.5 hidden sm:inline-flex"
+                >
+                  AI
+                </Badge>
+              )}
             </button>
           );
         })}
@@ -67,6 +85,7 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
         {activeTab === "teacher" && <TeacherTimetable />}
         {activeTab === "results" && <ExamResults />}
         {activeTab === "admitcards" && <AdmitCards />}
+        {activeTab === "online" && <OnlineTests />}
       </div>
     </div>
   );

@@ -287,7 +287,7 @@ export interface AttendanceRecord extends MySQLRecord {
   timeOut?: string;
   markedBy?: string;
   type: "student" | "staff";
-  method?: "manual" | "qr" | "rfid" | "essl";
+  method?: "manual" | "qr" | "rfid" | "essl" | "face";
   class?: string;
   section?: string;
   sessionId?: string;
@@ -811,3 +811,192 @@ export const DEFAULT_TRANSPORT_MONTHS = [
   "Feb",
   "Mar",
 ];
+
+// ──────────────────────────────────────────────────────────
+// Face Recognition Attendance
+// ──────────────────────────────────────────────────────────
+export interface FaceDescriptor {
+  studentId: string;
+  descriptors: number[][];
+  enrolledAt: string;
+}
+
+export interface FaceAttendanceLog {
+  id: string;
+  studentId: string;
+  timestamp: string;
+  confidence: number;
+  method: "face" | "qr" | "manual";
+  sessionId: string;
+}
+
+// ──────────────────────────────────────────────────────────
+// Library Management
+// ──────────────────────────────────────────────────────────
+export interface LibraryBook {
+  id: string;
+  isbn: string;
+  title: string;
+  author: string;
+  publisher?: string;
+  category: string;
+  totalQty: number;
+  availableQty: number;
+  location?: string;
+  addedAt: string;
+}
+
+export interface BookIssue {
+  id: string;
+  bookId: string;
+  studentId: string;
+  issueDate: string;
+  dueDate: string;
+  returnDate?: string;
+  fine: number;
+  status: "issued" | "returned" | "overdue";
+}
+
+// ──────────────────────────────────────────────────────────
+// Online Examinations
+// ──────────────────────────────────────────────────────────
+export interface ExamQuestion {
+  id: string;
+  question: string;
+  options: string[];
+  correctAnswers: number[];
+  marks: number;
+}
+
+export interface OnlineExam {
+  id: string;
+  title: string;
+  subject: string;
+  classId: string;
+  sections: string[];
+  duration: number;
+  totalMarks: number;
+  passPercentage: number;
+  startTime: string;
+  endTime: string;
+  questions: ExamQuestion[];
+  status: "draft" | "active" | "completed";
+  createdBy: string;
+}
+
+export interface ExamAttempt {
+  id: string;
+  examId: string;
+  studentId: string;
+  answers: Record<string, number[]>;
+  score: number;
+  totalMarks: number;
+  percentage: number;
+  passed: boolean;
+  startedAt: string;
+  submittedAt: string;
+  timeTaken: number;
+}
+
+// ──────────────────────────────────────────────────────────
+// GPS Transport Tracking
+// ──────────────────────────────────────────────────────────
+export interface DriverLocation {
+  driverId: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: string;
+  routeId: string;
+  isActive: boolean;
+}
+
+export interface TransportTrip {
+  id: string;
+  routeId: string;
+  driverId: string;
+  startTime: string;
+  endTime?: string;
+  status: "active" | "completed";
+  locations: DriverLocation[];
+}
+
+// ──────────────────────────────────────────────────────────
+// Bulk WhatsApp / SMS Broadcast
+// ──────────────────────────────────────────────────────────
+export interface BroadcastRecipientFilter {
+  type: "class" | "all" | "route";
+  classId?: string;
+  section?: string;
+  routeId?: string;
+}
+
+export interface BroadcastCampaign {
+  id: string;
+  title: string;
+  channel: "whatsapp" | "sms" | "both";
+  recipients: BroadcastRecipientFilter;
+  template: string;
+  message: string;
+  scheduledAt?: string;
+  sentAt?: string;
+  status: "draft" | "scheduled" | "sending" | "sent" | "failed";
+  totalRecipients: number;
+  delivered: number;
+  failed: number;
+  createdBy: string;
+}
+
+// ──────────────────────────────────────────────────────────
+// Parent PWA Push Notifications
+// ──────────────────────────────────────────────────────────
+export interface PushSubscription {
+  id: string;
+  userId: string;
+  endpoint: string;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  role: string;
+  createdAt: string;
+}
+
+export interface PushNotificationPayload {
+  title: string;
+  body: string;
+  icon?: string;
+  url?: string;
+  type: "attendance" | "fees" | "exam" | "homework" | "broadcast";
+  studentId?: string;
+}
+
+// ──────────────────────────────────────────────────────────
+// Student Performance Analytics
+// ──────────────────────────────────────────────────────────
+export interface MarksHistoryEntry {
+  examTitle: string;
+  subject: string;
+  score: number;
+  totalMarks: number;
+  date: string;
+}
+
+export interface AttendanceSummaryEntry {
+  present: number;
+  total: number;
+  month: string;
+}
+
+export interface FeesHistoryEntry {
+  month: string;
+  paid: number;
+  due: number;
+}
+
+export interface StudentAnalytics {
+  studentId: string;
+  marksHistory: MarksHistoryEntry[];
+  attendanceSummary: AttendanceSummaryEntry[];
+  feesHistory: FeesHistoryEntry[];
+}

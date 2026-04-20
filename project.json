@@ -1,29 +1,31 @@
 {
-  "overview": "School Ledger ERP is a comprehensive, server-centric school management system for Indian schools. All data is stored in MySQL on cPanel hosting and syncs across all devices in real time. It covers all school operations: student management, fees collection (INR), attendance (RFID/QR/biometric), examinations, HR/payroll, transport, inventory, communication (WhatsApp), chat, certificates, alumni, reports, and more — all in a fast, mobile-optimized PWA.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular, web-based School Management ERP for Indian schools. It is a fully mobile-optimized PWA supporting all user roles with MySQL backend on cPanel. Features include student management, fees collection, attendance (face recognition, QR, RFID, biometric), online exams with auto-grading, GPS transport tracking, library management, parent push notifications, student performance analytics, and bulk WhatsApp/SMS broadcast.",
   "features": [
-    "Full cPanel/MySQL backend — all data saved to server, syncs across every device in real time",
-    "20+ modules: Students, Fees, Attendance, HR/Payroll, Academics, Transport, Inventory, Exams, Chat, Communication, Certificates, Reports",
-    "Excel-style grids with rich filters, bulk actions, import/export for students and staff",
-    "Fees collection with auto-month selection, receipt generation (4 templates), QR code receipts, balance carry-forward",
-    "WhatsApp auto-reply bot — parents send admission number, receive attendance + fees summary",
-    "Role-based permissions: Super Admin, Admin, Teacher, Parent, Student, Driver, Accountant, Librarian",
-    "PWA — installable on Android/iOS, mobile bottom navigation, offline support",
-    "Fast performance: skeleton loading, parallel data fetches, 50-record pagination, client-side cache",
-    "Chat system: DMs between any users, auto-generated class/section/route groups, file sharing",
-    "Complete documentation and cPanel deployment guide included"
+    "AI Face Recognition Attendance — camera auto-marks students present on entry",
+    "UPI QR Code Payment — GPay/PhonePe QR on fee collection screen, auto-updates fee register",
+    "Online Exam + Auto-Grading — MCQ tests assigned to classes, auto-graded results",
+    "Parent PWA Push Notifications — instant alerts for attendance, fees due, and results",
+    "Student Performance Analytics — charts for marks trend, attendance %, and fees history",
+    "Library + Barcode Scanning — issue/return books, overdue reminders, barcode support",
+    "GPS Transport Tracking — live bus location for parents via driver's phone",
+    "Bulk WhatsApp/SMS Broadcast — send circulars, results, timetables to all parents",
+    "Role-based access control for all user types (Super Admin, Admin, Teacher, Parent, Student, Driver)",
+    "Multi-school/branch support with infinite session management",
+    "Complete fee management with UPI QR payment integration",
+    "PWA installable on Android/iOS with offline support"
   ],
-  "category": "productivity",
+  "category": "education",
   "tags": [
     "school-erp",
     "school-management",
-    "education",
-    "fees-management",
     "attendance",
-    "payroll",
+    "fees",
     "india",
-    "cpanel",
+    "pwa",
     "mysql",
-    "pwa"
+    "face-recognition",
+    "online-exam",
+    "gps-tracking"
   ],
-  "last_updated": "2026-04-19T17:52:32.038Z"
+  "last_updated": "2026-04-20T15:37:09.610Z"
 }

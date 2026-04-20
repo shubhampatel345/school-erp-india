@@ -13,6 +13,7 @@ import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
 import { DEFAULT_TRANSPORT_MONTHS, MONTHS } from "../types";
 import { formatCurrency, generateId } from "../utils/localStorage";
+import LiveTracking from "./transport/LiveTracking";
 
 // ── Local types ────────────────────────────────────────────
 interface PickupPoint {
@@ -33,12 +34,13 @@ interface TransportRoute {
   driverMobile: string;
 }
 
-type Tab = "routes" | "pickup" | "students" | "report";
+type Tab = "routes" | "pickup" | "students" | "report" | "livetracking";
 const TABS: { id: Tab; label: string }[] = [
   { id: "routes", label: "Routes" },
   { id: "pickup", label: "Pickup Points" },
   { id: "students", label: "Student Transport" },
   { id: "report", label: "Transport Report" },
+  { id: "livetracking", label: "🗺️ Live Tracking" },
 ];
 
 const EMPTY_ROUTE: Omit<TransportRoute, "id"> = {
@@ -933,6 +935,9 @@ export default function Transport() {
           ))}
         </div>
       )}
+
+      {/* ── LIVE TRACKING TAB ── */}
+      {tab === "livetracking" && <LiveTracking />}
 
       {/* Route Modal */}
       {showRouteModal && (

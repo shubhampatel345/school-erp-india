@@ -2,45 +2,66 @@
  * FeesPlan.tsx — Class-wise, section-wise fee plans
  *
  * Collection key: "fees_plan" (matches server MySQL table)
- * Amounts stored as JSON: {"Apr":1000,"May":1000,...}
- * Each plan row: classId + sectionId + headingId → amounts per month
+ * Each plan row: classId + sectionId + headingId → amounts per month (JSON)
+ * Single `amount` field = the base amount applied to all applicable months.
  *
- * CRITICAL: input fields MUST be editable (not readonly).
+ * FIXES:
+ * - Inputs are type="text" inputMode="decimal" — no browser spinner arrows
+ * - disabled only when isReadOnly (archived session), never when canEdit roles
+ * - safeMonths() normalises months whether string[] or JSON string or CSV
+ * - parseAmounts handles NULL / plain number / JSON object from MySQL
+ * - Save posts via updateData / saveData which push to MySQL via syncEngine
+ * - Refresh after save so new amounts appear immediately
  */
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "../../components/ui/button";
-import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
 import { CLASS_ORDER } from "../../types";
 import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
 
-function safeArray<T>(v: T[] | string | undefined): T[] {
-  if (Array.isArray(v)) return v;
-  if (typeof v === "string" && v) {
+// ─── helpers ─────────────────────────────────────────────────────────────────
+
+/** Safely convert any value to string[] (handles JSON string, CSV, or real array) */
+function safeStringArray(v: unknown): string[] {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === "string" && v.trim()) {
+    // try JSON first
     try {
       const p = JSON.parse(v);
-      return Array.isArray(p) ? p : [];
+      if (Array.isArray(p)) return p.map(String);
     } catch {
-      return [];
+      // not JSON — try CSV
+      return v
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     }
   }
   return [];
 }
 
-/** Parse the amounts field which may be a JSON string or an object */
+/**
+ * Parse the amounts field which may be:
+ *  - null / undefined → {}
+ *  - a plain number    → {} (caller should fall back to plan.amount)
+ *  - a JSON object string → { "Apr": 1000, ... }
+ *  - already an object    → pass through
+ */
 function parseAmounts(amounts: unknown): Record<string, number> {
-  if (!amounts) return {};
+  if (!amounts && amounts !== 0) return {};
+  if (typeof amounts === "number") return {}; // single amount — caller uses plan.amount
   if (typeof amounts === "object" && !Array.isArray(amounts)) {
     return amounts as Record<string, number>;
   }
-  if (typeof amounts === "string" && amounts) {
+  if (typeof amounts === "string" && amounts.trim()) {
     try {
-      const p = JSON.parse(amounts);
-      if (typeof p === "object" && !Array.isArray(p))
+      const p = JSON.parse(amounts) as unknown;
+      if (typeof p === "object" && !Array.isArray(p) && p !== null) {
         return p as Record<string, number>;
+      }
     } catch {
-      // ignore
+      // not parseable JSON — ignore
     }
   }
   return {};
@@ -61,11 +82,14 @@ const MONTH_SHORT: Record<string, string> = {
   March: "Mar",
 };
 
+// ─── component ───────────────────────────────────────────────────────────────
+
 export default function FeesPlanPage() {
   const {
     getData,
     saveData,
     updateData,
+    refreshCollection,
     currentUser,
     isReadOnly,
     currentSession,
@@ -74,31 +98,34 @@ export default function FeesPlanPage() {
 
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [selectedSection, setSelectedSection] = useState<string>("");
-  // editValues[headingId][month] = amount string
+  // editValues[headingId][monthShort] = amount string (empty = 0)
   const [editValues, setEditValues] = useState<
     Record<string, Record<string, string>>
   >({});
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
 
+  // Who can edit fee amounts
   const canEdit =
     currentUser?.role === "superadmin" ||
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // Load from context — collection keys match server
+  // ── Raw collections ─────────────────────────────────────────────────────────
   const rawHeadings = getData("fee_headings") as FeeHeading[];
+
+  /** Headings with months always as a real string[] */
   const headings = rawHeadings
     .map((h) => ({
       ...h,
-      months: safeArray<string>(h.months as unknown as string[]),
+      months: safeStringArray(h.months),
     }))
     .filter((h) => h.isActive !== false)
     .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
 
   const plans = getData("fees_plan") as FeesPlan[];
 
-  // Class list from context, sorted by CLASS_ORDER
+  // ── Classes ─────────────────────────────────────────────────────────────────
   const classSections: ClassSection[] = useMemo(() => {
     const cs = getData("classes") as ClassSection[];
     if (cs.length > 0) {
@@ -130,63 +157,19 @@ export default function FeesPlanPage() {
         selectedClass,
     );
     if (!cs) return [];
-    return safeArray<string>(cs.sections as unknown as string[]);
+    return safeStringArray(cs.sections);
   }, [classSections, selectedClass]);
 
-  // Headings applicable to selected class
+  /** Headings applicable to the selected class */
   const activeHeadings = useMemo(() => {
     if (!selectedClass) return headings;
-    return headings.filter(
-      (h) =>
-        !h.applicableClasses ||
-        h.applicableClasses.length === 0 ||
-        safeArray<string>(h.applicableClasses as unknown as string[]).includes(
-          selectedClass,
-        ),
-    );
+    return headings.filter((h) => {
+      const ac = safeStringArray(h.applicableClasses);
+      return ac.length === 0 || ac.includes(selectedClass);
+    });
   }, [headings, selectedClass]);
 
-  // When class or section changes, load existing plan amounts into editValues
-  useEffect(() => {
-    if (!selectedClass || !selectedSection || activeHeadings.length === 0) {
-      setEditValues({});
-      return;
-    }
-
-    const vals: Record<string, Record<string, string>> = {};
-    for (const heading of activeHeadings) {
-      vals[heading.id] = {};
-      const plan = plans.find(
-        (p) =>
-          (p.classId === selectedClass ||
-            (p as unknown as Record<string, string>).className ===
-              selectedClass) &&
-          (p.sectionId === selectedSection ||
-            (p as unknown as Record<string, string>).sectionName ===
-              selectedSection) &&
-          p.headingId === heading.id,
-      );
-
-      const headingMonths = heading.months;
-      for (const month of MONTHS) {
-        if (!headingMonths.includes(month)) continue;
-        const short = MONTH_SHORT[month] ?? month.slice(0, 3);
-        if (plan?.amounts) {
-          const amts = parseAmounts(plan.amounts);
-          vals[heading.id][short] =
-            amts[short] !== undefined ? String(amts[short]) : "";
-        } else if (plan?.amount) {
-          vals[heading.id][short] = String(plan.amount);
-        } else {
-          vals[heading.id][short] = "";
-        }
-      }
-    }
-    setEditValues(vals);
-    setSavedMsg("");
-  }, [selectedClass, selectedSection, activeHeadings, plans]);
-
-  // Auto-select first section when class changes
+  // ── Auto-select first section when class changes ─────────────────────────
   useEffect(() => {
     if (activeSections.length > 0) {
       setSelectedSection(activeSections[0]);
@@ -195,30 +178,93 @@ export default function FeesPlanPage() {
     }
   }, [activeSections]);
 
+  // ── Load existing plan amounts into editValues ────────────────────────────
+  useEffect(() => {
+    if (!selectedClass || !selectedSection || activeHeadings.length === 0) {
+      setEditValues({});
+      return;
+    }
+
+    const vals: Record<string, Record<string, string>> = {};
+
+    for (const heading of activeHeadings) {
+      vals[heading.id] = {};
+
+      // Find existing plan for this class + section + heading
+      const plan = plans.find((p) => {
+        const planClass =
+          p.classId ||
+          (p as unknown as Record<string, string>).className ||
+          (p as unknown as Record<string, string>).class ||
+          "";
+        const planSection =
+          p.sectionId ||
+          (p as unknown as Record<string, string>).sectionName ||
+          (p as unknown as Record<string, string>).section ||
+          "";
+        return (
+          planClass === selectedClass &&
+          planSection === selectedSection &&
+          p.headingId === heading.id
+        );
+      });
+
+      for (const month of MONTHS) {
+        if (!heading.months.includes(month)) continue;
+        const short = MONTH_SHORT[month] ?? month.slice(0, 3);
+
+        let val = "";
+        if (plan) {
+          // Try amounts map first, fall back to single amount field
+          if (plan.amounts && typeof plan.amounts === "object") {
+            const amts = plan.amounts as Record<string, number>;
+            val = amts[short] !== undefined ? String(amts[short]) : "";
+          } else if (plan.amounts) {
+            // Could be a JSON string stored in MySQL
+            const amts = parseAmounts(plan.amounts);
+            val = amts[short] !== undefined ? String(amts[short]) : "";
+          }
+          // Fall back to single amount field (one amount for all months)
+          if (!val && plan.amount) {
+            val = String(plan.amount);
+          }
+        }
+
+        vals[heading.id][short] = val;
+      }
+    }
+
+    setEditValues(vals);
+    setSavedMsg("");
+  }, [selectedClass, selectedSection, activeHeadings, plans]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
   function handleAmountChange(
     headingId: string,
     monthShort: string,
-    value: string,
+    raw: string,
   ) {
-    if (!canEdit) return;
+    // Accept digits and a single decimal point only
+    const cleaned = raw.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
     setEditValues((prev) => ({
       ...prev,
       [headingId]: {
-        ...prev[headingId],
-        [monthShort]: value,
+        ...(prev[headingId] ?? {}),
+        [monthShort]: cleaned,
       },
     }));
     setSavedMsg("");
   }
 
-  /** Copy amounts from one section to all other sections of the same class */
+  /** Copy amounts from the current section to all other sections of the same class */
   async function copyToAllSections() {
     if (!selectedClass || !selectedSection || !canEdit) return;
     const otherSections = activeSections.filter((s) => s !== selectedSection);
     if (otherSections.length === 0) return;
     if (
       !confirm(
-        `Copy amounts from Section ${selectedSection} to sections: ${otherSections.join(", ")}?`,
+        `Copy amounts from Section ${selectedSection} to: ${otherSections.join(", ")}?`,
       )
     )
       return;
@@ -240,27 +286,35 @@ export default function FeesPlanPage() {
           }
           if (!hasAny) continue;
 
-          const existing = plans.find(
-            (p) =>
-              (p.classId === selectedClass ||
-                (p as unknown as Record<string, string>).className ===
-                  selectedClass) &&
-              (p.sectionId === section ||
-                (p as unknown as Record<string, string>).sectionName ===
-                  section) &&
-              p.headingId === heading.id,
-          );
+          const existing = plans.find((p) => {
+            const pc =
+              p.classId ||
+              (p as unknown as Record<string, string>).className ||
+              "";
+            const ps =
+              p.sectionId ||
+              (p as unknown as Record<string, string>).sectionName ||
+              "";
+            return (
+              pc === selectedClass &&
+              ps === section &&
+              p.headingId === heading.id
+            );
+          });
 
           const planData = {
             classId: selectedClass,
             sectionId: section,
             className: selectedClass,
             sectionName: section,
+            class: selectedClass,
+            section,
             headingId: heading.id,
             headingName: heading.name,
-            amounts,
+            amounts: JSON.stringify(amounts),
             amount: Object.values(amounts)[0] ?? 0,
             sessionId: currentSession?.id ?? "",
+            session: currentSession?.id ?? "",
           };
 
           if (existing) {
@@ -276,6 +330,11 @@ export default function FeesPlanPage() {
       addNotification(
         `Amounts copied to all sections of Class ${selectedClass}`,
         "success",
+      );
+    } catch (err) {
+      addNotification(
+        `Copy failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        "error",
       );
     } finally {
       setSaving(false);
@@ -301,32 +360,43 @@ export default function FeesPlanPage() {
         }
       }
 
-      const existing = plans.find(
-        (p) =>
-          (p.classId === selectedClass ||
-            (p as unknown as Record<string, string>).className ===
-              selectedClass) &&
-          (p.sectionId === selectedSection ||
-            (p as unknown as Record<string, string>).sectionName ===
-              selectedSection) &&
-          p.headingId === heading.id,
-      );
+      const existing = plans.find((p) => {
+        const pc =
+          p.classId ||
+          (p as unknown as Record<string, string>).className ||
+          (p as unknown as Record<string, string>).class ||
+          "";
+        const ps =
+          p.sectionId ||
+          (p as unknown as Record<string, string>).sectionName ||
+          (p as unknown as Record<string, string>).section ||
+          "";
+        return (
+          pc === selectedClass &&
+          ps === selectedSection &&
+          p.headingId === heading.id
+        );
+      });
 
       const planData = {
         classId: selectedClass,
         sectionId: selectedSection,
         className: selectedClass,
         sectionName: selectedSection,
+        class: selectedClass,
+        section: selectedSection,
         headingId: heading.id,
         headingName: heading.name,
-        amounts,
+        amounts: JSON.stringify(amounts),
         amount: hasAny ? (Object.values(amounts)[0] ?? 0) : 0,
         sessionId: currentSession?.id ?? "",
+        session: currentSession?.id ?? "",
       };
 
       if (existing) {
         saves.push(updateData("fees_plan", existing.id, planData));
-      } else if (hasAny) {
+      } else {
+        // Save even when hasAny is false so zero-amount records exist
         saves.push(
           saveData("fees_plan", {
             id: generateId(),
@@ -336,29 +406,41 @@ export default function FeesPlanPage() {
       }
     }
 
-    await Promise.allSettled(saves);
-    setSaving(false);
-    setSavedMsg(`✓ Saved for ${selectedClass} - ${selectedSection}`);
-    addNotification(
-      `Fee plan saved for Class ${selectedClass} - Section ${selectedSection}`,
-      "success",
-    );
-    setTimeout(() => setSavedMsg(""), 3000);
+    try {
+      await Promise.allSettled(saves);
+      // Refresh from server to confirm save
+      await refreshCollection("fees_plan");
+      setSavedMsg(`✓ Saved — ${selectedClass} / ${selectedSection}`);
+      addNotification(
+        `Fee plan saved for Class ${selectedClass} - Section ${selectedSection}`,
+        "success",
+      );
+    } catch (err) {
+      addNotification(
+        `Save failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        "error",
+      );
+    } finally {
+      setSaving(false);
+      setTimeout(() => setSavedMsg(""), 4000);
+    }
   }
 
-  /** Compute column total for a heading (sum of all entered month amounts) */
+  // ── Totals ────────────────────────────────────────────────────────────────
+
   function getHeadingTotal(headingId: string): number {
-    const vals = editValues[headingId] ?? {};
-    return Object.values(vals).reduce((s, v) => s + (Number(v) || 0), 0);
+    return Object.values(editValues[headingId] ?? {}).reduce(
+      (s, v) => s + (Number(v) || 0),
+      0,
+    );
   }
 
-  /** Compute row total for a month (sum across all headings) */
   function getMonthTotal(monthShort: string): number {
     return activeHeadings.reduce((s, h) => {
-      if (
-        !h.months.some((m) => (MONTH_SHORT[m] ?? m.slice(0, 3)) === monthShort)
-      )
-        return s;
+      const applicable = h.months.some(
+        (m) => (MONTH_SHORT[m] ?? m.slice(0, 3)) === monthShort,
+      );
+      if (!applicable) return s;
       return s + (Number(editValues[h.id]?.[monthShort] ?? 0) || 0);
     }, 0);
   }
@@ -367,6 +449,8 @@ export default function FeesPlanPage() {
     (s, h) => s + getHeadingTotal(h.id),
     0,
   );
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
@@ -496,7 +580,7 @@ export default function FeesPlanPage() {
                             return (
                               <th
                                 key={m}
-                                className="px-2 py-2.5 text-center font-semibold min-w-[70px]"
+                                className="px-2 py-2.5 text-center font-semibold min-w-[72px]"
                               >
                                 {short}
                               </th>
@@ -526,6 +610,8 @@ export default function FeesPlanPage() {
                               {MONTHS.map((m) => {
                                 const short = MONTH_SHORT[m] ?? m.slice(0, 3);
                                 const isApplicable = heading.months.includes(m);
+                                const currentVal =
+                                  editValues[heading.id]?.[short] ?? "";
                                 return (
                                   <td
                                     key={m}
@@ -536,23 +622,37 @@ export default function FeesPlanPage() {
                                         <span className="text-muted-foreground text-[10px]">
                                           ₹
                                         </span>
-                                        <Input
-                                          type="number"
-                                          min="0"
-                                          value={
-                                            editValues[heading.id]?.[short] ??
-                                            ""
-                                          }
+                                        <input
+                                          type="text"
+                                          inputMode="numeric"
+                                          pattern="[0-9]*"
+                                          value={currentVal}
                                           onChange={(e) =>
+                                            canEdit &&
+                                            !isReadOnly &&
                                             handleAmountChange(
                                               heading.id,
                                               short,
                                               e.target.value,
                                             )
                                           }
-                                          disabled={!canEdit || isReadOnly}
-                                          className="h-7 text-center text-xs w-16 px-1"
+                                          onFocus={(e) => {
+                                            if (e.target.value === "0")
+                                              e.target.select();
+                                          }}
+                                          disabled={isReadOnly || !canEdit}
                                           placeholder="0"
+                                          className={[
+                                            "h-7 w-16 text-center text-xs px-1 rounded border",
+                                            "bg-background text-foreground",
+                                            "border-input focus:border-primary focus:ring-1 focus:ring-primary/30",
+                                            "outline-none transition-colors",
+                                            isReadOnly || !canEdit
+                                              ? "opacity-50 cursor-not-allowed bg-muted"
+                                              : "hover:border-primary/40",
+                                          ]
+                                            .filter(Boolean)
+                                            .join(" ")}
                                           data-ocid="fees-plan.amount-input"
                                         />
                                       </div>
@@ -606,10 +706,16 @@ export default function FeesPlanPage() {
                     </table>
                   </div>
 
-                  {!canEdit && (
+                  {!canEdit && !isReadOnly && (
                     <div className="p-3 bg-amber-50 border-t border-amber-200 text-amber-700 text-sm text-center">
                       Only Super Admin, Admin, or Accountant can edit fee
                       amounts.
+                    </div>
+                  )}
+                  {isReadOnly && (
+                    <div className="p-3 bg-amber-50 border-t border-amber-200 text-amber-700 text-sm text-center">
+                      This session is archived. Switch to the active session to
+                      edit.
                     </div>
                   )}
                 </div>
