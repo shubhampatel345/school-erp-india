@@ -1,16 +1,14 @@
 /**
  * SHUBH SCHOOL ERP — AppContext
  *
- * WhatsApp-style sync:
- * - On login: show loading screen → fetch ALL data from MySQL → render
- * - On any change: update local state + push ONLY changed record to server
- * - Token stored in sessionStorage (not localStorage)
- * - If server unreachable: show error with Retry — never show stale data
- *
- * FIXED: saveData/updateData/deleteData now await server confirmation, then
- * call refreshCollection() so all consumers see fresh MySQL data immediately.
- * Success notification only fires after server confirms.
- * Rollback happens on server error.
+ * LOCAL-FIRST sync pattern:
+ * - On login: show locally cached data IMMEDIATELY (no blank screen)
+ *   Then fetch fresh from server in background and merge
+ * - On any change: write to localStorage FIRST → success to user immediately
+ *   Then push to server in background via SyncQueue (persistent across refresh)
+ * - NEVER rollback data — if server push fails, data stays in localStorage
+ *   and retries automatically with exponential backoff
+ * - SyncQueue persists across page refresh and browser crashes
  */
 
 import {
@@ -438,8 +436,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Initialize: fetch ALL data from server after login ─────────────────────
-  // PERFORMANCE: Show the app immediately using cached data, fetch fresh in background.
+  // ── Initialize: LOCAL-FIRST — show cached data immediately, fetch server in background ──
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     if (initStartedRef.current) return;
@@ -465,31 +462,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        // syncEngine.initialize() returns cached data instantly if available,
-        // then fetches fresh data from MySQL in the background.
-        // Either way we get data back — cached or fresh.
+        // syncEngine.initialize() returns cached data IMMEDIATELY.
+        // Server fetch happens in background and merges via subscribers.
+        // This means the app renders instantly with cached data — no blank screen.
         const allData = await syncEngine.initialize(token);
 
-        // Extract sessions from data
+        // Extract sessions from cached data
         const serverSessions = (allData.sessions ?? []) as Session[];
 
         // If sessions table is empty, seed default session
         if (serverSessions.length === 0) {
           const defaultSession = makeDefaultSession();
-          try {
-            await syncEngine.saveRecord(
-              "sessions",
-              defaultSession as unknown as Record<string, unknown>,
-              "create",
-            );
-          } catch {
-            // ignore — continue with default in memory
-          }
+          // Save locally first (non-blocking)
+          void syncEngine.saveRecord(
+            "sessions",
+            defaultSession as unknown as Record<string, unknown>,
+            "create",
+          );
           serverSessions.push(defaultSession);
         }
 
-        // Render app immediately with whatever data we have (cached or fresh).
-        // If it was cached, the SyncEngine will notify subscribers when fresh data arrives.
+        // Render app with cached data immediately
         dispatch({
           type: "SET_INIT_DONE",
           data: allData,
@@ -869,12 +862,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.token],
   );
 
-  // ── saveData — create a new record ────────────────────────────────────────
+  // ── saveData — LOCAL-FIRST create ────────────────────────────────────────
   // Pattern:
-  //   1. Optimistic: add to local cache immediately (user sees instant feedback)
-  //   2. Await server confirmation
-  //   3. On success: refreshCollection pulls real server data (correct IDs etc.)
-  //   4. On failure: rollback optimistic update, throw error for caller to handle
+  //   1. Write to localStorage immediately (permanent — never lost)
+  //   2. Update in-memory cache → UI re-renders instantly
+  //   3. Return success to caller IMMEDIATELY (no waiting for server)
+  //   4. Server push happens in background via SyncQueue
+  //   5. NEVER rollback — data stays in localStorage even if server fails
   const saveData = useCallback(
     async (
       collection: string,
@@ -883,37 +877,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
 
-      // Optimistic: add to local cache so list updates instantly
-      syncEngine.updateCache(collection, item, "create");
+      // saveRecord() writes to localStorage + cache first, then pushes to server
+      // in background. Returns immediately — no awaiting server.
+      const saved = await syncEngine.saveRecord(collection, item, "create");
+
+      // Update context state with latest cache
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getCache(collection),
       });
 
-      try {
-        const saved = await syncEngine.saveRecord(collection, item, "create");
+      // Background refresh (non-blocking) — updates UI when server responds
+      void refreshCollection(collection);
 
-        // Server confirmed — refresh collection to get real server data
-        // (server may assign a different ID or normalize fields)
-        await refreshCollection(collection);
-
-        return saved;
-      } catch (err) {
-        // Rollback: remove the optimistic record
-        syncEngine.updateCache(collection, item, "delete");
-        dispatch({
-          type: "UPDATE_COLLECTION",
-          collection,
-          records: syncEngine.getCache(collection),
-        });
-        throw err;
-      }
+      return saved;
     },
     [state.token, refreshCollection],
   );
 
-  // ── updateData — edit an existing record ──────────────────────────────────
+  // ── updateData — LOCAL-FIRST edit ──────────────────────────────────────────
   const updateData = useCallback(
     async (
       collection: string,
@@ -923,78 +906,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
 
-      // Snapshot current record for potential rollback
       const existing = syncEngine.getCache(collection) as Array<
         Record<string, unknown>
       >;
       const currentRecord = existing.find((r) => r.id === id);
       const merged = { ...(currentRecord ?? {}), ...changes, id };
 
-      // Optimistic update
-      syncEngine.updateCache(collection, merged, "update");
+      // Write locally + queue for background push
+      await syncEngine.saveRecord(collection, merged, "update");
+
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getCache(collection),
       });
 
-      try {
-        await syncEngine.saveRecord(collection, merged, "update");
-
-        // Server confirmed — refresh to get canonical server data
-        await refreshCollection(collection);
-      } catch (err) {
-        // Rollback to previous record
-        if (currentRecord) {
-          syncEngine.updateCache(collection, currentRecord, "update");
-        }
-        dispatch({
-          type: "UPDATE_COLLECTION",
-          collection,
-          records: syncEngine.getCache(collection),
-        });
-        throw err;
-      }
+      // Background refresh (non-blocking)
+      void refreshCollection(collection);
     },
     [state.token, refreshCollection],
   );
 
-  // ── deleteData — remove a record ──────────────────────────────────────────
+  // ── deleteData — LOCAL-FIRST delete ──────────────────────────────────────
   const deleteData = useCallback(
     async (collection: string, id: string): Promise<void> => {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
 
-      // Snapshot for rollback
-      const existing = syncEngine.getCache(collection) as Array<
-        Record<string, unknown>
-      >;
-      const deletedRecord = existing.find((r) => r.id === id);
+      // Remove from cache immediately + queue delete for background push
+      await syncEngine.saveRecord(collection, { id }, "delete");
 
-      // Optimistic delete
-      syncEngine.updateCache(collection, { id }, "delete");
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getCache(collection),
       });
 
-      try {
-        await syncEngine.saveRecord(collection, { id }, "delete");
-        // After confirmed delete, refresh to ensure server-side cascades are reflected
-        await refreshCollection(collection);
-      } catch (err) {
-        // Rollback: restore deleted record
-        if (deletedRecord) {
-          syncEngine.updateCache(collection, deletedRecord, "create");
-        }
-        dispatch({
-          type: "UPDATE_COLLECTION",
-          collection,
-          records: syncEngine.getCache(collection),
-        });
-        throw err;
-      }
+      // Background refresh to confirm server state
+      void refreshCollection(collection);
     },
     [state.token, refreshCollection],
   );
@@ -1011,11 +960,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     syncCounts[k] = v.length;
   }
 
-  // ── Render loading screen during initial server fetch ──────────────────────
-  // ALWAYS block rendering until the server responds (or we fall back to
-  // offline mode).  This ensures every device sees real MySQL data on first
-  // render, not a stale empty-cache state.
-  const showLoading = state.currentUser !== null && state.isInitializing;
+  // ── LOCAL-FIRST: Only show loading screen when we have NO cached data ──────
+  // If we have cached data, render the app immediately.
+  // The server fetch happening in background will update via subscribers.
+  const hasCachedData = Object.keys(state.data).length > 0;
+  const showLoading =
+    state.currentUser !== null && state.isInitializing && !hasCachedData;
   const showError =
     state.currentUser !== null &&
     state.initError !== null &&

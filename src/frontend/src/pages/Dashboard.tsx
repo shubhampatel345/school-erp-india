@@ -101,6 +101,8 @@ function SyncBar() {
     needsAuth,
     serverCounts,
     syncedCounts,
+    pendingSyncCount,
+    failedSyncCount,
   } = useSync();
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -208,6 +210,29 @@ function SyncBar() {
       >
         {cfg.badgeText}
       </Badge>
+
+      {/* Pending sync queue indicator — shown when changes are waiting to push to server */}
+      {pendingSyncCount > 0 && (
+        <span
+          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/30 flex items-center gap-1"
+          title={`${pendingSyncCount} change${pendingSyncCount !== 1 ? "s" : ""} saved locally, syncing to server in background`}
+          data-ocid="dashboard.sync_pending_badge"
+        >
+          <Loader2 className="w-2.5 h-2.5 animate-spin" />
+          {pendingSyncCount} pending
+        </span>
+      )}
+
+      {/* Failed sync indicator */}
+      {failedSyncCount > 0 && (
+        <span
+          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/30"
+          title={`${failedSyncCount} change${failedSyncCount !== 1 ? "s" : ""} failed to sync. Data is safe locally. Check Settings to fix.`}
+          data-ocid="dashboard.sync_failed_badge"
+        >
+          {failedSyncCount} sync failed
+        </span>
+      )}
 
       {mode === "offline" && lastSyncError && (
         <span className="text-xs text-destructive/70 ml-1 truncate max-w-[200px]">

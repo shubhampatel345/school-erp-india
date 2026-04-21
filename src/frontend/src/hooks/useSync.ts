@@ -3,9 +3,10 @@
  *
  * Polls /api/sync/status every 30 s when an API URL is configured.
  * Exposes serverCounts from /sync/status (real MySQL COUNT(*)) for dashboard.
+ * Exposes SyncQueue pending/failed counts for the sync indicator badge.
  * Returns live connection state consumed by Dashboard and other components.
  *
- * Performance fix: window focus NO LONGER triggers a full re-fetch.
+ * Performance fix: window focus NO LONGER triggers a full re-fetch every time.
  * Re-fetch only happens if last fetch was >5 min ago, or user explicitly triggers.
  */
 
@@ -22,6 +23,7 @@ import {
   isApiConfigured,
 } from "../utils/api";
 import { dataService } from "../utils/dataService";
+import { syncEngine } from "../utils/syncEngine";
 
 export type SyncMode =
   | "local" // no API URL set — purely localStorage
@@ -52,6 +54,10 @@ export interface SyncState {
    * Use serverCounts for display; use syncedCounts only for the tooltip breakdown.
    */
   syncedCounts: Record<string, number>;
+  /** Number of changes pending background sync to server */
+  pendingSyncCount: number;
+  /** Number of changes that failed to sync after max retries */
+  failedSyncCount: number;
   /** Manually trigger an immediate sync + data refresh */
   triggerSync: () => Promise<void>;
 }
@@ -104,6 +110,17 @@ export function useSync(): SyncState {
   const [needsAuth, setNeedsAuth] = useState(false);
   const [serverInfo, setServerInfo] = useState<SyncState["serverInfo"]>(null);
   const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
+
+  // Subscribe to SyncEngine for queue stats
+  const [queueStats, setQueueStats] = useState(() =>
+    syncEngine.getQueueStats(),
+  );
+  useEffect(() => {
+    const unsub = syncEngine.subscribe(() => {
+      setQueueStats(syncEngine.getQueueStats());
+    });
+    return unsub;
+  }, []);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const activeRef = useRef(true);
@@ -308,6 +325,8 @@ export function useSync(): SyncState {
     serverInfo,
     serverCounts,
     syncedCounts,
+    pendingSyncCount: queueStats.pending,
+    failedSyncCount: queueStats.failed,
     triggerSync: runCheck,
   };
 }
