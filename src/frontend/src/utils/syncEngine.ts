@@ -11,6 +11,11 @@
  * App startup:
  * - Show cached data immediately (no blank screen)
  * - Fetch fresh from server in background → merge (server wins for confirmed, local wins for pending)
+ *
+ * KEY INVARIANT:
+ * - refreshCollection() merges pending local records OVER server data — pending records ALWAYS WIN.
+ * - Background sync SKIPS a collection refresh if that collection has pending records.
+ * - After pushQueueEntry() succeeds, a merge-refresh fires so the UI gets the server-confirmed state.
  */
 
 import type { SyncStatus } from "../types";
@@ -161,6 +166,19 @@ class SyncQueue {
     return this.getAll().filter((e) => e.failed);
   }
 
+  /** Returns true if any non-failed entries exist for the given collection */
+  hasPendingForCollection(collection: string): boolean {
+    for (const e of this.entries.values()) {
+      if (e.collection === collection && !e.failed) return true;
+    }
+    return false;
+  }
+
+  /** Returns all pending (non-failed) entries for a specific collection */
+  getPendingForCollection(collection: string): QueueEntry[] {
+    return this.getPending().filter((e) => e.collection === collection);
+  }
+
   clear(): void {
     this.entries.clear();
     this.persist();
@@ -226,6 +244,12 @@ const MAX_RETRIES = 3;
 const BACKOFF_BASE_MS = 1000;
 const BACKGROUND_SYNC_INTERVAL_MS = 30_000;
 
+/** Callback type: called when a collection's data has changed in the local cache */
+type CollectionUpdateCallback = (
+  collection: string,
+  records: unknown[],
+) => void;
+
 class SyncEngine {
   private token: string | null = null;
   private syncStatus: SyncStatus = {
@@ -237,6 +261,7 @@ class SyncEngine {
   };
   private syncQueue = new SyncQueue();
   private subscribers: Set<() => void> = new Set();
+  private collectionUpdateCallbacks: Set<CollectionUpdateCallback> = new Set();
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private bgSyncTimer: ReturnType<typeof setInterval> | null = null;
   private isOnline = true;
@@ -248,8 +273,23 @@ class SyncEngine {
     return () => this.subscribers.delete(callback);
   }
 
+  /**
+   * Register a callback that fires whenever a specific collection's data
+   * is updated in the local cache (after server push confirmation).
+   * AppContext uses this to dispatch UPDATE_COLLECTION without doing a
+   * full server refetch.
+   */
+  onCollectionUpdated(callback: CollectionUpdateCallback): () => void {
+    this.collectionUpdateCallbacks.add(callback);
+    return () => this.collectionUpdateCallbacks.delete(callback);
+  }
+
   private notify() {
     for (const fn of this.subscribers) fn();
+  }
+
+  private notifyCollection(collection: string, records: unknown[]) {
+    for (const fn of this.collectionUpdateCallbacks) fn(collection, records);
   }
 
   private setStatus(
@@ -267,6 +307,44 @@ class SyncEngine {
       ...(serverCounts ? { serverCounts } : {}),
     };
     this.notify();
+  }
+
+  /**
+   * Returns true if there are any non-failed pending queue entries for a collection.
+   * If true, a server refresh for that collection MUST merge rather than replace.
+   */
+  hasPendingRecords(collection: string): boolean {
+    return this.syncQueue.hasPendingForCollection(collection);
+  }
+
+  /**
+   * Returns the current in-memory cache for a collection, merged with any
+   * pending local records (pending records WIN over server data for same ID).
+   * This is the source of truth for the UI — local is always authoritative.
+   */
+  getLocalCollection(collection: string): unknown[] {
+    const cached = (this.allDataCache[collection] ?? []) as Record<
+      string,
+      unknown
+    >[];
+    const pending = this.syncQueue.getPendingForCollection(collection);
+    if (pending.length === 0) return cached;
+
+    // Merge: start with cached, overlay pending records (they win)
+    const merged = new Map<unknown, Record<string, unknown>>();
+    for (const row of cached) merged.set(row.id, row);
+    for (const entry of pending) {
+      if (entry.action === "delete") {
+        merged.delete(entry.data.id);
+      } else {
+        const existing = merged.get(entry.data.id);
+        merged.set(
+          entry.data.id,
+          existing ? { ...existing, ...entry.data } : entry.data,
+        );
+      }
+    }
+    return Array.from(merged.values());
   }
 
   /**
@@ -481,7 +559,8 @@ class SyncEngine {
 
   /**
    * Push a single queue entry to the server.
-   * On success: remove from queue.
+   * On success: remove from queue, then do a gentle merge-refresh of that collection
+   * so the UI eventually reflects the server-confirmed state.
    * On failure: increment retry, use exponential backoff, mark failed after max retries.
    */
   private async pushQueueEntry(queueId: string): Promise<void> {
@@ -515,6 +594,14 @@ class SyncEngine {
       this.syncQueue.dequeue(queueId);
       this.isOnline = true;
       this.setStatus("synced");
+
+      // After server confirms the push, do a gentle merge-refresh so the UI
+      // reflects the authoritative server state. We use refreshCollection()
+      // which correctly merges remaining pending records — safe to call here
+      // because we just dequeued this entry.
+      void this.refreshCollection(collection).then((merged) => {
+        this.notifyCollection(collection, merged);
+      });
     } catch (err) {
       const retries = this.syncQueue.incrementRetry(queueId);
 
@@ -598,6 +685,11 @@ class SyncEngine {
             }
           }
         }
+
+        // After flushing a collection, do a gentle merge-refresh
+        void this.refreshCollection(collection).then((merged) => {
+          this.notifyCollection(collection, merged);
+        });
       }
 
       this.syncStatus = {
@@ -617,12 +709,14 @@ class SyncEngine {
   private startBackgroundSync() {
     if (this.bgSyncTimer !== null) return;
     this.bgSyncTimer = setInterval(() => {
+      // Only flush the queue; do NOT do a full collection refresh here.
+      // Collection refreshes happen after successful pushes via pushQueueEntry.
       if (this.syncQueue.pendingCount() > 0) {
         void this.flushQueue();
       }
     }, BACKGROUND_SYNC_INTERVAL_MS);
 
-    // Also flush on window focus
+    // Also flush on window focus — but only the queue, not a full re-fetch
     const handleFocus = () => {
       if (this.syncQueue.pendingCount() > 0) {
         this.isOnline = true;
@@ -745,27 +839,42 @@ class SyncEngine {
     }
   }
 
+  /**
+   * Refresh a single collection from the server.
+   *
+   * SAFE MERGE STRATEGY:
+   * - Fetch server rows
+   * - Overlay any pending local records (pending ALWAYS WIN)
+   * - This means a refresh NEVER erases a record the user just added
+   */
   async refreshCollection(collection: string): Promise<unknown[]> {
     if (!isApiConfigured() || !this.token) {
-      return this.getCache(collection);
+      return this.getLocalCollection(collection);
     }
     try {
       const { fetchCollection } = await import("./api");
       const rows = await fetchCollection<unknown>(collection);
 
-      // Merge: server rows + pending local changes
-      const pendingForCollection = this.syncQueue
-        .getPending()
-        .filter((e) => e.collection === collection && e.action !== "delete");
+      // Merge: server rows + ALL pending local changes for this collection
+      const pendingForCollection =
+        this.syncQueue.getPendingForCollection(collection);
+
       const serverMap = new Map(
         (rows as Record<string, unknown>[]).map((r) => [r.id, r]),
       );
+
+      // Pending records WIN over server data for the same ID
       for (const e of pendingForCollection) {
-        const existing = serverMap.get(e.data.id);
-        serverMap.set(
-          e.data.id,
-          existing ? { ...existing, ...e.data } : e.data,
-        );
+        if (e.action === "delete") {
+          // Pending delete: remove from merged result even if server has it
+          serverMap.delete(e.data.id);
+        } else {
+          const existing = serverMap.get(e.data.id);
+          serverMap.set(
+            e.data.id,
+            existing ? { ...existing, ...e.data } : e.data,
+          );
+        }
       }
 
       const merged = Array.from(serverMap.values());
@@ -774,7 +883,8 @@ class SyncEngine {
       this.notify();
       return merged;
     } catch {
-      return this.getCache(collection);
+      // On network failure, return the local collection (with pending overlaid)
+      return this.getLocalCollection(collection);
     }
   }
 

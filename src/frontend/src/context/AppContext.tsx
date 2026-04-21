@@ -420,6 +420,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return unsub;
   }, []);
 
+  // ── Subscribe to post-push collection updates from SyncEngine ─────────────
+  // When SyncEngine confirms a record was pushed to MySQL, it fires this callback
+  // with the server-confirmed + pending-merged data. We dispatch UPDATE_COLLECTION
+  // so the UI reflects the authoritative server state without losing pending records.
+  useEffect(() => {
+    const unsub = syncEngine.onCollectionUpdated((collection, records) => {
+      const existing = stateRef.current.data[collection];
+      // Skip if content hasn't changed (avoid spurious re-renders)
+      if (
+        Array.isArray(existing) &&
+        existing.length === records.length &&
+        JSON.stringify(existing) === JSON.stringify(records)
+      ) {
+        return;
+      }
+      dispatch({ type: "UPDATE_COLLECTION", collection, records });
+    });
+    return unsub;
+  }, []);
+
   // ── Restore token from sessionStorage on page reload ──────────────────────
   // Note: sessionStorage is per-tab — on page reload within same tab, it persists.
   // This lets us re-initialize data without requiring re-login.
@@ -865,10 +885,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── saveData — LOCAL-FIRST create ────────────────────────────────────────
   // Pattern:
   //   1. Write to localStorage immediately (permanent — never lost)
-  //   2. Update in-memory cache → UI re-renders instantly
+  //   2. Update in-memory cache → UI re-renders instantly via SyncEngine subscriber
   //   3. Return success to caller IMMEDIATELY (no waiting for server)
   //   4. Server push happens in background via SyncQueue
-  //   5. NEVER rollback — data stays in localStorage even if server fails
+  //   5. After server confirms, SyncEngine fires onCollectionUpdated → UI updates again
+  //   6. NEVER rollback — data stays in localStorage even if server fails
+  //
+  // NOTE: We do NOT call refreshCollection() here — that would race against the
+  // background push and overwrite the local record with stale server data.
+  // The SyncEngine subscriber (above) will dispatch UPDATE_COLLECTION from the
+  // local cache immediately. The post-push refresh happens via onCollectionUpdated.
   const saveData = useCallback(
     async (
       collection: string,
@@ -881,19 +907,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // in background. Returns immediately — no awaiting server.
       const saved = await syncEngine.saveRecord(collection, item, "create");
 
-      // Update context state with latest cache
+      // Dispatch the local cache immediately so the UI shows the new record
+      // without waiting for any server response.
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getCache(collection),
+        records: syncEngine.getLocalCollection(collection),
       });
 
-      // Background refresh (non-blocking) — updates UI when server responds
-      void refreshCollection(collection);
+      // NO void refreshCollection() here — that is the root cause of the
+      // disappearing-record bug. Server fetch will happen after pushQueueEntry
+      // succeeds, via onCollectionUpdated callback registered above.
 
       return saved;
     },
-    [state.token, refreshCollection],
+    [state.token],
   );
 
   // ── updateData — LOCAL-FIRST edit ──────────────────────────────────────────
@@ -918,13 +946,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getCache(collection),
+        records: syncEngine.getLocalCollection(collection),
       });
 
-      // Background refresh (non-blocking)
-      void refreshCollection(collection);
+      // NO void refreshCollection() — same reason as saveData above.
     },
-    [state.token, refreshCollection],
+    [state.token],
   );
 
   // ── deleteData — LOCAL-FIRST delete ──────────────────────────────────────
@@ -939,10 +966,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getCache(collection),
+        records: syncEngine.getLocalCollection(collection),
       });
 
-      // Background refresh to confirm server state
+      // For deletes, it's safe to refresh after the local remove since the
+      // record is already gone locally — no race condition.
       void refreshCollection(collection);
     },
     [state.token, refreshCollection],

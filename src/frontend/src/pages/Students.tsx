@@ -450,24 +450,23 @@ export default function Students({ onNavigate }: StudentsProps) {
 
   // ── Handlers ───────────────────────────────────────────────────────────────
   // Called by StudentForm after a successful save.
-  // saveData/updateData in AppContext already call refreshCollection internally,
-  // but we also call it here to guarantee the list is fresh even if the form
-  // is closed before the background refresh completes.
+  // AppContext.saveData/updateData already dispatches UPDATE_COLLECTION from the
+  // local cache immediately after saveRecord() — no need to re-fetch here.
+  // A server-confirmed refresh fires via SyncEngine.onCollectionUpdated after push.
   function handleSaved() {
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);
-    // Trigger an additional refresh in the background so the grid always
-    // shows the canonical server state immediately after a save.
-    void refresh();
+    // Do NOT call refresh() here — that races against the background push and
+    // overwrites the new local record with stale MySQL data (the disappearing bug).
   }
 
   async function handleDelete(student: Student) {
     try {
       await deleteData("students", student.id);
       addNotification(`Student ${student.fullName} deleted`, "success");
-      // deleteData already calls refreshCollection internally; this explicit
-      // call ensures the grid is up-to-date even on slow networks.
+      // Safe to refresh after delete — the record is already removed locally,
+      // so the server fetch won't overwrite anything.
       void refresh();
     } catch {
       addNotification("Failed to delete student", "error");

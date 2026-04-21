@@ -243,18 +243,17 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         }
         setShowForm(false);
         setEditStaff(undefined);
-        // Refresh the staff list so the new/updated record appears immediately.
-        // saveData/updateData already call refreshCollection internally; this
-        // explicit call is a safety net for slow-network scenarios.
-        setRefreshing(true);
-        void refreshCollection("staff").finally(() => setRefreshing(false));
+        // AppContext.saveData/updateData already dispatches UPDATE_COLLECTION from
+        // the local cache immediately. Do NOT call refreshCollection here — that
+        // races against the background push and causes the new record to disappear.
+        // A server-confirmed refresh fires via SyncEngine.onCollectionUpdated.
       } catch {
         addNotification("Failed to save staff member.", "error");
       } finally {
         setSaving(false);
       }
     },
-    [staff, saveData, updateData, addNotification, refreshCollection],
+    [staff, saveData, updateData, addNotification],
   );
 
   const handleDelete = useCallback(
@@ -264,7 +263,7 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         await deleteData("staff", id);
         addNotification("Staff member deleted.", "info");
         setViewStaff(null);
-        // Refresh after delete
+        // Safe to refresh after delete — the record is already removed locally.
         setRefreshing(true);
         void refreshCollection("staff").finally(() => setRefreshing(false));
       } catch {

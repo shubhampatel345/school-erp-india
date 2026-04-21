@@ -118,7 +118,7 @@ export default function StaffForm({
   onSave,
   onCancel,
 }: Props) {
-  const { addNotification } = useApp();
+  useApp(); // ensure context is available for future use
   const photoRef = useRef<HTMLInputElement>(null);
   const dobDayRef = useRef<HTMLInputElement>(null);
   const dobMonthRef = useRef<HTMLInputElement>(null);
@@ -431,12 +431,8 @@ export default function StaffForm({
       ls.set("app_users", updated);
     }
 
-    addNotification(
-      initial ? `Staff updated: ${name}` : `New staff member added: ${name}`,
-      "success",
-      "👤",
-    );
-
+    // Notification is fired by the caller (StaffDirectory.handleSave) AFTER
+    // the server save is confirmed — not here, to avoid premature success messages.
     onSave(staffMember as Staff);
   }
 
