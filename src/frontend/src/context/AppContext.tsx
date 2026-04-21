@@ -1012,12 +1012,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }
 
   // ── Render loading screen during initial server fetch ──────────────────────
-  // PERFORMANCE: Only block render if there is truly NO cached data to show.
-  // If syncEngine has cached data (from localStorage), show the app immediately
-  // and let fresh data arrive in the background without a loading screen.
-  const hasCachedData = Object.keys(syncEngine.getAllCache()).length > 0;
-  const showLoading =
-    state.currentUser !== null && state.isInitializing && !hasCachedData;
+  // ALWAYS block rendering until the server responds (or we fall back to
+  // offline mode).  This ensures every device sees real MySQL data on first
+  // render, not a stale empty-cache state.
+  const showLoading = state.currentUser !== null && state.isInitializing;
   const showError =
     state.currentUser !== null &&
     state.initError !== null &&

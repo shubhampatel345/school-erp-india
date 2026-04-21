@@ -1432,7 +1432,6 @@ export default function Students({ onNavigate }: StudentsProps) {
         <StudentImportExport
           onClose={() => setShowImportExport(false)}
           onImported={() => void refresh()}
-          saveData={saveData}
         />
       )}
 

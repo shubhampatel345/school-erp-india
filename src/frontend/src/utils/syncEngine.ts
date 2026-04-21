@@ -116,43 +116,28 @@ class SyncEngine {
   /**
    * Called on app startup after login.
    *
-   * NEW: Immediately loads from localStorage cache so the app renders instantly.
-   * Then fetches fresh data from MySQL in the background.
-   * Subscribers are notified twice: once with cached data, once with fresh data.
+   * SERVER-FIRST: Always fetches from MySQL first on startup.
+   * Cached localStorage data is only used as a fallback when the server is
+   * unreachable (offline mode).  This ensures fresh devices always see real data.
    */
   async initialize(token: string): Promise<Record<string, unknown[]>> {
     this.token = token;
 
     if (!isApiConfigured()) {
-      this.setStatus("offline");
-      return {};
-    }
-
-    // ── Step 1: Load from localStorage cache immediately (instant) ──────────
-    const cachedData: Record<string, unknown[]> = {};
-    for (const [key] of Object.entries(this.allDataCache)) {
-      const cached = readCacheCollection(key);
-      if (cached) cachedData[key] = cached;
-    }
-    // Also scan known collection names from the cache prefix
-    const knownCollections = this.getKnownCollectionNames();
-    for (const name of knownCollections) {
-      const cached = readCacheCollection(name);
-      if (cached && !cachedData[name]) {
-        cachedData[name] = cached;
+      // No server configured — fall back to localStorage cache immediately
+      const cachedData: Record<string, unknown[]> = {};
+      for (const name of this.getKnownCollectionNames()) {
+        const cached = readCacheCollection(name);
+        if (cached) cachedData[name] = cached;
       }
-    }
-
-    if (Object.keys(cachedData).length > 0) {
       this.allDataCache = cachedData;
-      this.setStatus("loading"); // show "Cached" state while fetching fresh
-      // Return cached data immediately so app renders without waiting
-      // Background fetch will update via notify()
-      void this.fetchFreshData(token);
+      this.setStatus("offline");
       return cachedData;
     }
 
-    // ── Step 2: No cache — full blocking load (first time or cache cleared) ──
+    // ── Always fetch from server first (blocking) ────────────────────────────
+    // Show "loading" while we wait for the server response.
+    // If the server is unreachable, fall back to the localStorage cache.
     this.setStatus("loading");
     return this.fetchFreshData(token);
   }
@@ -165,7 +150,7 @@ class SyncEngine {
       this.allDataCache = data;
       this.isOnline = true;
 
-      // Persist to localStorage cache for next startup
+      // Persist to localStorage cache for offline fallback
       for (const [collection, records] of Object.entries(data)) {
         writeCacheCollection(collection, records);
       }
@@ -197,8 +182,24 @@ class SyncEngine {
       const msg =
         err instanceof Error ? err.message : "Failed to load data from server";
       this.isOnline = false;
+
+      // Offline fallback: load from localStorage cache
+      const cachedData: Record<string, unknown[]> = {};
+      for (const name of this.getKnownCollectionNames()) {
+        const cached = readCacheCollection(name);
+        if (cached) cachedData[name] = cached;
+      }
+      if (Object.keys(cachedData).length > 0) {
+        this.allDataCache = cachedData;
+        this.setStatus(
+          "offline",
+          "Server unreachable — showing cached data. Connect to internet and refresh.",
+        );
+        return cachedData;
+      }
+
       this.setStatus("error", msg);
-      return this.allDataCache; // return cached data as fallback
+      return {};
     }
   }
 

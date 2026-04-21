@@ -3,6 +3,7 @@ import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
+import { apiCall, getJwt } from "../utils/api";
 import { generateId, ls } from "../utils/localStorage";
 
 /**
@@ -38,11 +39,6 @@ const CSV_HEADERS = [
 interface Props {
   onClose: () => void;
   onImported: () => void;
-  /** saveData from AppContext — sends each student to the server */
-  saveData: (
-    collection: string,
-    item: Record<string, unknown>,
-  ) => Promise<Record<string, unknown>>;
 }
 
 /** Escape a CSV field value — wraps in quotes if it contains comma/quote/newline */
@@ -118,11 +114,7 @@ function dobToPassword(dob: string): string {
   return dob.replace(/\D/g, "");
 }
 
-export default function StudentImportExport({
-  onClose,
-  onImported,
-  saveData,
-}: Props) {
+export default function StudentImportExport({ onClose, onImported }: Props) {
   const { currentSession, addNotification, getData } = useApp();
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -298,30 +290,31 @@ export default function StudentImportExport({
         const student: Student = {
           id: existingStudent?.id ?? generateId(),
           admNo,
-          fullName: get(idxMap.fullName),
-          fatherName: get(idxMap.fatherName),
-          fatherMobile: get(idxMap.fatherMobile) || undefined,
-          motherName: get(idxMap.motherName),
-          motherMobile: get(idxMap.motherMobile) || undefined,
+          fullName: get(idxMap.fullName) || "",
+          name: get(idxMap.fullName) || "", // always send both for MySQL
+          fatherName: get(idxMap.fatherName) || "",
+          fatherMobile: get(idxMap.fatherMobile) || "",
+          motherName: get(idxMap.motherName) || "",
+          motherMobile: get(idxMap.motherMobile) || "",
           dob,
           gender,
-          class: get(idxMap.class),
-          section: get(idxMap.section),
-          mobile: get(idxMap.mobile),
-          guardianMobile: get(idxMap.guardianMobile),
-          address: get(idxMap.address),
-          village: get(idxMap.village) || undefined,
+          class: get(idxMap.class) || "",
+          section: get(idxMap.section) || "",
+          mobile: get(idxMap.mobile) || "",
+          guardianMobile: get(idxMap.guardianMobile) || "",
+          address: get(idxMap.address) || "",
+          village: get(idxMap.village) || "",
           photo: existingStudent?.photo ?? "",
           category: get(idxMap.category) || "General",
-          aadhaarNo: get(idxMap.aadhaarNo) || undefined,
-          srNo: get(idxMap.srNo) || undefined,
-          penNo: get(idxMap.penNo) || undefined,
-          apaarNo: get(idxMap.apaarNo) || undefined,
-          previousSchool: get(idxMap.previousSchool) || undefined,
-          admissionDate: get(idxMap.admissionDate) || undefined,
+          aadhaarNo: get(idxMap.aadhaarNo) || "",
+          srNo: get(idxMap.srNo) || "",
+          penNo: get(idxMap.penNo) || "",
+          apaarNo: get(idxMap.apaarNo) || "",
+          previousSchool: get(idxMap.previousSchool) || "",
+          admissionDate: get(idxMap.admissionDate) || "",
           credentials: { username: admNo, password: dobPassword },
           status,
-          sessionId,
+          sessionId: sessionId || "",
         };
 
         studentsToSave.push(student);
@@ -332,27 +325,41 @@ export default function StudentImportExport({
         return;
       }
 
-      // Save all students via context (server-synced)
+      // Save all students via batch endpoint (real server confirmation)
       setImporting(true);
       setImportProgress({ saved: 0, total: studentsToSave.length, failed: 0 });
 
       let saved = 0;
       let failed = 0;
       const CHUNK = 50;
+      const token = getJwt();
 
       for (let i = 0; i < studentsToSave.length; i += CHUNK) {
         const chunk = studentsToSave.slice(i, i + CHUNK);
-        const results = await Promise.allSettled(
-          chunk.map((s) =>
-            saveData("students", {
-              ...s,
-              name: s.fullName, // MySQL `name` column alias
-            } as unknown as Record<string, unknown>),
-          ),
-        );
-        for (const r of results) {
-          if (r.status === "fulfilled") saved++;
-          else failed++;
+        // Send chunk as a batch to server — waits for real MySQL confirmation
+        try {
+          const result = await apiCall<{
+            status: string;
+            data?: { pushed?: number; failed?: number; errors?: string[] };
+          }>(
+            "sync/batch",
+            "POST",
+            {
+              collection: "students",
+              items: chunk.map((s) => ({
+                ...s,
+                name: s.fullName, // ensure MySQL `name` column gets populated
+              })),
+            },
+            token,
+          );
+          const d = result.data ?? {};
+          const batchPushed = d.pushed ?? chunk.length;
+          const batchFailed = d.failed ?? 0;
+          saved += batchPushed;
+          failed += batchFailed;
+        } catch {
+          failed += chunk.length;
         }
         setImportProgress({ saved, total: studentsToSave.length, failed });
       }

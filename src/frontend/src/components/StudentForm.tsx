@@ -414,34 +414,34 @@ export default function StudentForm({
     const studentData: Student = {
       id: student?.id ?? generateId(),
       admNo: admNo.trim(),
-      fullName: fullName.trim(),
-      fatherName: fatherName.trim(),
-      fatherMobile: fatherMobile.trim() || undefined,
-      motherName: motherName.trim(),
-      motherMobile: motherMobile.trim() || undefined,
-      dob: dob || undefined,
+      fullName: fullName.trim() || "",
+      fatherName: fatherName.trim() || "",
+      fatherMobile: fatherMobile.trim() || "",
+      motherName: motherName.trim() || "",
+      motherMobile: motherMobile.trim() || "",
+      dob: dob || "",
       gender,
       class: cls,
       section,
-      mobile: mobile.trim(),
-      guardianMobile: guardianMobile.trim(),
-      address: address.trim(),
-      village: village.trim() || undefined,
+      mobile: mobile.trim() || "",
+      guardianMobile: guardianMobile.trim() || "",
+      address: address.trim() || "",
+      village: village.trim() || "",
       photo,
-      category,
-      aadhaarNo: aadhaarNo.trim() || undefined,
-      srNo: srNo.trim() || undefined,
-      penNo: penNo.trim() || undefined,
-      apaarNo: apaarNo.trim() || undefined,
-      previousSchool: previousSchool.trim() || undefined,
-      admissionDate: admissionDate.trim() || undefined,
-      transportId: transportRouteId || undefined,
+      category: category || "General",
+      aadhaarNo: aadhaarNo.trim() || "",
+      srNo: srNo.trim() || "",
+      penNo: penNo.trim() || "",
+      apaarNo: apaarNo.trim() || "",
+      previousSchool: previousSchool.trim() || "",
+      admissionDate: admissionDate.trim() || "",
+      transportId: transportRouteId || "",
       transportBusNo: selectedRoute?.busNo,
       transportRoute: selectedRoute?.routeName,
-      transportPickup: transportPickup || undefined,
+      transportPickup: transportPickup || "",
       transportMonths,
       credentials: { username: admNo.trim(), password: dobForPassword },
-      status,
+      status: status || "active",
       leavingDate: student?.leavingDate,
       leavingReason: student?.leavingReason,
       leavingRemarks: student?.leavingRemarks,
@@ -452,22 +452,24 @@ export default function StudentForm({
     setSaving(true);
     setSaveError(null);
 
+    // Always send both `name` and `fullName` so MySQL stores the student name
+    // correctly regardless of which column PHP uses as primary.
+    const payload = {
+      ...studentData,
+      name: studentData.fullName || studentData.admNo,
+      fullName: studentData.fullName || studentData.admNo,
+    } as unknown as Record<string, unknown>;
+
     try {
       if (isNew) {
-        await saveData("students", {
-          ...studentData,
-          name: studentData.fullName,
-        } as unknown as Record<string, unknown>);
+        await saveData("students", payload);
         addNotification(
           `New student added: ${studentData.fullName}`,
           "success",
           "👤",
         );
       } else {
-        await updateData("students", studentData.id, {
-          ...studentData,
-          name: studentData.fullName,
-        } as unknown as Record<string, unknown>);
+        await updateData("students", studentData.id, payload);
         addNotification(
           `Student updated: ${studentData.fullName}`,
           "success",

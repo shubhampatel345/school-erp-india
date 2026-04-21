@@ -818,7 +818,11 @@ function batchUpsert(PDO $pdo, string $table, array $rows, ?array $auth = null):
             if (!empty($tableColumns) && !in_array($k, $tableColumns, true)) continue;
             if (is_array($v) || is_object($v)) {
                 $filteredRow[$k] = json_encode($v, JSON_UNESCAPED_UNICODE);
+            } elseif ($v === 'undefined' || $v === 'null') {
+                // JS serialized undefined/null → store as empty string, never as NULL
+                $filteredRow[$k] = '';
             } elseif (is_scalar($v) || is_null($v)) {
+                // Keep real NULL only if it is PHP null (not a string)
                 $filteredRow[$k] = $v;
             }
         }
@@ -861,19 +865,35 @@ function batchUpsert(PDO $pdo, string $table, array $rows, ?array $auth = null):
     return ['pushed' => $pushed, 'failed' => $failed, 'errors' => $errors];
 }
 
-// Normalize rows: fix field aliases, JSON-encode arrays, etc.
+// Normalize rows: fix field aliases, JSON-encode arrays, sanitize undefined strings
 function normalize_rows(string $table, array $rows): array {
     foreach ($rows as &$row) {
         if (!is_array($row)) continue;
 
+        // Convert the string "undefined" / "null" from JS serialization → empty string
+        foreach ($row as $k => &$v) {
+            if ($v === 'undefined' || $v === 'null' || $v === null) {
+                $v = '';
+            }
+        }
+        unset($v);
+
         if ($table === 'students') {
-            if (!empty($row['fullName']) && empty($row['name'])) $row['name'] = $row['fullName'];
-            if (!empty($row['name']) && empty($row['fullName'])) $row['fullName'] = $row['name'];
+            // Always sync fullName ↔ name regardless of which side has a value
+            $fn = !empty($row['fullName']) ? $row['fullName'] : ($row['name'] ?? '');
+            $row['fullName'] = $fn;
+            $row['name']     = $fn;
             if (!empty($row['sessionId']) && empty($row['session'])) $row['session'] = $row['sessionId'];
+            if (!empty($row['session'])   && empty($row['sessionId'])) $row['sessionId'] = $row['session'];
+            // father_mobile → fatherMobile alias
+            if (empty($row['fatherMobile']) && !empty($row['father_mobile'])) {
+                $row['fatherMobile'] = $row['father_mobile'];
+            }
         }
         if ($table === 'staff') {
-            if (!empty($row['fullName']) && empty($row['name'])) $row['name'] = $row['fullName'];
-            if (!empty($row['name']) && empty($row['fullName'])) $row['fullName'] = $row['name'];
+            $n = !empty($row['fullName']) ? $row['fullName'] : ($row['name'] ?? '');
+            $row['fullName'] = $n;
+            $row['name']     = $n;
         }
         if ($table === 'classes') {
             if (!empty($row['className']) && empty($row['name'])) $row['name'] = $row['className'];

@@ -88,6 +88,8 @@ export interface Student extends MySQLRecord {
   id: string;
   admNo: string;
   fullName: string;
+  /** MySQL column alias — always set equal to fullName when saving */
+  name?: string;
   photo?: string;
   dob?: string; // DD/MM/YYYY
   gender: "Male" | "Female" | "Other";
