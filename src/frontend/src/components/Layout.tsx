@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { ls } from "../utils/localStorage";
 import Header from "./Header";
 import MobileNav from "./MobileNav";
 import Sidebar from "./Sidebar";
@@ -17,6 +18,30 @@ export default function Layout({
 }: LayoutProps) {
   const { currentSession } = useApp();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Initialize theme on app boot from localStorage
+  useEffect(() => {
+    const themeId = ls.get<string>("shubh_erp_theme", "default");
+    const themeMap: Record<string, string> = {
+      ocean: "ocean",
+      forest: "forest",
+      rose: "rose",
+      "dark-navy": "dark",
+      slate: "slate",
+      purple: "purple",
+      copper: "copper",
+      cherry: "cherry",
+      midnight: "midnight",
+    };
+    const root = document.documentElement;
+    root.removeAttribute("data-theme");
+    root.classList.remove("dark");
+    if (themeId !== "default") {
+      const dt = themeMap[themeId];
+      if (dt === "dark") root.classList.add("dark");
+      else if (dt) root.setAttribute("data-theme", dt);
+    }
+  }, []);
 
   const handleMenuToggle = () => setMobileMenuOpen((v) => !v);
 

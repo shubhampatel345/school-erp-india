@@ -71,6 +71,35 @@ const EMPTY_ITEM: Omit<InvItem, "id"> = {
 };
 const EMPTY_CAT: Omit<InvCategory, "id"> = { name: "", description: "" };
 
+// ── Modal extracted OUTSIDE the main component ───────────────────────────────
+// CRITICAL: If Modal were defined inside Inventory(), React would see a brand-new
+// component type on every parent render, causing the modal to unmount+remount
+// and lose input focus on every keystroke.
+function InvModal({
+  title,
+  onClose,
+  children,
+}: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <Card className="w-full max-w-lg shadow-elevated animate-slide-up">
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </CardHeader>
+        <CardContent className="space-y-3">{children}</CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function Inventory() {
   const {
     getData,
@@ -111,12 +140,13 @@ export default function Inventory() {
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [itemForm, setItemForm] = useState(EMPTY_ITEM);
 
-  const openAddItem = () => {
-    setItemForm({ ...EMPTY_ITEM, category: categories[0]?.name ?? "" });
+  const openAddItem = useCallback(() => {
+    setItemForm((prev) => ({ ...EMPTY_ITEM, category: prev.category || "" }));
     setEditItemId(null);
     setShowItemModal(true);
-  };
-  const openEditItem = (item: InvItem) => {
+  }, []);
+
+  const openEditItem = useCallback((item: InvItem) => {
     setItemForm({
       name: item.name,
       category: item.category,
@@ -128,7 +158,60 @@ export default function Inventory() {
     });
     setEditItemId(item.id);
     setShowItemModal(true);
-  };
+  }, []);
+
+  // ── Stable per-field setters — CRITICAL: these must be useCallback with []
+  // so their references never change, which would cause Input to remount mid-type.
+  const handleItemNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({ ...p, name: e.target.value })),
+    [],
+  );
+  const handleItemCategoryChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) =>
+      setItemForm((p) => ({ ...p, category: e.target.value })),
+    [],
+  );
+  const handleItemUnitChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({ ...p, unit: e.target.value })),
+    [],
+  );
+  const handleItemCostChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({
+        ...p,
+        costPrice:
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+      })),
+    [],
+  );
+  const handleItemSellChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({
+        ...p,
+        sellingPrice:
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+      })),
+    [],
+  );
+  const handleItemStockChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({
+        ...p,
+        currentStock: Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
+      })),
+    [],
+  );
+  const handleItemLocationChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({ ...p, storeLocation: e.target.value })),
+    [],
+  );
 
   const handleSaveItem = useCallback(async () => {
     if (!itemForm.name.trim()) return;
@@ -170,13 +253,25 @@ export default function Inventory() {
   const [stockNote, setStockNote] = useState("");
   const [stockError, setStockError] = useState("");
 
-  const openStockModal = (item: InvItem, action: "in" | "out") => {
+  const openStockModal = useCallback((item: InvItem, action: "in" | "out") => {
     setStockItemId(item.id);
     setStockAction(action);
     setStockQty(1);
     setStockNote("");
     setStockError("");
-  };
+  }, []);
+
+  const handleStockQtyChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setStockError("");
+      setStockQty(Number(e.target.value.replace(/[^0-9]/g, "")) || 0);
+    },
+    [],
+  );
+  const handleStockNoteChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setStockNote(e.target.value),
+    [],
+  );
 
   const handleStockUpdate = useCallback(async () => {
     if (!stockItemId || stockQty <= 0) return;
@@ -217,16 +312,28 @@ export default function Inventory() {
   const [editCatId, setEditCatId] = useState<string | null>(null);
   const [catForm, setCatForm] = useState(EMPTY_CAT);
 
-  const openAddCat = () => {
+  const openAddCat = useCallback(() => {
     setCatForm(EMPTY_CAT);
     setEditCatId(null);
     setShowCatModal(true);
-  };
-  const openEditCat = (c: InvCategory) => {
+  }, []);
+
+  const openEditCat = useCallback((c: InvCategory) => {
     setCatForm({ name: c.name, description: c.description });
     setEditCatId(c.id);
     setShowCatModal(true);
-  };
+  }, []);
+
+  const handleCatNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setCatForm((p) => ({ ...p, name: e.target.value })),
+    [],
+  );
+  const handleCatDescriptionChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setCatForm((p) => ({ ...p, description: e.target.value })),
+    [],
+  );
 
   const handleSaveCat = useCallback(async () => {
     if (!catForm.name.trim()) return;
@@ -279,29 +386,6 @@ export default function Inventory() {
     [items],
   );
   const stockItem = items.find((i) => i.id === stockItemId);
-
-  const Modal = ({
-    title,
-    onClose,
-    children,
-  }: { title: string; onClose: () => void; children: React.ReactNode }) => (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-lg shadow-elevated animate-slide-up">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base">{title}</CardTitle>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </CardHeader>
-        <CardContent className="space-y-3">{children}</CardContent>
-      </Card>
-    </div>
-  );
 
   return (
     <div className="space-y-4">
@@ -814,7 +898,7 @@ export default function Inventory() {
 
       {/* Item Modal */}
       {showItemModal && (
-        <Modal
+        <InvModal
           title={editItemId ? "Edit Item" : "Add Item"}
           onClose={() => {
             setShowItemModal(false);
@@ -826,9 +910,7 @@ export default function Inventory() {
               <Label>Item Name *</Label>
               <Input
                 value={itemForm.name}
-                onChange={(e) =>
-                  setItemForm((p) => ({ ...p, name: e.target.value }))
-                }
+                onChange={handleItemNameChange}
                 placeholder="e.g. School Dress"
                 data-ocid="inventory.item_name_input"
               />
@@ -838,9 +920,7 @@ export default function Inventory() {
               <select
                 className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
                 value={itemForm.category}
-                onChange={(e) =>
-                  setItemForm((p) => ({ ...p, category: e.target.value }))
-                }
+                onChange={handleItemCategoryChange}
               >
                 {categories.map((c) => (
                   <option key={c.id} value={c.name}>
@@ -853,24 +933,18 @@ export default function Inventory() {
               <Label>Unit</Label>
               <Input
                 value={itemForm.unit}
-                onChange={(e) =>
-                  setItemForm((p) => ({ ...p, unit: e.target.value }))
-                }
+                onChange={handleItemUnitChange}
                 placeholder="Pcs / Pair / Set"
               />
             </div>
             <div>
               <Label>Cost Price (₹)</Label>
               <Input
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={itemForm.costPrice || ""}
-                onChange={(e) =>
-                  setItemForm((p) => ({
-                    ...p,
-                    costPrice: Number(e.target.value),
-                  }))
-                }
+                onChange={handleItemCostChange}
                 placeholder="0"
                 data-ocid="inventory.item_cost_input"
               />
@@ -878,15 +952,11 @@ export default function Inventory() {
             <div>
               <Label>Selling Price (₹)</Label>
               <Input
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={itemForm.sellingPrice || ""}
-                onChange={(e) =>
-                  setItemForm((p) => ({
-                    ...p,
-                    sellingPrice: Number(e.target.value),
-                  }))
-                }
+                onChange={handleItemSellChange}
                 placeholder="0"
                 data-ocid="inventory.item_sell_input"
               />
@@ -894,15 +964,11 @@ export default function Inventory() {
             <div>
               <Label>Opening Stock</Label>
               <Input
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={itemForm.currentStock || ""}
-                onChange={(e) =>
-                  setItemForm((p) => ({
-                    ...p,
-                    currentStock: Number(e.target.value),
-                  }))
-                }
+                onChange={handleItemStockChange}
                 placeholder="0"
                 data-ocid="inventory.item_stock_input"
               />
@@ -911,9 +977,7 @@ export default function Inventory() {
               <Label>Store Location</Label>
               <Input
                 value={itemForm.storeLocation}
-                onChange={(e) =>
-                  setItemForm((p) => ({ ...p, storeLocation: e.target.value }))
-                }
+                onChange={handleItemLocationChange}
                 placeholder="e.g. Room 2 Shelf A"
               />
             </div>
@@ -936,12 +1000,12 @@ export default function Inventory() {
               Cancel
             </Button>
           </div>
-        </Modal>
+        </InvModal>
       )}
 
       {/* Category Modal */}
       {showCatModal && (
-        <Modal
+        <InvModal
           title={editCatId ? "Edit Category" : "Add Category"}
           onClose={() => {
             setShowCatModal(false);
@@ -952,9 +1016,7 @@ export default function Inventory() {
             <Label>Category Name *</Label>
             <Input
               value={catForm.name}
-              onChange={(e) =>
-                setCatForm((p) => ({ ...p, name: e.target.value }))
-              }
+              onChange={handleCatNameChange}
               placeholder="e.g. Uniform"
               data-ocid="inventory.cat_name_input"
             />
@@ -963,9 +1025,7 @@ export default function Inventory() {
             <Label>Description</Label>
             <Input
               value={catForm.description}
-              onChange={(e) =>
-                setCatForm((p) => ({ ...p, description: e.target.value }))
-              }
+              onChange={handleCatDescriptionChange}
               placeholder="Optional description"
             />
           </div>
@@ -987,12 +1047,12 @@ export default function Inventory() {
               Cancel
             </Button>
           </div>
-        </Modal>
+        </InvModal>
       )}
 
       {/* Stock Modal */}
       {stockItemId && (
-        <Modal
+        <InvModal
           title={stockAction === "in" ? "📥 Add Stock" : "📤 Issue Stock"}
           onClose={() => {
             setStockItemId(null);
@@ -1014,13 +1074,11 @@ export default function Inventory() {
           <div>
             <Label>Quantity *</Label>
             <Input
-              type="number"
-              min={1}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={stockQty || ""}
-              onChange={(e) => {
-                setStockError("");
-                setStockQty(Number(e.target.value));
-              }}
+              onChange={handleStockQtyChange}
               data-ocid="inventory.stock_qty_input"
             />
           </div>
@@ -1028,7 +1086,7 @@ export default function Inventory() {
             <Label>Note (optional)</Label>
             <Input
               value={stockNote}
-              onChange={(e) => setStockNote(e.target.value)}
+              onChange={handleStockNoteChange}
               placeholder={
                 stockAction === "in" ? "Supplier, etc." : "Student / buyer"
               }
@@ -1052,7 +1110,7 @@ export default function Inventory() {
               Cancel
             </Button>
           </div>
-        </Modal>
+        </InvModal>
       )}
     </div>
   );

@@ -458,10 +458,13 @@ export default function FeeHeadingPage() {
                 </label>
                 <Input
                   id="fee-heading-order"
-                  type="number"
-                  min="1"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={displayOrder}
-                  onChange={(e) => setDisplayOrder(e.target.value)}
+                  onChange={(e) =>
+                    setDisplayOrder(e.target.value.replace(/[^0-9]/g, ""))
+                  }
                   data-ocid="fee-heading.order-input"
                 />
               </div>

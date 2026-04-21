@@ -6,6 +6,11 @@
  * - On any change: update local state + push ONLY changed record to server
  * - Token stored in sessionStorage (not localStorage)
  * - If server unreachable: show error with Retry — never show stale data
+ *
+ * FIXED: saveData/updateData/deleteData now await server confirmation, then
+ * call refreshCollection() so all consumers see fresh MySQL data immediately.
+ * Success notification only fires after server confirms.
+ * Rollback happens on server error.
  */
 
 import {
@@ -31,8 +36,6 @@ import {
   backendLogin,
   clearTokens,
   getJwt,
-  getStoredServerPassword,
-  getStoredServerUsername,
   isApiConfigured,
   setJwt,
 } from "../utils/api";
@@ -388,14 +391,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const initStartedRef = useRef(false);
 
   // ── Subscribe to SyncEngine status changes ─────────────────────────────────
+  // Keep a ref to current data so we can compare inside the subscription closure
+  // without re-registering the subscriber on every render.
+  const stateRef = useRef(state);
+  useEffect(() => {
+    stateRef.current = state;
+  });
+
   useEffect(() => {
     const unsub = syncEngine.subscribe(() => {
       dispatch({ type: "SET_SYNC_STATUS", status: syncEngine.getSyncStatus() });
-      // Sync only changed/new collections from SyncEngine cache to state.
-      // We compare lengths to avoid unnecessary dispatches (reduce re-renders).
+      // Only dispatch UPDATE_COLLECTION when data actually changed.
+      // This prevents constant re-renders that cause focus loss while typing.
       const cache = syncEngine.getAllCache();
       for (const [collection, records] of Object.entries(cache)) {
         if (Array.isArray(records)) {
+          const existing = stateRef.current.data[collection];
+          // Skip if same length AND same content (shallow JSON compare)
+          if (
+            Array.isArray(existing) &&
+            existing.length === records.length &&
+            JSON.stringify(existing) === JSON.stringify(records)
+          ) {
+            continue;
+          }
           dispatch({ type: "UPDATE_COLLECTION", collection, records });
         }
       }
@@ -822,6 +841,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.data],
   );
 
+  // ── refreshCollection ──────────────────────────────────────────────────────
+  // Pulls fresh data from MySQL for a single collection and updates context.
+  // Called after every mutation (create/update/delete) so the UI immediately
+  // reflects what's actually in the database.
+  const refreshCollection = useCallback(
+    async (collection: string): Promise<void> => {
+      const token = state.token ?? getJwt();
+      syncEngine.setToken(token);
+      try {
+        const rows = await syncEngine.refreshCollection(collection);
+        dispatch({
+          type: "UPDATE_COLLECTION",
+          collection,
+          records: rows as unknown[],
+        });
+      } catch {
+        // If refresh fails, fall back to current cache — do NOT clear data
+        const rows = syncEngine.getCache(collection);
+        dispatch({
+          type: "UPDATE_COLLECTION",
+          collection,
+          records: rows,
+        });
+      }
+    },
+    [state.token],
+  );
+
+  // ── saveData — create a new record ────────────────────────────────────────
+  // Pattern:
+  //   1. Optimistic: add to local cache immediately (user sees instant feedback)
+  //   2. Await server confirmation
+  //   3. On success: refreshCollection pulls real server data (correct IDs etc.)
+  //   4. On failure: rollback optimistic update, throw error for caller to handle
   const saveData = useCallback(
     async (
       collection: string,
@@ -829,14 +882,38 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ): Promise<Record<string, unknown>> => {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
-      const saved = await syncEngine.saveRecord(collection, item, "create");
-      const records = syncEngine.getCache(collection) as unknown[];
-      dispatch({ type: "UPDATE_COLLECTION", collection, records });
-      return saved;
+
+      // Optimistic: add to local cache so list updates instantly
+      syncEngine.updateCache(collection, item, "create");
+      dispatch({
+        type: "UPDATE_COLLECTION",
+        collection,
+        records: syncEngine.getCache(collection),
+      });
+
+      try {
+        const saved = await syncEngine.saveRecord(collection, item, "create");
+
+        // Server confirmed — refresh collection to get real server data
+        // (server may assign a different ID or normalize fields)
+        await refreshCollection(collection);
+
+        return saved;
+      } catch (err) {
+        // Rollback: remove the optimistic record
+        syncEngine.updateCache(collection, item, "delete");
+        dispatch({
+          type: "UPDATE_COLLECTION",
+          collection,
+          records: syncEngine.getCache(collection),
+        });
+        throw err;
+      }
     },
-    [state.token],
+    [state.token, refreshCollection],
   );
 
+  // ── updateData — edit an existing record ──────────────────────────────────
   const updateData = useCallback(
     async (
       collection: string,
@@ -845,39 +922,81 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ): Promise<void> => {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
-      const existing = getData(collection) as Array<Record<string, unknown>>;
-      const current = existing.find((r) => r.id === id);
-      const merged = { ...(current ?? {}), ...changes, id };
-      await syncEngine.saveRecord(collection, merged, "update");
-      const records = syncEngine.getCache(collection) as unknown[];
-      dispatch({ type: "UPDATE_COLLECTION", collection, records });
+
+      // Snapshot current record for potential rollback
+      const existing = syncEngine.getCache(collection) as Array<
+        Record<string, unknown>
+      >;
+      const currentRecord = existing.find((r) => r.id === id);
+      const merged = { ...(currentRecord ?? {}), ...changes, id };
+
+      // Optimistic update
+      syncEngine.updateCache(collection, merged, "update");
+      dispatch({
+        type: "UPDATE_COLLECTION",
+        collection,
+        records: syncEngine.getCache(collection),
+      });
+
+      try {
+        await syncEngine.saveRecord(collection, merged, "update");
+
+        // Server confirmed — refresh to get canonical server data
+        await refreshCollection(collection);
+      } catch (err) {
+        // Rollback to previous record
+        if (currentRecord) {
+          syncEngine.updateCache(collection, currentRecord, "update");
+        }
+        dispatch({
+          type: "UPDATE_COLLECTION",
+          collection,
+          records: syncEngine.getCache(collection),
+        });
+        throw err;
+      }
     },
-    [state.token, getData],
+    [state.token, refreshCollection],
   );
 
+  // ── deleteData — remove a record ──────────────────────────────────────────
   const deleteData = useCallback(
     async (collection: string, id: string): Promise<void> => {
       const token = state.token ?? getJwt();
       syncEngine.setToken(token);
-      await syncEngine.saveRecord(collection, { id }, "delete");
-      const records = syncEngine.getCache(collection) as unknown[];
-      dispatch({ type: "UPDATE_COLLECTION", collection, records });
-    },
-    [state.token],
-  );
 
-  const refreshCollection = useCallback(
-    async (collection: string): Promise<void> => {
-      const token = state.token ?? getJwt();
-      syncEngine.setToken(token);
-      const rows = await syncEngine.refreshCollection(collection);
+      // Snapshot for rollback
+      const existing = syncEngine.getCache(collection) as Array<
+        Record<string, unknown>
+      >;
+      const deletedRecord = existing.find((r) => r.id === id);
+
+      // Optimistic delete
+      syncEngine.updateCache(collection, { id }, "delete");
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: rows as unknown[],
+        records: syncEngine.getCache(collection),
       });
+
+      try {
+        await syncEngine.saveRecord(collection, { id }, "delete");
+        // After confirmed delete, refresh to ensure server-side cascades are reflected
+        await refreshCollection(collection);
+      } catch (err) {
+        // Rollback: restore deleted record
+        if (deletedRecord) {
+          syncEngine.updateCache(collection, deletedRecord, "create");
+        }
+        dispatch({
+          type: "UPDATE_COLLECTION",
+          collection,
+          records: syncEngine.getCache(collection),
+        });
+        throw err;
+      }
     },
-    [state.token],
+    [state.token, refreshCollection],
   );
 
   // ── Computed values ────────────────────────────────────────────────────────

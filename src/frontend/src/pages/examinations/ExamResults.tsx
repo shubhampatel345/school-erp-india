@@ -318,11 +318,19 @@ function MarksEntryTable({
                         className="px-2 py-1 border border-border"
                       >
                         <Input
-                          type="number"
-                          min={0}
-                          max={group.maxMarks}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={s.marksObtained}
-                          onChange={(e) => updateMark(si, sj, e.target.value)}
+                          onChange={(e) =>
+                            updateMark(
+                              si,
+                              sj,
+                              e.target.value
+                                .replace(/[^0-9.]/g, "")
+                                .replace(/(\..*)\./g, "$1"),
+                            )
+                          }
                           className="h-8 text-center w-full min-w-16"
                           data-ocid={`marks-${si}-${sj}`}
                         />
@@ -615,12 +623,14 @@ export default function ExamResults() {
               <div className="space-y-1.5">
                 <Label>Max Marks (per subject)</Label>
                 <Input
-                  type="number"
-                  min={1}
-                  max={200}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={newMaxMarks}
                   onChange={(e) =>
-                    setNewMaxMarks(Number(e.target.value) || 100)
+                    setNewMaxMarks(
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 100,
+                    )
                   }
                   data-ocid="new-result-max-marks"
                 />

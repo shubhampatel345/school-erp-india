@@ -613,10 +613,17 @@ export default function FeeRegister() {
               </label>
               <Input
                 id="register-edit-amount"
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={editAmount}
-                onChange={(e) => setEditAmount(e.target.value)}
+                onChange={(e) =>
+                  setEditAmount(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
+                }
                 data-ocid="register-edit-amount"
               />
             </div>

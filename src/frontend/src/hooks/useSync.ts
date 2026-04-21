@@ -177,6 +177,7 @@ export function useSync(): SyncState {
           db_version: result.db_version,
           last_backup: result.last_backup,
         });
+        // Only update serverCounts when we get real data — never clear counts on error
         if (result.counts && Object.keys(result.counts).length > 0) {
           setServerCounts(result.counts);
         }
@@ -197,6 +198,7 @@ export function useSync(): SyncState {
           setMode("offline");
           setNeedsAuth(false);
           setLastSyncError(msg);
+          // Keep serverCounts from last successful sync — do NOT clear them
         }
       }
     } catch (err) {
@@ -213,6 +215,7 @@ export function useSync(): SyncState {
         setMode("offline");
         setNeedsAuth(false);
         setLastSyncError(msg);
+        // Keep serverCounts from last successful sync — do NOT clear them
       }
     }
   }, [restartPoll]);

@@ -979,12 +979,15 @@ export default function BiometricDevices() {
                 <div className="space-y-1">
                   <Label className="text-xs">Port</Label>
                   <Input
-                    type="number"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={deviceForm.port}
                     onChange={(e) =>
                       setDeviceForm((f) => ({
                         ...f,
-                        port: Number(e.target.value),
+                        port:
+                          Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
                       }))
                     }
                     data-ocid="biometric.device-port.input"

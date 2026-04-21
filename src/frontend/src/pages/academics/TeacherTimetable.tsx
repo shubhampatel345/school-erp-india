@@ -1003,13 +1003,19 @@ export default function TeacherTimetable() {
           <div className="space-y-1.5">
             <Label>Periods per Day</Label>
             <Input
-              type="number"
-              min={1}
-              max={12}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={periodsCount}
               onChange={(e) =>
                 setPeriodsCount(
-                  Math.max(1, Math.min(12, Number(e.target.value))),
+                  Math.max(
+                    1,
+                    Math.min(
+                      12,
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
+                    ),
+                  ),
                 )
               }
               data-ocid="tt-periods-count"
@@ -1027,12 +1033,17 @@ export default function TeacherTimetable() {
           <div className="space-y-1.5">
             <Label>Interval (min)</Label>
             <Input
-              type="number"
-              min={0}
-              max={60}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={intervalMin}
               onChange={(e) =>
-                setIntervalMin(Math.max(0, Number(e.target.value)))
+                setIntervalMin(
+                  Math.max(
+                    0,
+                    Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
+                  ),
+                )
               }
               data-ocid="tt-interval"
             />
@@ -1047,12 +1058,18 @@ export default function TeacherTimetable() {
               <div key={i} className="space-y-1">
                 <span className="text-xs text-muted-foreground">P{i + 1}</span>
                 <Input
-                  type="number"
-                  min={10}
-                  max={120}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={periodDurations[i] ?? 45}
                   onChange={(e) =>
-                    updateDuration(i, Math.max(10, Number(e.target.value)))
+                    updateDuration(
+                      i,
+                      Math.max(
+                        10,
+                        Number(e.target.value.replace(/[^0-9]/g, "")) || 10,
+                      ),
+                    )
                   }
                   className="h-8 text-sm"
                   data-ocid={`tt-period-dur-${i}`}

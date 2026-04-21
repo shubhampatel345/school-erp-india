@@ -556,12 +556,15 @@ function CallLogsTab({
               <div>
                 <Label className="text-xs">Duration (seconds)</Label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={newEntry.duration}
                   onChange={(e) =>
                     setNewEntry({
                       ...newEntry,
-                      duration: Number(e.target.value),
+                      duration:
+                        Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
                     })
                   }
                   data-ocid="calling.add_entry_duration_input"

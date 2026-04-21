@@ -1,7 +1,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { CheckCircle, Loader2, Palette, Save } from "lucide-react";
+import { CheckCircle, Loader2, Palette, RotateCcw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
@@ -13,72 +13,138 @@ interface ThemeDefinition {
   name: string;
   description: string;
   dataTheme?: string;
+  /** CSS oklch sidebar bg color for preview swatch */
+  sidebarColor: string;
+  /** CSS oklch accent color for preview highlights */
+  accentColor: string;
+  /** Hex colors for content area preview */
+  contentBg: string;
   primary: string;
   accent: string;
-  swatches: string[];
 }
 
 const THEMES: ThemeDefinition[] = [
   {
     id: "default",
-    name: "Navy Blue (Default)",
-    description: "Deep navy primary with cyan accent — professional, trusted",
-    primary: "#1e2a5c",
+    name: "Navy Blue",
+    description: "Deep navy sidebar, cyan accent — professional, trusted",
+    sidebarColor: "oklch(0.15 0.05 265)",
+    accentColor: "oklch(0.65 0.15 200)",
+    contentBg: "#f8f9fc",
+    primary: "#1e3a5f",
     accent: "#0bbfdc",
-    swatches: ["#f5f5fa", "#ffffff", "#1e2a5c", "#0bbfdc", "#e8eaf6"],
   },
   {
     id: "ocean",
-    name: "Ocean Blue",
-    description: "Deep blue with vibrant teal — calm, focused, modern",
+    name: "Deep Ocean",
+    description: "Dark blue sidebar, vibrant teal — calm and focused",
     dataTheme: "ocean",
+    sidebarColor: "oklch(0.12 0.06 230)",
+    accentColor: "oklch(0.58 0.18 175)",
+    contentBg: "#f0f4ff",
     primary: "#2c4aab",
     accent: "#0fa89a",
-    swatches: ["#f0f4ff", "#ffffff", "#2c4aab", "#0fa89a", "#dce8ff"],
   },
   {
     id: "forest",
     name: "Forest Green",
-    description: "Rich forest green with lime — natural, energetic",
+    description: "Rich dark green sidebar, lime accent — natural, energetic",
     dataTheme: "forest",
+    sidebarColor: "oklch(0.13 0.05 145)",
+    accentColor: "oklch(0.62 0.18 100)",
+    contentBg: "#f2f9f3",
     primary: "#1a5c32",
     accent: "#72c828",
-    swatches: ["#f2f9f3", "#ffffff", "#1a5c32", "#72c828", "#dcf0e0"],
   },
   {
     id: "rose",
-    name: "Rose Burgundy",
-    description: "Warm burgundy with coral — elegant and vibrant",
+    name: "Sunset Rose",
+    description: "Deep burgundy sidebar, coral accent — elegant, vibrant",
     dataTheme: "rose",
+    sidebarColor: "oklch(0.14 0.06 350)",
+    accentColor: "oklch(0.6 0.22 25)",
+    contentBg: "#fff5f8",
     primary: "#7a1040",
     accent: "#e84a2f",
-    swatches: ["#fff5f8", "#ffffff", "#7a1040", "#e84a2f", "#fce0e8"],
   },
   {
     id: "dark-navy",
-    name: "Dark Navy",
-    description: "Dark mode with deep navy background — modern, refined",
+    name: "Dark Night",
+    description: "Near-black sidebar, purple accent — modern, refined",
     dataTheme: "dark",
-    primary: "#3b82f6",
+    sidebarColor: "oklch(0.07 0.012 265)",
+    accentColor: "oklch(0.55 0.2 285)",
+    contentBg: "#0f172a",
+    primary: "#7c3aed",
     accent: "#10b981",
-    swatches: ["#0f172a", "#1e293b", "#3b82f6", "#10b981", "#334155"],
+  },
+  {
+    id: "slate",
+    name: "Slate Gray",
+    description: "Dark slate sidebar, cool blue accent — clean, minimal",
+    dataTheme: "slate",
+    sidebarColor: "oklch(0.16 0.03 240)",
+    accentColor: "oklch(0.55 0.12 220)",
+    contentBg: "#f4f6f9",
+    primary: "#3b5bdb",
+    accent: "#4dabf7",
+  },
+  {
+    id: "purple",
+    name: "Royal Purple",
+    description: "Deep purple sidebar, violet accent — regal, premium",
+    dataTheme: "purple",
+    sidebarColor: "oklch(0.14 0.08 295)",
+    accentColor: "oklch(0.65 0.22 295)",
+    contentBg: "#faf5ff",
+    primary: "#7c3aed",
+    accent: "#a855f7",
+  },
+  {
+    id: "copper",
+    name: "Copper Bronze",
+    description: "Dark brown sidebar, amber accent — warm, distinctive",
+    dataTheme: "copper",
+    sidebarColor: "oklch(0.16 0.05 40)",
+    accentColor: "oklch(0.62 0.18 60)",
+    contentBg: "#fdf8f0",
+    primary: "#92400e",
+    accent: "#f59e0b",
+  },
+  {
+    id: "cherry",
+    name: "Cherry Red",
+    description: "Dark crimson sidebar, orange-red accent — bold, passionate",
+    dataTheme: "cherry",
+    sidebarColor: "oklch(0.15 0.07 15)",
+    accentColor: "oklch(0.6 0.22 30)",
+    contentBg: "#fff5f0",
+    primary: "#b91c1c",
+    accent: "#f97316",
+  },
+  {
+    id: "midnight",
+    name: "Midnight Teal",
+    description: "Very dark teal sidebar, light teal accent — deep, cool",
+    dataTheme: "midnight",
+    sidebarColor: "oklch(0.1 0.05 200)",
+    accentColor: "oklch(0.65 0.18 185)",
+    contentBg: "#f0fdfa",
+    primary: "#0d9488",
+    accent: "#2dd4bf",
   },
 ];
 
 const LS_KEY = "shubh_erp_theme";
 
-function applyTheme(theme: ThemeDefinition) {
+export function applyTheme(theme: ThemeDefinition) {
   const root = document.documentElement;
-  // Remove previous data-theme attributes
   root.removeAttribute("data-theme");
-  if (theme.dataTheme && theme.dataTheme !== "dark") {
-    root.setAttribute("data-theme", theme.dataTheme);
-  }
-  // Dark mode
+  root.classList.remove("dark");
   if (theme.dataTheme === "dark") {
     root.classList.add("dark");
-  } else {
-    root.classList.remove("dark");
+  } else if (theme.dataTheme) {
+    root.setAttribute("data-theme", theme.dataTheme);
   }
 }
 
@@ -98,9 +164,73 @@ async function saveThemeToServer(themeId: string): Promise<void> {
     signal: AbortSignal.timeout(10000),
   });
   const text = await res.text();
-  if (text.trimStart().startsWith("<")) return; // silently skip
+  if (text.trimStart().startsWith("<")) return;
   const json = JSON.parse(text) as { status?: string };
   if (json.status === "error") return;
+}
+
+/** Sidebar mini-preview: shows a fake sidebar with colored items */
+function SidebarPreview({
+  theme,
+  isActive,
+}: {
+  theme: ThemeDefinition;
+  isActive: boolean;
+}) {
+  const fakeItems = ["Dashboard", "Students", "Fees", "Attendance", "Settings"];
+  return (
+    <div
+      className="w-20 rounded-md overflow-hidden flex-shrink-0 shadow-sm"
+      style={{
+        backgroundColor: theme.sidebarColor,
+        border: isActive
+          ? `2px solid ${theme.accent}`
+          : "2px solid transparent",
+      }}
+    >
+      {/* Mini logo bar */}
+      <div
+        className="h-5 px-1.5 flex items-center gap-1"
+        style={{ backgroundColor: "rgba(0,0,0,0.2)" }}
+      >
+        <div
+          className="w-2.5 h-2.5 rounded-sm"
+          style={{ backgroundColor: theme.accentColor }}
+        />
+        <div className="w-8 h-1 rounded-full bg-white/40" />
+      </div>
+      {/* Mini nav items */}
+      <div className="p-1 space-y-0.5">
+        {fakeItems.map((label, i) => (
+          <div
+            key={label}
+            className="h-3.5 rounded-sm flex items-center px-1 gap-1"
+            style={{
+              backgroundColor:
+                i === 0
+                  ? `${theme.accentColor.replace(")", " / 0.35)")}`
+                  : "transparent",
+            }}
+          >
+            <div
+              className="w-1.5 h-1.5 rounded-sm flex-shrink-0"
+              style={{
+                backgroundColor:
+                  i === 0 ? theme.accentColor : "rgba(255,255,255,0.4)",
+              }}
+            />
+            <div
+              className="flex-1 h-0.5 rounded-full"
+              style={{
+                backgroundColor:
+                  i === 0 ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.4)",
+              }}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export default function ThemeSettings() {
@@ -137,80 +267,90 @@ export default function ThemeSettings() {
     }
   }
 
+  function handleReset() {
+    void handleApply(THEMES[0]);
+  }
+
   return (
-    <div className="p-4 lg:p-6 max-w-3xl space-y-6 animate-fade-in">
-      <div className="flex items-center gap-3">
-        <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-          <Palette className="w-5 h-5 text-primary" />
+    <div className="p-4 lg:p-6 max-w-4xl space-y-6 animate-fade-in">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Palette className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="text-xl font-display font-semibold text-foreground">
+              Theme Settings
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Choose a color theme — sidebar is always dark for readability
+            </p>
+          </div>
         </div>
-        <div>
-          <h2 className="text-xl font-display font-semibold text-foreground">
-            Theme Settings
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Choose a color theme for your School Ledger ERP
-          </p>
-        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleReset}
+          data-ocid="theme.reset_button"
+          className="gap-1.5"
+        >
+          <RotateCcw className="w-3.5 h-3.5" />
+          Reset
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {THEMES.map((theme) => {
-          const isActive = currentTheme === theme.id;
+          const active = currentTheme === theme.id;
           return (
             <Card
               key={theme.id}
-              className={`p-4 cursor-pointer transition-smooth hover:shadow-card ${
-                isActive
+              className={`p-3 cursor-pointer transition-smooth hover:shadow-card ${
+                active
                   ? "border-2 border-primary shadow-card"
                   : "hover:border-primary/30"
               }`}
               onClick={() => void handleApply(theme)}
               data-ocid={`theme.${theme.id}.card`}
             >
-              {/* Color swatches preview */}
-              <div className="flex gap-1.5 mb-3">
-                {theme.swatches.map((color) => (
-                  <div
-                    key={color}
-                    className="w-7 h-7 rounded-full border border-border/50"
-                    style={{ backgroundColor: color }}
-                    title={color}
-                  />
-                ))}
-              </div>
+              <div className="flex gap-3">
+                {/* Sidebar mini-preview */}
+                <SidebarPreview theme={theme} isActive={active} />
 
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <p className="font-semibold text-foreground text-sm">
-                    {theme.name}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-start justify-between gap-1 mb-1">
+                    <p className="font-semibold text-foreground text-sm leading-tight">
+                      {theme.name}
+                    </p>
+                    {active && (
+                      <Badge className="text-[9px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30 shrink-0 px-1 py-0">
+                        <CheckCircle className="w-2 h-2 mr-0.5" />
+                        Active
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
                     {theme.description}
                   </p>
-                </div>
-                {isActive && (
-                  <Badge className="text-[10px] bg-emerald-500/10 text-emerald-700 border-emerald-500/30 shrink-0">
-                    <CheckCircle className="w-2.5 h-2.5 mr-1" />
-                    Active
-                  </Badge>
-                )}
-              </div>
-
-              {/* Primary / Accent pill */}
-              <div className="flex gap-2 mt-3">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: theme.primary }}
-                  />
-                  Primary
-                </div>
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <div
-                    className="w-3 h-3 rounded-full"
-                    style={{ backgroundColor: theme.accent }}
-                  />
-                  Accent
+                  {/* Color dots */}
+                  <div className="flex gap-1.5 mt-2">
+                    <div
+                      className="w-4 h-4 rounded-full border border-border/40 shadow-sm"
+                      style={{ backgroundColor: theme.primary }}
+                      title="Primary"
+                    />
+                    <div
+                      className="w-4 h-4 rounded-full border border-border/40 shadow-sm"
+                      style={{ backgroundColor: theme.accent }}
+                      title="Accent"
+                    />
+                    <div
+                      className="w-4 h-4 rounded-full border border-border/40 shadow-sm"
+                      style={{ backgroundColor: theme.contentBg }}
+                      title="Content background"
+                    />
+                  </div>
                 </div>
               </div>
             </Card>
@@ -223,7 +363,7 @@ export default function ThemeSettings() {
         <div className="flex items-center gap-2">
           <Palette className="w-4 h-4 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            Current theme:{" "}
+            Active theme:{" "}
             <strong className="text-foreground">
               {THEMES.find((t) => t.id === currentTheme)?.name ?? "Default"}
             </strong>
@@ -233,34 +373,10 @@ export default function ThemeSettings() {
           )}
         </div>
         <p className="text-xs text-muted-foreground mt-1 ml-6">
-          Theme is saved and applied across all devices when using server sync.
+          Themes are saved to localStorage and applied instantly on every device
+          when server sync is active.
         </p>
       </Card>
-
-      {/* Manual Save Button */}
-      <div className="flex justify-end">
-        <Button
-          onClick={() => {
-            const theme =
-              THEMES.find((t) => t.id === currentTheme) ?? THEMES[0];
-            void handleApply(theme);
-          }}
-          disabled={saving}
-          data-ocid="theme.save_button"
-        >
-          {saving ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Saving…
-            </>
-          ) : (
-            <>
-              <Save className="w-4 h-4 mr-2" />
-              Apply &amp; Save Theme
-            </>
-          )}
-        </Button>
-      </div>
     </div>
   );
 }

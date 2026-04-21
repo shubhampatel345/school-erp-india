@@ -243,13 +243,18 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         }
         setShowForm(false);
         setEditStaff(undefined);
+        // Refresh the staff list so the new/updated record appears immediately.
+        // saveData/updateData already call refreshCollection internally; this
+        // explicit call is a safety net for slow-network scenarios.
+        setRefreshing(true);
+        void refreshCollection("staff").finally(() => setRefreshing(false));
       } catch {
         addNotification("Failed to save staff member.", "error");
       } finally {
         setSaving(false);
       }
     },
-    [staff, saveData, updateData, addNotification],
+    [staff, saveData, updateData, addNotification, refreshCollection],
   );
 
   const handleDelete = useCallback(
@@ -259,11 +264,14 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
         await deleteData("staff", id);
         addNotification("Staff member deleted.", "info");
         setViewStaff(null);
+        // Refresh after delete
+        setRefreshing(true);
+        void refreshCollection("staff").finally(() => setRefreshing(false));
       } catch {
         addNotification("Failed to delete staff member.", "error");
       }
     },
-    [deleteData, addNotification],
+    [deleteData, addNotification, refreshCollection],
   );
 
   // ── Export CSV ─────────────────────────────────────────────

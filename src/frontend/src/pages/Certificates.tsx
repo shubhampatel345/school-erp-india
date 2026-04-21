@@ -214,11 +214,16 @@ function TemplateEditor({
         <div>
           <Label>Font Size</Label>
           <Input
-            type="number"
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]*"
             value={form.fontSize}
-            min={9}
-            max={18}
-            onChange={(e) => set("fontSize", Number(e.target.value))}
+            onChange={(e) =>
+              set(
+                "fontSize",
+                Number(e.target.value.replace(/[^0-9]/g, "")) || 12,
+              )
+            }
           />
         </div>
         <div className="col-span-2">

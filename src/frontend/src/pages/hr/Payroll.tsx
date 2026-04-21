@@ -303,72 +303,107 @@ function SetupRow({ staff, onSaved }: SetupRowProps) {
       </td>
       <td className="px-2 py-2">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={base}
-          onChange={(e) => setBase(e.target.value)}
+          onChange={(e) =>
+            setBase(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={hra}
-          onChange={(e) => setHra(e.target.value)}
+          onChange={(e) =>
+            setHra(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={da}
-          onChange={(e) => setDa(e.target.value)}
+          onChange={(e) =>
+            setDa(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2 hidden xl:table-cell">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={otherAllow}
-          onChange={(e) => setOtherAllow(e.target.value)}
+          onChange={(e) =>
+            setOtherAllow(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={pf}
-          onChange={(e) => setPf(e.target.value)}
+          onChange={(e) =>
+            setPf(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2 hidden lg:table-cell">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={esi}
-          onChange={(e) => setEsi(e.target.value)}
+          onChange={(e) =>
+            setEsi(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-2 py-2 hidden lg:table-cell">
         <Input
-          type="number"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={otherDed}
-          onChange={(e) => setOtherDed(e.target.value)}
+          onChange={(e) =>
+            setOtherDed(
+              e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+            )
+          }
           className="w-24 h-8 text-sm"
           placeholder="0"
-          min={0}
         />
       </td>
       <td className="px-3 py-3 text-right font-mono font-semibold text-sm text-primary">
@@ -888,12 +923,12 @@ export default function Payroll() {
                 </Label>
                 <Input
                   id="wd-default"
-                  type="number"
-                  min={1}
-                  max={31}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={settingsWd}
                   onChange={(e) =>
-                    setSettingsWd(e.target.value.replace(/^0+(?=\d)/, ""))
+                    setSettingsWd(e.target.value.replace(/[^0-9]/g, ""))
                   }
                   className="w-28"
                   data-ocid="payroll.default_wd_input"
@@ -947,12 +982,12 @@ export default function Payroll() {
                 <Label htmlFor="month-wd">Working Days — {selectedMonth}</Label>
                 <Input
                   id="month-wd"
-                  type="number"
-                  min={1}
-                  max={31}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={monthWorkingDays}
                   onChange={(e) =>
-                    setMonthWorkingDays(e.target.value.replace(/^0+(?=\d)/, ""))
+                    setMonthWorkingDays(e.target.value.replace(/[^0-9]/g, ""))
                   }
                   className="w-24"
                   data-ocid="payroll.working_days_input"

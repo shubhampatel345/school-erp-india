@@ -34,8 +34,6 @@ interface NavItem {
   roles?: UserRole[];
 }
 
-// Flat nav — NO submenus, NO expandable sections
-// Each item maps directly to a page ID used in activePage state
 const NAV_ITEMS: NavItem[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   {
@@ -189,8 +187,6 @@ export default function Sidebar({
     return item.roles.includes(currentUser.role);
   };
 
-  // Consider active if activePage starts with item id
-  // e.g. "fees/collect" matches "fees", "hr/staff" matches "hr"
   const isActive = (id: string) =>
     activePage === id || activePage.startsWith(`${id}/`);
 
@@ -202,6 +198,7 @@ export default function Sidebar({
       style={{
         backgroundColor: "oklch(var(--sidebar))",
         color: "oklch(var(--sidebar-foreground))",
+        borderRight: "1px solid oklch(var(--sidebar-border))",
       }}
     >
       {/* Logo strip */}
@@ -209,12 +206,21 @@ export default function Sidebar({
         className="flex items-center gap-2 h-14 px-3 flex-shrink-0"
         style={{ borderBottom: "1px solid oklch(var(--sidebar-border))" }}
       >
-        <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center flex-shrink-0">
-          <GraduationCap className="w-4 h-4 text-primary-foreground" />
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ backgroundColor: "oklch(var(--sidebar-accent))" }}
+        >
+          <GraduationCap
+            className="w-4 h-4"
+            style={{ color: "oklch(var(--sidebar-foreground))" }}
+          />
         </div>
         {!collapsed && (
-          <span className="font-display font-bold text-sm text-white truncate leading-tight">
-            SCHOOL LEDGER ERP
+          <span
+            className="font-display font-bold text-sm truncate leading-tight"
+            style={{ color: "oklch(var(--sidebar-foreground))" }}
+          >
+            SHUBH SCHOOL ERP
           </span>
         )}
       </div>
@@ -233,17 +239,41 @@ export default function Sidebar({
               data-ocid={`nav-${item.id.replace(/\//g, "-")}`}
               onClick={() => onNavigate(item.id)}
               title={collapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-smooth group
-                ${
-                  active
-                    ? "bg-white/15 text-white font-semibold"
-                    : "text-white/70 hover:bg-white/10 hover:text-white"
-                }`}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-smooth group relative"
+              style={
+                active
+                  ? {
+                      backgroundColor: "oklch(var(--sidebar-accent) / 0.35)",
+                      color: "oklch(var(--sidebar-foreground))",
+                      borderLeft: "3px solid oklch(var(--sidebar-accent))",
+                      paddingLeft: collapsed ? "10px" : "9px",
+                      fontWeight: 600,
+                    }
+                  : {
+                      color: "oklch(var(--sidebar-foreground) / 0.78)",
+                      borderLeft: "3px solid transparent",
+                      paddingLeft: collapsed ? "10px" : "9px",
+                    }
+              }
+              onMouseEnter={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                    "oklch(var(--sidebar-accent) / 0.15)";
+                  (e.currentTarget as HTMLButtonElement).style.color =
+                    "oklch(var(--sidebar-foreground))";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active) {
+                  (e.currentTarget as HTMLButtonElement).style.backgroundColor =
+                    "transparent";
+                  (e.currentTarget as HTMLButtonElement).style.color =
+                    "oklch(var(--sidebar-foreground) / 0.78)";
+                }
+              }}
             >
               <div className="relative flex-shrink-0">
-                <Icon
-                  className={`w-4 h-4 ${active ? "text-white" : "text-white/50 group-hover:text-white/80"}`}
-                />
+                <Icon className="w-4 h-4 opacity-100" />
                 {collapsed && showUnread && (
                   <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center">
                     {chatUnread > 9 ? "9+" : chatUnread}
@@ -274,14 +304,26 @@ export default function Sidebar({
           style={{ borderTop: "1px solid oklch(var(--sidebar-border))" }}
         >
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-full bg-white/10 flex items-center justify-center flex-shrink-0">
-              <Users className="w-3.5 h-3.5 text-white/60" />
+            <div
+              className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+              style={{ backgroundColor: "oklch(var(--sidebar-accent) / 0.2)" }}
+            >
+              <Users
+                className="w-3.5 h-3.5"
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.7)" }}
+              />
             </div>
             <div className="min-w-0">
-              <p className="text-[11px] text-white/70 truncate font-medium leading-none">
+              <p
+                className="text-[11px] truncate font-medium leading-none"
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.85)" }}
+              >
                 {currentUser?.fullName ?? currentUser?.name ?? "User"}
               </p>
-              <p className="text-[10px] text-white/30 mt-0.5 capitalize leading-none">
+              <p
+                className="text-[10px] mt-0.5 capitalize leading-none"
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.5)" }}
+              >
                 {currentUser?.role ?? ""}
               </p>
             </div>

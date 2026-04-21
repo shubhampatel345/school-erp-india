@@ -201,12 +201,19 @@ function UpiQrTab({ students }: { students: Student[] }) {
             </label>
             <input
               id="upi-custom-amount"
-              type="number"
-              min="1"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               placeholder="Enter amount"
               value={customAmount}
-              onChange={(e) => setCustomAmount(e.target.value)}
-              className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+              onChange={(e) =>
+                setCustomAmount(
+                  e.target.value
+                    .replace(/[^0-9.]/g, "")
+                    .replace(/(\..*)\./g, "$1"),
+                )
+              }
+              className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
               data-ocid="upi-custom-amount-input"
             />
           </div>
@@ -835,12 +842,19 @@ export default function OnlineFees() {
                 </label>
                 <input
                   id="pay-amount"
-                  type="number"
-                  min="1"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   placeholder="Enter amount"
                   value={payAmount}
-                  onChange={(e) => setPayAmount(e.target.value)}
-                  className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                  onChange={(e) =>
+                    setPayAmount(
+                      e.target.value
+                        .replace(/[^0-9.]/g, "")
+                        .replace(/(\..*)\./g, "$1"),
+                    )
+                  }
+                  className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="online-pay-amount"
                 />
               </div>

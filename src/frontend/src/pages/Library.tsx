@@ -142,10 +142,18 @@ function LibrarySettingsPanel({
           <div>
             <Label>Fine per overdue day (₹)</Label>
             <Input
-              type="number"
-              className="mt-1 no-spinner"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              className="mt-1"
               value={finePerDay}
-              onChange={(e) => setFinePerDay(e.target.value)}
+              onChange={(e) =>
+                setFinePerDay(
+                  e.target.value
+                    .replace(/[^0-9.]/g, "")
+                    .replace(/(\..*)\./g, "$1"),
+                )
+              }
               placeholder="5"
               data-ocid="library.settings.fine_input"
             />
@@ -153,10 +161,14 @@ function LibrarySettingsPanel({
           <div>
             <Label>Default loan period (days)</Label>
             <Input
-              type="number"
-              className="mt-1 no-spinner"
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              className="mt-1"
               value={defaultLoanDays}
-              onChange={(e) => setDefaultLoanDays(e.target.value)}
+              onChange={(e) =>
+                setDefaultLoanDays(e.target.value.replace(/[^0-9]/g, ""))
+              }
               placeholder="14"
               data-ocid="library.settings.loan_days_input"
             />
@@ -323,22 +335,28 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
             <div>
               <Label>Total Qty</Label>
               <Input
-                type="number"
-                className="mt-1 no-spinner"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="mt-1"
                 value={totalQty}
-                onChange={(e) => setTotalQty(e.target.value)}
-                min="0"
+                onChange={(e) =>
+                  setTotalQty(e.target.value.replace(/[^0-9]/g, ""))
+                }
                 data-ocid="library.book.total_qty_input"
               />
             </div>
             <div>
               <Label>Available Qty</Label>
               <Input
-                type="number"
-                className="mt-1 no-spinner"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                className="mt-1"
                 value={availableQty}
-                onChange={(e) => setAvailableQty(e.target.value)}
-                min="0"
+                onChange={(e) =>
+                  setAvailableQty(e.target.value.replace(/[^0-9]/g, ""))
+                }
                 data-ocid="library.book.available_qty_input"
               />
             </div>

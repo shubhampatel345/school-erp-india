@@ -1009,13 +1009,18 @@ export default function StaffForm({
               <Label htmlFor="sf-base">Base Salary (₹) *</Label>
               <Input
                 id="sf-base"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={baseSalary}
                 onChange={(e) =>
-                  setBaseSalary(e.target.value.replace(/^0+(?=\d)/, ""))
+                  setBaseSalary(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
                 }
                 placeholder="e.g. 25000"
-                min={0}
                 data-ocid="staff-salary"
               />
             </div>
@@ -1024,13 +1029,18 @@ export default function StaffForm({
               <Label htmlFor="sf-hra">HRA (₹)</Label>
               <Input
                 id="sf-hra"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={hra}
                 onChange={(e) =>
-                  setHra(e.target.value.replace(/^0+(?=\d)/, ""))
+                  setHra(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
                 }
                 placeholder="House Rent Allowance"
-                min={0}
               />
             </div>
 
@@ -1038,11 +1048,18 @@ export default function StaffForm({
               <Label htmlFor="sf-da">DA (₹)</Label>
               <Input
                 id="sf-da"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={da}
-                onChange={(e) => setDa(e.target.value.replace(/^0+(?=\d)/, ""))}
+                onChange={(e) =>
+                  setDa(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
+                }
                 placeholder="Dearness Allowance"
-                min={0}
               />
             </div>
 
@@ -1050,13 +1067,18 @@ export default function StaffForm({
               <Label htmlFor="sf-other-allow">Other Allowance (₹)</Label>
               <Input
                 id="sf-other-allow"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={otherAllowance}
                 onChange={(e) =>
-                  setOtherAllowance(e.target.value.replace(/^0+(?=\d)/, ""))
+                  setOtherAllowance(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
                 }
                 placeholder="e.g. Travel, Special"
-                min={0}
               />
             </div>
 
@@ -1064,11 +1086,18 @@ export default function StaffForm({
               <Label htmlFor="sf-pf">PF Deduction (₹)</Label>
               <Input
                 id="sf-pf"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={pf}
-                onChange={(e) => setPf(e.target.value.replace(/^0+(?=\d)/, ""))}
+                onChange={(e) =>
+                  setPf(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
+                }
                 placeholder="Provident Fund"
-                min={0}
               />
             </div>
 
@@ -1076,13 +1105,18 @@ export default function StaffForm({
               <Label htmlFor="sf-esi">ESI Deduction (₹)</Label>
               <Input
                 id="sf-esi"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={esi}
                 onChange={(e) =>
-                  setEsi(e.target.value.replace(/^0+(?=\d)/, ""))
+                  setEsi(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
                 }
                 placeholder="Employee State Insurance"
-                min={0}
               />
             </div>
 
@@ -1090,13 +1124,18 @@ export default function StaffForm({
               <Label htmlFor="sf-other-ded">Other Deduction (₹)</Label>
               <Input
                 id="sf-other-ded"
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={otherDeduction}
                 onChange={(e) =>
-                  setOtherDeduction(e.target.value.replace(/^0+(?=\d)/, ""))
+                  setOtherDeduction(
+                    e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  )
                 }
                 placeholder="Loan, TDS, etc."
-                min={0}
               />
             </div>
           </div>

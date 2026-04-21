@@ -1,19 +1,13 @@
 /**
  * FeesPlan.tsx — Class-wise, section-wise fee plans
  *
- * Collection key: "fees_plan" (matches server MySQL table)
- * Each plan row: classId + sectionId + headingId → amounts per month (JSON)
- * Single `amount` field = the base amount applied to all applicable months.
- *
- * FIXES:
- * - Inputs are type="text" inputMode="decimal" — no browser spinner arrows
- * - disabled only when isReadOnly (archived session), never when canEdit roles
- * - safeMonths() normalises months whether string[] or JSON string or CSV
- * - parseAmounts handles NULL / plain number / JSON object from MySQL
- * - Save posts via updateData / saveData which push to MySQL via syncEngine
- * - Refresh after save so new amounts appear immediately
+ * TYPING FIX:
+ * - headings is now memoized so its reference is stable across renders.
+ *   This prevents the editValues effect from firing on every SyncEngine poll.
+ * - handleAmountChange is a stable useCallback with empty deps.
+ * - All permissions are computed once with useMemo.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { useApp } from "../../context/AppContext";
 import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
@@ -22,16 +16,13 @@ import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
-/** Safely convert any value to string[] (handles JSON string, CSV, or real array) */
 function safeStringArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);
   if (typeof v === "string" && v.trim()) {
-    // try JSON first
     try {
       const p = JSON.parse(v);
       if (Array.isArray(p)) return p.map(String);
     } catch {
-      // not JSON — try CSV
       return v
         .split(",")
         .map((s) => s.trim())
@@ -41,16 +32,9 @@ function safeStringArray(v: unknown): string[] {
   return [];
 }
 
-/**
- * Parse the amounts field which may be:
- *  - null / undefined → {}
- *  - a plain number    → {} (caller should fall back to plan.amount)
- *  - a JSON object string → { "Apr": 1000, ... }
- *  - already an object    → pass through
- */
 function parseAmounts(amounts: unknown): Record<string, number> {
   if (!amounts && amounts !== 0) return {};
-  if (typeof amounts === "number") return {}; // single amount — caller uses plan.amount
+  if (typeof amounts === "number") return {};
   if (typeof amounts === "object" && !Array.isArray(amounts)) {
     return amounts as Record<string, number>;
   }
@@ -61,7 +45,7 @@ function parseAmounts(amounts: unknown): Record<string, number> {
         return p as Record<string, number>;
       }
     } catch {
-      // not parseable JSON — ignore
+      // not parseable JSON
     }
   }
   return {};
@@ -105,25 +89,35 @@ export default function FeesPlanPage() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
 
-  // Who can edit fee amounts
-  const canEdit =
-    currentUser?.role === "superadmin" ||
-    currentUser?.role === "admin" ||
-    currentUser?.role === "accountant";
+  // ── Stable permission flags — computed once, not re-derived on every render ──
+  const canEdit = useMemo(
+    () =>
+      currentUser?.role === "superadmin" ||
+      currentUser?.role === "admin" ||
+      currentUser?.role === "accountant",
+    [currentUser?.role],
+  );
 
   // ── Raw collections ─────────────────────────────────────────────────────────
+  // CRITICAL: memoize headings so its reference is stable.
+  // Without this, headings rebuilds every render → activeHeadings changes →
+  // editValues useEffect fires → erases what the user is typing.
   const rawHeadings = getData("fee_headings") as FeeHeading[];
+  const headings = useMemo(
+    () =>
+      rawHeadings
+        .map((h) => ({
+          ...h,
+          months: safeStringArray(h.months),
+        }))
+        .filter((h) => h.isActive !== false)
+        .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)),
+    [rawHeadings],
+  );
 
-  /** Headings with months always as a real string[] */
-  const headings = rawHeadings
-    .map((h) => ({
-      ...h,
-      months: safeStringArray(h.months),
-    }))
-    .filter((h) => h.isActive !== false)
-    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
-
-  const plans = getData("fees_plan") as FeesPlan[];
+  const rawPlans = getData("fees_plan") as FeesPlan[];
+  // Memoize plans too so activeHeadings.filter doesn't re-run unnecessarily.
+  const plans = useMemo(() => rawPlans, [rawPlans]);
 
   // ── Classes ─────────────────────────────────────────────────────────────────
   const classSections: ClassSection[] = useMemo(() => {
@@ -146,9 +140,15 @@ export default function FeesPlanPage() {
     }));
   }, [getData]);
 
-  const classNames = classSections
-    .map((c) => c.className ?? (c as unknown as { name?: string }).name ?? "")
-    .filter(Boolean);
+  const classNames = useMemo(
+    () =>
+      classSections
+        .map(
+          (c) => c.className ?? (c as unknown as { name?: string }).name ?? "",
+        )
+        .filter(Boolean),
+    [classSections],
+  );
 
   const activeSections: string[] = useMemo(() => {
     const cs = classSections.find(
@@ -179,7 +179,28 @@ export default function FeesPlanPage() {
   }, [activeSections]);
 
   // ── Load existing plan amounts into editValues ────────────────────────────
+  // Use refs to track previous serialized values so we can skip the effect
+  // when data arrives from SyncEngine polls but hasn't actually changed.
+  // This prevents the fee grid from resetting while the user is typing.
+  const prevEditKeyRef = useRef<string>("");
+
+  const plansKey = useMemo(
+    () =>
+      JSON.stringify(
+        plans.map((p) => ({ id: p.id, amounts: p.amounts, amount: p.amount })),
+      ),
+    [plans],
+  );
+  const headingsKey = useMemo(
+    () => JSON.stringify(activeHeadings.map((h) => h.id)),
+    [activeHeadings],
+  );
+
   useEffect(() => {
+    const newKey = `${selectedClass}|${selectedSection}|${headingsKey}|${plansKey}`;
+    if (prevEditKeyRef.current === newKey) return; // nothing changed — don't reset
+    prevEditKeyRef.current = newKey;
+
     if (!selectedClass || !selectedSection || activeHeadings.length === 0) {
       setEditValues({});
       return;
@@ -190,7 +211,6 @@ export default function FeesPlanPage() {
     for (const heading of activeHeadings) {
       vals[heading.id] = {};
 
-      // Find existing plan for this class + section + heading
       const plan = plans.find((p) => {
         const planClass =
           p.classId ||
@@ -215,16 +235,13 @@ export default function FeesPlanPage() {
 
         let val = "";
         if (plan) {
-          // Try amounts map first, fall back to single amount field
           if (plan.amounts && typeof plan.amounts === "object") {
             const amts = plan.amounts as Record<string, number>;
             val = amts[short] !== undefined ? String(amts[short]) : "";
           } else if (plan.amounts) {
-            // Could be a JSON string stored in MySQL
             const amts = parseAmounts(plan.amounts);
             val = amts[short] !== undefined ? String(amts[short]) : "";
           }
-          // Fall back to single amount field (one amount for all months)
           if (!val && plan.amount) {
             val = String(plan.amount);
           }
@@ -236,28 +253,32 @@ export default function FeesPlanPage() {
 
     setEditValues(vals);
     setSavedMsg("");
-  }, [selectedClass, selectedSection, activeHeadings, plans]);
+  }, [
+    selectedClass,
+    selectedSection,
+    activeHeadings,
+    plans,
+    headingsKey,
+    plansKey,
+  ]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
+  // CRITICAL: empty deps array so this is created once — never a new reference.
+  const handleAmountChange = useCallback(
+    (headingId: string, monthShort: string, raw: string) => {
+      const cleaned = raw.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
+      setEditValues((prev) => ({
+        ...prev,
+        [headingId]: {
+          ...(prev[headingId] ?? {}),
+          [monthShort]: cleaned,
+        },
+      }));
+      setSavedMsg("");
+    },
+    [],
+  );
 
-  function handleAmountChange(
-    headingId: string,
-    monthShort: string,
-    raw: string,
-  ) {
-    // Accept digits and a single decimal point only
-    const cleaned = raw.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1");
-    setEditValues((prev) => ({
-      ...prev,
-      [headingId]: {
-        ...(prev[headingId] ?? {}),
-        [monthShort]: cleaned,
-      },
-    }));
-    setSavedMsg("");
-  }
-
-  /** Copy amounts from the current section to all other sections of the same class */
   async function copyToAllSections() {
     if (!selectedClass || !selectedSection || !canEdit) return;
     const otherSections = activeSections.filter((s) => s !== selectedSection);
@@ -396,7 +417,6 @@ export default function FeesPlanPage() {
       if (existing) {
         saves.push(updateData("fees_plan", existing.id, planData));
       } else {
-        // Save even when hasAny is false so zero-amount records exist
         saves.push(
           saveData("fees_plan", {
             id: generateId(),
@@ -408,7 +428,6 @@ export default function FeesPlanPage() {
 
     try {
       await Promise.allSettled(saves);
-      // Refresh from server to confirm save
       await refreshCollection("fees_plan");
       setSavedMsg(`✓ Saved — ${selectedClass} / ${selectedSection}`);
       addNotification(
@@ -622,38 +641,12 @@ export default function FeesPlanPage() {
                                         <span className="text-muted-foreground text-[10px]">
                                           ₹
                                         </span>
-                                        <input
-                                          type="text"
-                                          inputMode="numeric"
-                                          pattern="[0-9]*"
+                                        <AmountCell
+                                          headingId={heading.id}
+                                          monthShort={short}
                                           value={currentVal}
-                                          onChange={(e) =>
-                                            canEdit &&
-                                            !isReadOnly &&
-                                            handleAmountChange(
-                                              heading.id,
-                                              short,
-                                              e.target.value,
-                                            )
-                                          }
-                                          onFocus={(e) => {
-                                            if (e.target.value === "0")
-                                              e.target.select();
-                                          }}
                                           disabled={isReadOnly || !canEdit}
-                                          placeholder="0"
-                                          className={[
-                                            "h-7 w-16 text-center text-xs px-1 rounded border",
-                                            "bg-background text-foreground",
-                                            "border-input focus:border-primary focus:ring-1 focus:ring-primary/30",
-                                            "outline-none transition-colors",
-                                            isReadOnly || !canEdit
-                                              ? "opacity-50 cursor-not-allowed bg-muted"
-                                              : "hover:border-primary/40",
-                                          ]
-                                            .filter(Boolean)
-                                            .join(" ")}
-                                          data-ocid="fees-plan.amount-input"
+                                          onChange={handleAmountChange}
                                         />
                                       </div>
                                     ) : (
@@ -748,3 +741,54 @@ export default function FeesPlanPage() {
     </div>
   );
 }
+
+// ── AmountCell extracted as a separate component ──────────────────────────────
+// CRITICAL: This MUST be outside FeesPlanPage so it doesn't remount on parent re-renders.
+// It receives a stable `onChange` callback (useCallback with []) so React.memo works.
+import { memo } from "react";
+
+interface AmountCellProps {
+  headingId: string;
+  monthShort: string;
+  value: string;
+  disabled: boolean;
+  onChange: (headingId: string, monthShort: string, raw: string) => void;
+}
+
+const AmountCell = memo(function AmountCell({
+  headingId,
+  monthShort,
+  value,
+  disabled,
+  onChange,
+}: AmountCellProps) {
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      value={value}
+      onChange={(e) => {
+        if (!disabled) onChange(headingId, monthShort, e.target.value);
+      }}
+      onFocus={(e) => {
+        if (e.target.value === "0") e.target.select();
+      }}
+      disabled={disabled}
+      placeholder="0"
+      className={[
+        "h-7 w-16 text-center text-xs px-1 rounded border",
+        "bg-background text-foreground",
+        "border-input focus:border-primary focus:ring-1 focus:ring-primary/30",
+        "outline-none transition-colors",
+        "[appearance:textfield] [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden",
+        disabled
+          ? "opacity-50 cursor-not-allowed bg-muted"
+          : "hover:border-primary/40",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      data-ocid="fees-plan.amount-input"
+    />
+  );
+});

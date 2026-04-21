@@ -22,14 +22,42 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <script>
+      // Apply saved theme BEFORE React renders — prevents flash of wrong theme
+      (function() {
+        try {
+          var themeId = localStorage.getItem('shubh_erp_theme') || 'default';
+          var root = document.documentElement;
+          var themeMap = {
+            'ocean': 'ocean',
+            'forest': 'forest',
+            'rose': 'rose',
+            'dark-navy': 'dark',
+            'slate': 'slate',
+            'purple': 'purple',
+            'copper': 'copper',
+            'cherry': 'cherry',
+            'midnight': 'midnight'
+          };
+          root.removeAttribute('data-theme');
+          root.classList.remove('dark');
+          if (themeId !== 'default') {
+            var dt = themeMap[themeId];
+            if (dt === 'dark') {
+              root.classList.add('dark');
+            } else if (dt) {
+              root.setAttribute('data-theme', dt);
+            }
+          }
+        } catch(e) {}
+      })();
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').catch(() => {});
         });
       }
     </script>
-    <script type="module" crossorigin src="/assets/index-CLboC74D.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-hFFazzpw.css">
+    <script type="module" crossorigin src="/assets/index-DDRHpTqB.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-RKeEWT9Z.css">
   </head>
   <body>
     <div id="root"></div>

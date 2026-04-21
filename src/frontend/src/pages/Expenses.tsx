@@ -26,7 +26,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Expense } from "../types";
 import { MONTHS, formatCurrency, generateId } from "../utils/localStorage";
@@ -239,8 +239,60 @@ export default function Expenses() {
   };
 
   const [entryForm, setEntryForm] = useState<EntryForm>(EMPTY_ENTRY);
-  const setField = (k: keyof EntryForm, v: string) =>
-    setEntryForm((f) => ({ ...f, [k]: v }));
+
+  // CRITICAL: setField must be a stable useCallback so that Input onChange refs
+  // don't change on every render (which would remount inputs and lose focus).
+  const setField = useCallback(
+    (k: keyof EntryForm, v: string) => setEntryForm((f) => ({ ...f, [k]: v })),
+    [],
+  );
+
+  // Stable per-field handlers for the entry dialog — these have [] deps so
+  // the function reference never changes, preventing Input remounts mid-type.
+  const handleHeadNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) =>
+      setField("headName", e.target.value),
+    [setField],
+  );
+  const handleAmountChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setField(
+        "amount",
+        e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+      ),
+    [setField],
+  );
+  const handleDateChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setField("date", e.target.value),
+    [setField],
+  );
+  const handlePaymentModeChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) =>
+      setField("paymentMode", e.target.value as EntryForm["paymentMode"]),
+    [setField],
+  );
+  const handleDescriptionChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setField("description", e.target.value),
+    [setField],
+  );
+  const handleHeadFormNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setHeadForm((f) => ({ ...f, name: e.target.value })),
+    [],
+  );
+  const handleHeadFormBudgetChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setHeadForm((f) => ({
+        ...f,
+        monthlyBudget:
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+      })),
+    [],
+  );
 
   const handleOpenDialog = (type: "income" | "expense", item?: Expense) => {
     setDialogType(type);
@@ -695,9 +747,19 @@ export default function Expenses() {
                   Monthly Budget (₹)
                 </Label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={budget}
-                  onChange={(e) => setBudget(Number(e.target.value))}
+                  onChange={(e) =>
+                    setBudget(
+                      Number(
+                        e.target.value
+                          .replace(/[^0-9.]/g, "")
+                          .replace(/(\..*)\./g, "$1"),
+                      ) || 0,
+                    )
+                  }
                   className="w-36"
                   data-ocid="expenses.budget_input"
                 />
@@ -765,7 +827,7 @@ export default function Expenses() {
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
                   value={entryForm.headName}
-                  onChange={(e) => setField("headName", e.target.value)}
+                  onChange={handleHeadNameChange}
                   data-ocid="expenses.form_head_select"
                 >
                   <option value="">— Select Head —</option>
@@ -781,9 +843,11 @@ export default function Expenses() {
               <div>
                 <Label>Amount (₹) *</Label>
                 <Input
-                  type="number"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={entryForm.amount}
-                  onChange={(e) => setField("amount", e.target.value)}
+                  onChange={handleAmountChange}
                   placeholder="0"
                   data-ocid="expenses.form_amount_input"
                 />
@@ -793,7 +857,7 @@ export default function Expenses() {
                 <Input
                   type="date"
                   value={entryForm.date}
-                  onChange={(e) => setField("date", e.target.value)}
+                  onChange={handleDateChange}
                 />
               </div>
               <div>
@@ -801,12 +865,7 @@ export default function Expenses() {
                 <select
                   className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
                   value={entryForm.paymentMode}
-                  onChange={(e) =>
-                    setField(
-                      "paymentMode",
-                      e.target.value as EntryForm["paymentMode"],
-                    )
-                  }
+                  onChange={handlePaymentModeChange}
                 >
                   {["Cash", "Cheque", "Online"].map((m) => (
                     <option key={m} value={m}>
@@ -819,7 +878,7 @@ export default function Expenses() {
                 <Label>Description</Label>
                 <Input
                   value={entryForm.description}
-                  onChange={(e) => setField("description", e.target.value)}
+                  onChange={handleDescriptionChange}
                   data-ocid="expenses.form_description_input"
                 />
               </div>
@@ -871,9 +930,7 @@ export default function Expenses() {
                 <Label>Head Name *</Label>
                 <Input
                   value={headForm.name}
-                  onChange={(e) =>
-                    setHeadForm((f) => ({ ...f, name: e.target.value }))
-                  }
+                  onChange={handleHeadFormNameChange}
                   placeholder="e.g. Salary"
                   data-ocid="expenses.head_name_input"
                 />
@@ -897,15 +954,11 @@ export default function Expenses() {
               <div>
                 <Label>Monthly Budget (₹)</Label>
                 <Input
-                  type="number"
-                  min={0}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={headForm.monthlyBudget || ""}
-                  onChange={(e) =>
-                    setHeadForm((f) => ({
-                      ...f,
-                      monthlyBudget: Number(e.target.value),
-                    }))
-                  }
+                  onChange={handleHeadFormBudgetChange}
                   placeholder="0 = no budget"
                 />
               </div>

@@ -186,12 +186,19 @@ function QuestionEditor({
       <div className="flex items-center gap-2 pt-1">
         <Label className="text-xs text-muted-foreground">Marks:</Label>
         <Input
-          type="number"
-          className="h-7 w-20 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          className="h-7 w-20 text-sm"
           value={q.marks}
-          min={1}
           onChange={(e) =>
-            onUpdate({ ...q, marks: Math.max(1, Number(e.target.value) || 1) })
+            onUpdate({
+              ...q,
+              marks: Math.max(
+                1,
+                Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
+              ),
+            })
           }
           data-ocid="online_tests.marks_input"
         />
@@ -406,12 +413,18 @@ function CreateExamDialog({
             <div className="space-y-1">
               <Label>Duration (minutes)</Label>
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={duration}
                 onChange={(e) =>
-                  setDuration(Math.max(1, Number(e.target.value) || 1))
+                  setDuration(
+                    Math.max(
+                      1,
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
+                    ),
+                  )
                 }
-                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 data-ocid="online_tests.duration_input"
               />
             </div>
@@ -436,14 +449,21 @@ function CreateExamDialog({
             <div className="space-y-1">
               <Label>Pass Percentage (%)</Label>
               <Input
-                type="number"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={passPct}
                 onChange={(e) =>
                   setPassPct(
-                    Math.min(100, Math.max(0, Number(e.target.value) || 0)),
+                    Math.min(
+                      100,
+                      Math.max(
+                        0,
+                        Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
+                      ),
+                    ),
                   )
                 }
-                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 data-ocid="online_tests.pass_pct_input"
               />
             </div>
@@ -1657,10 +1677,18 @@ function ResultsDashboard() {
                         {overrideCell === attempt.id ? (
                           <div className="flex items-center justify-end gap-1">
                             <Input
-                              type="number"
-                              className="h-7 w-20 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              type="text"
+                              inputMode="numeric"
+                              pattern="[0-9]*"
+                              className="h-7 w-20 text-sm"
                               value={overrideScore}
-                              onChange={(e) => setOverrideScore(e.target.value)}
+                              onChange={(e) =>
+                                setOverrideScore(
+                                  e.target.value
+                                    .replace(/[^0-9.]/g, "")
+                                    .replace(/(\..*)\./g, "$1"),
+                                )
+                              }
                               autoFocus
                               data-ocid="online_tests.override_score_input"
                             />

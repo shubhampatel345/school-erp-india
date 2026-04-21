@@ -297,12 +297,14 @@ export default function TeacherTimetable() {
               <div className="space-y-1">
                 <Label className="text-xs">Periods/Day</Label>
                 <Input
-                  type="number"
-                  min={4}
-                  max={12}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={periodsPerDay}
                   onChange={(e) =>
-                    handlePeriodsPerDayChange(Number(e.target.value) || 8)
+                    handlePeriodsPerDayChange(
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 8,
+                    )
                   }
                   className="h-8"
                 />
@@ -319,12 +321,14 @@ export default function TeacherTimetable() {
               <div className="space-y-1">
                 <Label className="text-xs">Period (min)</Label>
                 <Input
-                  type="number"
-                  min={30}
-                  max={90}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={periodDuration}
                   onChange={(e) =>
-                    setPeriodDuration(Number(e.target.value) || 45)
+                    setPeriodDuration(
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 45,
+                    )
                   }
                   className="h-8"
                 />
@@ -332,12 +336,14 @@ export default function TeacherTimetable() {
               <div className="space-y-1">
                 <Label className="text-xs">Break After Period</Label>
                 <Input
-                  type="number"
-                  min={1}
-                  max={periodsPerDay}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={breakAfterPeriod}
                   onChange={(e) =>
-                    setBreakAfterPeriod(Number(e.target.value) || 4)
+                    setBreakAfterPeriod(
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 4,
+                    )
                   }
                   className="h-8"
                 />
@@ -345,12 +351,14 @@ export default function TeacherTimetable() {
               <div className="space-y-1">
                 <Label className="text-xs">Break (min)</Label>
                 <Input
-                  type="number"
-                  min={5}
-                  max={60}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={breakDuration}
                   onChange={(e) =>
-                    setBreakDuration(Number(e.target.value) || 20)
+                    setBreakDuration(
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 20,
+                    )
                   }
                   className="h-8"
                 />

@@ -17,8 +17,7 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { useRef } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type {
   ClassSection,
@@ -303,30 +302,87 @@ export default function StudentForm({
   const yyyyRef = useRef<HTMLInputElement>(null);
   const photoRef = useRef<HTMLInputElement>(null);
 
-  function handleDayChange(val: string) {
+  // Stable callbacks — useCallback prevents new references on every render,
+  // which would cause BasicInfoFields (React.memo) to re-render and lose focus.
+  const handleDayChange = useCallback((val: string) => {
     const clean = val.replace(/\D/g, "").slice(0, 2);
-    setDobParts([clean, dobParts[1], dobParts[2]]);
+    setDobParts((prev) => [clean, prev[1], prev[2]]);
     if (clean.length === 2) mmRef.current?.focus();
-  }
+  }, []);
 
-  function handleMonthChange(val: string) {
+  const handleMonthChange = useCallback((val: string) => {
     const clean = val.replace(/\D/g, "").slice(0, 2);
-    setDobParts([dobParts[0], clean, dobParts[2]]);
+    setDobParts((prev) => [prev[0], clean, prev[2]]);
     if (clean.length === 2) yyyyRef.current?.focus();
-  }
+  }, []);
 
-  function handleYearChange(val: string) {
+  const handleYearChange = useCallback((val: string) => {
     const clean = val.replace(/\D/g, "").slice(0, 4);
-    setDobParts([dobParts[0], dobParts[1], clean]);
-  }
+    setDobParts((prev) => [prev[0], prev[1], clean]);
+  }, []);
 
-  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => setPhoto(ev.target?.result as string);
-    reader.readAsDataURL(file);
-  }
+  const handlePhotoUpload = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => setPhoto(ev.target?.result as string);
+      reader.readAsDataURL(file);
+    },
+    [],
+  );
+
+  // Stable setters for BasicInfoFields — each wrapped once so reference is stable
+  const stableSetAdmNo = useCallback((v: string) => setAdmNo(v), []);
+  const stableSetFullName = useCallback((v: string) => setFullName(v), []);
+  const stableSetFatherName = useCallback((v: string) => setFatherName(v), []);
+  const stableSetFatherMobile = useCallback(
+    (v: string) => setFatherMobile(v),
+    [],
+  );
+  const stableSetMotherName = useCallback((v: string) => setMotherName(v), []);
+  const stableSetMotherMobile = useCallback(
+    (v: string) => setMotherMobile(v),
+    [],
+  );
+  const stableSetMobile = useCallback((v: string) => setMobile(v), []);
+  const stableSetGuardianMobile = useCallback(
+    (v: string) => setGuardianMobile(v),
+    [],
+  );
+  const stableSetAddress = useCallback((v: string) => setAddress(v), []);
+  const stableSetVillage = useCallback((v: string) => setVillage(v), []);
+  const stableSetAadhaarNo = useCallback((v: string) => setAadhaarNo(v), []);
+  const stableSetSrNo = useCallback((v: string) => setSrNo(v), []);
+  const stableSetPenNo = useCallback((v: string) => setPenNo(v), []);
+  const stableSetApaarNo = useCallback((v: string) => setApaarNo(v), []);
+  const stableSetPreviousSchool = useCallback(
+    (v: string) => setPreviousSchool(v),
+    [],
+  );
+  const stableSetAdmissionDate = useCallback(
+    (v: string) => setAdmissionDate(v),
+    [],
+  );
+  const stableSetCls = useCallback((v: string) => {
+    setCls(v);
+    setSection("");
+  }, []);
+  const stableSetSection = useCallback((v: string) => setSection(v), []);
+  const stableSetGender = useCallback(
+    (v: Student["gender"]) => setGender(v),
+    [],
+  );
+  const stableSetCategory = useCallback((v: string) => setCategory(v), []);
+  const stableSetStatus = useCallback(
+    (v: Student["status"]) => setStatus(v),
+    [],
+  );
+  const stableSetGuardianOpen = useCallback(
+    (v: boolean) => setGuardianOpen(v),
+    [],
+  );
+  const stableSetExtraOpen = useCallback((v: boolean) => setExtraOpen(v), []);
 
   function validate() {
     const errs: Record<string, string> = {};
@@ -474,13 +530,13 @@ export default function StudentForm({
               <TabsContent value="basic" className="p-5 space-y-4 mt-0">
                 <BasicInfoFields
                   admNo={admNo}
-                  setAdmNo={setAdmNo}
+                  setAdmNo={stableSetAdmNo}
                   fullName={fullName}
-                  setFullName={setFullName}
+                  setFullName={stableSetFullName}
                   cls={cls}
-                  setCls={setCls}
+                  setCls={stableSetCls}
                   section={section}
-                  setSection={setSection}
+                  setSection={stableSetSection}
                   dobParts={dobParts}
                   handleDayChange={handleDayChange}
                   handleMonthChange={handleMonthChange}
@@ -488,51 +544,51 @@ export default function StudentForm({
                   mmRef={mmRef}
                   yyyyRef={yyyyRef}
                   gender={gender}
-                  setGender={setGender}
+                  setGender={stableSetGender}
                   category={category}
-                  setCategory={setCategory}
+                  setCategory={stableSetCategory}
                   fatherName={fatherName}
-                  setFatherName={setFatherName}
+                  setFatherName={stableSetFatherName}
                   mobile={mobile}
-                  setMobile={setMobile}
+                  setMobile={stableSetMobile}
                   admissionDate={admissionDate}
-                  setAdmissionDate={setAdmissionDate}
+                  setAdmissionDate={stableSetAdmissionDate}
                   address={address}
-                  setAddress={setAddress}
+                  setAddress={stableSetAddress}
                   village={village}
-                  setVillage={setVillage}
+                  setVillage={stableSetVillage}
                   status={status}
-                  setStatus={setStatus}
+                  setStatus={stableSetStatus}
                   photo={photo}
                   photoRef={photoRef}
                   handlePhotoUpload={handlePhotoUpload}
                   fatherMobile={fatherMobile}
-                  setFatherMobile={setFatherMobile}
+                  setFatherMobile={stableSetFatherMobile}
                   motherName={motherName}
-                  setMotherName={setMotherName}
+                  setMotherName={stableSetMotherName}
                   motherMobile={motherMobile}
-                  setMotherMobile={setMotherMobile}
+                  setMotherMobile={stableSetMotherMobile}
                   guardianMobile={guardianMobile}
-                  setGuardianMobile={setGuardianMobile}
+                  setGuardianMobile={stableSetGuardianMobile}
                   aadhaarNo={aadhaarNo}
-                  setAadhaarNo={setAadhaarNo}
+                  setAadhaarNo={stableSetAadhaarNo}
                   srNo={srNo}
-                  setSrNo={setSrNo}
+                  setSrNo={stableSetSrNo}
                   penNo={penNo}
-                  setPenNo={setPenNo}
+                  setPenNo={stableSetPenNo}
                   apaarNo={apaarNo}
-                  setApaarNo={setApaarNo}
+                  setApaarNo={stableSetApaarNo}
                   previousSchool={previousSchool}
-                  setPreviousSchool={setPreviousSchool}
+                  setPreviousSchool={stableSetPreviousSchool}
                   availableClasses={availableClasses}
                   sectionsForClass={sectionsForClass}
                   noClassesWarning={noClassesWarning}
                   errors={errors}
                   isNew={!student}
                   guardianOpen={guardianOpen}
-                  setGuardianOpen={setGuardianOpen}
+                  setGuardianOpen={stableSetGuardianOpen}
                   extraOpen={extraOpen}
-                  setExtraOpen={setExtraOpen}
+                  setExtraOpen={stableSetExtraOpen}
                 />
               </TabsContent>
 
@@ -692,10 +748,18 @@ export default function StudentForm({
                             Apply same discount to selected headings
                           </Label>
                           <Input
-                            type="number"
+                            type="text"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             placeholder="₹ amount"
                             value={discountAll}
-                            onChange={(e) => setDiscountAll(e.target.value)}
+                            onChange={(e) =>
+                              setDiscountAll(
+                                e.target.value
+                                  .replace(/[^0-9.]/g, "")
+                                  .replace(/(\..*)\./g, "$1"),
+                              )
+                            }
                             className="h-8 text-sm"
                           />
                         </div>
@@ -767,13 +831,17 @@ export default function StudentForm({
                                   ₹
                                 </span>
                                 <Input
-                                  type="number"
+                                  type="text"
+                                  inputMode="numeric"
+                                  pattern="[0-9]*"
                                   placeholder="0"
                                   value={discountAmounts[h.id] ?? ""}
                                   onChange={(e) =>
                                     setDiscountAmounts((prev) => ({
                                       ...prev,
-                                      [h.id]: e.target.value,
+                                      [h.id]: e.target.value
+                                        .replace(/[^0-9.]/g, "")
+                                        .replace(/(\..*)\./g, "$1"),
                                     }))
                                   }
                                   className="w-24 h-8 text-sm text-right"
@@ -799,13 +867,13 @@ export default function StudentForm({
             <div className="p-5 space-y-4">
               <BasicInfoFields
                 admNo={admNo}
-                setAdmNo={setAdmNo}
+                setAdmNo={stableSetAdmNo}
                 fullName={fullName}
-                setFullName={setFullName}
+                setFullName={stableSetFullName}
                 cls={cls}
-                setCls={setCls}
+                setCls={stableSetCls}
                 section={section}
-                setSection={setSection}
+                setSection={stableSetSection}
                 dobParts={dobParts}
                 handleDayChange={handleDayChange}
                 handleMonthChange={handleMonthChange}
@@ -813,51 +881,51 @@ export default function StudentForm({
                 mmRef={mmRef}
                 yyyyRef={yyyyRef}
                 gender={gender}
-                setGender={setGender}
+                setGender={stableSetGender}
                 category={category}
-                setCategory={setCategory}
+                setCategory={stableSetCategory}
                 fatherName={fatherName}
-                setFatherName={setFatherName}
+                setFatherName={stableSetFatherName}
                 mobile={mobile}
-                setMobile={setMobile}
+                setMobile={stableSetMobile}
                 admissionDate={admissionDate}
-                setAdmissionDate={setAdmissionDate}
+                setAdmissionDate={stableSetAdmissionDate}
                 address={address}
-                setAddress={setAddress}
+                setAddress={stableSetAddress}
                 village={village}
-                setVillage={setVillage}
+                setVillage={stableSetVillage}
                 status={status}
-                setStatus={setStatus}
+                setStatus={stableSetStatus}
                 photo={photo}
                 photoRef={photoRef}
                 handlePhotoUpload={handlePhotoUpload}
                 fatherMobile={fatherMobile}
-                setFatherMobile={setFatherMobile}
+                setFatherMobile={stableSetFatherMobile}
                 motherName={motherName}
-                setMotherName={setMotherName}
+                setMotherName={stableSetMotherName}
                 motherMobile={motherMobile}
-                setMotherMobile={setMotherMobile}
+                setMotherMobile={stableSetMotherMobile}
                 guardianMobile={guardianMobile}
-                setGuardianMobile={setGuardianMobile}
+                setGuardianMobile={stableSetGuardianMobile}
                 aadhaarNo={aadhaarNo}
-                setAadhaarNo={setAadhaarNo}
+                setAadhaarNo={stableSetAadhaarNo}
                 srNo={srNo}
-                setSrNo={setSrNo}
+                setSrNo={stableSetSrNo}
                 penNo={penNo}
-                setPenNo={setPenNo}
+                setPenNo={stableSetPenNo}
                 apaarNo={apaarNo}
-                setApaarNo={setApaarNo}
+                setApaarNo={stableSetApaarNo}
                 previousSchool={previousSchool}
-                setPreviousSchool={setPreviousSchool}
+                setPreviousSchool={stableSetPreviousSchool}
                 availableClasses={availableClasses}
                 sectionsForClass={sectionsForClass}
                 noClassesWarning={noClassesWarning}
                 errors={errors}
                 isNew={!student}
                 guardianOpen={guardianOpen}
-                setGuardianOpen={setGuardianOpen}
+                setGuardianOpen={stableSetGuardianOpen}
                 extraOpen={extraOpen}
-                setExtraOpen={setExtraOpen}
+                setExtraOpen={stableSetExtraOpen}
               />
             </div>
           )}
@@ -965,7 +1033,7 @@ interface BasicInfoFieldsProps {
   setExtraOpen: (v: boolean) => void;
 }
 
-function BasicInfoFields({
+const BasicInfoFields = memo(function BasicInfoFields({
   admNo,
   setAdmNo,
   fullName,
@@ -1114,13 +1182,7 @@ function BasicInfoFields({
           <Label>
             Class <span className="text-destructive">*</span>
           </Label>
-          <Select
-            value={cls}
-            onValueChange={(v) => {
-              setCls(v);
-              setSection("");
-            }}
-          >
+          <Select value={cls} onValueChange={setCls}>
             <SelectTrigger data-ocid="student-form.class">
               <SelectValue
                 placeholder={
@@ -1479,4 +1541,4 @@ function BasicInfoFields({
         )}
     </>
   );
-}
+});

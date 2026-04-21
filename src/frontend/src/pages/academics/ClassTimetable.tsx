@@ -242,11 +242,15 @@ export default function ClassTimetable() {
               Periods/Day
             </span>
             <input
-              type="number"
-              min={1}
-              max={10}
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]*"
               value={periods}
-              onChange={(e) => handlePeriodsChange(Number(e.target.value))}
+              onChange={(e) =>
+                handlePeriodsChange(
+                  Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
+                )
+              }
               className="w-full border border-input rounded-md px-3 py-2 text-sm bg-card"
               data-ocid="classtimetable.periods-input"
             />
@@ -306,11 +310,15 @@ export default function ClassTimetable() {
               </label>
               <input
                 id="break-duration"
-                type="number"
-                min={0}
-                max={30}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={breakDuration}
-                onChange={(e) => setBreakDuration(Number(e.target.value))}
+                onChange={(e) =>
+                  setBreakDuration(
+                    Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
+                  )
+                }
                 className="w-14 border border-input rounded px-2 py-1 text-xs bg-card"
               />
               <span className="text-xs text-muted-foreground">min</span>
@@ -325,13 +333,14 @@ export default function ClassTimetable() {
               >
                 <span className="text-xs text-muted-foreground">P{i + 1}</span>
                 <input
-                  type="number"
-                  min={15}
-                  max={120}
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={dur}
                   onChange={(e) => {
                     const newDur = [...periodDurations];
-                    newDur[i] = Number(e.target.value);
+                    newDur[i] =
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 0;
                     setPeriodDurations(newDur);
                   }}
                   className="w-14 border border-input rounded px-2 py-1 text-xs bg-card text-center"

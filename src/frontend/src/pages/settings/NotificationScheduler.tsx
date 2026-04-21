@@ -386,15 +386,16 @@ export default function NotificationScheduler() {
                         </Label>
                         <Input
                           id={`timing-val-${rule.id}`}
-                          type="number"
-                          min={1}
-                          max={30}
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
                           value={rule.timingValue}
                           onChange={(e) =>
                             update(
                               rule.id,
                               "timingValue",
-                              Number(e.target.value),
+                              Number(e.target.value.replace(/[^0-9]/g, "")) ||
+                                1,
                             )
                           }
                           className="h-8 text-xs"
@@ -531,14 +532,15 @@ export default function NotificationScheduler() {
                     Before
                   </Label>
                   <Input
-                    type="number"
-                    min={1}
-                    max={30}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={newRule.timingValue}
                     onChange={(e) =>
                       setNewRule((r) => ({
                         ...r,
-                        timingValue: Number(e.target.value),
+                        timingValue:
+                          Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
                       }))
                     }
                     data-ocid="scheduler-new-timing-value-input"

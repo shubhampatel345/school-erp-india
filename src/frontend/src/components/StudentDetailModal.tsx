@@ -377,23 +377,29 @@ export default function StudentDetailModal({
       credentials: { username: form.admNo, password: dobForPwd },
     };
     if (updateData) {
+      // Await server confirmation; call onUpdate regardless so parent refreshes
       void updateData("students", updated.id, {
         ...updated,
         name: updated.fullName,
-      } as unknown as Record<string, unknown>).catch(() => {
-        // Fallback to localStorage if server fails
-        const all = ls.get<Student[]>("students", []);
-        const idx = all.findIndex((s) => s.id === updated.id);
-        if (idx >= 0) all[idx] = updated;
-        ls.set("students", all);
-      });
+      } as unknown as Record<string, unknown>)
+        .then(() => {
+          onUpdate(updated);
+        })
+        .catch(() => {
+          // Fallback to localStorage if server fails, but still update UI
+          const all = ls.get<Student[]>("students", []);
+          const idx = all.findIndex((s) => s.id === updated.id);
+          if (idx >= 0) all[idx] = updated;
+          ls.set("students", all);
+          onUpdate(updated);
+        });
     } else {
       const all = ls.get<Student[]>("students", []);
       const idx = all.findIndex((s) => s.id === updated.id);
       if (idx >= 0) all[idx] = updated;
       ls.set("students", all);
+      onUpdate(updated);
     }
-    onUpdate(updated);
     setEditing(false);
   }
 
@@ -409,19 +415,24 @@ export default function StudentDetailModal({
       void updateData("students", updated.id, {
         ...updated,
         name: updated.fullName,
-      } as unknown as Record<string, unknown>).catch(() => {
-        const all = ls.get<Student[]>("students", []);
-        const idx = all.findIndex((s) => s.id === updated.id);
-        if (idx >= 0) all[idx] = updated;
-        ls.set("students", all);
-      });
+      } as unknown as Record<string, unknown>)
+        .then(() => {
+          onUpdate(updated);
+        })
+        .catch(() => {
+          const all = ls.get<Student[]>("students", []);
+          const idx = all.findIndex((s) => s.id === updated.id);
+          if (idx >= 0) all[idx] = updated;
+          ls.set("students", all);
+          onUpdate(updated);
+        });
     } else {
       const all = ls.get<Student[]>("students", []);
       const idx = all.findIndex((s) => s.id === updated.id);
       if (idx >= 0) all[idx] = updated;
       ls.set("students", all);
+      onUpdate(updated);
     }
-    onUpdate(updated);
     setShowDiscontinue(false);
   }
 
@@ -437,19 +448,24 @@ export default function StudentDetailModal({
       void updateData("students", updated.id, {
         ...updated,
         name: updated.fullName,
-      } as unknown as Record<string, unknown>).catch(() => {
-        const all = ls.get<Student[]>("students", []);
-        const idx = all.findIndex((s) => s.id === updated.id);
-        if (idx >= 0) all[idx] = updated;
-        ls.set("students", all);
-      });
+      } as unknown as Record<string, unknown>)
+        .then(() => {
+          onUpdate(updated);
+        })
+        .catch(() => {
+          const all = ls.get<Student[]>("students", []);
+          const idx = all.findIndex((s) => s.id === updated.id);
+          if (idx >= 0) all[idx] = updated;
+          ls.set("students", all);
+          onUpdate(updated);
+        });
     } else {
       const all = ls.get<Student[]>("students", []);
       const idx = all.findIndex((s) => s.id === updated.id);
       if (idx >= 0) all[idx] = updated;
       ls.set("students", all);
+      onUpdate(updated);
     }
-    onUpdate(updated);
   }
 
   function getPaidMonthsForHeading(headingId: string): string[] {
@@ -1607,10 +1623,16 @@ export default function StudentDetailModal({
                         <input
                           className="w-24 h-8 px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                           value={newDiscAmt}
-                          onChange={(e) => setNewDiscAmt(e.target.value)}
+                          onChange={(e) =>
+                            setNewDiscAmt(
+                              e.target.value
+                                .replace(/[^0-9.]/g, "")
+                                .replace(/(\..*)\./g, "$1"),
+                            )
+                          }
                           placeholder="0"
-                          type="number"
-                          min="0"
+                          type="text"
+                          inputMode="numeric"
                         />
                       </div>
                       <div className="space-y-1 flex-1 min-w-[120px]">
@@ -2307,13 +2329,16 @@ export default function StudentDetailModal({
                 <div className="space-y-1">
                   <Label className="text-xs">Amount (₹)</Label>
                   <Input
-                    type="number"
-                    min="1"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={oldFeeFormData.amount}
                     onChange={(e) =>
                       setOldFeeFormData((p) => ({
                         ...p,
-                        amount: e.target.value,
+                        amount: e.target.value
+                          .replace(/[^0-9.]/g, "")
+                          .replace(/(\..*)\./g, "$1"),
                       }))
                     }
                     placeholder="0"

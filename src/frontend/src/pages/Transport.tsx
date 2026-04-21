@@ -974,13 +974,15 @@ export default function Transport() {
             <div>
               <Label>Capacity</Label>
               <Input
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={routeForm.capacity || ""}
                 onChange={(e) =>
                   setRouteForm((p) => ({
                     ...p,
-                    capacity: Number(e.target.value),
+                    capacity:
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
                   }))
                 }
                 placeholder="e.g. 40"
@@ -1074,13 +1076,19 @@ export default function Transport() {
             <div>
               <Label>Monthly Fare (₹) *</Label>
               <Input
-                type="number"
-                min={0}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={pointForm.monthlyFare || ""}
                 onChange={(e) =>
                   setPointForm((p) => ({
                     ...p,
-                    monthlyFare: Number(e.target.value),
+                    monthlyFare:
+                      Number(
+                        e.target.value
+                          .replace(/[^0-9.]/g, "")
+                          .replace(/(\..*)\./g, "$1"),
+                      ) || 0,
                   }))
                 }
                 placeholder="e.g. 500"
@@ -1093,13 +1101,15 @@ export default function Transport() {
             <div>
               <Label>Display Order</Label>
               <Input
-                type="number"
-                min={1}
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={pointForm.displayOrder || ""}
                 onChange={(e) =>
                   setPointForm((p) => ({
                     ...p,
-                    displayOrder: Number(e.target.value),
+                    displayOrder:
+                      Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
                   }))
                 }
                 placeholder="e.g. 1"

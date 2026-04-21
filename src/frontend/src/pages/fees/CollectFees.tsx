@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -550,6 +550,89 @@ export default function CollectFees() {
     isSuperAdmin ||
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
+
+  // ── Stable onChange handlers — CRITICAL for no-focus-loss ─────────────────
+  // These must be useCallback with [] deps so their references never change.
+  // Inline lambdas create new function refs on every render, which causes
+  // React to remount input elements and lose cursor focus mid-keystroke.
+  const handleLateFeesChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setLateFees(
+        Math.max(
+          0,
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+        ),
+      ),
+    [],
+  );
+  const handleConcessionChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setConcessionAmt(
+        Math.max(
+          0,
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+        ),
+      ),
+    [],
+  );
+  const handleReceiptAmtChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setReceiptAmt(
+        Math.max(
+          0,
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+        ),
+      ),
+    [],
+  );
+  const handleRemarksChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setRemarks(e.target.value),
+    [],
+  );
+  const handleOtherLabelChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setOtherCharge((p) => ({ ...p, label: e.target.value })),
+    [],
+  );
+  const handleOtherAmountChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setOtherCharge((p) => ({
+        ...p,
+        paidAmount: Math.max(
+          0,
+          Number(
+            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
+          ) || 0,
+        ),
+      })),
+    [],
+  );
+  const handleAdmNoChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setAdmNoInput(e.target.value);
+      if (!e.target.value) {
+        // Reset student selection when input cleared
+        setSelectedStudent(null);
+        setRows([]);
+        setPanelMonths([]);
+        setOldBalance(0);
+        setLateFees(0);
+        setConcessionAmt(0);
+        setReceiptAmt(0);
+        setRemarks("");
+        setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+        setErrorMsg("");
+        setFeeLoadState("idle");
+      }
+    },
+    [],
+  );
 
   // All data from context — already fetched from server
   const allStudents = (getData("students") as Student[]).filter(
@@ -1166,10 +1249,7 @@ export default function CollectFees() {
                 type="text"
                 placeholder="Search by Adm No or Name..."
                 value={admNoInput}
-                onChange={(e) => {
-                  setAdmNoInput(e.target.value);
-                  if (!e.target.value) clearStudent();
-                }}
+                onChange={handleAdmNoChange}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && filteredStudents.length > 0)
                     selectStudent(filteredStudents[0]);
@@ -1700,14 +1780,15 @@ export default function CollectFees() {
                               className="border border-border px-1 py-0.5 text-center bg-primary/5"
                             >
                               <input
-                                type="number"
-                                min="0"
+                                type="text"
+                                inputMode="numeric"
+                                pattern="[0-9]*"
                                 value={amt}
                                 onChange={(e) => {
-                                  const val = Math.max(
-                                    0,
-                                    Number(e.target.value),
-                                  );
+                                  const raw = e.target.value
+                                    .replace(/[^0-9.]/g, "")
+                                    .replace(/(\..*)\./g, "$1");
+                                  const val = Math.max(0, Number(raw) || 0);
                                   setCellAmounts((prev) => ({
                                     ...prev,
                                     [row.headingId]: {
@@ -1716,7 +1797,7 @@ export default function CollectFees() {
                                     },
                                   }));
                                 }}
-                                className="w-[48px] h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                                className="w-[48px] h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                                 disabled={!row.checked}
                               />
                             </td>
@@ -1741,29 +1822,20 @@ export default function CollectFees() {
                         type="text"
                         placeholder="Other fee label..."
                         value={otherCharge.label}
-                        onChange={(e) =>
-                          setOtherCharge((p) => ({
-                            ...p,
-                            label: e.target.value,
-                          }))
-                        }
+                        onChange={handleOtherLabelChange}
                         className="w-full h-5 px-2 text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 italic"
                         data-ocid="other-charge-label"
                       />
                     </td>
                     <td className="border border-border px-1 py-1 text-center">
                       <input
-                        type="number"
-                        min="0"
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
                         placeholder="0"
                         value={otherCharge.paidAmount || ""}
-                        onChange={(e) =>
-                          setOtherCharge((p) => ({
-                            ...p,
-                            paidAmount: Math.max(0, Number(e.target.value)),
-                          }))
-                        }
-                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                        onChange={handleOtherAmountChange}
+                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                         data-ocid="other-charge-paid"
                       />
                     </td>
@@ -1886,14 +1958,13 @@ export default function CollectFees() {
                 </label>
                 <input
                   id="late-fees-input"
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={lateFees || ""}
                   placeholder="0"
-                  onChange={(e) =>
-                    setLateFees(Math.max(0, Number(e.target.value)))
-                  }
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                  onChange={handleLateFeesChange}
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="late-fees-input"
                 />
               </div>
@@ -1906,14 +1977,13 @@ export default function CollectFees() {
                 </label>
                 <input
                   id="concession-amt-input"
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={concessionAmt || ""}
                   placeholder="0"
-                  onChange={(e) =>
-                    setConcessionAmt(Math.max(0, Number(e.target.value)))
-                  }
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                  onChange={handleConcessionChange}
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="concession-amt-input"
                 />
               </div>
@@ -1941,14 +2011,13 @@ export default function CollectFees() {
                 </label>
                 <input
                   id="receipt-amt-input"
-                  type="number"
-                  min="0"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   value={receiptAmt || ""}
                   placeholder="0"
-                  onChange={(e) =>
-                    setReceiptAmt(Math.max(0, Number(e.target.value)))
-                  }
-                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40 no-spinner"
+                  onChange={handleReceiptAmtChange}
+                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
                   data-ocid="receipt-amt-input"
                 />
               </div>
@@ -1991,7 +2060,7 @@ export default function CollectFees() {
                   id="remarks-input"
                   type="text"
                   value={remarks}
-                  onChange={(e) => setRemarks(e.target.value)}
+                  onChange={handleRemarksChange}
                   placeholder="Any notes..."
                   className="w-full h-6 px-2 text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="remarks-input"
@@ -2348,15 +2417,26 @@ export default function CollectFees() {
                   </label>
                   <input
                     id="edit-paid-amt"
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={editState.paidAmount}
                     onChange={(e) =>
                       setEditState((s) =>
-                        s ? { ...s, paidAmount: Number(e.target.value) } : s,
+                        s
+                          ? {
+                              ...s,
+                              paidAmount:
+                                Number(
+                                  e.target.value
+                                    .replace(/[^0-9.]/g, "")
+                                    .replace(/(\..*)\./g, "$1"),
+                                ) || 0,
+                            }
+                          : s,
                       )
                     }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                 </div>
                 <div>
@@ -2368,15 +2448,26 @@ export default function CollectFees() {
                   </label>
                   <input
                     id="edit-discount"
-                    type="number"
-                    min="0"
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     value={editState.discount}
                     onChange={(e) =>
                       setEditState((s) =>
-                        s ? { ...s, discount: Number(e.target.value) } : s,
+                        s
+                          ? {
+                              ...s,
+                              discount:
+                                Number(
+                                  e.target.value
+                                    .replace(/[^0-9.]/g, "")
+                                    .replace(/(\..*)\./g, "$1"),
+                                ) || 0,
+                            }
+                          : s,
                       )
                     }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 no-spinner"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                   />
                 </div>
               </div>
