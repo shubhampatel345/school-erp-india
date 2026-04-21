@@ -452,8 +452,10 @@ export default function Students({ onNavigate }: StudentsProps) {
   // Called by StudentForm after a successful save.
   // AppContext.saveData/updateData already dispatches UPDATE_COLLECTION from the
   // local cache immediately after saveRecord() — no need to re-fetch here.
+  // The notification fires AFTER this callback (in StudentForm.handleSave) so
+  // the record is guaranteed visible before the notification appears.
   // A server-confirmed refresh fires via SyncEngine.onCollectionUpdated after push.
-  function handleSaved() {
+  function handleSaved(_student?: Student) {
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);

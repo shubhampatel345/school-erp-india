@@ -463,6 +463,10 @@ export default function StudentForm({
     try {
       if (isNew) {
         await saveData("students", payload);
+        // FIX: Call onSave FIRST to add the record to the in-memory students list,
+        // THEN fire the notification. This guarantees the record is visible in the
+        // grid before the notification appears — no "added but invisible" state.
+        onSave(studentData);
         addNotification(
           `New student added: ${studentData.fullName}`,
           "success",
@@ -470,14 +474,13 @@ export default function StudentForm({
         );
       } else {
         await updateData("students", studentData.id, payload);
+        onSave(studentData);
         addNotification(
           `Student updated: ${studentData.fullName}`,
           "success",
           "✅",
         );
       }
-
-      onSave(studentData);
     } catch (err: unknown) {
       const msg =
         err instanceof Error

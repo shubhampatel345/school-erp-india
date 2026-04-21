@@ -268,6 +268,31 @@ class SyncEngine {
   private allDataCache: Record<string, unknown[]> = {};
   private isFlushingQueue = false;
 
+  /**
+   * FIX: In-flight records — records that have been dequeued from SyncQueue
+   * and are currently being pushed to the server via an active HTTP request.
+   * These are NOT in syncQueue.getPending() anymore (already dequeued) but
+   * also NOT on the server yet (request in flight).
+   * backgroundRefresh() MUST include these in its merge or they will vanish.
+   */
+  private inFlightRecords: Map<
+    string,
+    {
+      collection: string;
+      id: string;
+      record: Record<string, unknown>;
+      enqueuedAt: number;
+    }
+  > = new Map();
+
+  /**
+   * FIX: Timestamp of last saveRecord() call. backgroundRefresh() skips
+   * itself for 5 seconds after any save to prevent the race condition where
+   * a server fetch overwrites a record that was just written locally but not
+   * yet confirmed on the server.
+   */
+  private lastSaveAt = 0;
+
   subscribe(callback: () => void): () => void {
     this.subscribers.add(callback);
     return () => this.subscribers.delete(callback);
@@ -409,16 +434,36 @@ class SyncEngine {
   }
 
   private async backgroundRefresh(token: string): Promise<void> {
+    // FIX: Skip refresh if a save happened within the last 5 seconds.
+    // This is the primary guard against the race condition:
+    //   saveRecord() writes locally → backgroundRefresh() fires → fetches
+    //   stale server data → overwrites the just-saved local record → record vanishes.
+    const msSinceLastSave = Date.now() - this.lastSaveAt;
+    if (msSinceLastSave < 5000) {
+      return;
+    }
+
     try {
       const data = await apiFetchAll(token);
       this.isOnline = true;
 
-      // Merge strategy: server wins for confirmed records, local pending wins for unsynced
+      // Build combined set of IDs that must NOT be overwritten by server data:
+      // (a) records still in the persistent SyncQueue (not yet pushed)
+      // (b) records in inFlightRecords (currently being pushed — dequeued but not confirmed)
       const pendingIds = new Set(
         this.syncQueue
           .getPending()
           .map((e) => `${e.collection}::${e.data.id as string}`),
       );
+      // Add in-flight record IDs to the protected set
+      for (const [, inflight] of this.inFlightRecords) {
+        const recordId =
+          inflight.id ||
+          (inflight.record.id as string) ||
+          (inflight.record.admNo as string) ||
+          "";
+        pendingIds.add(`${inflight.collection}::${recordId}`);
+      }
 
       for (const [collection, serverRows] of Object.entries(data)) {
         const serverRowsArr = serverRows as Record<string, unknown>[];
@@ -438,6 +483,27 @@ class SyncEngine {
           const key = `${collection}::${localRow.id as string}`;
           if (pendingIds.has(key) && !merged.has(localRow.id)) {
             merged.set(localRow.id, localRow);
+          }
+        }
+
+        // FIX: Also overlay in-flight records for this collection so they
+        // are never lost even if the server fetch races against the push.
+        for (const [, inflight] of this.inFlightRecords) {
+          if (inflight.collection === collection) {
+            const inflightId =
+              inflight.id ||
+              (inflight.record.id as string) ||
+              (inflight.record.admNo as string);
+            if (inflightId) {
+              // In-flight local record wins over any stale server version
+              const existing = merged.get(inflightId);
+              merged.set(
+                inflightId,
+                existing
+                  ? { ...existing, ...inflight.record }
+                  : inflight.record,
+              );
+            }
           }
         }
 
@@ -529,6 +595,10 @@ class SyncEngine {
     writeCacheCollection(collection, this.allDataCache[collection] ?? []);
     writeCacheVersion();
 
+    // FIX: Stamp the save time so backgroundRefresh() skips its next cycle
+    // and does not overwrite this record with stale server data.
+    this.lastSaveAt = Date.now();
+
     // Step 3: Return immediately — caller gets success right away
     if (!isApiConfigured()) {
       return record;
@@ -562,6 +632,9 @@ class SyncEngine {
    * On success: remove from queue, then do a gentle merge-refresh of that collection
    * so the UI eventually reflects the server-confirmed state.
    * On failure: increment retry, use exponential backoff, mark failed after max retries.
+   *
+   * FIX: Record is added to inFlightRecords BEFORE dequeue so backgroundRefresh()
+   * never loses it during the window between dequeue and server confirmation.
    */
   private async pushQueueEntry(queueId: string): Promise<void> {
     const entries = this.syncQueue.getAll();
@@ -571,6 +644,17 @@ class SyncEngine {
     if (!this.isOnline || !isApiConfigured()) return;
 
     const token = this.token;
+
+    // FIX: Add to inFlightRecords BEFORE dequeue.
+    // This ensures backgroundRefresh() can see it even after dequeue completes.
+    const inflightId =
+      (entry.data.id as string) || (entry.data.admNo as string) || queueId;
+    this.inFlightRecords.set(queueId, {
+      collection: entry.collection,
+      id: inflightId,
+      record: entry.data,
+      enqueuedAt: entry.createdAt,
+    });
 
     try {
       const { collection, action, data } = entry;
@@ -590,6 +674,9 @@ class SyncEngine {
         await apiDeleteRecord(collection, id, token);
       }
 
+      // FIX: Remove from inFlightRecords AFTER server confirms the push.
+      this.inFlightRecords.delete(queueId);
+
       // Success: remove from queue
       this.syncQueue.dequeue(queueId);
       this.isOnline = true;
@@ -603,9 +690,14 @@ class SyncEngine {
         this.notifyCollection(collection, merged);
       });
     } catch (err) {
+      // FIX: On network error / transient failure, KEEP the record in inFlightRecords
+      // so backgroundRefresh() continues to protect it during retry backoff.
+      // Only remove from inFlightRecords on permanent failure (max retries exhausted).
       const retries = this.syncQueue.incrementRetry(queueId);
 
       if (retries >= MAX_RETRIES) {
+        // Permanent failure — remove from in-flight (it stays in queue as failed)
+        this.inFlightRecords.delete(queueId);
         this.syncQueue.markFailed(queueId);
         const msg = err instanceof Error ? err.message : "Sync failed";
         this.setStatus("error", `${msg} (data saved locally)`);
@@ -845,6 +937,7 @@ class SyncEngine {
    * SAFE MERGE STRATEGY:
    * - Fetch server rows
    * - Overlay any pending local records (pending ALWAYS WIN)
+   * - Overlay any in-flight records (being pushed right now — ALWAYS WIN)
    * - This means a refresh NEVER erases a record the user just added
    */
   async refreshCollection(collection: string): Promise<unknown[]> {
@@ -877,6 +970,25 @@ class SyncEngine {
         }
       }
 
+      // FIX: In-flight records also WIN — they are being pushed right now but
+      // haven't been confirmed yet. Without this, a refreshCollection() call
+      // triggered from elsewhere could wipe a record mid-push.
+      for (const [, inflight] of this.inFlightRecords) {
+        if (inflight.collection === collection) {
+          const inflightId =
+            inflight.id ||
+            (inflight.record.id as string) ||
+            (inflight.record.admNo as string);
+          if (inflightId) {
+            const existing = serverMap.get(inflightId);
+            serverMap.set(
+              inflightId,
+              existing ? { ...existing, ...inflight.record } : inflight.record,
+            );
+          }
+        }
+      }
+
       const merged = Array.from(serverMap.values());
       this.allDataCache[collection] = merged;
       writeCacheCollection(collection, merged);
@@ -891,6 +1003,8 @@ class SyncEngine {
   reset() {
     this.token = null;
     this.allDataCache = {};
+    this.inFlightRecords.clear();
+    this.lastSaveAt = 0;
     // Do NOT clear syncQueue on logout — pending changes survive re-login
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
