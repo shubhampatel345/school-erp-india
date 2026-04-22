@@ -9,48 +9,81 @@ export interface None {
 export type Option<T> = Some<T> | None;
 export interface backendInterface {
     /**
-     * / Batch upsert array of JSON records. Returns count upserted.
+     * / Upsert a batch of records (insert or overwrite by id).
      */
-    batchUpsert(collection: string, recordsJson: Array<string>): Promise<bigint>;
+    batchUpsert(collection: string, records: Array<{
+        id: string;
+        data: string;
+    }>): Promise<{
+        ok: boolean;
+        err: string;
+        count: bigint;
+    }>;
     /**
-     * / Create a new record. Returns "ok".
+     * / Create a new record. Fails if the id already exists.
      */
-    createRecord(collection: string, recordJson: string): Promise<string>;
+    createRecord(collection: string, id: string, data: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
     /**
-     * / Delete a record by id. Returns "ok" or "not_found".
+     * / Delete an entire collection. Returns number of records removed.
      */
-    deleteRecord(collection: string, id: string): Promise<string>;
+    deleteCollection(collection: string): Promise<{
+        ok: boolean;
+        count: bigint;
+    }>;
     /**
-     * / Fetch all collections in one shot (WhatsApp-style initial load).
+     * / Delete a record by id.
      */
-    fetchAll(): Promise<string>;
+    deleteRecord(collection: string, id: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
     /**
-     * / Return recent changelog entries as JSON array (last 100)
+     * / Export all data for backup. Returns array of (collection, [(id, data)]).
      */
-    getChangelog(): Promise<string>;
+    exportAll(): Promise<Array<[string, Array<[string, string]>]>>;
     /**
-     * / Return record counts for all collections (for dashboard stats)
+     * / Return changelog entries since a given timestamp (nanoseconds).
+     * / Pass 0 to get all entries.
      */
-    getCounts(): Promise<string>;
+    getChangelog(since: bigint): Promise<Array<string>>;
     /**
-     * / Return a single record by id (JSON string or empty string if not found)
+     * / Return count per collection.
      */
-    getRecord(collection: string, id: string): Promise<string>;
+    getCounts(): Promise<Array<[string, bigint]>>;
     /**
-     * / Return all records in a collection as a JSON array string
+     * / Get a single record by id. Returns null if not found.
      */
-    listRecords(collection: string): Promise<string>;
+    getRecord(collection: string, id: string): Promise<string | null>;
+    /**
+     * / Import all data from a backup. Merges (upserts) all records.
+     */
+    importAll(data: Array<[string, Array<[string, string]>]>): Promise<{
+        ok: boolean;
+        count: bigint;
+    }>;
+    /**
+     * / List all records in a collection as an array of JSON strings.
+     */
+    listRecords(collection: string): Promise<Array<string>>;
+    /**
+     * / Paginated list. offset is 0-based.
+     */
+    listRecordsPaginated(collection: string, offset: bigint, limit: bigint): Promise<{
+        total: bigint;
+        records: Array<string>;
+    }>;
+    /**
+     * / Health check.
+     */
     ping(): Promise<string>;
     /**
-     * / Replace entire collection with new records. Returns count.
+     * / Update an existing record. Returns err if not found.
      */
-    replaceCollection(collection: string, recordsJson: Array<string>): Promise<bigint>;
-    /**
-     * / Update an existing record by id. Returns "ok" or "not_found".
-     */
-    updateRecord(collection: string, id: string, recordJson: string): Promise<string>;
-    /**
-     * / Upsert a record: update if id exists, create otherwise. Returns "ok".
-     */
-    upsertRecord(collection: string, id: string, recordJson: string): Promise<string>;
+    updateRecord(collection: string, id: string, data: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
 }

@@ -33,12 +33,6 @@ import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AppUser, UserRole } from "../../types";
-import {
-  apiCreateRecord,
-  apiDeleteRecord,
-  apiUpdateRecord,
-  getJwt,
-} from "../../utils/api";
 import { generateId, ls } from "../../utils/localStorage";
 
 interface UserFormData {
@@ -98,7 +92,8 @@ interface StoredUser extends AppUser {
 }
 
 export default function UserManagement() {
-  const { currentUser, changePassword } = useApp();
+  const { currentUser, changePassword, saveData, updateData, deleteData } =
+    useApp();
 
   const [users, setUsers] = useState<StoredUser[]>(() =>
     ls.get<StoredUser[]>("custom_users", []),
@@ -113,8 +108,6 @@ export default function UserManagement() {
   const [resetUser, setResetUser] = useState<StoredUser | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [resetting, setResetting] = useState(false);
-
-  const jwt = getJwt();
 
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
@@ -205,21 +198,14 @@ export default function UserManagement() {
         );
         persistUsers(updatedList);
 
-        // Server update
-        if (jwt) {
-          await apiUpdateRecord(
-            "users",
-            editUser.id,
-            {
-              fullName,
-              username,
-              role,
-              mobile,
-              email,
-            } as Record<string, unknown>,
-            jwt,
-          ).catch(() => {});
-        }
+        // Persist to canister via updateData
+        await updateData("userAccounts", editUser.id, {
+          fullName,
+          username,
+          role,
+          mobile,
+          email,
+        } as Record<string, unknown>).catch(() => {});
 
         if (password) {
           changePassword(editUser.id, password);
@@ -248,22 +234,16 @@ export default function UserManagement() {
         passwords[username] = password;
         ls.set("user_passwords", passwords);
 
-        // Server create
-        if (jwt) {
-          await apiCreateRecord(
-            "users",
-            {
-              id,
-              fullName,
-              username,
-              role,
-              mobile,
-              email,
-              password,
-            } as Record<string, unknown>,
-            jwt,
-          ).catch(() => {});
-        }
+        // Persist to canister
+        await saveData("userAccounts", {
+          id,
+          fullName,
+          username,
+          role,
+          mobile,
+          email,
+        } as Record<string, unknown>).catch(() => {});
+
         toast.success("User created.");
       }
       setShowForm(false);
@@ -282,9 +262,7 @@ export default function UserManagement() {
       const passwords = ls.get<Record<string, string>>("user_passwords", {});
       delete passwords[deleteTarget.username];
       ls.set("user_passwords", passwords);
-      if (jwt) {
-        await apiDeleteRecord("users", deleteTarget.id, jwt).catch(() => {});
-      }
+      await deleteData("userAccounts", deleteTarget.id).catch(() => {});
       toast.success("User deleted.");
       setDeleteTarget(null);
     } catch (err) {
@@ -305,14 +283,9 @@ export default function UserManagement() {
       const passwords = ls.get<Record<string, string>>("user_passwords", {});
       passwords[resetUser.username] = newPassword;
       ls.set("user_passwords", passwords);
-      if (jwt) {
-        await apiUpdateRecord(
-          "users",
-          resetUser.id,
-          { password: newPassword } as Record<string, unknown>,
-          jwt,
-        ).catch(() => {});
-      }
+      await updateData("userAccounts", resetUser.id, {
+        password: newPassword,
+      } as Record<string, unknown>).catch(() => {});
       toast.success(
         `Password reset for ${resetUser.fullName ?? resetUser.username}.`,
       );

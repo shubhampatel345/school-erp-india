@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { createActor } from "./backend";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import { AppProvider, useApp } from "./context/AppContext";
@@ -26,6 +27,7 @@ import Students from "./pages/Students";
 import Transport from "./pages/Transport";
 import VirtualClasses from "./pages/VirtualClasses";
 import StudentAnalytics from "./pages/analytics/StudentAnalytics";
+import { setActorProvider } from "./utils/canisterService";
 
 function AppRoutes() {
   const { currentUser } = useApp();
@@ -106,6 +108,26 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Bootstrap canister actor once on mount
+  useEffect(() => {
+    const canisterId =
+      (import.meta.env.CANISTER_ID_BACKEND as string | undefined) ?? "";
+    if (!canisterId) return;
+    try {
+      const actor = createActor(
+        canisterId,
+        async (file) => file.getBytes(),
+        async (bytes) => {
+          const { ExternalBlob } = await import("./backend");
+          return ExternalBlob.fromBytes(bytes as Uint8Array<ArrayBuffer>);
+        },
+      );
+      setActorProvider(() => actor);
+    } catch {
+      // Actor creation failed — app continues in offline/local-only mode
+    }
+  }, []);
+
   return (
     <AppProvider>
       <AppRoutes />

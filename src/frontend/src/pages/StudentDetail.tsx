@@ -12,7 +12,7 @@ import {
   Phone,
   User,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import { useApp } from "../context/AppContext";
@@ -49,7 +49,15 @@ export default function StudentDetailPage({
   const [student, setStudent] = useState<Student | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
-  const allStudents = getData("students") as Student[];
+
+  // All students for sibling lookup
+  const allStudents = (getData("students") as Student[]).filter(Boolean);
+
+  // Keep a ref to getData so loadStudent can call it without stale closure
+  const getDataRef = useRef(getData);
+  getDataRef.current = getData;
+  const refreshRef = useRef(refreshCollection);
+  refreshRef.current = refreshCollection;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: studentId is the dependency
   useEffect(() => {
@@ -58,21 +66,26 @@ export default function StudentDetailPage({
 
   async function loadStudent() {
     setLoading(true);
-    const cached = (getData("students") as Student[]).find(
-      (s) => s.id === studentId,
-    );
-    if (cached) {
-      setStudent(cached);
-      setLoading(false);
-      return;
-    }
     try {
-      await refreshCollection("students");
-      const fresh = (getData("students") as Student[]).find(
-        (s) => s.id === studentId,
-      );
+      // Try in-memory cache first (instant)
+      const cached = (getDataRef.current("students") as Student[])
+        .filter(Boolean)
+        .find((s) => s?.id === studentId);
+
+      if (cached) {
+        setStudent(cached);
+        setLoading(false);
+        return;
+      }
+
+      // Not in cache — refresh from canister
+      await refreshRef.current("students");
+      const fresh = (getDataRef.current("students") as Student[])
+        .filter(Boolean)
+        .find((s) => s?.id === studentId);
       setStudent(fresh ?? null);
     } catch {
+      // Refresh failed — student not found
       setStudent(null);
     } finally {
       setLoading(false);
@@ -80,6 +93,7 @@ export default function StudentDetailPage({
   }
 
   function handleUpdate(updated: Student) {
+    if (!updated) return;
     setStudent(updated);
   }
 
@@ -127,6 +141,27 @@ export default function StudentDetailPage({
     );
   }
 
+  // Safe accessors — guard every field access
+  const safeName = student.fullName ?? student.admNo ?? "Unknown Student";
+  const safeAdmNo = student.admNo ?? "—";
+  const safeClass = student.class ?? "—";
+  const safeSection = student.section ?? "—";
+  const safeFatherName = student.fatherName ?? "—";
+  const safeInitial = safeName.charAt(0).toUpperCase();
+
+  // Siblings — students sharing the same primary mobile
+  const primaryMobile =
+    student.mobile ?? student.guardianMobile ?? student.fatherMobile;
+  const siblings = primaryMobile
+    ? allStudents.filter(
+        (s) =>
+          s?.id !== student.id &&
+          (s?.mobile === primaryMobile ||
+            s?.guardianMobile === primaryMobile ||
+            s?.fatherMobile === primaryMobile),
+      )
+    : [];
+
   return (
     <div className="flex flex-col h-full overflow-y-auto">
       {/* Header */}
@@ -144,7 +179,7 @@ export default function StudentDetailPage({
           </Button>
           <span className="text-muted-foreground text-sm">/</span>
           <span className="text-sm font-medium text-foreground truncate">
-            {student.fullName}
+            {safeName}
           </span>
         </div>
       </div>
@@ -157,26 +192,25 @@ export default function StudentDetailPage({
               {student.photo ? (
                 <img
                   src={student.photo}
-                  alt={student.fullName}
+                  alt={safeName}
                   className="w-full h-full object-cover"
                 />
               ) : (
                 <span className="text-3xl font-bold text-primary">
-                  {student.fullName.charAt(0).toUpperCase()}
+                  {safeInitial}
                 </span>
               )}
             </div>
             <div className="flex-1 min-w-0">
               <h1 className="text-xl font-bold font-display text-foreground">
-                {student.fullName}
+                {safeName}
               </h1>
               <p className="text-sm text-muted-foreground mt-0.5">
                 Adm. No:{" "}
-                <span className="font-mono font-medium">{student.admNo}</span>
+                <span className="font-mono font-medium">{safeAdmNo}</span>
               </p>
               <p className="text-sm text-muted-foreground">
-                Class {student.class} – {student.section} &nbsp;·&nbsp;{" "}
-                {student.fatherName}
+                Class {safeClass} – {safeSection} &nbsp;·&nbsp; {safeFatherName}
               </p>
               <div className="flex flex-wrap gap-2 mt-2">
                 <Badge
@@ -266,8 +300,8 @@ export default function StudentDetailPage({
               <Calendar className="w-4 h-4 text-primary" />
               Academic Information
             </h3>
-            <InfoRow label="Class" value={`Class ${student.class}`} />
-            <InfoRow label="Section" value={student.section} />
+            <InfoRow label="Class" value={`Class ${safeClass}`} />
+            <InfoRow label="Section" value={safeSection} />
             <InfoRow label="Previous School" value={student.previousSchool} />
           </div>
 
@@ -321,26 +355,18 @@ export default function StudentDetailPage({
         )}
 
         {/* Family Siblings */}
-        {(() => {
-          const primaryMobile =
-            student.mobile || student.guardianMobile || student.fatherMobile;
-          if (!primaryMobile) return null;
-          const siblings = allStudents.filter(
-            (s) =>
-              s.id !== student.id &&
-              (s.mobile === primaryMobile ||
-                s.guardianMobile === primaryMobile ||
-                s.fatherMobile === primaryMobile),
-          );
-          if (siblings.length === 0) return null;
-          return (
-            <div className="bg-card rounded-xl border border-primary/30 p-5">
-              <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
-                <Mail className="w-4 h-4 text-primary" />
-                Family Members ({siblings.length})
-              </h3>
-              <div className="space-y-2">
-                {siblings.map((s) => (
+        {siblings.length > 0 && (
+          <div className="bg-card rounded-xl border border-primary/30 p-5">
+            <h3 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+              <Mail className="w-4 h-4 text-primary" />
+              Family Members ({siblings.length})
+            </h3>
+            <div className="space-y-2">
+              {siblings.map((s) => {
+                if (!s?.id) return null;
+                const siblingName = s.fullName ?? s.admNo ?? "Unknown";
+                const siblingInitial = siblingName.charAt(0).toUpperCase();
+                return (
                   <div
                     key={s.id}
                     className="flex items-center gap-3 p-2.5 bg-muted/30 rounded-lg"
@@ -349,21 +375,22 @@ export default function StudentDetailPage({
                       {s.photo ? (
                         <img
                           src={s.photo}
-                          alt={s.fullName}
+                          alt={siblingName}
                           className="w-full h-full object-cover"
                         />
                       ) : (
                         <span className="text-xs font-bold text-primary">
-                          {(s.fullName ?? "?").charAt(0).toUpperCase()}
+                          {siblingInitial}
                         </span>
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-foreground truncate">
-                        {s.fullName}
+                        {siblingName}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Adm: {s.admNo} · Class {s.class}-{s.section}
+                        Adm: {s.admNo ?? "—"} · Class {s.class ?? "—"}-
+                        {s.section ?? "—"}
                       </p>
                     </div>
                     <Badge
@@ -375,11 +402,11 @@ export default function StudentDetailPage({
                       {s.status === "active" ? "Active" : "Disc."}
                     </Badge>
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
-          );
-        })()}
+          </div>
+        )}
       </div>
 
       {/* Edit Form */}
@@ -387,7 +414,7 @@ export default function StudentDetailPage({
         <StudentForm
           student={student}
           onSave={(updated) => {
-            setStudent(updated);
+            if (updated) setStudent(updated);
             setShowForm(false);
           }}
           onClose={() => setShowForm(false)}
@@ -397,7 +424,7 @@ export default function StudentDetailPage({
       )}
 
       {/* Full Detail Modal */}
-      {showDetailModal && (
+      {showDetailModal && student && (
         <StudentDetailModal
           student={student}
           onClose={() => setShowDetailModal(false)}

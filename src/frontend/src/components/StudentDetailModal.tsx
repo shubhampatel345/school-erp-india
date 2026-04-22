@@ -556,45 +556,10 @@ export default function StudentDetailModal({
     setTimeout(() => window.print(), 300);
   }
 
-  async function handleSendMessage() {
+  function handleSendMessage() {
     if (!onNavigate) return;
-    const apiBase =
-      localStorage.getItem("shubh_erp_api_url") ??
-      "https://shubh.psmkgs.com/api";
-    const token = localStorage.getItem("shubh_erp_auth_token") ?? "";
-    try {
-      const res = await fetch(`${apiBase}/chat/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("API error");
-      const data = (await res.json()) as {
-        data: { id: number; name: string; role: string; entity_id?: string }[];
-      };
-      const users = data.data ?? [];
-      // Match by entity_id = student.id or by name match
-      const match = users.find(
-        (u) =>
-          (u.entity_id && u.entity_id === student.id) ||
-          u.name.toLowerCase() === student.fullName.toLowerCase(),
-      );
-      if (!match) {
-        toast.info("Student does not have a chat account yet");
-        return;
-      }
-      // Start DM then navigate
-      await fetch(`${apiBase}/chat/conversations/start`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ recipient_user_id: match.id }),
-      });
-      onClose();
-      onNavigate("chat");
-    } catch {
-      toast.info("Student does not have a chat account yet");
-    }
+    onClose();
+    onNavigate("chat");
   }
 
   // ── Net Payable calculation (fix3) ──────────────────────────────────────

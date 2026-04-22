@@ -20,7 +20,8 @@ import type {
   TransportRoute,
   TransportTrip,
 } from "../../types";
-import { apiCall, getJwt } from "../../utils/api";
+import { canisterService, generateId } from "../../utils/canisterService";
+import { syncEngine } from "../../utils/syncEngine";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -127,24 +128,38 @@ function TrackBus({ routes }: { routes: TransportRoute[] }) {
     setLoading(true);
     setError(null);
     try {
-      const jwt = getJwt();
-      const res = await apiCall<{
-        status: string;
-        data?: DriverLocation;
-        message?: string;
-      }>(
-        `transport/driver_location?routeId=${encodeURIComponent(routeId)}`,
-        "GET",
-        null,
-        jwt,
-      );
-      if (res.status === "ok" && res.data) {
-        setLocation(res.data);
+      // Load driver location from canister
+      const driverLocations = syncEngine.getLocalCollection(
+        "driver_locations",
+      ) as Array<{
+        routeId?: string;
+        latitude?: number;
+        longitude?: number;
+        accuracy?: number;
+        timestamp?: string;
+        isActive?: boolean;
+      }>;
+      const latest = driverLocations
+        .filter((d) => d.routeId === routeId && d.isActive)
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp ?? 0).getTime() -
+            new Date(a.timestamp ?? 0).getTime(),
+        )[0];
+      if (latest?.latitude && latest?.longitude) {
+        setLocation({
+          latitude: latest.latitude,
+          longitude: latest.longitude,
+          accuracy: latest.accuracy,
+          timestamp: latest.timestamp ?? "",
+          routeId,
+          isActive: true,
+        } as DriverLocation);
         setLastFetchAt(new Date());
         setSecondsAgo(0);
       } else {
         setLocation(null);
-        setError(res.message ?? "No active driver on this route");
+        setError("No active driver on this route");
       }
     } catch (err) {
       setError(
@@ -388,21 +403,21 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
     async (pos: GeolocationPosition, tripId: string, routeId: string) => {
       setPosting(true);
       try {
-        const jwt = getJwt();
-        await apiCall(
-          "transport/driver_location",
-          "POST",
-          {
-            driverId: currentUser?.id ?? "unknown",
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-            timestamp: new Date().toISOString(),
-            routeId,
-            tripId,
-            isActive: true,
-          },
-          jwt,
+        const locationRecord = {
+          id: `dloc_${Date.now()}`,
+          driverId: currentUser?.id ?? "unknown",
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          timestamp: new Date().toISOString(),
+          routeId,
+          tripId,
+          isActive: true,
+        };
+        await canisterService.createRecord(
+          "driver_locations",
+          locationRecord.id,
+          locationRecord,
         );
       } catch {
         // best-effort — don't interrupt tracking
@@ -429,25 +444,24 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         setCurrentPos(pos);
-        // Create trip record
-        const jwt = getJwt();
+        // Create trip record in canister
         let tripId = `trip_${Date.now()}`;
         try {
-          const res = await apiCall<{ status: string; data?: { id: string } }>(
-            "transport/trips",
-            "POST",
-            {
-              routeId: selectedRouteId,
-              driverId: currentUser?.id ?? "unknown",
-              driverName: currentUser?.name ?? "Driver",
-              startTime: new Date().toISOString(),
-              status: "active",
-            },
-            jwt,
+          const tripRecord = {
+            id: tripId,
+            routeId: selectedRouteId,
+            driverId: currentUser?.id ?? "unknown",
+            driverName: currentUser?.name ?? "Driver",
+            startTime: new Date().toISOString(),
+            status: "active",
+          };
+          await canisterService.createRecord(
+            "transport_trips",
+            tripId,
+            tripRecord,
           );
-          if (res.data?.id) tripId = res.data.id;
         } catch {
-          // Proceed with local id if server unreachable
+          // Proceed with local id if canister unreachable
         }
 
         const trip: TransportTrip = {
@@ -509,16 +523,11 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
 
     if (activeTrip) {
       try {
-        const jwt = getJwt();
-        await apiCall(
-          `transport/trips/${activeTrip.id}`,
-          "PUT",
-          {
-            status: "completed",
-            endTime: new Date().toISOString(),
-          },
-          jwt,
-        );
+        await canisterService.updateRecord("transport_trips", activeTrip.id, {
+          id: activeTrip.id,
+          status: "completed",
+          endTime: new Date().toISOString(),
+        });
       } catch {
         // non-critical
       }
@@ -720,18 +729,17 @@ function TripHistory() {
     const load = async () => {
       setLoading(true);
       try {
-        const jwt = getJwt();
-        const res = await apiCall<{
-          status: string;
-          data?: TransportTrip[];
-        }>("transport/trips?days=30", "GET", null, jwt);
-        if (res.status === "ok" && Array.isArray(res.data)) {
-          setTrips(res.data);
-        } else {
-          setTrips([]);
-        }
+        // Load trips from canister
+        const trips =
+          await canisterService.listRecords<TransportTrip>("transport_trips");
+        const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+        const recent = trips.filter((t) => {
+          const ts = new Date(t.startTime ?? 0).getTime();
+          return ts >= thirtyDaysAgo;
+        });
+        setTrips(recent);
       } catch {
-        setError("Could not load trip history from server.");
+        setError("Could not load trip history from canister.");
       } finally {
         setLoading(false);
       }

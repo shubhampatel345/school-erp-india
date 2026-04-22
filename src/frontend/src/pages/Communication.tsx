@@ -196,27 +196,8 @@ function maskPhone(phone: string): string {
   return `${phone.slice(0, 2)}****${phone.slice(-4)}`;
 }
 
-async function saveToServer(route: string, payload: Record<string, unknown>) {
-  try {
-    const apiBase =
-      localStorage.getItem("shubh_erp_api_base_url") ??
-      "https://shubh.psmkgs.com";
-    const token =
-      sessionStorage.getItem("shubh_erp_jwt_token") ??
-      localStorage.getItem("shubh_erp_jwt_token") ??
-      "";
-    const url = `${apiBase}/api/index.php?route=${route}`;
-    await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify(payload),
-    });
-  } catch {
-    // fail silently; settings saved locally
-  }
+async function saveToServer(_route: string, _payload: Record<string, unknown>) {
+  // Data is stored in the Internet Computer canister — no PHP/MySQL sync needed
 }
 
 // ── WhatsApp Compose Tab ──────────────────────────────────────────────────────
@@ -1081,13 +1062,11 @@ function WhatsAppBotTab() {
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        <div className="p-4 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 space-y-1">
-          <p className="font-semibold">⚠️ Server-side setup required</p>
+        <div className="p-4 rounded-lg bg-blue-50 border border-blue-200 text-sm text-blue-800 space-y-1">
+          <p className="font-semibold">ℹ️ WhatsApp Bot Setup</p>
           <p>
-            Configure the webhook on your cPanel server at{" "}
-            <code className="bg-amber-100 px-1 rounded text-xs">
-              https://shubh.psmkgs.com/api/index.php?route=whatsapp/webhook
-            </code>
+            Configure the webhook URL on your wacoder.in dashboard. Use your
+            app&apos;s live URL as the webhook endpoint.
           </p>
         </div>
 
@@ -1547,61 +1526,57 @@ interface ChatGroupItem {
 }
 
 function GroupsTab() {
-  const { currentUser, addNotification } = useApp();
+  const { currentUser, addNotification, getData } = useApp();
   const [groups, setGroups] = useState<ChatGroupItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
 
-  const apiBase =
-    localStorage.getItem("shubh_erp_api_base_url") ??
-    "https://shubh.psmkgs.com";
-  const token =
-    sessionStorage.getItem("shubh_erp_jwt_token") ??
-    localStorage.getItem("shubh_erp_jwt_token") ??
-    "";
-
-  const fetchGroups = useCallback(async () => {
+  const buildGroupsFromData = useCallback(() => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/api/index.php?route=chat/groups`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { data: ChatGroupItem[] };
-      setGroups(data.data ?? []);
+      // Build groups from canister-stored classes and transport routes
+      const classes = getData("classes") as {
+        id: string;
+        name: string;
+        sections: string[];
+      }[];
+      const routes = getData("transportRoutes") as {
+        id: string;
+        name: string;
+      }[];
+      const classGroups: ChatGroupItem[] = classes.flatMap((cls, ci) =>
+        (cls.sections ?? [""]).map((sec, si) => ({
+          id: ci * 100 + si + 1,
+          name: sec ? `${cls.name} - ${sec} Group` : `${cls.name} Group`,
+          type: "class_group" as const,
+          member_count: 0,
+        })),
+      );
+      const routeGroupItems: ChatGroupItem[] = routes.map((r, i) => ({
+        id: 10000 + i,
+        name: `${r.name} Route Group`,
+        type: "route_group" as const,
+        member_count: 0,
+      }));
+      setGroups([...classGroups, ...routeGroupItems]);
     } catch {
       setGroups([]);
     } finally {
       setLoading(false);
     }
-  }, [apiBase, token]);
+  }, [getData]);
 
   useEffect(() => {
-    fetchGroups();
-  }, [fetchGroups]);
+    buildGroupsFromData();
+  }, [buildGroupsFromData]);
 
-  const handleGenerate = async () => {
+  const handleGenerate = () => {
     setGenerating(true);
     try {
-      const res = await fetch(
-        `${apiBase}/api/index.php?route=chat/groups/generate`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        },
-      );
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      buildGroupsFromData();
       addNotification("Chat groups generated successfully", "success", "💬");
-      await fetchGroups();
     } catch {
-      addNotification(
-        "Failed to generate groups. Check server connection.",
-        "error",
-        "❌",
-      );
+      addNotification("Failed to generate groups", "error", "❌");
     } finally {
       setGenerating(false);
     }
@@ -1626,7 +1601,7 @@ function GroupsTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={fetchGroups}
+              onClick={buildGroupsFromData}
               disabled={loading}
               data-ocid="groups-refresh-btn"
             >

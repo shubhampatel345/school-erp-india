@@ -120,10 +120,12 @@ export default function FeesPlanPage() {
   const plans = useMemo(() => rawPlans, [rawPlans]);
 
   // ── Classes ─────────────────────────────────────────────────────────────────
+  // NOTE: getData is stable (comes from useApp context via useCallback) but
+  // wrapping in useMemo with rawPlans as dep avoids re-running on every render.
+  const rawClasses = getData("classes") as ClassSection[];
   const classSections: ClassSection[] = useMemo(() => {
-    const cs = getData("classes") as ClassSection[];
-    if (cs.length > 0) {
-      return [...cs].sort((a, b) => {
+    if (rawClasses.length > 0) {
+      return [...rawClasses].sort((a, b) => {
         const an =
           a.className ?? (a as unknown as { name?: string }).name ?? "";
         const bn =
@@ -138,7 +140,7 @@ export default function FeesPlanPage() {
       className: c,
       sections: ["A", "B", "C"],
     }));
-  }, [getData]);
+  }, [rawClasses]);
 
   const classNames = useMemo(
     () =>
@@ -184,12 +186,39 @@ export default function FeesPlanPage() {
   // This prevents the fee grid from resetting while the user is typing.
   const prevEditKeyRef = useRef<string>("");
 
+  // CRITICAL: Only hash plans for the CURRENT class+section.
+  // If we hash ALL plans, any background server sync that touches a different
+  // class's plan will change plansKey → useEffect fires → editValues resets
+  // while the user is mid-typing. Scoping to selected class/section ensures
+  // the key only changes when data that actually affects this grid changes.
+  const relevantPlans = useMemo(
+    () =>
+      plans.filter((p) => {
+        const pc =
+          p.classId ||
+          (p as unknown as Record<string, string>).className ||
+          (p as unknown as Record<string, string>).class ||
+          "";
+        const ps =
+          p.sectionId ||
+          (p as unknown as Record<string, string>).sectionName ||
+          (p as unknown as Record<string, string>).section ||
+          "";
+        return pc === selectedClass && ps === selectedSection;
+      }),
+    [plans, selectedClass, selectedSection],
+  );
+
   const plansKey = useMemo(
     () =>
       JSON.stringify(
-        plans.map((p) => ({ id: p.id, amounts: p.amounts, amount: p.amount })),
+        relevantPlans.map((p) => ({
+          id: p.id,
+          amounts: p.amounts,
+          amount: p.amount,
+        })),
       ),
-    [plans],
+    [relevantPlans],
   );
   const headingsKey = useMemo(
     () => JSON.stringify(activeHeadings.map((h) => h.id)),
@@ -211,23 +240,8 @@ export default function FeesPlanPage() {
     for (const heading of activeHeadings) {
       vals[heading.id] = {};
 
-      const plan = plans.find((p) => {
-        const planClass =
-          p.classId ||
-          (p as unknown as Record<string, string>).className ||
-          (p as unknown as Record<string, string>).class ||
-          "";
-        const planSection =
-          p.sectionId ||
-          (p as unknown as Record<string, string>).sectionName ||
-          (p as unknown as Record<string, string>).section ||
-          "";
-        return (
-          planClass === selectedClass &&
-          planSection === selectedSection &&
-          p.headingId === heading.id
-        );
-      });
+      // Use relevantPlans (already scoped to selectedClass+selectedSection)
+      const plan = relevantPlans.find((p) => p.headingId === heading.id);
 
       for (const month of MONTHS) {
         if (!heading.months.includes(month)) continue;
@@ -257,7 +271,7 @@ export default function FeesPlanPage() {
     selectedClass,
     selectedSection,
     activeHeadings,
-    plans,
+    relevantPlans,
     headingsKey,
     plansKey,
   ]);

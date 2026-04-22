@@ -26,11 +26,9 @@ import {
 } from "@/components/ui/select";
 import {
   AlertTriangle,
-  BarChart2,
   BookOpen,
   Camera,
   CheckCircle2,
-  ChevronDown,
   Download,
   Edit2,
   History,
@@ -48,12 +46,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import type { BookIssue, LibraryBook, Student } from "../types";
-import {
-  deleteCollectionItem,
-  fetchCollection,
-  saveCollectionItem,
-  updateCollectionItem,
-} from "../utils/api";
+import { dataService } from "../utils/dataService";
 import { generateId } from "../utils/localStorage";
 
 // ── Types ──────────────────────────────────────────────────
@@ -1695,14 +1688,12 @@ export default function Library() {
     ? currentUser.role === "superadmin" || currentUser.role === "admin"
     : false;
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(() => {
     setLoading(true);
     setError("");
     try {
-      const [booksData, issuesData] = await Promise.all([
-        fetchCollection<LibraryBook>("library_books"),
-        fetchCollection<BookIssue>("book_issues"),
-      ]);
+      const booksData = dataService.get<LibraryBook>("library");
+      const issuesData = dataService.get<BookIssue>("libraryTransactions");
       setBooks(booksData);
       setIssues(issuesData);
     } catch (e) {
@@ -1715,7 +1706,7 @@ export default function Library() {
   }, []);
 
   useEffect(() => {
-    void loadData();
+    loadData();
   }, [loadData]);
 
   const saveSettings = (s: LibrarySettings) => {
@@ -1732,8 +1723,8 @@ export default function Library() {
         addedAt: todayStr(),
         ...data,
       };
-      await saveCollectionItem(
-        "library_books",
+      await dataService.save(
+        "library",
         newBook as unknown as Record<string, unknown>,
       );
       setBooks((prev) => [...prev, newBook]);
@@ -1748,8 +1739,8 @@ export default function Library() {
     if (!editBook) return;
     try {
       const updated: LibraryBook = { ...editBook, ...data };
-      await updateCollectionItem(
-        "library_books",
+      await dataService.update(
+        "library",
         editBook.id,
         updated as unknown as Record<string, unknown>,
       );
@@ -1767,7 +1758,7 @@ export default function Library() {
     if (!window.confirm(`Delete "${book.title}"? This cannot be undone.`))
       return;
     try {
-      await deleteCollectionItem("library_books", id);
+      await dataService.delete("library", id);
       setBooks((prev) => prev.filter((b) => b.id !== id));
       toast.success("Book deleted");
     } catch {
@@ -1795,16 +1786,16 @@ export default function Library() {
         fine: 0,
         status: "issued",
       };
-      await saveCollectionItem(
-        "book_issues",
+      await dataService.save(
+        "libraryTransactions",
         issue as unknown as Record<string, unknown>,
       );
       const updatedBook: LibraryBook = {
         ...book,
         availableQty: book.availableQty - 1,
       };
-      await updateCollectionItem(
-        "library_books",
+      await dataService.update(
+        "library",
         bookId,
         updatedBook as unknown as Record<string, unknown>,
       );
@@ -1827,8 +1818,8 @@ export default function Library() {
         fine,
         status: "returned",
       };
-      await updateCollectionItem(
-        "book_issues",
+      await dataService.update(
+        "libraryTransactions",
         issueId,
         updated as unknown as Record<string, unknown>,
       );
@@ -1837,8 +1828,8 @@ export default function Library() {
           ...book,
           availableQty: book.availableQty + 1,
         };
-        await updateCollectionItem(
-          "library_books",
+        await dataService.update(
+          "library",
           book.id,
           updatedBook as unknown as Record<string, unknown>,
         );
@@ -1970,8 +1961,8 @@ export default function Library() {
           addedAt: todayStr(),
         };
         try {
-          await saveCollectionItem(
-            "library_books",
+          await dataService.save(
+            "library",
             book as unknown as Record<string, unknown>,
           );
           newBooks.push(book);
@@ -2032,7 +2023,7 @@ export default function Library() {
           <Button
             variant="ghost"
             size="icon"
-            onClick={() => void loadData()}
+            onClick={() => loadData()}
             title="Refresh"
             data-ocid="library.refresh_button"
           >
@@ -2103,7 +2094,7 @@ export default function Library() {
         >
           <AlertTriangle className="w-10 h-10 text-destructive/60 mb-3" />
           <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={() => void loadData()} variant="outline">
+          <Button onClick={() => loadData()} variant="outline">
             <RefreshCw className="w-4 h-4 mr-2" /> Retry
           </Button>
         </div>

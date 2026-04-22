@@ -1,36 +1,25 @@
 /**
- * SHUBH SCHOOL ERP — API Sync Status Hook
+ * SHUBH SCHOOL ERP — Canister Sync Status Hook
  *
- * Polls /api/sync/status every 30 s when an API URL is configured.
- * Exposes serverCounts from /sync/status (real MySQL COUNT(*)) for dashboard.
- * Exposes SyncQueue pending/failed counts for the sync indicator badge.
- * Returns live connection state consumed by Dashboard and other components.
+ * Replaces the old MySQL/cPanel polling hook.
+ * - Reads sync state from syncEngine (canister-native)
+ * - Fetches getCounts() from canister every 30 s
+ * - Exposes triggerFullSync() to manually reload all collections
  *
- * Performance fix: window focus NO LONGER triggers a full re-fetch every time.
- * Re-fetch only happens if last fetch was >5 min ago, or user explicitly triggers.
+ * No JWT, no PHP, no server URL configuration needed.
  */
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import {
-  type SyncStatusResponse,
-  fetchSyncStatus,
-  isApiConfigured,
-} from "../utils/api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { canisterService } from "../utils/canisterService";
 import { dataService } from "../utils/dataService";
 import { syncEngine } from "../utils/syncEngine";
 
 export type SyncMode =
-  | "local" // no API URL set — purely localStorage
-  | "connected" // API reachable + data loaded
-  | "syncing" // in-flight request
-  | "offline" // API configured but unreachable
-  | "auth_error"; // API reachable but auth rejected
+  | "local" // canister not yet ready (initialising)
+  | "connected" // canister reachable, data loaded
+  | "syncing" // in-flight canister fetch
+  | "offline" // no network or canister unreachable
+  | "auth_error"; // kept for backward compat — canister has no auth errors
 
 export interface SyncState {
   mode: SyncMode;
@@ -39,294 +28,111 @@ export interface SyncState {
   isSynced: boolean;
   isPolling: boolean;
   needsAuth: boolean;
+  /** Version info — null for canister (no version endpoint like PHP) */
   serverInfo: {
     version?: string;
     db_version?: string;
     last_backup?: string;
   } | null;
-  /**
-   * Real MySQL COUNT(*) per collection — taken directly from /sync/status response.
-   * These are the authoritative counts to display on dashboard stat cards.
-   */
   serverCounts: Record<string, number>;
-  /**
-   * In-memory cache counts from DataService (may be partial if fetch is still in flight).
-   * Use serverCounts for display; use syncedCounts only for the tooltip breakdown.
-   */
   syncedCounts: Record<string, number>;
-  /** Number of changes pending background sync to server */
   pendingSyncCount: number;
-  /** Number of changes that failed to sync after max retries */
   failedSyncCount: number;
-  /** Manually trigger an immediate sync + data refresh */
   triggerSync: () => Promise<void>;
 }
 
 const POLL_INTERVAL_MS = 30_000;
-const AUTH_BACKOFF_MS = 30_000;
-// Max time (ms) before we stop showing "Syncing" even if dataService is still loading.
-const MAX_SYNCING_DISPLAY_MS = 8_000;
-const LS_LAST_SYNC_KEY = "shubh_erp_last_sync_time";
-/** Minimum gap between background re-fetches when returning to tab (5 minutes) */
-const FOCUS_REFETCH_INTERVAL_MS = 5 * 60_000;
-
-function persistLastSync(ts: Date) {
-  try {
-    localStorage.setItem(LS_LAST_SYNC_KEY, ts.toISOString());
-  } catch {
-    // ignore
-  }
-}
-
-function loadLastSync(): Date | null {
-  try {
-    const raw = localStorage.getItem(LS_LAST_SYNC_KEY);
-    if (!raw) return null;
-    const d = new Date(raw);
-    return Number.isNaN(d.getTime()) ? null : d;
-  } catch {
-    return null;
-  }
-}
-
-function isSuperAdminOnlyError(msg: string): boolean {
-  const lower = msg.toLowerCase();
-  return (
-    lower.includes("super admin") ||
-    lower.includes("superadmin") ||
-    lower.includes("super_admin") ||
-    lower.includes("unauthorized") ||
-    lower.includes("unauthenticated") ||
-    lower.includes("forbidden")
-  );
-}
 
 export function useSync(): SyncState {
-  const [mode, setMode] = useState<SyncMode>(() =>
-    isApiConfigured() ? "syncing" : "local",
-  );
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(loadLastSync);
+  const [mode, setMode] = useState<SyncMode>("local");
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [lastSyncError, setLastSyncError] = useState<string | null>(null);
-  const [needsAuth, setNeedsAuth] = useState(false);
-  const [serverInfo, setServerInfo] = useState<SyncState["serverInfo"]>(null);
   const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
-
-  // Subscribe to SyncEngine for queue stats
   const [queueStats, setQueueStats] = useState(() =>
     syncEngine.getQueueStats(),
   );
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const activeRef = useRef(true);
+
+  // Subscribe to syncEngine for live pending count + status
   useEffect(() => {
     const unsub = syncEngine.subscribe(() => {
       setQueueStats(syncEngine.getQueueStats());
+      const status = syncEngine.getSyncStatus();
+      if (status.state === "synced") {
+        setMode("connected");
+        setLastSyncTime(status.lastSyncTime ?? new Date());
+        setLastSyncError(null);
+        if (Object.keys(status.serverCounts).length > 0) {
+          setServerCounts(status.serverCounts);
+        }
+      } else if (status.state === "loading") {
+        setMode("syncing");
+      } else if (status.state === "offline") {
+        setMode("offline");
+        setLastSyncError(status.lastError);
+      }
     });
     return unsub;
   }, []);
 
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeRef = useRef(true);
-  /** Timestamp of the last successful full data init (for focus-refetch throttling) */
-  const lastFullFetchRef = useRef<number>(0);
-
-  // Subscribe to DataService for live cache counts (tooltip breakdown only)
-  const dsMode = useSyncExternalStore(
-    dataService.subscribe.bind(dataService),
-    () => dataService.getMode(),
-  );
-  const syncedCounts = dataService.getCounts();
-
-  // Track when we first entered "loading" state so we can cap the syncing display
-  const loadingStartRef = useRef<number | null>(null);
-  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
-
-  useEffect(() => {
-    if (dsMode === "loading") {
-      if (loadingStartRef.current === null) {
-        loadingStartRef.current = Date.now();
-        setLoadingTimedOut(false);
-      }
-      const elapsed = Date.now() - (loadingStartRef.current ?? Date.now());
-      if (elapsed >= MAX_SYNCING_DISPLAY_MS) {
-        setLoadingTimedOut(true);
-      } else {
-        const remaining = MAX_SYNCING_DISPLAY_MS - elapsed;
-        const t = setTimeout(() => setLoadingTimedOut(true), remaining);
-        return () => clearTimeout(t);
-      }
-    } else {
-      loadingStartRef.current = null;
-      setLoadingTimedOut(false);
-    }
-  }, [dsMode]);
-
-  const restartPoll = useCallback(
-    (intervalMs: number, checkFn: () => Promise<void>) => {
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      intervalRef.current = setInterval(() => {
-        void checkFn();
-      }, intervalMs);
-    },
-    [],
-  );
-
-  const runCheck = useCallback(async () => {
-    if (!isApiConfigured()) {
-      setMode("local");
-      setNeedsAuth(false);
-      return;
-    }
-    setMode("syncing");
+  // Poll canister getCounts() every 30 s
+  const fetchCounts = useCallback(async () => {
+    if (!activeRef.current) return;
     try {
-      const result: SyncStatusResponse = await fetchSyncStatus();
+      const counts = await canisterService.getCounts();
       if (!activeRef.current) return;
-
-      if (result.status === "ok") {
-        const now = new Date();
+      if (Object.keys(counts).length > 0) {
+        setServerCounts(counts);
         setMode("connected");
-        setLastSyncTime(now);
+        setLastSyncTime(new Date());
         setLastSyncError(null);
-        setNeedsAuth(false);
-        persistLastSync(now);
-        setServerInfo({
-          version: result.version,
-          db_version: result.db_version,
-          last_backup: result.last_backup,
-        });
-        // Only update serverCounts when we get real data — never clear counts on error
-        if (result.counts && Object.keys(result.counts).length > 0) {
-          setServerCounts(result.counts);
-        }
-        restartPoll(POLL_INTERVAL_MS, runCheck);
-        // Trigger DataService to load/refresh all collections when connected.
-        void dataService.init(true);
-        lastFullFetchRef.current = Date.now();
-      } else {
-        const msg = result.message ?? "Server returned an error";
-        if (isSuperAdminOnlyError(msg)) {
-          setMode("auth_error");
-          setNeedsAuth(true);
-          setLastSyncError(
-            "Server requires Super Admin authentication. Go to Settings → Data Management → Database Server to authenticate.",
-          );
-          restartPoll(AUTH_BACKOFF_MS, runCheck);
-        } else {
-          setMode("offline");
-          setNeedsAuth(false);
-          setLastSyncError(msg);
-          // Keep serverCounts from last successful sync — do NOT clear them
-        }
       }
-    } catch (err) {
+    } catch {
       if (!activeRef.current) return;
-      const msg = err instanceof Error ? err.message : "Connection failed";
-      if (isSuperAdminOnlyError(msg)) {
-        setMode("auth_error");
-        setNeedsAuth(true);
-        setLastSyncError(
-          "Server requires Super Admin authentication. Go to Settings → Data Management → Database Server to authenticate.",
-        );
-        restartPoll(AUTH_BACKOFF_MS, runCheck);
-      } else {
-        setMode("offline");
-        setNeedsAuth(false);
-        setLastSyncError(msg);
-        // Keep serverCounts from last successful sync — do NOT clear them
-      }
+      setMode("offline");
+      setLastSyncError("Could not reach canister");
     }
-  }, [restartPoll]);
+  }, []);
 
-  // Start/stop polling based on whether API is configured
   useEffect(() => {
     activeRef.current = true;
-
-    if (!isApiConfigured()) {
-      setMode("local");
-      return;
-    }
-
-    // Initial data load + status check on startup
-    void dataService.init(true);
-    lastFullFetchRef.current = Date.now();
-    void runCheck();
-
+    void fetchCounts();
     intervalRef.current = setInterval(() => {
-      void runCheck();
+      void fetchCounts();
     }, POLL_INTERVAL_MS);
-
-    /**
-     * PERFORMANCE FIX: window focus NO LONGER triggers a full re-fetch every time.
-     * Instead, re-fetch only if the last full fetch was more than 5 minutes ago.
-     * This makes the app 3-5x faster for users who switch tabs or minimise/restore.
-     */
-    function handleFocus() {
-      if (!isApiConfigured()) return;
-      const elapsed = Date.now() - lastFullFetchRef.current;
-      if (elapsed >= FOCUS_REFETCH_INTERVAL_MS) {
-        void dataService.init(true);
-        lastFullFetchRef.current = Date.now();
-        void runCheck();
-      }
-    }
-    window.addEventListener("focus", handleFocus);
-
     return () => {
       activeRef.current = false;
       if (intervalRef.current !== null) {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      window.removeEventListener("focus", handleFocus);
     };
-  }, [runCheck]);
+  }, [fetchCounts]);
 
-  // Re-evaluate when localStorage API URL or JWT changes (storage event from other tabs)
-  useEffect(() => {
-    function handleStorageChange(e: StorageEvent) {
-      if (e.key === "shubh_erp_api_url") {
-        if (e.newValue) {
-          restartPoll(POLL_INTERVAL_MS, runCheck);
-          void runCheck();
-        } else {
-          if (intervalRef.current !== null) {
-            clearInterval(intervalRef.current);
-            intervalRef.current = null;
-          }
-          setMode("local");
-          setLastSyncError(null);
-          setNeedsAuth(false);
-        }
-      }
-      if (e.key === "shubh_erp_jwt_token" && e.newValue) {
-        setNeedsAuth(false);
-        restartPoll(POLL_INTERVAL_MS, runCheck);
-        void runCheck();
-      }
-    }
-    window.addEventListener("storage", handleStorageChange);
-    return () => window.removeEventListener("storage", handleStorageChange);
-  }, [runCheck, restartPoll]);
+  const triggerSync = useCallback(async () => {
+    setMode("syncing");
+    await syncEngine.loadAllFromCanister();
+    const counts = await canisterService.getCounts();
+    setServerCounts(counts);
+    setMode("connected");
+    setLastSyncTime(new Date());
+  }, []);
 
-  const effectiveMode: SyncMode =
-    dsMode === "loading" && !loadingTimedOut
-      ? "syncing"
-      : dsMode === "ready"
-        ? "connected"
-        : mode;
+  const syncedCounts = dataService.getCounts();
 
   return {
-    mode: effectiveMode,
+    mode,
     lastSyncTime,
     lastSyncError,
-    isSynced: effectiveMode === "connected",
-    isPolling: effectiveMode === "syncing",
-    needsAuth,
-    serverInfo,
+    isSynced: mode === "connected",
+    isPolling: mode === "syncing",
+    needsAuth: false,
+    serverInfo: null,
     serverCounts,
     syncedCounts,
     pendingSyncCount: queueStats.pending,
     failedSyncCount: queueStats.failed,
-    triggerSync: runCheck,
+    triggerSync,
   };
 }

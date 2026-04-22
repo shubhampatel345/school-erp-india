@@ -355,8 +355,8 @@ export default function WhatsAppSettings() {
           </p>
           {[
             "Log in to your wacoder.in dashboard",
-            "Go to Webhook Settings and enter your server URL:",
-            "https://shubh.psmkgs.com/api/index.php?route=whatsapp/webhook",
+            "Go to Webhook Settings and enter your canister app URL:",
+            `${window.location.origin}/api/whatsapp/webhook`,
             "Enable incoming message webhook",
             "Save settings — parents can now text your school number with their child's Admission No.",
           ].map((step, i) => (

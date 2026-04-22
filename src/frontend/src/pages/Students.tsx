@@ -43,6 +43,54 @@ import { ls } from "../utils/localStorage";
 
 const ITEMS_PER_PAGE = 50;
 
+// Hardcoded class order — always shown even if no classes configured yet
+const HARDCODED_CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
+// Legacy class names without "Class " prefix (used in stored data)
+const CLASS_RAW_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "11",
+  "12",
+];
+
+function classOrder(name: string): number {
+  // Try exact match first
+  let idx = CLASS_RAW_ORDER.indexOf(name);
+  if (idx !== -1) return idx;
+  // Try stripping "Class " prefix
+  idx = CLASS_RAW_ORDER.indexOf(name.replace(/^Class\s+/i, ""));
+  if (idx !== -1) return idx;
+  return 99;
+}
+
 // ── Column definitions ────────────────────────────────────────────────────────
 interface ColDef {
   key: string;
@@ -174,13 +222,10 @@ export default function Students({ onNavigate }: StudentsProps) {
     addNotification,
   } = useApp();
 
-  // ── Students from context (server-synced) ─────────────────────────────────
-  // getData is stable (useCallback), but its return value changes — we pull
-  // it outside useMemo and just reference the function directly.
+  // ── Students from context (canister-native) ───────────────────────────────
   const rawStudents = getData("students") as Student[];
   const students = useMemo(
-    () => rawStudents.filter(Boolean),
-    // rawStudents reference changes when context updates — this is intentional
+    () => (Array.isArray(rawStudents) ? rawStudents : []).filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rawStudents],
   );
@@ -188,7 +233,7 @@ export default function Students({ onNavigate }: StudentsProps) {
   // ── Classes from context ───────────────────────────────────────────────────
   const rawClasses = getData("classes") as ClassSection[];
   const contextClasses = useMemo(
-    () => rawClasses,
+    () => (Array.isArray(rawClasses) ? rawClasses : []).filter(Boolean),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [rawClasses],
   );
@@ -207,7 +252,7 @@ export default function Students({ onNavigate }: StudentsProps) {
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
 
-  // Refresh once on mount
+  // Refresh once on mount to load canister data
   useEffect(() => {
     void refreshRef.current();
   }, []);
@@ -246,7 +291,6 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [showBirthdays, setShowBirthdays] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
-  /** Pagination */
   const [currentPage, setCurrentPage] = useState(1);
 
   const canManage =
@@ -254,7 +298,6 @@ export default function Students({ onNavigate }: StudentsProps) {
     currentUser?.role === "admin" ||
     currentUser?.role === "receptionist";
 
-  // Save column prefs to localStorage (UI preference only)
   useEffect(() => {
     ls.set(LS_COL_KEY, visibleCols);
   }, [visibleCols]);
@@ -268,45 +311,32 @@ export default function Students({ onNavigate }: StudentsProps) {
     return Array.from(routes).sort();
   }, [students]);
 
-  // Class names for filter (from context.classes first, fallback to student data)
+  // Class names for filter — prefer context classes sorted correctly,
+  // fallback to hardcoded list if no classes configured yet
   const classNames = useMemo(() => {
     if (contextClasses.length > 0) {
-      const CLASS_ORDER = [
-        "Nursery",
-        "LKG",
-        "UKG",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "10",
-        "11",
-        "12",
-      ];
       return [...contextClasses]
         .sort((a, b) => {
           const an =
             a.className ?? (a as unknown as { name?: string }).name ?? "";
           const bn =
             b.className ?? (b as unknown as { name?: string }).name ?? "";
-          const ai = CLASS_ORDER.indexOf(an);
-          const bi = CLASS_ORDER.indexOf(bn);
-          return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          return classOrder(an) - classOrder(bn);
         })
         .map(
           (c) => c.className ?? (c as unknown as { name?: string }).name ?? "",
         );
     }
-    // Fallback to unique values from student data
+    // Fallback: unique class values from student data, sorted
     const seen = new Set<string>();
-    return students
+    const fromStudents = students
       .map((s) => s.class)
-      .filter((c) => c && !seen.has(c) && seen.add(c));
+      .filter((c): c is string => !!c && !seen.has(c) && !!seen.add(c));
+    if (fromStudents.length > 0) {
+      return fromStudents.sort((a, b) => classOrder(a) - classOrder(b));
+    }
+    // Last resort: hardcoded list
+    return HARDCODED_CLASS_ORDER;
   }, [contextClasses, students]);
 
   // Sections for selected class filter
@@ -318,12 +348,13 @@ export default function Students({ onNavigate }: StudentsProps) {
         filterClass,
     );
     if (cls?.sections) return cls.sections;
-    // Fallback from student data
     const seen = new Set<string>();
     return students
       .filter((s) => s.class === filterClass)
       .map((s) => s.section)
-      .filter((sec) => sec && !seen.has(sec) && seen.add(sec));
+      .filter(
+        (sec): sec is string => !!sec && !seen.has(sec) && !!seen.add(sec),
+      );
   }, [filterClass, contextClasses, students]);
 
   const stats = useMemo(() => {
@@ -340,6 +371,7 @@ export default function Students({ onNavigate }: StudentsProps) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     let list = students.filter((s) => {
+      if (!s || !s.id) return false;
       if (filterClass !== "all" && s.class !== filterClass) return false;
       if (filterSection !== "all" && s.section !== filterSection) return false;
       if (filterStatus !== "all" && s.status !== filterStatus) return false;
@@ -350,17 +382,17 @@ export default function Students({ onNavigate }: StudentsProps) {
         return false;
       if (q) {
         const haystack = [
-          s.fullName,
-          s.admNo,
-          s.fatherName,
-          s.motherName,
-          s.mobile,
+          s.fullName ?? "",
+          s.admNo ?? "",
+          s.fatherName ?? "",
+          s.motherName ?? "",
+          s.mobile ?? "",
           s.fatherMobile ?? "",
           s.address ?? "",
           s.village ?? "",
-          `${s.class}${s.section}`,
-          s.class,
-          s.section,
+          `${s.class ?? ""}${s.section ?? ""}`,
+          s.class ?? "",
+          s.section ?? "",
         ]
           .join(" ")
           .toLowerCase();
@@ -407,7 +439,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     filtered.length === 0 ? 0 : (safePage - 1) * ITEMS_PER_PAGE + 1;
   const paginationEnd = Math.min(safePage * ITEMS_PER_PAGE, filtered.length);
 
-  // Birthdays
+  // Birthdays this month
   const today = new Date();
   const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
   const birthdayStudents = students.filter((s) => {
@@ -449,26 +481,20 @@ export default function Students({ onNavigate }: StudentsProps) {
   }
 
   // ── Handlers ───────────────────────────────────────────────────────────────
-  // Called by StudentForm after a successful save.
-  // AppContext.saveData/updateData already dispatches UPDATE_COLLECTION from the
-  // local cache immediately after saveRecord() — no need to re-fetch here.
-  // The notification fires AFTER this callback (in StudentForm.handleSave) so
-  // the record is guaranteed visible before the notification appears.
-  // A server-confirmed refresh fires via SyncEngine.onCollectionUpdated after push.
   function handleSaved(_student?: Student) {
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);
-    // Do NOT call refresh() here — that races against the background push and
-    // overwrites the new local record with stale MySQL data (the disappearing bug).
+    // Do NOT refresh here — that races against background push and causes records to vanish
   }
 
   async function handleDelete(student: Student) {
     try {
       await deleteData("students", student.id);
-      addNotification(`Student ${student.fullName} deleted`, "success");
-      // Safe to refresh after delete — the record is already removed locally,
-      // so the server fetch won't overwrite anything.
+      addNotification(
+        `Student ${student.fullName ?? student.admNo} deleted`,
+        "success",
+      );
       void refresh();
     } catch {
       addNotification("Failed to delete student", "error");
@@ -652,6 +678,16 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
   }
 
+  // Safe double-click handler — never throws even if student data has nulls
+  function handleRowDoubleClick(student: Student) {
+    try {
+      if (!student || !student.id) return;
+      setSelectedStudent(student);
+    } catch {
+      // Guard against any unexpected errors — never crash the whole page
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Page Header */}
@@ -764,7 +800,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             />
           </div>
 
-          {/* Class filter from context */}
           <Select
             value={filterClass}
             onValueChange={(v) => {
@@ -789,7 +824,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             </SelectContent>
           </Select>
 
-          {/* Section filter */}
           <Select
             value={filterSection}
             onValueChange={(v) => {
@@ -1064,7 +1098,6 @@ export default function Students({ onNavigate }: StudentsProps) {
           </thead>
 
           <tbody>
-            {/* Loading skeleton — show while initial load is in progress */}
             {isRefreshing && students.length === 0 && (
               <SkeletonTableRows rows={10} cols={activeVisibleCols.length} />
             )}
@@ -1098,9 +1131,9 @@ export default function Students({ onNavigate }: StudentsProps) {
             )}
 
             {paginatedStudents.map((student, idx) => {
+              if (!student || !student.id) return null;
               const isDiscontinued = student.status === "discontinued";
               const isChecked = selectedIds.has(student.id);
-              // idx relative to current page for data-ocid numbering
               const globalIdx = (safePage - 1) * ITEMS_PER_PAGE + idx;
               return (
                 <tr
@@ -1119,20 +1152,14 @@ export default function Students({ onNavigate }: StudentsProps) {
                   ].join(" ")}
                   style={{ height: "36px" }}
                   data-ocid={`students.item.${globalIdx + 1}`}
-                  onDoubleClick={() => {
-                    try {
-                      setSelectedStudent(student);
-                    } catch {
-                      // guard against undefined student properties
-                    }
-                  }}
+                  onDoubleClick={() => handleRowDoubleClick(student)}
                 >
                   <td className="w-8 px-2 border-r border-border/40">
                     <Checkbox
                       checked={isChecked}
                       onCheckedChange={() => toggleRow(student.id)}
                       onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${student.fullName}`}
+                      aria-label={`Select ${student.fullName ?? student.admNo}`}
                       className="w-3.5 h-3.5"
                     />
                   </td>
@@ -1197,7 +1224,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </table>
       </div>
 
-      {/* Pagination Controls */}
+      {/* Pagination */}
       {filtered.length > ITEMS_PER_PAGE && (
         <div className="flex-shrink-0 border-t border-border bg-card px-4 py-2 flex items-center justify-between gap-3">
           <span className="text-xs text-muted-foreground">
@@ -1215,7 +1242,6 @@ export default function Students({ onNavigate }: StudentsProps) {
             >
               <ChevronLeft className="w-3.5 h-3.5 mr-1" /> Prev
             </Button>
-            {/* Page number pills — show up to 5 around current page */}
             {(() => {
               const items = Array.from({ length: totalPages }, (_, i) => i + 1)
                 .filter(
@@ -1349,8 +1375,11 @@ export default function Students({ onNavigate }: StudentsProps) {
                   Delete Student?
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  Delete <strong>{deleteConfirm.fullName}</strong> (
-                  {deleteConfirm.admNo})? This cannot be undone.
+                  Delete{" "}
+                  <strong>
+                    {deleteConfirm.fullName ?? deleteConfirm.admNo}
+                  </strong>{" "}
+                  ({deleteConfirm.admNo})? This cannot be undone.
                 </p>
               </div>
             </div>
@@ -1406,6 +1435,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                 variant="destructive"
                 size="sm"
                 onClick={() => void handleBulkDelete()}
+                data-ocid="students-bulk-delete.confirm_button"
               >
                 Delete All
               </Button>
@@ -1414,8 +1444,8 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* Add/Edit Student Form */}
-      {showForm && canWrite && (
+      {/* Student Form Modal */}
+      {showForm && (
         <StudentForm
           student={editStudent ?? undefined}
           onSave={handleSaved}
@@ -1428,32 +1458,30 @@ export default function Students({ onNavigate }: StudentsProps) {
         />
       )}
 
-      {/* Import/Export */}
-      {showImportExport && (
-        <StudentImportExport
-          onClose={() => setShowImportExport(false)}
-          onImported={() => void refresh()}
-        />
-      )}
-
-      {/* Student Detail Modal */}
+      {/* Student Detail Modal (double-click) */}
       {selectedStudent && (
         <StudentDetailModal
           student={selectedStudent}
-          onClose={() => {
-            setSelectedStudent(null);
-            // Refresh grid so any edits made inside the modal are visible
-            void refresh();
-          }}
+          onClose={() => setSelectedStudent(null)}
           onUpdate={(updated) => {
+            // Update the selected student reference so modal stays in sync
             setSelectedStudent(updated);
-            // Immediately refresh the list so updated data is visible everywhere
-            void refresh();
           }}
           onNavigate={onNavigate}
           updateData={updateData}
           deleteData={deleteData}
           allStudents={students}
+        />
+      )}
+
+      {/* Import/Export */}
+      {showImportExport && (
+        <StudentImportExport
+          onClose={() => setShowImportExport(false)}
+          onImported={() => {
+            setShowImportExport(false);
+            void refresh();
+          }}
         />
       )}
     </div>

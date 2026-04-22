@@ -1228,76 +1228,100 @@ export default function CollectFees() {
               {receiptNo}
             </div>
           </div>
-          {/* Search */}
-          <div
-            ref={dropdownRef}
-            className="relative flex flex-col gap-0.5 flex-1 min-w-[180px]"
-          >
-            <label
-              htmlFor="adm-no-search"
-              className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
+          {/* Search — hidden once a student is selected */}
+          {!selectedStudent && (
+            <div
+              ref={dropdownRef}
+              className="relative flex flex-col gap-0.5 flex-1 min-w-[180px]"
             >
-              Admission No.{" "}
-              <span className="text-[8px] text-muted-foreground/60 normal-case">
-                (F4-Search)
-              </span>
-            </label>
-            <div className="relative">
-              <input
-                id="adm-no-search"
-                ref={admNoRef}
-                type="text"
-                placeholder="Search by Adm No or Name..."
-                value={admNoInput}
-                onChange={handleAdmNoChange}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && filteredStudents.length > 0)
-                    selectStudent(filteredStudents[0]);
-                  if (e.key === "F4") {
-                    e.preventDefault();
-                    admNoRef.current?.select();
-                  }
-                }}
-                className="h-7 w-full px-2 pr-7 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                data-ocid="collect-fees-search"
-              />
-              <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground text-[11px]">
-                🔍
-              </span>
-            </div>
-            {showDropdown && (
-              <div className="absolute z-40 top-full left-0 right-0 bg-card border border-border rounded-lg shadow-elevated mt-0.5 max-h-52 overflow-y-auto">
-                {filteredStudents.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    className="w-full text-left px-2.5 py-1.5 hover:bg-muted/50 text-xs flex items-center gap-2 border-b border-border last:border-0"
-                    onClick={() => selectStudent(s)}
-                  >
-                    {s.photo ? (
-                      <img
-                        src={s.photo}
-                        alt=""
-                        className="w-6 h-6 rounded-full object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] flex-shrink-0">
-                        {s.fullName[0]}
-                      </div>
-                    )}
-                    <span className="min-w-0">
-                      <span className="font-semibold block truncate">
-                        {s.fullName}
-                      </span>
-                      <span className="text-muted-foreground text-[10px]">
-                        {s.admNo} · Cls {s.class}-{s.section}
-                      </span>
-                    </span>
-                  </button>
-                ))}
+              <label
+                htmlFor="adm-no-search"
+                className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
+              >
+                Admission No.{" "}
+                <span className="text-[8px] text-muted-foreground/60 normal-case">
+                  (F4-Search)
+                </span>
+              </label>
+              <div className="relative">
+                <input
+                  id="adm-no-search"
+                  ref={admNoRef}
+                  type="text"
+                  placeholder="Search by Adm No or Name..."
+                  value={admNoInput}
+                  onChange={handleAdmNoChange}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && filteredStudents.length > 0)
+                      selectStudent(filteredStudents[0]);
+                    if (e.key === "F4") {
+                      e.preventDefault();
+                      admNoRef.current?.select();
+                    }
+                  }}
+                  className="h-7 w-full px-2 pr-7 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  data-ocid="collect-fees-search"
+                />
+                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground text-[11px]">
+                  🔍
+                </span>
               </div>
-            )}
-          </div>
+              {showDropdown && (
+                <div className="absolute z-40 top-full left-0 right-0 bg-card border border-border rounded-lg shadow-elevated mt-0.5 max-h-52 overflow-y-auto">
+                  {filteredStudents.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className="w-full text-left px-2.5 py-1.5 hover:bg-muted/50 text-xs flex items-center gap-2 border-b border-border last:border-0"
+                      onClick={() => selectStudent(s)}
+                    >
+                      {s.photo ? (
+                        <img
+                          src={s.photo}
+                          alt=""
+                          className="w-6 h-6 rounded-full object-cover flex-shrink-0"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold text-[10px] flex-shrink-0">
+                          {s.fullName[0]}
+                        </div>
+                      )}
+                      <span className="min-w-0">
+                        <span className="font-semibold block truncate">
+                          {s.fullName}
+                        </span>
+                        <span className="text-muted-foreground text-[10px]">
+                          {s.admNo} · Cls {s.class}-{s.section}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {/* Selected student chip — shown instead of search bar */}
+          {selectedStudent && (
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <div className="flex items-center gap-2 bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1 min-w-0">
+                <span className="text-[10px] font-bold text-primary truncate">
+                  {selectedStudent.fullName}
+                </span>
+                <span className="text-[9px] text-muted-foreground whitespace-nowrap">
+                  #{selectedStudent.admNo} · {selectedStudent.class}-
+                  {selectedStudent.section}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={clearStudent}
+                className="h-7 px-2 text-[10px] font-semibold rounded border border-border hover:bg-muted/50 transition-colors text-muted-foreground whitespace-nowrap flex-shrink-0"
+                data-ocid="collect-fees-change-student"
+              >
+                Change
+              </button>
+            </div>
+          )}
 
           {/* Action Buttons */}
           <div className="flex items-end gap-1.5 flex-wrap ml-auto">

@@ -12,50 +12,79 @@ import type { Principal } from '@icp-sdk/core/principal';
 
 export interface _SERVICE {
   /**
-   * / Batch upsert array of JSON records. Returns count upserted.
+   * / Upsert a batch of records (insert or overwrite by id).
    */
-  'batchUpsert' : ActorMethod<[string, Array<string>], bigint>,
+  'batchUpsert' : ActorMethod<
+    [string, Array<{ 'id' : string, 'data' : string }>],
+    { 'ok' : boolean, 'err' : string, 'count' : bigint }
+  >,
   /**
-   * / Create a new record. Returns "ok".
+   * / Create a new record. Fails if the id already exists.
    */
-  'createRecord' : ActorMethod<[string, string], string>,
+  'createRecord' : ActorMethod<
+    [string, string, string],
+    { 'ok' : boolean, 'err' : string }
+  >,
   /**
-   * / Delete a record by id. Returns "ok" or "not_found".
+   * / Delete an entire collection. Returns number of records removed.
    */
-  'deleteRecord' : ActorMethod<[string, string], string>,
+  'deleteCollection' : ActorMethod<
+    [string],
+    { 'ok' : boolean, 'count' : bigint }
+  >,
   /**
-   * / Fetch all collections in one shot (WhatsApp-style initial load).
+   * / Delete a record by id.
    */
-  'fetchAll' : ActorMethod<[], string>,
+  'deleteRecord' : ActorMethod<
+    [string, string],
+    { 'ok' : boolean, 'err' : string }
+  >,
   /**
-   * / Return recent changelog entries as JSON array (last 100)
+   * / Export all data for backup. Returns array of (collection, [(id, data)]).
    */
-  'getChangelog' : ActorMethod<[], string>,
+  'exportAll' : ActorMethod<[], Array<[string, Array<[string, string]>]>>,
   /**
-   * / Return record counts for all collections (for dashboard stats)
+   * / Return changelog entries since a given timestamp (nanoseconds).
+   * / Pass 0 to get all entries.
    */
-  'getCounts' : ActorMethod<[], string>,
+  'getChangelog' : ActorMethod<[bigint], Array<string>>,
   /**
-   * / Return a single record by id (JSON string or empty string if not found)
+   * / Return count per collection.
    */
-  'getRecord' : ActorMethod<[string, string], string>,
+  'getCounts' : ActorMethod<[], Array<[string, bigint]>>,
   /**
-   * / Return all records in a collection as a JSON array string
+   * / Get a single record by id. Returns null if not found.
    */
-  'listRecords' : ActorMethod<[string], string>,
+  'getRecord' : ActorMethod<[string, string], [] | [string]>,
+  /**
+   * / Import all data from a backup. Merges (upserts) all records.
+   */
+  'importAll' : ActorMethod<
+    [Array<[string, Array<[string, string]>]>],
+    { 'ok' : boolean, 'count' : bigint }
+  >,
+  /**
+   * / List all records in a collection as an array of JSON strings.
+   */
+  'listRecords' : ActorMethod<[string], Array<string>>,
+  /**
+   * / Paginated list. offset is 0-based.
+   */
+  'listRecordsPaginated' : ActorMethod<
+    [string, bigint, bigint],
+    { 'total' : bigint, 'records' : Array<string> }
+  >,
+  /**
+   * / Health check.
+   */
   'ping' : ActorMethod<[], string>,
   /**
-   * / Replace entire collection with new records. Returns count.
+   * / Update an existing record. Returns err if not found.
    */
-  'replaceCollection' : ActorMethod<[string, Array<string>], bigint>,
-  /**
-   * / Update an existing record by id. Returns "ok" or "not_found".
-   */
-  'updateRecord' : ActorMethod<[string, string, string], string>,
-  /**
-   * / Upsert a record: update if id exists, create otherwise. Returns "ok".
-   */
-  'upsertRecord' : ActorMethod<[string, string, string], string>,
+  'updateRecord' : ActorMethod<
+    [string, string, string],
+    { 'ok' : boolean, 'err' : string }
+  >,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

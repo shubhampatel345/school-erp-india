@@ -91,54 +91,94 @@ export class ExternalBlob {
 }
 export interface backendInterface {
     /**
-     * / Batch upsert array of JSON records. Returns count upserted.
+     * / Upsert a batch of records (insert or overwrite by id).
      */
-    batchUpsert(collection: string, recordsJson: Array<string>): Promise<bigint>;
+    batchUpsert(collection: string, records: Array<{
+        id: string;
+        data: string;
+    }>): Promise<{
+        ok: boolean;
+        err: string;
+        count: bigint;
+    }>;
     /**
-     * / Create a new record. Returns "ok".
+     * / Create a new record. Fails if the id already exists.
      */
-    createRecord(collection: string, recordJson: string): Promise<string>;
+    createRecord(collection: string, id: string, data: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
     /**
-     * / Delete a record by id. Returns "ok" or "not_found".
+     * / Delete an entire collection. Returns number of records removed.
      */
-    deleteRecord(collection: string, id: string): Promise<string>;
+    deleteCollection(collection: string): Promise<{
+        ok: boolean;
+        count: bigint;
+    }>;
     /**
-     * / Fetch all collections in one shot (WhatsApp-style initial load).
+     * / Delete a record by id.
      */
-    fetchAll(): Promise<string>;
+    deleteRecord(collection: string, id: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
     /**
-     * / Return recent changelog entries as JSON array (last 100)
+     * / Export all data for backup. Returns array of (collection, [(id, data)]).
      */
-    getChangelog(): Promise<string>;
+    exportAll(): Promise<Array<[string, Array<[string, string]>]>>;
     /**
-     * / Return record counts for all collections (for dashboard stats)
+     * / Return changelog entries since a given timestamp (nanoseconds).
+     * / Pass 0 to get all entries.
      */
-    getCounts(): Promise<string>;
+    getChangelog(since: bigint): Promise<Array<string>>;
     /**
-     * / Return a single record by id (JSON string or empty string if not found)
+     * / Return count per collection.
      */
-    getRecord(collection: string, id: string): Promise<string>;
+    getCounts(): Promise<Array<[string, bigint]>>;
     /**
-     * / Return all records in a collection as a JSON array string
+     * / Get a single record by id. Returns null if not found.
      */
-    listRecords(collection: string): Promise<string>;
+    getRecord(collection: string, id: string): Promise<string | null>;
+    /**
+     * / Import all data from a backup. Merges (upserts) all records.
+     */
+    importAll(data: Array<[string, Array<[string, string]>]>): Promise<{
+        ok: boolean;
+        count: bigint;
+    }>;
+    /**
+     * / List all records in a collection as an array of JSON strings.
+     */
+    listRecords(collection: string): Promise<Array<string>>;
+    /**
+     * / Paginated list. offset is 0-based.
+     */
+    listRecordsPaginated(collection: string, offset: bigint, limit: bigint): Promise<{
+        total: bigint;
+        records: Array<string>;
+    }>;
+    /**
+     * / Health check.
+     */
     ping(): Promise<string>;
     /**
-     * / Replace entire collection with new records. Returns count.
+     * / Update an existing record. Returns err if not found.
      */
-    replaceCollection(collection: string, recordsJson: Array<string>): Promise<bigint>;
-    /**
-     * / Update an existing record by id. Returns "ok" or "not_found".
-     */
-    updateRecord(collection: string, id: string, recordJson: string): Promise<string>;
-    /**
-     * / Upsert a record: update if id exists, create otherwise. Returns "ok".
-     */
-    upsertRecord(collection: string, id: string, recordJson: string): Promise<string>;
+    updateRecord(collection: string, id: string, data: string): Promise<{
+        ok: boolean;
+        err: string;
+    }>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
-    async batchUpsert(arg0: string, arg1: Array<string>): Promise<bigint> {
+    async batchUpsert(arg0: string, arg1: Array<{
+        id: string;
+        data: string;
+    }>): Promise<{
+        ok: boolean;
+        err: string;
+        count: bigint;
+    }> {
         if (this.processError) {
             try {
                 const result = await this.actor.batchUpsert(arg0, arg1);
@@ -152,21 +192,44 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async createRecord(arg0: string, arg1: string): Promise<string> {
+    async createRecord(arg0: string, arg1: string, arg2: string): Promise<{
+        ok: boolean;
+        err: string;
+    }> {
         if (this.processError) {
             try {
-                const result = await this.actor.createRecord(arg0, arg1);
+                const result = await this.actor.createRecord(arg0, arg1, arg2);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.createRecord(arg0, arg1);
+            const result = await this.actor.createRecord(arg0, arg1, arg2);
             return result;
         }
     }
-    async deleteRecord(arg0: string, arg1: string): Promise<string> {
+    async deleteCollection(arg0: string): Promise<{
+        ok: boolean;
+        count: bigint;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteCollection(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteCollection(arg0);
+            return result;
+        }
+    }
+    async deleteRecord(arg0: string, arg1: string): Promise<{
+        ok: boolean;
+        err: string;
+    }> {
         if (this.processError) {
             try {
                 const result = await this.actor.deleteRecord(arg0, arg1);
@@ -180,35 +243,35 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async fetchAll(): Promise<string> {
+    async exportAll(): Promise<Array<[string, Array<[string, string]>]>> {
         if (this.processError) {
             try {
-                const result = await this.actor.fetchAll();
+                const result = await this.actor.exportAll();
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.fetchAll();
+            const result = await this.actor.exportAll();
             return result;
         }
     }
-    async getChangelog(): Promise<string> {
+    async getChangelog(arg0: bigint): Promise<Array<string>> {
         if (this.processError) {
             try {
-                const result = await this.actor.getChangelog();
+                const result = await this.actor.getChangelog(arg0);
                 return result;
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
-            const result = await this.actor.getChangelog();
+            const result = await this.actor.getChangelog(arg0);
             return result;
         }
     }
-    async getCounts(): Promise<string> {
+    async getCounts(): Promise<Array<[string, bigint]>> {
         if (this.processError) {
             try {
                 const result = await this.actor.getCounts();
@@ -222,21 +285,38 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async getRecord(arg0: string, arg1: string): Promise<string> {
+    async getRecord(arg0: string, arg1: string): Promise<string | null> {
         if (this.processError) {
             try {
                 const result = await this.actor.getRecord(arg0, arg1);
-                return result;
+                return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
             } catch (e) {
                 this.processError(e);
                 throw new Error("unreachable");
             }
         } else {
             const result = await this.actor.getRecord(arg0, arg1);
+            return from_candid_opt_n1(this._uploadFile, this._downloadFile, result);
+        }
+    }
+    async importAll(arg0: Array<[string, Array<[string, string]>]>): Promise<{
+        ok: boolean;
+        count: bigint;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.importAll(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.importAll(arg0);
             return result;
         }
     }
-    async listRecords(arg0: string): Promise<string> {
+    async listRecords(arg0: string): Promise<Array<string>> {
         if (this.processError) {
             try {
                 const result = await this.actor.listRecords(arg0);
@@ -247,6 +327,23 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.listRecords(arg0);
+            return result;
+        }
+    }
+    async listRecordsPaginated(arg0: string, arg1: bigint, arg2: bigint): Promise<{
+        total: bigint;
+        records: Array<string>;
+    }> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.listRecordsPaginated(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.listRecordsPaginated(arg0, arg1, arg2);
             return result;
         }
     }
@@ -264,21 +361,10 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async replaceCollection(arg0: string, arg1: Array<string>): Promise<bigint> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.replaceCollection(arg0, arg1);
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.replaceCollection(arg0, arg1);
-            return result;
-        }
-    }
-    async updateRecord(arg0: string, arg1: string, arg2: string): Promise<string> {
+    async updateRecord(arg0: string, arg1: string, arg2: string): Promise<{
+        ok: boolean;
+        err: string;
+    }> {
         if (this.processError) {
             try {
                 const result = await this.actor.updateRecord(arg0, arg1, arg2);
@@ -292,20 +378,9 @@ export class Backend implements backendInterface {
             return result;
         }
     }
-    async upsertRecord(arg0: string, arg1: string, arg2: string): Promise<string> {
-        if (this.processError) {
-            try {
-                const result = await this.actor.upsertRecord(arg0, arg1, arg2);
-                return result;
-            } catch (e) {
-                this.processError(e);
-                throw new Error("unreachable");
-            }
-        } else {
-            const result = await this.actor.upsertRecord(arg0, arg1, arg2);
-            return result;
-        }
-    }
+}
+function from_candid_opt_n1(_uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, value: [] | [string]): string | null {
+    return value.length === 0 ? null : value[0];
 }
 export interface CreateActorOptions {
     agent?: Agent;

@@ -50,7 +50,7 @@ import type {
   Student,
   StudentAnalytics as StudentAnalyticsType,
 } from "../../types";
-import { apiFetchStudentAnalytics } from "../../utils/api";
+import { syncEngine } from "../../utils/syncEngine";
 
 // ── Colour helpers ─────────────────────────────────────────────────────────────
 
@@ -675,8 +675,82 @@ function AnalyticsPanel({ studentId }: { studentId: string }) {
     if (!studentId) return;
     setLoading(true);
     setError(null);
-    apiFetchStudentAnalytics(studentId)
-      .then((data) => {
+
+    // Build analytics from local canister-synced data
+    Promise.resolve()
+      .then(() => {
+        const attendance = syncEngine.getLocalCollection(
+          "attendance",
+        ) as Array<{
+          studentId?: string;
+          date?: string;
+          status?: string;
+          subject?: string;
+        }>;
+        const feeReceipts = syncEngine.getLocalCollection(
+          "fee_receipts",
+        ) as Array<{
+          studentId?: string;
+          admNo?: string;
+          amount?: number;
+          date?: string;
+          months?: string[];
+        }>;
+        const examResults = syncEngine.getLocalCollection(
+          "exam_results",
+        ) as Array<{
+          studentId?: string;
+          subject?: string;
+          marks?: number;
+          maxMarks?: number;
+          examDate?: string;
+        }>;
+
+        const stdAttendance = attendance.filter(
+          (a) => a.studentId === studentId,
+        );
+        const monthMap: Record<string, { present: number; total: number }> = {};
+        for (const a of stdAttendance) {
+          const month = a.date ? a.date.slice(0, 7) : "Unknown";
+          if (!monthMap[month]) monthMap[month] = { present: 0, total: 0 };
+          monthMap[month].total++;
+          if (a.status === "present" || a.status === "P")
+            monthMap[month].present++;
+        }
+        const attendanceSummary = Object.entries(monthMap).map(
+          ([month, v]) => ({
+            month,
+            present: v.present,
+            total: v.total,
+            percentage:
+              v.total > 0 ? Math.round((v.present / v.total) * 100) : 0,
+          }),
+        );
+
+        const stdResults = examResults.filter((r) => r.studentId === studentId);
+        const marksHistory = stdResults.map((r) => ({
+          examTitle: String((r as Record<string, unknown>).examTitle ?? "Exam"),
+          subject: r.subject ?? "Unknown",
+          score: r.marks ?? 0,
+          totalMarks: r.maxMarks ?? 100,
+          date: r.examDate ?? "",
+        }));
+
+        const stdFees = feeReceipts.filter(
+          (r) => r.studentId === studentId || r.admNo === studentId,
+        );
+        const feesHistory = stdFees.map((r) => ({
+          month: Array.isArray(r.months) ? (r.months[0] ?? "") : "",
+          paid: r.amount ?? 0,
+          due: 0,
+        }));
+
+        const data: StudentAnalyticsType = {
+          studentId,
+          marksHistory,
+          attendanceSummary,
+          feesHistory,
+        };
         setAnalytics(data);
         setLoading(false);
       })

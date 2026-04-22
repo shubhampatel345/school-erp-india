@@ -42,7 +42,7 @@ interface CheckResult {
 }
 
 const CURRENT_FEATURES = [
-  "Complete school ERP with MySQL backend sync",
+  "Complete school ERP powered by Internet Computer canister storage",
   "Student management with CBSE/ICSE class names (Nursery–Class 12)",
   "Fees collection, receipts & headings with auto month selection",
   "Attendance — camera QR + USB/Bluetooth scanner",
@@ -54,8 +54,8 @@ const CURRENT_FEATURES = [
   "ESSL/ZKTeco biometric device integration",
   "Backup & Restore with factory reset",
   "Role-based permissions — 9 roles controlled by Super Admin",
-  "Theme settings — 5 color themes",
-  "Direct file routing — no .htaccess needed on cPanel",
+  "Theme settings — 10+ color themes",
+  "Data stored natively on the Internet Computer — no server setup needed",
 ];
 
 export default function SystemUpdate() {
@@ -130,8 +130,8 @@ export default function SystemUpdate() {
               v{CURRENT_VERSION}
             </p>
             <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-              <Server className="w-3 h-3" /> SCHOOL LEDGER ERP — cPanel MySQL
-              Edition
+              <Server className="w-3 h-3" /> SHUBH SCHOOL ERP — Internet
+              Computer Edition
             </p>
           </div>
           {checkResult?.isUpToDate === true && (
@@ -234,16 +234,14 @@ export default function SystemUpdate() {
             Update
           </h3>
           <p className="text-xs text-muted-foreground">
-            School Ledger ERP is a manual update system. Follow these steps:
+            School Ledger ERP uses an automatic update system via Caffeine.
+            Follow these steps:
           </p>
           <ol className="space-y-2">
             {[
-              "Download the latest release ZIP from GitHub Releases",
-              "Extract the ZIP and locate the dist/ folder",
-              "Open cPanel → File Manager → public_html/",
-              "Upload all files from dist/ to public_html/ (replace existing files)",
-              "Also upload the api/ folder if the PHP API was updated",
-              "Open https://shubh.psmkgs.com/api/index.php?route=migrate/run to update the database schema",
+              "Check for updates using the button above",
+              "If an update is available, open your Caffeine project dashboard",
+              "The new version will be deployed automatically to the Internet Computer",
               "Hard-refresh the browser (Ctrl+Shift+R) to load the new version",
             ].map((step, i) => (
               <li
@@ -298,19 +296,13 @@ export default function SystemUpdate() {
         )}
       </Card>
 
-      {/* Server info */}
+      {/* Data storage info */}
       <Card className="p-4 bg-muted/30">
         <p className="text-xs text-muted-foreground">
           <Server className="w-3.5 h-3.5 inline mr-1.5" />
-          <strong>Data Storage:</strong> All school data is stored in MySQL on
-          your cPanel server at{" "}
-          <code className="font-mono text-[11px] bg-muted px-1 rounded">
-            psmkgsco_shubherp_db
-          </code>
-          . Backups are JSON files downloaded to your device. Server:{" "}
-          <code className="font-mono text-[11px] bg-muted px-1 rounded">
-            shubh.psmkgs.com
-          </code>
+          <strong>Data Storage:</strong> All school data is stored natively in
+          the Internet Computer canister. Data syncs automatically across all
+          devices — no server setup or uploads required.
         </p>
       </Card>
     </div>

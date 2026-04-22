@@ -3,7 +3,7 @@
  *
  * Uses a simulated face descriptor (canvas pixel hash → 128-value vector)
  * so the same API surface can be upgraded to real face-api.js later.
- * Camera access mirrors the QRAttendance.tsx pattern.
+ * All data (face descriptors, attendance, logs) stored in canister via useApp().
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -28,12 +28,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Student } from "../../types";
-import { getApiIndexUrl, getJwt, isApiConfigured } from "../../utils/api";
 import { generateId } from "../../utils/localStorage";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 interface FaceDescriptor {
+  id: string;
   studentId: string;
   descriptor: number[]; // 128-value pixel hash vector
   enrolledAt: string;
@@ -68,7 +68,6 @@ const COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
 /**
  * Compute a 128-value pixel-hash "descriptor" from a canvas frame.
  * Divides the image into 128 sample points and reads brightness values.
- * Deterministic for the same face/lighting → consistent enough for demo matching.
  */
 function computeDescriptor(
   ctx: CanvasRenderingContext2D,
@@ -84,14 +83,13 @@ function computeDescriptor(
       const x = Math.floor(col * stepX + stepX / 2);
       const y = Math.floor(row * stepY + stepY / 2);
       const px = ctx.getImageData(x, y, 1, 1).data;
-      // Normalised brightness 0–1
       desc[idx++] = (px[0] * 0.299 + px[1] * 0.587 + px[2] * 0.114) / 255;
     }
   }
   return desc;
 }
 
-/** Euclidean distance between two 128-d descriptors (lower = more similar) */
+/** Euclidean distance between two 128-d descriptors */
 function euclidean(a: number[], b: number[]): number {
   let sum = 0;
   for (let i = 0; i < 128; i++) {
@@ -103,75 +101,7 @@ function euclidean(a: number[], b: number[]): number {
 
 /** Convert Euclidean distance to a 0–1 confidence score */
 function distanceToConfidence(dist: number): number {
-  // Empirical: random faces ~3-4, same face ~0.5-1.5
   return Math.max(0, 1 - dist / 3);
-}
-
-// ── API helpers ────────────────────────────────────────────────────────────────
-
-async function saveFaceDescriptor(studentId: string, descriptor: number[]) {
-  if (!isApiConfigured()) return;
-  const token = getJwt();
-  const url = `${getApiIndexUrl()}?route=face_descriptors`;
-  await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({
-      studentId,
-      descriptorData: descriptor,
-      enrolledAt: new Date().toISOString(),
-    }),
-  });
-}
-
-async function loadFaceDescriptors(): Promise<FaceDescriptor[]> {
-  if (!isApiConfigured()) return [];
-  const token = getJwt();
-  const url = `${getApiIndexUrl()}?route=face_descriptors`;
-  try {
-    const res = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    const json = (await res.json()) as {
-      status: string;
-      data?: FaceDescriptor[];
-    };
-    return json.data ?? [];
-  } catch {
-    return [];
-  }
-}
-
-async function saveFaceAttendance(log: FaceLog) {
-  if (!isApiConfigured()) return;
-  const token = getJwt();
-  const url = `${getApiIndexUrl()}?route=face_attendance`;
-  await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(log),
-  });
-}
-
-async function loadFaceAttendanceLogs(): Promise<FaceLog[]> {
-  if (!isApiConfigured()) return [];
-  const token = getJwt();
-  const url = `${getApiIndexUrl()}?route=face_attendance`;
-  try {
-    const res = await fetch(url, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    const json = (await res.json()) as { status: string; data?: FaceLog[] };
-    return json.data ?? [];
-  } catch {
-    return [];
-  }
 }
 
 // ── Confidence badge ───────────────────────────────────────────────────────────
@@ -204,17 +134,20 @@ interface FaceAttendanceProps {
 }
 
 export default function FaceAttendance({ date }: FaceAttendanceProps) {
-  const { getData, saveData, addNotification, currentSession, currentUser } =
-    useApp();
+  const {
+    getData,
+    saveData,
+    updateData,
+    addNotification,
+    currentSession,
+    currentUser,
+  } = useApp();
   const [activeTab, setActiveTab] = useState<FaceTab>("enrollment");
 
   // Enrollment
   const [enrollSearch, setEnrollSearch] = useState("");
   const [enrollingStudent, setEnrollingStudent] = useState<Student | null>(
     null,
-  );
-  const [enrollDescriptors, setEnrollDescriptors] = useState<FaceDescriptor[]>(
-    [],
   );
   const [enrollCameraOn, setEnrollCameraOn] = useState(false);
   const [enrollCameraError, setEnrollCameraError] = useState("");
@@ -224,7 +157,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
 
   // Live detection
   const [detectionOn, setDetectionOn] = useState(false);
-  const [liveDescriptors, setLiveDescriptors] = useState<FaceDescriptor[]>([]);
   const [welcomeCard, setWelcomeCard] = useState<WelcomeCard | null>(null);
   const [noMatchMsg, setNoMatchMsg] = useState(false);
   const [recentCheckins, setRecentCheckins] = useState<FaceLog[]>([]);
@@ -237,10 +169,8 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
   const noMatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Log tab
-  const [faceLogs, setFaceLogs] = useState<FaceLog[]>([]);
   const [logDateFilter, setLogDateFilter] = useState(date);
   const [logClassFilter, setLogClassFilter] = useState("");
-  const [logsLoaded, setLogsLoaded] = useState(false);
 
   const canAccess = currentUser ? ALLOWED_ROLES.has(currentUser.role) : false;
   const canEnroll = currentUser
@@ -255,6 +185,15 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
       ),
     [getData, currentSession],
   );
+
+  // Face descriptors from canister
+  const enrollDescriptors = useMemo(
+    () => getData("face_descriptors") as FaceDescriptor[],
+    [getData],
+  );
+
+  // Face logs from canister
+  const faceLogs = useMemo(() => getData("face_logs") as FaceLog[], [getData]);
 
   const enrolledIds = useMemo(
     () => new Set(enrollDescriptors.map((d) => d.studentId)),
@@ -271,24 +210,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         s.class.toLowerCase().includes(q),
     );
   }, [activeStudents, enrollSearch]);
-
-  // Load descriptors on mount
-  useEffect(() => {
-    loadFaceDescriptors().then((d) => {
-      setEnrollDescriptors(d);
-      setLiveDescriptors(d);
-    });
-  }, []);
-
-  // Load logs when switching to log tab
-  useEffect(() => {
-    if (activeTab === "log" && !logsLoaded) {
-      loadFaceAttendanceLogs().then((logs) => {
-        setFaceLogs(logs);
-        setLogsLoaded(true);
-      });
-    }
-  }, [activeTab, logsLoaded]);
 
   // Cleanup on unmount
   // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup only
@@ -348,24 +269,30 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     const descriptor = computeDescriptor(ctx, canvas.width, canvas.height);
 
     try {
-      await saveFaceDescriptor(enrollingStudent.id, descriptor);
-      const newEntry: FaceDescriptor = {
+      // Check if descriptor already exists for this student — update or create
+      const existing = enrollDescriptors.find(
+        (d) => d.studentId === enrollingStudent.id,
+      );
+      const descriptorRecord: FaceDescriptor = {
+        id: existing?.id ?? generateId(),
         studentId: enrollingStudent.id,
         descriptor,
         enrolledAt: new Date().toISOString(),
       };
-      setEnrollDescriptors((prev) => {
-        const filtered = prev.filter(
-          (d) => d.studentId !== enrollingStudent.id,
+
+      if (existing?.id) {
+        await updateData(
+          "face_descriptors",
+          existing.id,
+          descriptorRecord as unknown as Record<string, unknown>,
         );
-        return [...filtered, newEntry];
-      });
-      setLiveDescriptors((prev) => {
-        const filtered = prev.filter(
-          (d) => d.studentId !== enrollingStudent.id,
+      } else {
+        await saveData(
+          "face_descriptors",
+          descriptorRecord as unknown as Record<string, unknown>,
         );
-        return [...filtered, newEntry];
-      });
+      }
+
       toast.success(
         `✅ ${enrollingStudent.fullName} enrolled for face recognition`,
       );
@@ -398,7 +325,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         await liveVideoRef.current.play();
       }
       setDetectionOn(true);
-      startDetectionLoop();
     } catch {
       toast.error("Camera access denied. Please allow camera permissions.");
     }
@@ -429,10 +355,10 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const frameDescriptor = computeDescriptor(ctx, canvas.width, canvas.height);
 
-    // Match against enrolled descriptors
+    // Match against enrolled descriptors from canister
     let bestMatch: { descriptor: FaceDescriptor; confidence: number } | null =
       null;
-    for (const enrolled of liveDescriptors) {
+    for (const enrolled of enrollDescriptors) {
       const dist = euclidean(frameDescriptor, enrolled.descriptor);
       const confidence = distanceToConfidence(dist);
       if (confidence > MATCH_THRESHOLD) {
@@ -446,7 +372,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
       const { descriptor: match, confidence } = bestMatch;
       const now = Date.now();
       const lastSeen = cooldownMapRef.current.get(match.studentId) ?? 0;
-      if (now - lastSeen < COOLDOWN_MS) return; // cooldown active
+      if (now - lastSeen < COOLDOWN_MS) return;
 
       cooldownMapRef.current.set(match.studentId, now);
       const student = activeStudents.find((s) => s.id === match.studentId);
@@ -475,7 +401,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
 
       setRecentCheckins((prev) => [faceLog, ...prev].slice(0, 5));
 
-      // Save attendance record
+      // Save attendance record to canister
       const attRec: AttendanceRecord = {
         id: generateId(),
         studentId: student.id,
@@ -494,20 +420,22 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         "attendance",
         attRec as unknown as Record<string, unknown>,
       ).catch(() => {});
-      saveFaceAttendance(faceLog).catch(() => {});
+      saveData(
+        "face_logs",
+        faceLog as unknown as Record<string, unknown>,
+      ).catch(() => {});
       addNotification(
         `🎭 Face: ${student.fullName} marked Present`,
         "success",
         "🎭",
       );
-    } else if (liveDescriptors.length > 0) {
-      // Face visible but no match — show message briefly
+    } else if (enrollDescriptors.length > 0) {
       setNoMatchMsg(true);
       if (noMatchTimerRef.current) clearTimeout(noMatchTimerRef.current);
       noMatchTimerRef.current = setTimeout(() => setNoMatchMsg(false), 3000);
     }
   }, [
-    liveDescriptors,
+    enrollDescriptors,
     activeStudents,
     date,
     currentSession,
@@ -516,18 +444,16 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     detectionOn,
   ]);
 
-  function startDetectionLoop() {
-    if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
-    detectionTimerRef.current = setInterval(() => {
-      runDetectionFrame();
-    }, DETECTION_INTERVAL_MS);
-  }
-
-  // Re-start loop when runDetectionFrame changes (deps update)
+  // Start/stop detection loop when detectionOn changes
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
   useEffect(() => {
     if (detectionOn) {
-      startDetectionLoop();
+      if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
+      detectionTimerRef.current = setInterval(() => {
+        runDetectionFrame();
+      }, DETECTION_INTERVAL_MS);
+    } else {
+      if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
     }
     return () => {
       if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
@@ -601,8 +527,8 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         <Brain className="w-5 h-5 text-yellow-600 flex-shrink-0" />
         <p className="text-sm text-yellow-800 dark:text-yellow-300">
           <span className="font-semibold">AI Face Detection (Demo Mode)</span> —
-          Uses pixel-hash descriptors for face matching. Real face-api.js models
-          can be loaded for production accuracy.
+          Uses pixel-hash descriptors for face matching. All data stored in the
+          canister — works across all devices automatically.
         </p>
       </Card>
 
@@ -692,7 +618,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                       onClick={() => {
                         setEnrollingStudent(student);
                         setEnrollCameraError("");
-                        setTimeout(() => startEnrollCamera(), 100);
+                        setTimeout(() => void startEnrollCamera(), 100);
                       }}
                       data-ocid={`face.enroll-button.${idx + 1}`}
                     >
@@ -838,7 +764,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                     <p className="text-muted-foreground text-sm">
                       Start detection to auto-mark students as they enter
                     </p>
-                    {liveDescriptors.length === 0 && (
+                    {enrollDescriptors.length === 0 && (
                       <p className="text-xs text-yellow-600 dark:text-yellow-400">
                         ⚠ No enrolled faces yet — go to Enrollment tab first
                       </p>
@@ -866,7 +792,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                   <Button
                     className="flex-1"
                     onClick={() => void startLiveCamera()}
-                    disabled={liveDescriptors.length === 0}
+                    disabled={enrollDescriptors.length === 0}
                     data-ocid="face.live.start_button"
                   >
                     <Camera className="w-4 h-4 mr-2" /> Start Detection
@@ -884,7 +810,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
               </div>
             </Card>
 
-            {/* Welcome card overlay */}
+            {/* Welcome card */}
             {welcomeCard && (
               <Card className="p-5 border-green-400/40 bg-green-500/5 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center gap-4">

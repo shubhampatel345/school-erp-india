@@ -3,7 +3,7 @@ import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
 import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
-import { apiCall, getJwt } from "../utils/api";
+import { canisterService } from "../utils/canisterService";
 import { generateId, ls } from "../utils/localStorage";
 
 /**
@@ -332,32 +332,20 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
       let saved = 0;
       let failed = 0;
       const CHUNK = 50;
-      const token = getJwt();
 
       for (let i = 0; i < studentsToSave.length; i += CHUNK) {
         const chunk = studentsToSave.slice(i, i + CHUNK);
-        // Send chunk as a batch to server — waits for real MySQL confirmation
+        // Send chunk as a batch to canister — waits for real confirmation
         try {
-          const result = await apiCall<{
-            status: string;
-            data?: { pushed?: number; failed?: number; errors?: string[] };
-          }>(
-            "sync/batch",
-            "POST",
-            {
-              collection: "students",
-              items: chunk.map((s) => ({
-                ...s,
-                name: s.fullName, // ensure MySQL `name` column gets populated
-              })),
-            },
-            token,
+          const result = await canisterService.batchUpsert(
+            "students",
+            chunk.map((s) => s as unknown as Record<string, unknown>),
           );
-          const d = result.data ?? {};
-          const batchPushed = d.pushed ?? chunk.length;
-          const batchFailed = d.failed ?? 0;
-          saved += batchPushed;
-          failed += batchFailed;
+          if (result.ok) {
+            saved += result.count;
+          } else {
+            failed += chunk.length;
+          }
         } catch {
           failed += chunk.length;
         }

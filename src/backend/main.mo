@@ -1,333 +1,254 @@
+import Map "mo:core/Map";
 import List "mo:core/List";
 import Text "mo:core/Text";
 import Nat "mo:core/Nat";
+import Int "mo:core/Int";
+import Time "mo:core/Time";
+import Iter "mo:core/Iter";
+import Array "mo:core/Array";
+import Migration "migration";
 
-
+(with migration = Migration.run)
 actor {
-  // ── Stable storage for all ERP collections ──────────────────────────────
-  // Each collection stores JSON-encoded records as Text.
-  // This keeps the API simple and avoids Candid type churn as schemas evolve.
 
-  let students     : List.List<Text> = List.empty<Text>();
-  let staff        : List.List<Text> = List.empty<Text>();
-  let sessions     : List.List<Text> = List.empty<Text>();
-  let classes      : List.List<Text> = List.empty<Text>();
-  let sections     : List.List<Text> = List.empty<Text>();
-  let subjects     : List.List<Text> = List.empty<Text>();
-  let attendance   : List.List<Text> = List.empty<Text>();
-  let feeReceipts  : List.List<Text> = List.empty<Text>();
-  let feesPlan     : List.List<Text> = List.empty<Text>();
-  let feeHeads     : List.List<Text> = List.empty<Text>();
-  let feeBalances  : List.List<Text> = List.empty<Text>();
-  let transport    : List.List<Text> = List.empty<Text>();
-  let pickupPoints : List.List<Text> = List.empty<Text>();
-  let inventory    : List.List<Text> = List.empty<Text>();
-  let expenses     : List.List<Text> = List.empty<Text>();
-  let expenseHeads : List.List<Text> = List.empty<Text>();
-  let homework     : List.List<Text> = List.empty<Text>();
-  let alumni       : List.List<Text> = List.empty<Text>();
-  let payroll      : List.List<Text> = List.empty<Text>();
-  let payslips     : List.List<Text> = List.empty<Text>();
-  let notices      : List.List<Text> = List.empty<Text>();
-  let examinations : List.List<Text> = List.empty<Text>();
-  let examResults  : List.List<Text> = List.empty<Text>();
-  let library      : List.List<Text> = List.empty<Text>();
-  let changelog    : List.List<Text> = List.empty<Text>();
+  // ── Storage ──────────────────────────────────────────────────────────────
+  // Outer map: collection name → inner map
+  // Inner map:  record id      → JSON text
+  // Enhanced orthogonal persistence keeps all state across upgrades.
 
-  // ── Collection registry ───────────────────────────────────────────────────
+  let store : Map.Map<Text, Map.Map<Text, Text>> = Map.empty<Text, Map.Map<Text, Text>>();
 
-  private func getList(name : Text) : List.List<Text> {
-    switch name {
-      case "students"         students;
-      case "staff"            staff;
-      case "sessions"         sessions;
-      case "classes"          classes;
-      case "sections"         sections;
-      case "subjects"         subjects;
-      case "attendance"       attendance;
-      case "fee_receipts"     feeReceipts;
-      case "fees_plan"        feesPlan;
-      case "fee_heads"        feeHeads;
-      case "fee_headings"     feeHeads;
-      case "fee_balances"     feeBalances;
-      case "transport_routes" transport;
-      case "pickup_points"    pickupPoints;
-      case "inventory_items"  inventory;
-      case "expenses"         expenses;
-      case "expense_heads"    expenseHeads;
-      case "homework"         homework;
-      case "alumni"           alumni;
-      case "payroll_setup"    payroll;
-      case "payslips"         payslips;
-      case "notices"          notices;
-      case "examinations"     examinations;
-      case "exam_results"     examResults;
-      case "library"          library;
-      case _                  students;
-    }
+  // Changelog: each entry is a JSON object with id/collection/op/timestamp
+  let changelog : List.List<Text> = List.empty<Text>();
+
+  // ── Private helpers ───────────────────────────────────────────────────────
+
+  // Get or lazily create the inner map for a collection.
+  private func col(name : Text) : Map.Map<Text, Text> {
+    switch (store.get(name)) {
+      case (?m) m;
+      case null {
+        let m = Map.empty<Text, Text>();
+        store.add(name, m);
+        m;
+      };
+    };
   };
 
-  // ── JSON id extraction ────────────────────────────────────────────────────
-  // Extract the value of "id":"..." from a JSON string.
-  // Returns "" if not found.
+  // Append a changelog entry (kept to last 1000).
+  private func logChange(collection : Text, id : Text, op : Text, data : Text) {
+    let ts = Time.now();
+    let entry = "{\"collection\":\"" # collection # "\",\"id\":\"" # id #
+                "\",\"op\":\"" # op # "\",\"timestamp\":" # ts.toText() #
+                ",\"data\":" # data # "}";
+    changelog.add(entry);
+    // Trim to last 1000 entries to avoid unbounded growth.
+    if (changelog.size() > 1000) {
+      changelog.truncate(1000);
+    };
+  };
 
-  private func extractId(json : Text) : Text {
-    let needle = "\"id\":\"";
-    switch (json.stripStart(#text needle)) {
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  /// Health check.
+  public query func ping() : async Text {
+    "SHUBH SCHOOL ERP canister v3 — canister storage active";
+  };
+
+  /// Create a new record. Fails if the id already exists.
+  public func createRecord(collection : Text, id : Text, data : Text)
+      : async { ok : Bool; err : Text } {
+    if (id == "") return { ok = false; err = "id must not be empty" };
+    let m = col(collection);
+    switch (m.get(id)) {
+      case (?_) { { ok = false; err = "record already exists: " # id } };
       case null {
-        // Try numeric id: "id":123
-        let needle2 = "\"id\":";
-        switch (json.stripStart(#text needle2)) {
-          case null "";
-          case (?rest) {
-            // Collect digits until non-digit
-            var id = "";
-            var done = false;
-            for (ch in rest.toIter()) {
-              if (not done) {
-                if (ch >= '0' and ch <= '9') {
-                  id #= Text.fromChar(ch);
-                } else {
-                  done := true;
+        m.add(id, data);
+        logChange(collection, id, "create", data);
+        { ok = true; err = "" };
+      };
+    };
+  };
+
+  /// Update an existing record. Returns err if not found.
+  public func updateRecord(collection : Text, id : Text, data : Text)
+      : async { ok : Bool; err : Text } {
+    if (id == "") return { ok = false; err = "id must not be empty" };
+    let m = col(collection);
+    switch (m.get(id)) {
+      case null { { ok = false; err = "record not found: " # id } };
+      case (?_) {
+        m.add(id, data);
+        logChange(collection, id, "update", data);
+        { ok = true; err = "" };
+      };
+    };
+  };
+
+  /// Delete a record by id.
+  public func deleteRecord(collection : Text, id : Text)
+      : async { ok : Bool; err : Text } {
+    if (id == "") return { ok = false; err = "id must not be empty" };
+    let m = col(collection);
+    switch (m.get(id)) {
+      case null { { ok = false; err = "record not found: " # id } };
+      case (?data) {
+        m.remove(id);
+        logChange(collection, id, "delete", data);
+        { ok = true; err = "" };
+      };
+    };
+  };
+
+  /// Get a single record by id. Returns null if not found.
+  public query func getRecord(collection : Text, id : Text) : async ?Text {
+    switch (store.get(collection)) {
+      case null null;
+      case (?m) m.get(id);
+    };
+  };
+
+  /// List all records in a collection as an array of JSON strings.
+  public query func listRecords(collection : Text) : async [Text] {
+    switch (store.get(collection)) {
+      case null [];
+      case (?m) m.values().toArray();
+    };
+  };
+
+  /// Paginated list. offset is 0-based.
+  public query func listRecordsPaginated(collection : Text, offset : Nat, limit : Nat)
+      : async { records : [Text]; total : Nat } {
+    switch (store.get(collection)) {
+      case null { { records = []; total = 0 } };
+      case (?m) {
+        let total = m.size();
+        let all = m.values().toArray();
+        let end = Nat.min(offset + limit, total);
+        let records : [Text] = if (offset >= total) {
+          [];
+        } else {
+          all.sliceToArray(offset.toInt(), end.toInt());
+        };
+        { records; total };
+      };
+    };
+  };
+
+  /// Upsert a batch of records (insert or overwrite by id).
+  public func batchUpsert(collection : Text, records : [{ id : Text; data : Text }])
+      : async { ok : Bool; count : Nat; err : Text } {
+    let m = col(collection);
+    var count : Nat = 0;
+    for (r in records.vals()) {
+      if (r.id != "") {
+        let op = if (m.containsKey(r.id)) "update" else "create";
+        m.add(r.id, r.data);
+        logChange(collection, r.id, op, r.data);
+        count += 1;
+      };
+    };
+    { ok = true; count; err = "" };
+  };
+
+  /// Delete an entire collection. Returns number of records removed.
+  public func deleteCollection(collection : Text) : async { ok : Bool; count : Nat } {
+    switch (store.get(collection)) {
+      case null { { ok = true; count = 0 } };
+      case (?m) {
+        let count = m.size();
+        m.clear();
+        store.remove(collection);
+        { ok = true; count };
+      };
+    };
+  };
+
+  /// Return count per collection.
+  public query func getCounts() : async [(Text, Nat)] {
+    store.entries()
+      .map<(Text, Map.Map<Text, Text>), (Text, Nat)>(
+        func((k, v)) { (k, v.size()) }
+      ).toArray()
+  };
+
+  /// Return changelog entries since a given timestamp (nanoseconds).
+  /// Pass 0 to get all entries.
+  public query func getChangelog(since : Nat) : async [Text] {
+    if (since == 0) return changelog.toArray();
+    // Filter entries whose timestamp >= since.
+    // We do a simple linear scan since changelog is bounded to 1000 entries.
+    let sinceInt : Int = since.toInt();
+    changelog.filter(func(entry : Text) : Bool {
+      // Quick parse: look for "timestamp": after the field key.
+      let needle = "\"timestamp\":";
+      switch (entry.stripStart(#text "{")) {
+        case null false;
+        case (?_) {
+          // Find timestamp value by scanning for the key.
+          var found = false;
+          var check = entry;
+          label search loop {
+            switch (check.stripStart(#text needle)) {
+              case (?rest) {
+                // Parse the integer that follows.
+                var numText = "";
+                var done = false;
+                for (ch in rest.toIter()) {
+                  if (not done) {
+                    if ((ch >= '0' and ch <= '9') or ch == '-') {
+                      numText #= Text.fromChar(ch);
+                    } else {
+                      done := true;
+                    };
+                  };
+                };
+                switch (Int.fromText(numText)) {
+                  case (?ts) { found := ts >= sinceInt };
+                  case null  { found := false };
+                };
+                break search;
+              };
+              case null {
+                // Advance one character and retry.
+                switch (check.toIter().next()) {
+                  case null { break search };
+                  case (?_) {
+                    // Drop first char.
+                    let chars = check.toArray();
+                    if (chars.size() <= 1) { break search };
+                    check := Text.fromArray(chars.sliceToArray(1, chars.size()));
+                  };
                 };
               };
             };
-            id
           };
-        }
-      };
-      case (?rest) {
-        // Collect characters until closing quote
-        var id = "";
-        var done = false;
-        for (ch in rest.toIter()) {
-          if (not done) {
-            if (ch == '\"') {
-              done := true;
-            } else {
-              id #= Text.fromChar(ch);
-            };
-          };
+          found
         };
-        id
-      };
-    }
+      }
+    }).toArray()
   };
 
-  // ── Utility: find index of item with matching id field ───────────────────
-
-  private func findIndexById(list : List.List<Text>, id : Text) : ?Nat {
-    if (id == "") return null;
-    var idx : Nat = 0;
-    var found : ?Nat = null;
-    list.forEach(func(item : Text) {
-      if (found == null) {
-        if (extractId(item) == id) {
-          found := ?idx;
-        };
-        idx += 1;
-      };
-    });
-    found
+  /// Export all data for backup. Returns array of (collection, [(id, data)]).
+  public query func exportAll() : async [(Text, [(Text, Text)])] {
+    store.entries()
+      .map<(Text, Map.Map<Text, Text>), (Text, [(Text, Text)])>(
+        func((coll, m)) { (coll, m.toArray()) }
+      ).toArray()
   };
 
-  // ── Helper: build JSON array from list ───────────────────────────────────
-
-  private func toJsonArray(list : List.List<Text>) : Text {
-    let items = list.toArray();
-    if (items.size() == 0) return "[]";
-    var r = "[";
-    var first = true;
-    for (item in items.vals()) {
-      if (not first) r #= ",";
-      r #= item;
-      first := false;
-    };
-    r #= "]";
-    r
-  };
-
-  // ── Ping ─────────────────────────────────────────────────────────────────
-
-  public query func ping() : async Text {
-    "SHUBH SCHOOL ERP backend v2 — canister storage active";
-  };
-
-  // ── Generic collection CRUD ──────────────────────────────────────────────
-
-  /// Return all records in a collection as a JSON array string
-  public query func listRecords(collection : Text) : async Text {
-    toJsonArray(getList(collection))
-  };
-
-  /// Return a single record by id (JSON string or empty string if not found)
-  public query func getRecord(collection : Text, id : Text) : async Text {
-    let list = getList(collection);
-    switch (findIndexById(list, id)) {
-      case null "";
-      case (?idx) {
-        // list.at(idx) traps on OOB which is safe here since idx came from findIndexById
-        list.at(idx)
-      };
-    }
-  };
-
-  /// Create a new record. Returns "ok".
-  public func createRecord(collection : Text, recordJson : Text) : async Text {
-    let list = getList(collection);
-    list.add(recordJson);
-    "ok"
-  };
-
-  /// Update an existing record by id. Returns "ok" or "not_found".
-  public func updateRecord(collection : Text, id : Text, recordJson : Text) : async Text {
-    let list = getList(collection);
-    switch (findIndexById(list, id)) {
-      case null "not_found";
-      case (?idx) {
-        list.put(idx, recordJson);
-        "ok"
-      };
-    }
-  };
-
-  /// Delete a record by id. Returns "ok" or "not_found".
-  public func deleteRecord(collection : Text, id : Text) : async Text {
-    let list = getList(collection);
-    switch (findIndexById(list, id)) {
-      case null "not_found";
-      case (?idx) {
-        // Rebuild list without the item at idx
-        let newList = List.empty<Text>();
-        var i : Nat = 0;
-        list.forEach(func(item : Text) {
-          if (i != idx) newList.add(item);
-          i += 1;
-        });
-        list.clear();
-        newList.forEach(func(item : Text) { list.add(item) });
-        "ok"
-      };
-    }
-  };
-
-  /// Upsert a record: update if id exists, create otherwise. Returns "ok".
-  public func upsertRecord(collection : Text, id : Text, recordJson : Text) : async Text {
-    let list = getList(collection);
-    switch (findIndexById(list, id)) {
-      case null {
-        list.add(recordJson);
-        "ok"
-      };
-      case (?idx) {
-        list.put(idx, recordJson);
-        "ok"
-      };
-    }
-  };
-
-  /// Batch upsert array of JSON records. Returns count upserted.
-  public func batchUpsert(collection : Text, recordsJson : [Text]) : async Nat {
-    let list = getList(collection);
-    var count : Nat = 0;
-    for (recordJson in recordsJson.vals()) {
-      let id = extractId(recordJson);
-      switch (findIndexById(list, id)) {
-        case null {
-          list.add(recordJson);
-        };
-        case (?idx) {
-          list.put(idx, recordJson);
+  /// Import all data from a backup. Merges (upserts) all records.
+  public func importAll(data : [(Text, [(Text, Text)])]) : async { ok : Bool; count : Nat } {
+    var total : Nat = 0;
+    for ((collection, records) in data.vals()) {
+      let m = col(collection);
+      for ((id, json) in records.vals()) {
+        if (id != "") {
+          m.add(id, json);
+          total += 1;
         };
       };
-      count += 1;
     };
-    count
-  };
-
-  /// Replace entire collection with new records. Returns count.
-  public func replaceCollection(collection : Text, recordsJson : [Text]) : async Nat {
-    let list = getList(collection);
-    list.clear();
-    for (item in recordsJson.vals()) {
-      list.add(item);
-    };
-    list.size()
-  };
-
-  /// Return record counts for all collections (for dashboard stats)
-  public query func getCounts() : async Text {
-    "{" #
-      "\"students\":"         # students.size().toText()     # "," #
-      "\"staff\":"            # staff.size().toText()        # "," #
-      "\"sessions\":"         # sessions.size().toText()     # "," #
-      "\"classes\":"          # classes.size().toText()      # "," #
-      "\"sections\":"         # sections.size().toText()     # "," #
-      "\"subjects\":"         # subjects.size().toText()     # "," #
-      "\"attendance\":"       # attendance.size().toText()   # "," #
-      "\"fee_receipts\":"     # feeReceipts.size().toText()  # "," #
-      "\"fees_plan\":"        # feesPlan.size().toText()     # "," #
-      "\"fee_heads\":"        # feeHeads.size().toText()     # "," #
-      "\"transport_routes\":" # transport.size().toText()    # "," #
-      "\"inventory_items\":"  # inventory.size().toText()    # "," #
-      "\"expenses\":"         # expenses.size().toText()     # "," #
-      "\"homework\":"         # homework.size().toText()     # "," #
-      "\"alumni\":"           # alumni.size().toText()       # "," #
-      "\"payroll_setup\":"    # payroll.size().toText()      # "," #
-      "\"payslips\":"         # payslips.size().toText()     # "," #
-      "\"notices\":"          # notices.size().toText()      # "," #
-      "\"examinations\":"     # examinations.size().toText() # "," #
-      "\"library\":"          # library.size().toText()      #
-    "}"
-  };
-
-  /// Fetch all collections in one shot (WhatsApp-style initial load).
-  public query func fetchAll() : async Text {
-    "{" #
-      "\"students\":"         # toJsonArray(students)     # "," #
-      "\"staff\":"            # toJsonArray(staff)        # "," #
-      "\"sessions\":"         # toJsonArray(sessions)     # "," #
-      "\"classes\":"          # toJsonArray(classes)      # "," #
-      "\"sections\":"         # toJsonArray(sections)     # "," #
-      "\"subjects\":"         # toJsonArray(subjects)     # "," #
-      "\"attendance\":"       # toJsonArray(attendance)   # "," #
-      "\"fee_receipts\":"     # toJsonArray(feeReceipts)  # "," #
-      "\"fees_plan\":"        # toJsonArray(feesPlan)     # "," #
-      "\"fee_heads\":"        # toJsonArray(feeHeads)     # "," #
-      "\"fee_balances\":"     # toJsonArray(feeBalances)  # "," #
-      "\"transport_routes\":" # toJsonArray(transport)    # "," #
-      "\"pickup_points\":"    # toJsonArray(pickupPoints) # "," #
-      "\"inventory_items\":"  # toJsonArray(inventory)    # "," #
-      "\"expenses\":"         # toJsonArray(expenses)     # "," #
-      "\"expense_heads\":"    # toJsonArray(expenseHeads) # "," #
-      "\"homework\":"         # toJsonArray(homework)     # "," #
-      "\"alumni\":"           # toJsonArray(alumni)       # "," #
-      "\"payroll_setup\":"    # toJsonArray(payroll)      # "," #
-      "\"payslips\":"         # toJsonArray(payslips)     # "," #
-      "\"notices\":"          # toJsonArray(notices)      # "," #
-      "\"examinations\":"     # toJsonArray(examinations) # "," #
-      "\"exam_results\":"     # toJsonArray(examResults)  # "," #
-      "\"library\":"          # toJsonArray(library)      #
-    "}"
-  };
-
-  /// Return recent changelog entries as JSON array (last 100)
-  public query func getChangelog() : async Text {
-    let items = changelog.toArray();
-    let len = items.size();
-    let start : Nat = if (len > 100) len - 100 else 0;
-    var result = "[";
-    var first = true;
-    var i : Nat = 0;
-    for (item in items.vals()) {
-      if (i >= start) {
-        if (not first) result #= ",";
-        result #= item;
-        first := false;
-      };
-      i += 1;
-    };
-    result #= "]";
-    result
+    { ok = true; count = total };
   };
 };

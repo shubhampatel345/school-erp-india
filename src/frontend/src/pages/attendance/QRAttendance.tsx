@@ -619,8 +619,8 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
           camera and point it at a student's admit card QR code.{" "}
           <span className="font-semibold ml-2">⌨️ Scanner Device mode:</span>{" "}
           Connect a USB/Bluetooth barcode scanner — it will type the code into
-          the input and auto-submit on Enter. All scans save directly to MySQL
-          via the server.
+          the input and auto-submit on Enter. All scans save directly to the
+          canister — available on every device instantly.
         </p>
       </Card>
     </div>

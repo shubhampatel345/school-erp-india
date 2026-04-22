@@ -6,7 +6,6 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  Code2,
   Database,
   FileText,
   HardDrive,
@@ -45,7 +44,7 @@ const DOCS: DocSection[] = [
     badge: "Start Here",
     items: [
       {
-        heading: "First-Time Setup (5 Steps)",
+        heading: "First-Time Setup (4 Steps)",
         body: `Step 1 — Log in as Super Admin
   Username: superadmin
   Password: admin123
@@ -54,21 +53,18 @@ Step 2 — Add School Profile
   Go to Settings > School Profile
   Fill in: School Name, Address, Phone, Email, Logo
 
-Step 3 — Connect to Your Server
-  Go to Settings > Data Management > Database Server
-  API URL: https://shubh.psmkgs.com/api/index.php
-  Click "Test Connection" → should show green
-  Click "Authenticate Now" → enter admin123
-
-Step 4 — Set Up Academics
+Step 3 — Set Up Academics
   Go to Academics > Classes
   Add all your classes: Nursery, LKG, UKG, Class 1 to Class 12
   Add sections for each class: A, B, C, etc.
 
-Step 5 — Set Up Fees
+Step 4 — Set Up Fees
   Go to Fees > Fee Headings → add Tuition, Transport, Computer, etc.
   Go to Fees > Fee Plans → set amounts per class per heading
-  You are now ready to add students!`,
+  You are now ready to add students!
+
+All data is stored automatically in the Internet Computer canister.
+No server setup, no PHP, no MySQL, no uploads required.`,
       },
       {
         heading: "Default Login Credentials",
@@ -127,7 +123,7 @@ Optional fields:
   • Category (General / OBC / SC / ST)
   • Previous School
 
-Click Save — student is added to MySQL immediately.`,
+Click Save — student is added to the canister immediately.`,
       },
       {
         heading: "Bulk Import via CSV",
@@ -238,7 +234,7 @@ The charge is included in the receipt and fee register.`,
 Select class, section, and date
 All students in the class are listed
 Mark each student: Present / Absent / Late / Half Day
-Click Save — attendance is saved to MySQL.`,
+Click Save — attendance is saved to the canister.`,
       },
       {
         heading: "QR Code Scanner — Camera Mode",
@@ -340,175 +336,71 @@ Students assigned to this point pay this fare per month.`,
     ],
   },
   {
-    id: "cpanel",
-    title: "cPanel Deployment Guide",
+    id: "deployment",
+    title: "Deployment Guide",
     icon: Server,
     badge: "Important",
     items: [
       {
-        heading: "Step 1 — Upload Frontend Files",
-        body: `1. Download the build from GitHub:
-   https://github.com/shubhampatel345/school-erp-india
+        heading: "How Deployment Works",
+        body: `SHUBH SCHOOL ERP runs on the Internet Computer — a decentralized network.
+Deployment is managed through your Caffeine project dashboard.
 
-2. Open cPanel > File Manager > public_html/
+To deploy a new version:
+1. Open your Caffeine project
+2. Click "Deploy" to push the latest build live
+3. Your app gets a live URL automatically
+4. All data is preserved across deployments
 
-3. Delete any existing index.html or old files.
-
-4. Upload all files from the dist/ folder to public_html/
-   (or use the zip upload feature and extract there)
-
-5. Upload the .htaccess file to public_html/ as well.
-   (This ensures SPA routing works for page refreshes)`,
+No cPanel, no FTP, no server configuration needed.`,
       },
       {
-        heading: "Step 2 — Upload API Files",
-        body: `1. In cPanel > File Manager > public_html/
-2. Create a folder named api/ if it doesn't exist
-3. Upload TWO files from the api/ folder in your build:
-   • api/index.php   ← main API handler (all routes)
-   • api/config.php  ← database credentials
+        heading: "Connecting a Custom Domain",
+        body: `Requirements: Plus or Pro Caffeine plan + project must be live.
 
-That's it! No .htaccess needed inside the api/ folder.
-All API routing uses query parameters: ?route=endpoint`,
+Steps:
+1. Go to Settings > Domains in your Caffeine dashboard
+2. Click "Bring your own domain"
+3. Enter your domain (e.g. shubh.psmkgs.com)
+4. Caffeine generates DNS records (CNAME/TXT)
+5. Add those records at your domain registrar
+6. Wait up to 24 hours for DNS propagation
+7. SSL is handled automatically — no manual certificate setup
+
+Your domain remains live even if you downgrade your Caffeine plan.`,
       },
       {
-        heading: "Step 3 — Create Database Tables",
-        body: `Open this URL in your browser ONCE after uploading:
-https://shubh.psmkgs.com/api/index.php?route=migrate/run
+        heading: "Data Storage",
+        body: `All school data is stored natively in the Internet Computer canister.
 
-Expected response:
-{"status":"ok","message":"Migration complete","tables":["students","staff",...]}
-
-This creates all 20+ required tables in your MySQL database.
-If you see an error, check your database credentials in api/config.php.`,
+What this means:
+• Data saves instantly and reliably — no server round-trips
+• Works across all devices automatically
+• No disappearing records — the canister IS the database
+• No PHP, no MySQL, no cPanel uploads required
+• Backup via Settings > Data Management > Export All Data`,
       },
       {
-        heading: "Step 4 — Test Connection in App",
-        body: `1. Open the app at https://shubh.psmkgs.com
-2. Log in as superadmin / admin123
-3. Go to Settings > Data Management > Database Server
-4. API URL should be: https://shubh.psmkgs.com/api/index.php
-5. Click "Test Connection" → should show green "Connected"
-6. Click "Authenticate Now" → enter admin123
+        heading: "Backup & Restore",
+        body: `Export: Go to Settings > Data Management > Export All Data
+  → Downloads a JSON file with all school data
 
-You are now live! All data will save to your MySQL database
-and sync across every device.`,
-      },
-      {
-        heading: "Step 5 — Verify in phpMyAdmin",
-        body: `1. Open cPanel > phpMyAdmin
-2. Select database: psmkgsco_shubherp_db
-3. You should see tables: students, staff, attendance, fee_receipts, etc.
-4. Click the users table → you should see a row for superadmin
+Import: Settings > Data Management > Import Backup
+  → Select the JSON file to restore all data
 
-If the users table is empty:
-Open: https://shubh.psmkgs.com/api/index.php?route=migrate/reset-superadmin
-This re-creates the superadmin user with password admin123.`,
-      },
-      {
-        heading: "Database Credentials",
-        body: `File location: public_html/api/config.php
-
-Host:     localhost
-Port:     3306
-Database: psmkgsco_shubherp_db
-User:     psmkgsco_shubherp_user
-Password: Shubh@420
-
-Change credentials in api/config.php if your hosting uses different values.`,
-      },
-      {
-        heading: "Reset All Tables (Fix Column Errors)",
-        body: `Use this ONLY if tables exist but data shows NULL values.
-This drops all tables and recreates them with correct column names.
-
-⚠️ WARNING: All data is deleted!
-Only use if tables are empty or corrupted.
-
-URL: https://shubh.psmkgs.com/api/index.php?route=migrate/reset-db
-
-After running, push your data again from:
-Settings > Data Management > Push Local Data to Server`,
+Factory Reset: Settings > Data Management > Factory Reset
+  → Wipes all data and returns to fresh state
+  → Use only when transferring the ERP to a new school`,
       },
     ],
   },
   {
-    id: "api",
-    title: "PHP API Reference",
-    icon: Code2,
-    items: [
-      {
-        heading: "Base URL & Routing",
-        body: `Base URL: https://shubh.psmkgs.com/api/index.php
-
-All routes use query parameter routing (NO .htaccess required):
-https://shubh.psmkgs.com/api/index.php?route={endpoint}
-
-This works on ALL cPanel servers regardless of mod_rewrite settings.`,
-      },
-      {
-        heading: "Authentication",
-        body: `POST /api/index.php?route=auth/login
-Body: {"username":"superadmin","password":"admin123"}
-Returns: {"status":"ok","token":"<jwt>","user":{...}}
-
-Include in all subsequent requests:
-Header: Authorization: Bearer {token}
-
-Token expires after 24 hours. Re-authenticate if you get 401 errors.`,
-      },
-      {
-        heading: "Core Sync Endpoints",
-        body: `GET  ?route=sync/all         → Fetch ALL data (all collections)
-GET  ?route=sync/status      → Record counts per collection
-POST ?route=sync/push        → Bulk push all collections at once
-
-Health check (no auth required):
-GET  ?route=health           → {"status":"ok"}`,
-      },
-      {
-        heading: "Collection Endpoints (CRUD)",
-        body: `Pattern: ?route={collection}
-
-GET    ?route=students              → List all students
-POST   ?route=students              → Create a student
-PUT    ?route=students&id={id}      → Update a student
-DELETE ?route=students&id={id}      → Delete a student
-
-Replace "students" with any collection:
-students, staff, attendance, fee_receipts, fees_plan,
-fee_headings, sessions, classes, subjects,
-transport_routes, inventory_items, expenses,
-homework, alumni, alumni_events, homework_submissions,
-payroll, chat_messages, changelog`,
-      },
-      {
-        heading: "Migration Endpoints",
-        body: `?route=migrate/run              → Create all tables
-?route=migrate/reset-superadmin → Reset superadmin password to admin123
-?route=migrate/reset-db         → Drop and recreate all tables (⚠️ deletes data)`,
-      },
-    ],
-  },
-  {
-    id: "mysql",
-    title: "MySQL Setup",
+    id: "data-collections",
+    title: "Data Collections",
     icon: Database,
     items: [
       {
-        heading: "Database Configuration",
-        body: `Location: public_html/api/config.php
-
-define('DB_HOST', getenv('DB_HOST') ?: 'localhost');
-define('DB_PORT', getenv('DB_PORT') ?: '3306');
-define('DB_NAME', getenv('DB_NAME') ?: 'psmkgsco_shubherp_db');
-define('DB_USER', getenv('DB_USER') ?: 'psmkgsco_shubherp_user');
-define('DB_PASS', getenv('DB_PASS') ?: 'Shubh@420');
-
-To change credentials: edit api/config.php and re-upload.`,
-      },
-      {
-        heading: "Table List",
+        heading: "Available Collections",
         body: `Core: users, sessions, classes, subjects
 Students: students, discounts
 Fees: fee_headings, fees_plan, fee_receipts
@@ -522,22 +414,8 @@ Other: expenses, homework, homework_submissions,
        alumni, alumni_events, chat_messages, changelog`,
       },
       {
-        heading: "Verifying Data in phpMyAdmin",
-        body: `1. Open cPanel > phpMyAdmin
-2. Select psmkgsco_shubherp_db
-3. Click any table (e.g. students)
-4. Click Browse to see rows
-
-If a table shows rows but name/admNo columns are NULL:
-→ Run migrate/reset-db and push data again
-
-If a table is empty after pushing:
-→ Check Authentication in Settings > Data Management
-→ Re-authenticate and push again`,
-      },
-      {
-        heading: "Column Names (camelCase)",
-        body: `All columns use camelCase to match frontend fields:
+        heading: "Field Names (camelCase)",
+        body: `All data uses camelCase field names:
 students: admNo, fullName, fatherName, motherName, dob,
           gender, class, section, mobile, address,
           category, status, transportId, transportRoute
@@ -663,19 +541,17 @@ Type "RESET" to confirm
 Click Reset
 
 ⚠️ This wipes ALL local data: students, fees, attendance, etc.
-Your server MySQL data is NOT affected by factory reset.
-After reset, the app re-downloads all data from the server on next login.`,
+Canister data is NOT affected by factory reset.
+After reset, the app re-downloads all data from the canister on next login.`,
       },
       {
         heading: "Push Local Data to Server",
-        body: `If you have data in the browser that is not on MySQL yet:
-Go to Settings > Data Management > Database Server
-Scroll down to "Push Local Data to Server"
-Click Push
+        body: `If you have data in the browser that has not synced to the canister yet:
+Go to Settings > Data Management
+Click "Sync Now" or wait for automatic background sync.
 
-The system sends all collections (students, fees, etc.) to MySQL.
-Watch the progress log — each collection shows "Pushed ✓" or "FAILED ✗".
-If a collection fails, check authentication and try again.`,
+The system sends all pending changes to the Internet Computer canister.
+Watch the sync indicator in the top bar — it shows pending count and clears when done.`,
       },
     ],
   },
@@ -734,7 +610,7 @@ Changes take effect at next login.`,
     items: [
       {
         heading: "Install on Android",
-        body: `1. Open https://shubh.psmkgs.com in Chrome
+        body: `1. Open the app URL in Chrome
 2. Tap the 3-dot menu in Chrome
 3. Tap "Add to Home Screen"
 4. Tap Install
@@ -744,7 +620,7 @@ It works offline and loads faster.`,
       },
       {
         heading: "Install on iPhone (iOS)",
-        body: `1. Open https://shubh.psmkgs.com in Safari
+        body: `1. Open the app URL in Safari
 2. Tap the Share button (square with arrow)
 3. Tap "Add to Home Screen"
 4. Tap Add
@@ -769,53 +645,37 @@ Inventory, Reports, Settings, and all other modules.`,
     badge: "Common Issues",
     items: [
       {
-        heading: "❌ Server returned HTML instead of JSON",
-        body: `Cause: api/ folder not uploaded to cPanel, or wrong URL.
+        heading: "❌ Data not syncing across devices",
+        body: `The Internet Computer canister stores all data automatically.
+If data is not appearing on another device:
 
 Fix:
-1. Check API URL in Settings > Data Management > Database Server
-   Must be: https://shubh.psmkgs.com/api/index.php
-   (NOT: https://psmkgs.com/api or without /index.php)
-
-2. Upload api/index.php and api/config.php to cPanel > public_html/api/
-
-3. Test directly: open in browser:
-   https://shubh.psmkgs.com/api/index.php?route=health
-   Should return: {"status":"ok"}`,
+1. Wait a few seconds — canister sync is near-instant but may have a short delay
+2. Refresh the page to force a re-fetch from the canister
+3. Check your internet connection
+4. If still not syncing, check the sync indicator in the top bar`,
       },
       {
-        heading: "❌ Invalid username or password (server auth)",
+        heading: "❌ Invalid username or password",
         body: `Fix:
-1. Go to Settings > Data Management > Database Server
-2. Click "Authenticate Now" and enter admin123
-3. If still failing, run migrate/reset-superadmin:
-   https://shubh.psmkgs.com/api/index.php?route=migrate/reset-superadmin
-4. This resets superadmin password to admin123
-5. Go back to Settings and authenticate again`,
-      },
-      {
-        heading: "❌ Green sync but MySQL tables are empty",
-        body: `The sync indicator was checking connection, not actual data.
+1. Use your registered username/mobile and password
+2. Teachers use: Mobile Number / Date of Birth (DDMMYYYY)
+3. Parents use: Mobile Number / Mobile Number
+4. Super Admin: superadmin / admin123
 
-Fix:
-1. Settings > Data Management > Database Server
-2. Make sure status shows "Authenticated" (not just "Connected")
-3. Click "Push Local Data to Server"
-4. Wait for all collections to show green "Pushed"
-5. Open phpMyAdmin to verify rows appear in tables`,
+If Super Admin password is forgotten:
+Go to Settings > Data Management > Factory Reset (last resort)`,
       },
       {
         heading: "❌ Dashboard shows 0 students on a new device",
-        body: `The new device has no local cache yet.
+        body: `The new device needs to load data from the canister.
 
 Fix:
-1. Make sure server API URL is correct in Settings
-2. Make sure you are authenticated with the server
-3. Refresh the page — data is fetched from MySQL on load
-4. If still 0, click "Test Connection" in Settings
+1. Wait a moment for the canister to respond (first load may take 2-3 seconds)
+2. Refresh the page
+3. Check your internet connection
 
-Note: Data always comes from MySQL when server is connected.
-If server is unreachable, the app shows cached browser data.`,
+Data always loads from the Internet Computer canister — not from the browser.`,
       },
       {
         heading: "❌ Classes dropdown empty when adding a student",
@@ -830,14 +690,13 @@ Fix:
       },
       {
         heading: "❌ Student added but not showing in list",
-        body: `Cause: The student saved to the browser but not to MySQL, or there is an authentication issue.
+        body: `Cause: Save may have been interrupted or canister was slow.
 
 Fix:
-1. Check the red error banner (if visible) for the specific error
-2. Go to Settings > Data Management — check server authentication
-3. Re-authenticate if needed
-4. Try adding the student again — look for a success message
-5. If the student appears in MySQL (phpMyAdmin) but not in the app, refresh the page`,
+1. Refresh the page to reload data from the canister
+2. Check if the student appears after refresh
+3. If not, try adding the student again — the form prevents duplicates
+4. Check your internet connection — canister writes require connectivity`,
       },
       {
         heading: "❌ Fee plan amounts show ₹0",
@@ -851,24 +710,11 @@ Fix:
 5. Go back to Collect Fees — amounts now load correctly`,
       },
       {
-        heading: "❌ NULL values in MySQL columns (admNo, name, etc.)",
-        body: `Cause: Old database tables with wrong column names.
-
-Fix:
-1. Open: https://shubh.psmkgs.com/api/index.php?route=migrate/reset-db
-2. This drops all tables and recreates with camelCase column names
-3. Go to Settings > Data Management > Push Local Data to Server
-4. Push all data again
-
-⚠️ migrate/reset-db deletes all MySQL data.
-Only run this if MySQL data is already empty or corrupted.`,
-      },
-      {
         heading: "❌ Receipt print not working",
         body: `Cause: Browser popup blocker preventing the print window.
 
 Fix:
-1. Allow popups for shubh.psmkgs.com in browser settings
+1. Allow popups for this site in browser settings
 2. In Chrome: click the popup blocked icon in the address bar > Always allow
 3. OR: use the "Download PDF" option instead of Print
 
@@ -1038,7 +884,7 @@ export default function Documentation() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search documentation — e.g. 'cPanel', 'fees', 'import', 'NULL'…"
+            placeholder="Search documentation — e.g. 'fees', 'import', 'attendance', 'backup'…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10 h-9"
@@ -1085,9 +931,9 @@ export default function Documentation() {
 
           <div className="mt-auto px-4 pt-4 pb-2">
             <div className="p-3 rounded-lg bg-card border text-xs space-y-1.5">
-              <p className="font-semibold text-foreground">Live API</p>
+              <p className="font-semibold text-foreground">Data Storage</p>
               <code className="text-[10px] text-muted-foreground break-all">
-                /api/index.php?route=&#123;endpoint&#125;
+                Internet Computer Canister
               </code>
             </div>
           </div>
@@ -1149,7 +995,7 @@ export default function Documentation() {
                 <FileText className="w-12 h-12 mb-3 opacity-20" />
                 <p className="font-medium">No results for "{search}"</p>
                 <p className="text-xs mt-1">
-                  Try searching for: cPanel, fees, attendance, import, backup
+                  Try searching for: fees, attendance, import, backup, roles
                 </p>
               </div>
             )}
@@ -1177,28 +1023,28 @@ export default function Documentation() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   {[
                     {
-                      label: "API Base URL",
-                      value: "https://shubh.psmkgs.com/api/index.php?route=",
-                    },
-                    {
-                      label: "Run Migration",
-                      value: "?route=migrate/run",
-                    },
-                    {
-                      label: "Reset Super Admin",
-                      value: "?route=migrate/reset-superadmin",
-                    },
-                    {
-                      label: "Health Check",
-                      value: "?route=health",
+                      label: "Storage",
+                      value: "Internet Computer Canister",
                     },
                     {
                       label: "Default Login",
                       value: "superadmin / admin123",
                     },
                     {
-                      label: "Database",
-                      value: "psmkgsco_shubherp_db",
+                      label: "Teacher Login",
+                      value: "Mobile / DOB (DDMMYYYY)",
+                    },
+                    {
+                      label: "Parent Login",
+                      value: "Mobile / Mobile",
+                    },
+                    {
+                      label: "Backup Location",
+                      value: "Settings > Data Management",
+                    },
+                    {
+                      label: "Deploy Via",
+                      value: "Caffeine Dashboard",
                     },
                   ].map((item) => (
                     <div key={item.label} className="space-y-0.5">

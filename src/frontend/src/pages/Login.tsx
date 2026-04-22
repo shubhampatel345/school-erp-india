@@ -248,17 +248,9 @@ export default function Login() {
                   <em>Settings → User Management → Reset Password</em>.
                 </p>
                 <p className="mt-2">
-                  For Super Admin access issues, visit:
-                  <br />
-                  <code
-                    className="text-xs px-1.5 py-0.5 rounded"
-                    style={{
-                      background: "oklch(1 0 0 / 0.08)",
-                      color: "oklch(0.82 0.14 200)",
-                    }}
-                  >
-                    /api/index.php?route=migrate/reset-superadmin
-                  </code>
+                  For Super Admin access issues, contact your system
+                  administrator or use the factory reset option in Settings →
+                  Data Management.
                 </p>
               </div>
             )}

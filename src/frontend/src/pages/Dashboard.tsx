@@ -123,7 +123,7 @@ function SyncBar() {
     local: {
       bg: "bg-card border-b border-border",
       icon: <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" />,
-      label: "Local Mode — data on this device only",
+      label: "Local Mode — syncing to Internet Computer canister",
       labelClass: "text-xs font-medium text-muted-foreground",
       badgeCls: "bg-muted text-muted-foreground border-border",
       badgeText: "Local",
@@ -132,8 +132,8 @@ function SyncBar() {
       bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
       icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
       label: countSummary
-        ? `Synced to MySQL — ${countSummary} — all devices share this data`
-        : "Synced to MySQL server — all devices see the same data",
+        ? `Synced to Internet Computer — ${countSummary} — all devices share this data`
+        : "Synced to Internet Computer canister — all devices see the same data",
       labelClass: "text-xs font-medium text-emerald-700",
       badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
       badgeText: "Synced",
@@ -284,7 +284,7 @@ function SyncBar() {
               {mode === "connected" ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
-                  MySQL Server
+                  Internet Computer Canister
                 </>
               ) : mode === "local" ? (
                 <>
@@ -298,7 +298,7 @@ function SyncBar() {
                 </>
               ) : mode === "offline" ? (
                 <>
-                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Server
+                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Canister
                   Unreachable
                 </>
               ) : (
@@ -309,11 +309,10 @@ function SyncBar() {
             </p>
             {mode === "connected" && (
               <div className="space-y-0.5 text-muted-foreground">
-                {serverInfo?.db_version && <p>MySQL {serverInfo.db_version}</p>}
                 {serverInfo?.version && <p>API v{serverInfo.version}</p>}
                 <div className="mt-1 pt-1 border-t border-border/50">
                   <p className="font-medium text-foreground mb-0.5">
-                    Records in MySQL:
+                    Records on Internet Computer:
                   </p>
                   {Object.entries(displayCounts)
                     .filter(([, count]) => count > 0)
@@ -332,21 +331,20 @@ function SyncBar() {
             )}
             {mode === "local" && (
               <p className="text-muted-foreground leading-relaxed">
-                Data is stored in this browser only. Configure a MySQL server in
-                Settings → Data Management to sync across devices.
+                Data is stored locally and syncing to the Internet Computer
+                canister in the background.
               </p>
             )}
             {mode === "auth_error" && (
               <p className="text-muted-foreground leading-relaxed">
-                Go to{" "}
-                <strong>Settings → Data Management → Database Server</strong>{" "}
-                and click <strong>Authenticate Now</strong>.
+                Go to <strong>Settings → Data Management</strong> and click{" "}
+                <strong>Authenticate Now</strong>.
               </p>
             )}
             {mode === "offline" && (
               <p className="text-muted-foreground leading-relaxed">
-                Server is configured but unreachable. Check your internet
-                connection or server status.
+                Canister is configured but unreachable. Check your internet
+                connection or canister status.
               </p>
             )}
           </div>
@@ -356,7 +354,7 @@ function SyncBar() {
       {mode === "local" && (
         <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors">
           <Server className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Configure Server</span>
+          <span className="hidden sm:inline">Internet Computer</span>
         </div>
       )}
     </div>

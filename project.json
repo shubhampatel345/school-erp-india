@@ -1,31 +1,31 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular, web-based School Management ERP for Indian schools. It is a fully mobile-optimized PWA supporting all user roles with MySQL backend on cPanel. Features include student management, fees collection, attendance (face recognition, QR, RFID, biometric), online exams with auto-grading, GPS transport tracking, library management, parent push notifications, student performance analytics, and bulk WhatsApp/SMS broadcast.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular school management system for Indian schools built on the Internet Computer. It supports multi-school/branch operations with all user roles (Super Admin, Admin, Teacher, Parent, Student, Driver). All data is stored natively in the Internet Computer canister for instant, reliable, cross-device sync — no PHP, MySQL, or cPanel required.",
   "features": [
-    "AI Face Recognition Attendance — camera auto-marks students present on entry",
-    "UPI QR Code Payment — GPay/PhonePe QR on fee collection screen, auto-updates fee register",
-    "Online Exam + Auto-Grading — MCQ tests assigned to classes, auto-graded results",
-    "Parent PWA Push Notifications — instant alerts for attendance, fees due, and results",
-    "Student Performance Analytics — charts for marks trend, attendance %, and fees history",
-    "Library + Barcode Scanning — issue/return books, overdue reminders, barcode support",
-    "GPS Transport Tracking — live bus location for parents via driver's phone",
-    "Bulk WhatsApp/SMS Broadcast — send circulars, results, timetables to all parents",
-    "Role-based access control for all user types (Super Admin, Admin, Teacher, Parent, Student, Driver)",
-    "Multi-school/branch support with infinite session management",
-    "Complete fee management with UPI QR payment integration",
-    "PWA installable on Android/iOS with offline support"
+    "Student Information System with Excel-style grid and bulk import/export",
+    "Fees Collection with auto month selection, receipts, balance carry-forward",
+    "Attendance (QR, RFID, biometric, AI face recognition)",
+    "HR & Payroll management with payslips",
+    "Transport management with GPS tracking",
+    "Online Examinations with auto-grading",
+    "Library management with barcode scanning",
+    "Inventory management",
+    "Chat system with class/section and route-wise groups",
+    "Communication (WhatsApp, bulk broadcast, notifications)",
+    "Multiple color themes with dark sidebar",
+    "Mobile PWA with offline support",
+    "Role-based permissions (Super Admin, Admin, Teacher, Parent, Student, Driver)",
+    "Canister-native storage — no MySQL or cPanel sync needed"
   ],
   "category": "education",
   "tags": [
     "school-erp",
-    "school-management",
-    "attendance",
-    "fees",
+    "education",
     "india",
     "pwa",
-    "mysql",
-    "face-recognition",
-    "online-exam",
-    "gps-tracking"
+    "multi-role",
+    "attendance",
+    "fees",
+    "internet-computer"
   ],
-  "last_updated": "2026-04-20T15:37:09.610Z"
+  "last_updated": "2026-04-22T12:45:26.919Z"
 }

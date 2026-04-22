@@ -32,13 +32,11 @@ import type {
   Student,
 } from "../../types";
 import {
-  apiCreateRecord,
-  apiDeleteRecord,
-  apiListRecords,
-  apiUpdateRecord,
-  getJwt,
-} from "../../utils/api";
+  canisterService,
+  generateId as genId,
+} from "../../utils/canisterService";
 import { CLASSES, SECTIONS, generateId } from "../../utils/localStorage";
+import { syncEngine } from "../../utils/syncEngine";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -327,26 +325,16 @@ function CreateExamDialog({
 
     setSaving(true);
     try {
-      const token = getJwt();
       if (editingExam) {
-        await apiUpdateRecord(
-          "online_exams",
-          editingExam.id,
-          { ...exam, questionsData: JSON.stringify(exam.questions) } as Record<
-            string,
-            unknown
-          >,
-          token,
-        );
+        await canisterService.updateRecord("online_exams", editingExam.id, {
+          ...exam,
+          questionsData: JSON.stringify(exam.questions),
+        } as Record<string, unknown>);
       } else {
-        await apiCreateRecord(
-          "online_exams",
-          { ...exam, questionsData: JSON.stringify(exam.questions) } as Record<
-            string,
-            unknown
-          >,
-          token,
-        );
+        await canisterService.createRecord("online_exams", exam.id, {
+          ...exam,
+          questionsData: JSON.stringify(exam.questions),
+        } as Record<string, unknown>);
       }
       addNotification(
         `Exam "${exam.title}" ${editingExam ? "updated" : "created"} successfully.`,
@@ -571,12 +559,10 @@ function ExamManager() {
   const loadExams = useCallback(async () => {
     setLoading(true);
     try {
-      const token = getJwt();
-      const rows = await apiListRecords<Record<string, unknown>>(
-        "online_exams",
-        {},
-        token,
-      );
+      const rows =
+        await canisterService.listRecords<Record<string, unknown>>(
+          "online_exams",
+        );
       const parsed: OnlineExam[] = rows.map((r) => ({
         id: String(r.id ?? r.examId ?? generateId()),
         title: String(r.title ?? ""),
@@ -626,13 +612,10 @@ function ExamManager() {
           ? "active"
           : "draft";
     try {
-      const token = getJwt();
-      await apiUpdateRecord(
-        "online_exams",
-        exam.id,
-        { status: nextStatus } as Record<string, unknown>,
-        token,
-      );
+      await canisterService.updateRecord("online_exams", exam.id, {
+        id: exam.id,
+        status: nextStatus,
+      } as Record<string, unknown>);
       setExams((prev) =>
         prev.map((e) => (e.id === exam.id ? { ...e, status: nextStatus } : e)),
       );
@@ -647,8 +630,7 @@ function ExamManager() {
 
   async function handleDelete(examId: string) {
     try {
-      const token = getJwt();
-      await apiDeleteRecord("online_exams", examId, token);
+      await canisterService.deleteRecord("online_exams", examId);
       setExams((prev) => prev.filter((e) => e.id !== examId));
       addNotification("Exam deleted.", "success");
     } catch {
@@ -902,15 +884,14 @@ function ExamInterface({
     };
 
     try {
-      const token = getJwt();
-      await apiCreateRecord(
+      await canisterService.createRecord(
         "exam_attempts",
+        attempt.id ?? genId(),
         {
           ...attempt,
           answersData: JSON.stringify(answers),
           breakdownData: JSON.stringify(breakdown),
         } as Record<string, unknown>,
-        token,
       );
     } catch {
       if (!auto)
@@ -1255,41 +1236,45 @@ function TakeExam({
     async function load() {
       setLoading(true);
       try {
-        const token = getJwt();
-        const rows = await apiListRecords<Record<string, unknown>>(
-          "online_exams",
-          { classId, status: "active" },
-          token,
-        );
-        const parsed: OnlineExam[] = rows.map((r) => ({
-          id: String(r.id ?? generateId()),
-          title: String(r.title ?? ""),
-          subject: String(r.subject ?? ""),
-          classId: String(r.classId ?? ""),
-          sections: (() => {
-            try {
-              return JSON.parse(String(r.sections ?? "[]")) as string[];
-            } catch {
-              return [];
-            }
-          })(),
-          duration: Number(r.duration ?? 60),
-          totalMarks: Number(r.totalMarks ?? 0),
-          passPercentage: Number(r.passPercentage ?? 40),
-          startTime: String(r.startTime ?? ""),
-          endTime: String(r.endTime ?? ""),
-          questions: (() => {
-            try {
-              return JSON.parse(
-                String(r.questionsData ?? r.questions ?? "[]"),
-              ) as ExamQuestion[];
-            } catch {
-              return [];
-            }
-          })(),
-          status: (r.status as OnlineExam["status"]) ?? "active",
-          createdBy: String(r.createdBy ?? ""),
-        }));
+        const rows =
+          await canisterService.listRecords<Record<string, unknown>>(
+            "online_exams",
+          );
+        const parsed: OnlineExam[] = rows
+          .filter(
+            (r) =>
+              String(r.classId ?? "") === classId &&
+              String(r.status ?? "") === "active",
+          )
+          .map((r) => ({
+            id: String(r.id ?? generateId()),
+            title: String(r.title ?? ""),
+            subject: String(r.subject ?? ""),
+            classId: String(r.classId ?? ""),
+            sections: (() => {
+              try {
+                return JSON.parse(String(r.sections ?? "[]")) as string[];
+              } catch {
+                return [];
+              }
+            })(),
+            duration: Number(r.duration ?? 60),
+            totalMarks: Number(r.totalMarks ?? 0),
+            passPercentage: Number(r.passPercentage ?? 40),
+            startTime: String(r.startTime ?? ""),
+            endTime: String(r.endTime ?? ""),
+            questions: (() => {
+              try {
+                return JSON.parse(
+                  String(r.questionsData ?? r.questions ?? "[]"),
+                ) as ExamQuestion[];
+              } catch {
+                return [];
+              }
+            })(),
+            status: (r.status as OnlineExam["status"]) ?? "active",
+            createdBy: String(r.createdBy ?? ""),
+          }));
         const nowTs = Date.now();
         setExams(
           parsed.filter(
@@ -1422,10 +1407,9 @@ function ResultsDashboard() {
     async function load() {
       setLoadingExams(true);
       try {
-        const token = getJwt();
         const [examRows, studentRows] = await Promise.all([
-          apiListRecords<Record<string, unknown>>("online_exams", {}, token),
-          apiListRecords<Student>("students", {}, token),
+          canisterService.listRecords<Record<string, unknown>>("online_exams"),
+          canisterService.listRecords<Student>("students"),
         ]);
         setStudents(studentRows);
         setExams(
@@ -1466,14 +1450,13 @@ function ResultsDashboard() {
       return;
     }
     setLoadingAttempts(true);
-    const token = getJwt();
-    apiListRecords<Record<string, unknown>>(
-      "exam_attempts",
-      { examId: selectedExamId },
-      token,
-    )
+    canisterService
+      .listRecords<Record<string, unknown>>("exam_attempts")
       .then((rows) => {
-        const mapped = rows.map((r) => {
+        const filtered = rows.filter(
+          (r) => String(r.examId ?? "") === selectedExamId,
+        );
+        const mapped = filtered.map((r) => {
           const student = students.find((s) => s.id === String(r.studentId));
           return {
             id: String(r.id ?? generateId()),
@@ -1539,25 +1522,20 @@ function ResultsDashboard() {
     const newScore = Number(overrideScore);
     if (Number.isNaN(newScore)) return;
     try {
-      const token = getJwt();
       const attempt = attempts.find((a) => a.id === attemptId);
       if (!attempt) return;
       const newPct = pct(newScore, attempt.totalMarks);
       const newPassed = selectedExam
         ? newPct >= selectedExam.passPercentage
         : false;
-      await apiUpdateRecord(
-        "exam_attempts",
-        attemptId,
-        {
-          score: newScore,
-          percentage: newPct,
-          passed: newPassed,
-          overrideReason,
-          overriddenAt: now(),
-        } as Record<string, unknown>,
-        token,
-      );
+      await canisterService.updateRecord("exam_attempts", attemptId, {
+        id: attemptId,
+        score: newScore,
+        percentage: newPct,
+        passed: newPassed,
+        overrideReason,
+        overriddenAt: now(),
+      } as Record<string, unknown>);
       setAttempts((prev) =>
         prev.map((a) =>
           a.id === attemptId

@@ -9,40 +9,114 @@
 import { IDL } from '@icp-sdk/core/candid';
 
 export const idlService = IDL.Service({
-  'batchUpsert' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
-  'createRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
-  'deleteRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
-  'fetchAll' : IDL.Func([], [IDL.Text], ['query']),
-  'getChangelog' : IDL.Func([], [IDL.Text], ['query']),
-  'getCounts' : IDL.Func([], [IDL.Text], ['query']),
-  'getRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
-  'listRecords' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
+  'batchUpsert' : IDL.Func(
+      [IDL.Text, IDL.Vec(IDL.Record({ 'id' : IDL.Text, 'data' : IDL.Text }))],
+      [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text, 'count' : IDL.Nat })],
+      [],
+    ),
+  'createRecord' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text],
+      [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+      [],
+    ),
+  'deleteCollection' : IDL.Func(
+      [IDL.Text],
+      [IDL.Record({ 'ok' : IDL.Bool, 'count' : IDL.Nat })],
+      [],
+    ),
+  'deleteRecord' : IDL.Func(
+      [IDL.Text, IDL.Text],
+      [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+      [],
+    ),
+  'exportAll' : IDL.Func(
+      [],
+      [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text))))],
+      ['query'],
+    ),
+  'getChangelog' : IDL.Func([IDL.Nat], [IDL.Vec(IDL.Text)], ['query']),
+  'getCounts' : IDL.Func(
+      [],
+      [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat))],
+      ['query'],
+    ),
+  'getRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Opt(IDL.Text)], ['query']),
+  'importAll' : IDL.Func(
+      [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text))))],
+      [IDL.Record({ 'ok' : IDL.Bool, 'count' : IDL.Nat })],
+      [],
+    ),
+  'listRecords' : IDL.Func([IDL.Text], [IDL.Vec(IDL.Text)], ['query']),
+  'listRecordsPaginated' : IDL.Func(
+      [IDL.Text, IDL.Nat, IDL.Nat],
+      [IDL.Record({ 'total' : IDL.Nat, 'records' : IDL.Vec(IDL.Text) })],
+      ['query'],
+    ),
   'ping' : IDL.Func([], [IDL.Text], ['query']),
-  'replaceCollection' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
-  'updateRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
-  'upsertRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
+  'updateRecord' : IDL.Func(
+      [IDL.Text, IDL.Text, IDL.Text],
+      [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+      [],
+    ),
 });
 
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
   return IDL.Service({
-    'batchUpsert' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
-    'createRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
-    'deleteRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
-    'fetchAll' : IDL.Func([], [IDL.Text], ['query']),
-    'getChangelog' : IDL.Func([], [IDL.Text], ['query']),
-    'getCounts' : IDL.Func([], [IDL.Text], ['query']),
-    'getRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
-    'listRecords' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
-    'ping' : IDL.Func([], [IDL.Text], ['query']),
-    'replaceCollection' : IDL.Func(
-        [IDL.Text, IDL.Vec(IDL.Text)],
-        [IDL.Nat],
+    'batchUpsert' : IDL.Func(
+        [IDL.Text, IDL.Vec(IDL.Record({ 'id' : IDL.Text, 'data' : IDL.Text }))],
+        [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text, 'count' : IDL.Nat })],
         [],
       ),
-    'updateRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
-    'upsertRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
+    'createRecord' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+        [],
+      ),
+    'deleteCollection' : IDL.Func(
+        [IDL.Text],
+        [IDL.Record({ 'ok' : IDL.Bool, 'count' : IDL.Nat })],
+        [],
+      ),
+    'deleteRecord' : IDL.Func(
+        [IDL.Text, IDL.Text],
+        [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+        [],
+      ),
+    'exportAll' : IDL.Func(
+        [],
+        [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text))))],
+        ['query'],
+      ),
+    'getChangelog' : IDL.Func([IDL.Nat], [IDL.Vec(IDL.Text)], ['query']),
+    'getCounts' : IDL.Func(
+        [],
+        [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Nat))],
+        ['query'],
+      ),
+    'getRecord' : IDL.Func(
+        [IDL.Text, IDL.Text],
+        [IDL.Opt(IDL.Text)],
+        ['query'],
+      ),
+    'importAll' : IDL.Func(
+        [IDL.Vec(IDL.Tuple(IDL.Text, IDL.Vec(IDL.Tuple(IDL.Text, IDL.Text))))],
+        [IDL.Record({ 'ok' : IDL.Bool, 'count' : IDL.Nat })],
+        [],
+      ),
+    'listRecords' : IDL.Func([IDL.Text], [IDL.Vec(IDL.Text)], ['query']),
+    'listRecordsPaginated' : IDL.Func(
+        [IDL.Text, IDL.Nat, IDL.Nat],
+        [IDL.Record({ 'total' : IDL.Nat, 'records' : IDL.Vec(IDL.Text) })],
+        ['query'],
+      ),
+    'ping' : IDL.Func([], [IDL.Text], ['query']),
+    'updateRecord' : IDL.Func(
+        [IDL.Text, IDL.Text, IDL.Text],
+        [IDL.Record({ 'ok' : IDL.Bool, 'err' : IDL.Text })],
+        [],
+      ),
   });
 };
 

@@ -1,155 +1,60 @@
-// Version: 1.0.0
+// Version: 3.0.0
+type Data__791452850<K, V> =
+  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type Internal__8484328<K, V> =
+  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
+type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
+type List__415060402<T> = List__790383201<T>;
+type List__790383201<T> =
+  {
+    var blockIndex : Nat__490723111;
+    var blocks : [var [var ?T]];
+    var elementIndex : Nat__490723111
+  };
+type Map__158565046<K, V> = Map__297112838<K, V>;
+type Map__297112838<K, V> =
+  {var root : Node__46230540<K, V>; var size : Nat__490723111};
+type Map__605269027<K, V> = Map__158565046<K, V>;
 type Nat__490723111 = Nat__920180692;
 type Nat__920180692 = Nat;
-actor {
-  stable alumni :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable attendance :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
+type Node__46230540<K, V> =
+  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+actor ({
+  in alumni : List__415060402<Text>;
+  in attendance : List__415060402<Text>;
+  in changelog : List__415060402<Text>;
+  in classes : List__415060402<Text>;
+  in examResults : List__415060402<Text>;
+  in examinations : List__415060402<Text>;
+  in expenseHeads : List__415060402<Text>;
+  in expenses : List__415060402<Text>;
+  in feeBalances : List__415060402<Text>;
+  in feeHeads : List__415060402<Text>;
+  in feeReceipts : List__415060402<Text>;
+  in feesPlan : List__415060402<Text>;
+  in homework : List__415060402<Text>;
+  in inventory : List__415060402<Text>;
+  in library : List__415060402<Text>;
+  in notices : List__415060402<Text>;
+  in payroll : List__415060402<Text>;
+  in payslips : List__415060402<Text>;
+  in pickupPoints : List__415060402<Text>;
+  in sections : List__415060402<Text>;
+  in sessions : List__415060402<Text>;
+  in staff : List__415060402<Text>;
+  in students : List__415060402<Text>;
+  in subjects : List__415060402<Text>;
+  in transport : List__415060402<Text>
+}, {
   stable changelog :
     {
       var blockIndex : Nat__490723111;
       var blocks : [var [var ?Text]];
       var elementIndex : Nat__490723111
     };
-  stable classes :
+  stable store :
     {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable examResults :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable examinations :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable expenseHeads :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable expenses :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable feeBalances :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable feeHeads :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable feeReceipts :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable feesPlan :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable homework :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable inventory :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable library :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable notices :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable payroll :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable payslips :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable pickupPoints :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable sections :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable sessions :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable staff :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable students :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable subjects :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
-    };
-  stable transport :
-    {
-      var blockIndex : Nat__490723111;
-      var blocks : [var [var ?Text]];
-      var elementIndex : Nat__490723111
+      var root : Node__46230540<Text, Map__605269027<Text, Text>>;
+      var size : Nat__490723111
     }
-};
+}) ;

@@ -1,14 +1,15 @@
 /**
- * SHUBH SCHOOL ERP — AppContext
+ * SHUBH SCHOOL ERP — AppContext (Canister-Native)
  *
- * LOCAL-FIRST sync pattern:
- * - On login: show locally cached data IMMEDIATELY (no blank screen)
- *   Then fetch fresh from server in background and merge
- * - On any change: write to localStorage FIRST → success to user immediately
- *   Then push to server in background via SyncQueue (persistent across refresh)
- * - NEVER rollback data — if server push fails, data stays in localStorage
- *   and retries automatically with exponential backoff
- * - SyncQueue persists across page refresh and browser crashes
+ * LOCAL-FIRST with Internet Computer canister backend:
+ * - On login: show locally cached data immediately (from syncEngine localStorage cache)
+ *   Then load fresh data from canister in background
+ * - All writes: instant locally via syncEngine → background canister push
+ * - No PHP, no MySQL, no JWT tokens, no serverUrl configuration
+ * - Auth: local password check only (canister auth is platform-managed)
+ *
+ * The canister actor is injected via canisterService.setActorProvider()
+ * so this context is pure React — no direct actor dependency.
  */
 
 import {
@@ -19,7 +20,6 @@ import {
   useEffect,
   useReducer,
   useRef,
-  useState,
 } from "react";
 import type {
   AppUser,
@@ -30,19 +30,14 @@ import type {
   SyncStatus,
   UserRole,
 } from "../types";
-import {
-  backendLogin,
-  clearTokens,
-  getJwt,
-  isApiConfigured,
-  setJwt,
-} from "../utils/api";
-import { generateId, ls } from "../utils/localStorage";
+import { generateId } from "../utils/canisterService";
+import { ls } from "../utils/localStorage";
 import { syncEngine } from "../utils/syncEngine";
 
-// ── Default permissions per role ─────────────────────────────────────────────
+// ── Default permissions per role ──────────────────────────────────────────────
+
 const ROLE_DEFAULTS: Record<UserRole, PermissionMatrix> = {
-  superadmin: {} as PermissionMatrix, // unrestricted — hasPermission always true
+  superadmin: {} as PermissionMatrix,
   admin: buildMatrix(true, true, true, true),
   teacher: buildMatrix(true, false, false, false),
   receptionist: buildMatrix(true, true, false, false),
@@ -89,27 +84,19 @@ function buildMatrix(
 // ── App state ─────────────────────────────────────────────────────────────────
 
 interface AppState {
-  // Auth
   currentUser: AppUser | null;
-  token: string | null;
-  // Init
   isInitializing: boolean;
   initError: string | null;
-  // Session
   currentSession: Session | null;
   sessions: Session[];
-  // Sync
   syncStatus: SyncStatus;
-  // Permissions
   permissions: PermissionMatrix;
-  // All data in memory (loaded from server on login)
   data: Record<string, unknown[]>;
-  // Notifications (in-memory only)
   notifications: Notification[];
 }
 
 type AppAction =
-  | { type: "SET_USER"; user: AppUser; token: string | null }
+  | { type: "SET_USER"; user: AppUser }
   | { type: "LOGOUT" }
   | { type: "SET_INIT_START" }
   | {
@@ -133,7 +120,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         currentUser: action.user,
-        token: action.token,
         isInitializing: true,
         initError: null,
         permissions:
@@ -142,10 +128,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       };
 
     case "LOGOUT":
-      return {
-        ...INITIAL_STATE,
-        notifications: [],
-      };
+      return { ...INITIAL_STATE, notifications: [] };
 
     case "SET_INIT_START":
       return { ...state, isInitializing: true, initError: null };
@@ -239,7 +222,6 @@ function makeDefaultSession(): Session {
 
 const INITIAL_STATE: AppState = {
   currentUser: null,
-  token: null,
   isInitializing: false,
   initError: null,
   currentSession: null,
@@ -256,7 +238,7 @@ const INITIAL_STATE: AppState = {
   notifications: [],
 };
 
-// ── Context value interface ────────────────────────────────────────────────────
+// ── Context value interface ───────────────────────────────────────────────────
 
 interface AppContextValue {
   currentUser: AppUser | null;
@@ -268,9 +250,7 @@ interface AppContextValue {
   canWrite: boolean;
   isSyncLoading: boolean;
   syncStatus: SyncStatus;
-  /** Real server counts (from MySQL COUNT(*)) for dashboard stat cards */
   serverCounts: Record<string, number>;
-  /** Legacy compatibility: counts from dataService cache */
   syncCounts: Record<string, number>;
   // Auth
   login: (username: string, password: string) => Promise<boolean>;
@@ -292,7 +272,7 @@ interface AppContextValue {
     module: string,
     action?: keyof Omit<Permission, "module">,
   ) => boolean;
-  // Data access (server-synced)
+  // Data access
   getData: (collection: string) => unknown[];
   saveData: (
     collection: string,
@@ -310,6 +290,7 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 // ── Hardcoded Super Admin ─────────────────────────────────────────────────────
+
 const SUPER_ADMIN: AppUser = {
   id: "su1",
   username: "superadmin",
@@ -347,7 +328,7 @@ function AppLoading({
         </div>
         <div className="text-center">
           <p className="text-xl font-bold text-foreground font-display tracking-tight">
-            SCHOOL LEDGER ERP
+            SHUBH SCHOOL ERP
           </p>
           {error ? (
             <>
@@ -382,81 +363,66 @@ function AppLoading({
   );
 }
 
-// ── AppProvider ────────────────────────────────────────────────────────────────
+// ── AppProvider ───────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const initStartedRef = useRef(false);
-
-  // ── Subscribe to SyncEngine status changes ─────────────────────────────────
-  // Keep a ref to current data so we can compare inside the subscription closure
-  // without re-registering the subscriber on every render.
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   });
 
+  // ── Subscribe to SyncEngine status changes ────────────────────────────────
   useEffect(() => {
     const unsub = syncEngine.subscribe(() => {
       dispatch({ type: "SET_SYNC_STATUS", status: syncEngine.getSyncStatus() });
-      // Only dispatch UPDATE_COLLECTION when data actually changed.
-      // This prevents constant re-renders that cause focus loss while typing.
+      // Propagate collection updates — skip if content unchanged to avoid focus loss
       const cache = syncEngine.getAllCache();
       for (const [collection, records] of Object.entries(cache)) {
-        if (Array.isArray(records)) {
-          const existing = stateRef.current.data[collection];
-          // Skip if same length AND same content (shallow JSON compare)
-          if (
-            Array.isArray(existing) &&
-            existing.length === records.length &&
-            JSON.stringify(existing) === JSON.stringify(records)
-          ) {
-            continue;
-          }
-          dispatch({ type: "UPDATE_COLLECTION", collection, records });
-        }
+        if (!Array.isArray(records)) continue;
+        const existing = stateRef.current.data[collection];
+        if (
+          Array.isArray(existing) &&
+          existing.length === records.length &&
+          JSON.stringify(existing) === JSON.stringify(records)
+        )
+          continue;
+        dispatch({ type: "UPDATE_COLLECTION", collection, records });
       }
     });
     return unsub;
   }, []);
 
-  // ── Subscribe to post-push collection updates from SyncEngine ─────────────
-  // When SyncEngine confirms a record was pushed to MySQL, it fires this callback
-  // with the server-confirmed + pending-merged data. We dispatch UPDATE_COLLECTION
-  // so the UI reflects the authoritative server state without losing pending records.
+  // ── Subscribe to post-push collection updates ─────────────────────────────
   useEffect(() => {
     const unsub = syncEngine.onCollectionUpdated((collection, records) => {
       const existing = stateRef.current.data[collection];
-      // Skip if content hasn't changed (avoid spurious re-renders)
       if (
         Array.isArray(existing) &&
         existing.length === records.length &&
         JSON.stringify(existing) === JSON.stringify(records)
-      ) {
+      )
         return;
-      }
       dispatch({ type: "UPDATE_COLLECTION", collection, records });
     });
     return unsub;
   }, []);
 
-  // ── Restore token from sessionStorage on page reload ──────────────────────
-  // Note: sessionStorage is per-tab — on page reload within same tab, it persists.
-  // This lets us re-initialize data without requiring re-login.
+  // ── Restore user from sessionStorage on page reload ───────────────────────
   useEffect(() => {
-    const storedToken = getJwt();
     const storedUserRaw = sessionStorage.getItem("shubh_current_user");
-    if (storedToken && storedUserRaw) {
+    if (storedUserRaw) {
       try {
         const user = JSON.parse(storedUserRaw) as AppUser;
-        dispatch({ type: "SET_USER", user, token: storedToken });
+        dispatch({ type: "SET_USER", user });
       } catch {
-        // corrupt storage — ignore, user will re-login
+        /* corrupt storage */
       }
     }
   }, []);
 
-  // ── Initialize: LOCAL-FIRST — show cached data immediately, fetch server in background ──
+  // ── Initialize: load canister data after login ────────────────────────────
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     if (initStartedRef.current) return;
@@ -464,97 +430,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       dispatch({ type: "SET_INIT_START" });
-
-      // ── OFFLINE / LOCAL-FIRST MODE ─────────────────────────────────────────
-      // When no MySQL server is configured (the default state), skip the
-      // server fetch entirely and render immediately from localStorage.
-      // This is what makes the preview work: no server call = no crash.
-      if (!isApiConfigured()) {
-        const localData: Record<string, unknown[]> = {};
-        // Load all known collections from localStorage cache
-        const knownCollections = [
-          "students",
-          "staff",
-          "sessions",
-          "classes",
-          "sections",
-          "subjects",
-          "attendance",
-          "fee_receipts",
-          "fees_plan",
-          "fee_heads",
-          "fee_headings",
-          "fee_balances",
-          "transport_routes",
-          "pickup_points",
-          "inventory_items",
-          "expenses",
-          "expense_heads",
-          "homework",
-          "alumni",
-          "payroll_setup",
-          "payslips",
-          "notices",
-          "examinations",
-          "exam_results",
-          "library",
-        ];
-        for (const col of knownCollections) {
-          const cached = localStorage.getItem(`erp_cache_${col}`);
-          if (cached) {
-            try {
-              const entry = JSON.parse(cached) as { data: unknown[] };
-              if (Array.isArray(entry.data)) localData[col] = entry.data;
-            } catch {
-              /* corrupt cache — skip */
-            }
-          }
-        }
-        const localSessions = localData.sessions as
-          | Array<{ id: string; label: string; isActive: boolean }>
-          | undefined;
-        const defaultSessions =
-          localSessions && localSessions.length > 0
-            ? (localSessions as Session[])
-            : [makeDefaultSession()];
-        syncEngine.setToken(null);
-        dispatch({
-          type: "SET_INIT_DONE",
-          data: localData,
-          sessions: defaultSessions,
-        });
-        return;
-      }
-
-      const token = state.token ?? getJwt();
-
-      if (!token) {
-        // No token and API is configured but not authenticated — use localStorage
-        const localSessions = ls.get<Session[]>("sessions", []);
-        const defaultSessions =
-          localSessions.length > 0 ? localSessions : [makeDefaultSession()];
-        dispatch({
-          type: "SET_INIT_DONE",
-          data: {},
-          sessions: defaultSessions,
-        });
-        syncEngine.setToken(null);
-        return;
-      }
-
       try {
-        // syncEngine.initialize() returns cached data IMMEDIATELY.
-        // Server fetch happens in background and merges via subscribers.
-        // This means the app renders instantly with cached data — no blank screen.
-        const allData = await syncEngine.initialize(token);
+        // syncEngine.initialize() loads localStorage cache instantly,
+        // then fetches from canister in background — no blank screen.
+        const allData = await syncEngine.initialize();
 
-        // Extract sessions from cached data
         const serverSessions = (allData.sessions ?? []) as Session[];
-
-        // If sessions table is empty, seed default session
         if (serverSessions.length === 0) {
           const defaultSession = makeDefaultSession();
-          // Save locally first (non-blocking)
           void syncEngine.saveRecord(
             "sessions",
             defaultSession as unknown as Record<string, unknown>,
@@ -563,52 +446,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
           serverSessions.push(defaultSession);
         }
 
-        // Render app with cached data immediately
         dispatch({
           type: "SET_INIT_DONE",
           data: allData,
           sessions: serverSessions,
         });
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Failed to connect to server";
+        const msg = err instanceof Error ? err.message : "Failed to load data";
         dispatch({ type: "SET_INIT_ERROR", error: msg });
         initStartedRef.current = false;
       }
     })();
-  }, [state.currentUser, state.isInitializing, state.token]);
+  }, [state.currentUser, state.isInitializing]);
 
-  // ── Login ──────────────────────────────────────────────────────────────────
+  // ── Login ─────────────────────────────────────────────────────────────────
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
-      // 1. Super Admin — local check first, then server for JWT
+      // 1. Super Admin — local password check
       if (username === "superadmin") {
         const passwords = ls.get<Record<string, string>>("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
         if (password !== validPw) return false;
-
-        let token = getJwt();
-        // Try backend login in background to get JWT
-        if (isApiConfigured()) {
-          void backendLogin(username, password).then((res) => {
-            if (res.success && res.token) {
-              setJwt(res.token);
-              syncEngine.setToken(res.token);
-            }
-          });
-          token = token ?? null;
-        }
-
         sessionStorage.setItem(
           "shubh_current_user",
           JSON.stringify(SUPER_ADMIN),
         );
         initStartedRef.current = false;
-        dispatch({ type: "SET_USER", user: SUPER_ADMIN, token });
+        dispatch({ type: "SET_USER", user: SUPER_ADMIN });
         return true;
       }
 
-      // 2. Custom staff users (localStorage)
+      // 2. Custom staff users
       const customUsers = ls.get<Array<AppUser & { password?: string }>>(
         "custom_users",
         [],
@@ -629,12 +497,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           };
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
           initStartedRef.current = false;
-          dispatch({ type: "SET_USER", user, token: null });
+          dispatch({ type: "SET_USER", user });
           return true;
         }
       }
 
-      // 3. Staff (Teacher/Driver) — username=mobile, password=dob ddmmyyyy
+      // 3. Staff (Teacher/Driver/etc.)
       const staffList = ls.get<
         Array<{
           id: string;
@@ -662,23 +530,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
                 : designation === "receptionist"
                   ? "receptionist"
                   : "teacher";
-        const staffDisplayName = staffMember.name ?? "Staff";
         const user: AppUser = {
           id: staffMember.id,
           username,
           role,
-          fullName: staffDisplayName,
-          name: staffDisplayName,
+          fullName: staffMember.name ?? "Staff",
+          name: staffMember.name ?? "Staff",
           staffId: staffMember.id,
           mobile: staffMember.mobile,
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        dispatch({ type: "SET_USER", user, token: null });
+        dispatch({ type: "SET_USER", user });
         return true;
       }
 
-      // 4. Students — username=admNo, password=dob ddmmyyyy
+      // 4. Students
       const students = ls.get<
         Array<{
           id: string;
@@ -693,22 +560,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
           s.credentials?.password === password,
       );
       if (student) {
-        const studentDisplayName = student.fullName ?? "Student";
         const user: AppUser = {
           id: student.id,
           username,
           role: "student",
-          fullName: studentDisplayName,
-          name: studentDisplayName,
+          fullName: student.fullName ?? "Student",
+          name: student.fullName ?? "Student",
           studentId: student.id,
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        dispatch({ type: "SET_USER", user, token: null });
+        dispatch({ type: "SET_USER", user });
         return true;
       }
 
-      // 5. Parent — username=guardianMobile, password=guardianMobile
+      // 5. Parent — mobile as both username and password
       const parent = students.find((s) => {
         const raw = s as unknown as {
           guardianMobile?: string;
@@ -725,46 +591,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           fatherName?: string;
         };
         const mob = raw.guardianMobile ?? raw.fatherMobile ?? username;
-        const parentDisplayName =
-          raw.guardianName ?? raw.fatherName ?? "Parent";
         const user: AppUser = {
           id: `parent_${mob}`,
           username,
           role: "parent",
-          fullName: parentDisplayName,
-          name: parentDisplayName,
+          fullName: raw.guardianName ?? raw.fatherName ?? "Parent",
+          name: raw.guardianName ?? raw.fatherName ?? "Parent",
           mobile: mob,
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        dispatch({ type: "SET_USER", user, token: null });
+        dispatch({ type: "SET_USER", user });
         return true;
-      }
-
-      // 6. Server-side fallback — validate against MySQL users table.
-      // Used for staff/teachers/parents who exist only on the server (fresh device).
-      if (isApiConfigured()) {
-        try {
-          const result = await backendLogin(username, password);
-          if (result.success && result.token) {
-            setJwt(result.token);
-            syncEngine.setToken(result.token);
-            const serverRole = (result.role ?? "teacher") as UserRole;
-            const user: AppUser = {
-              id: `server_${username}`,
-              username,
-              role: serverRole,
-              fullName: username,
-              name: username,
-            };
-            sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-            initStartedRef.current = false;
-            dispatch({ type: "SET_USER", user, token: result.token });
-            return true;
-          }
-        } catch {
-          // Server unreachable — fall through to return false
-        }
       }
 
       return false;
@@ -774,19 +612,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");
-    clearTokens();
     syncEngine.reset();
     initStartedRef.current = false;
     dispatch({ type: "LOGOUT" });
   }, []);
 
-  // ── Retry init (when server was unreachable) ───────────────────────────────
   const retryInit = useCallback(() => {
     initStartedRef.current = false;
     dispatch({ type: "SET_INIT_START" });
   }, []);
 
-  // Expose addNotification globally for non-React code
   const addNotification = useCallback(
     (message: string, type: Notification["type"] = "info", icon?: string) => {
       const notif: Notification = {
@@ -870,7 +705,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     };
     dispatch({ type: "ADD_SESSION", session });
-    // Save to server
     void syncEngine.saveRecord(
       "sessions",
       session as unknown as Record<string, unknown>,
@@ -903,11 +737,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.currentUser, state.permissions],
   );
 
-  // ── Data access (server-synced) ────────────────────────────────────────────
+  // ── Data access ───────────────────────────────────────────────────────────
 
   const getData = useCallback(
     (collection: string): unknown[] => {
-      // Prefer state.data (loaded from server), fall back to SyncEngine cache
       const fromState = state.data[collection];
       if (fromState && fromState.length > 0) return fromState;
       return syncEngine.getCache(collection);
@@ -915,143 +748,78 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.data],
   );
 
-  // ── refreshCollection ──────────────────────────────────────────────────────
-  // Pulls fresh data from MySQL for a single collection and updates context.
-  // Called after every mutation (create/update/delete) so the UI immediately
-  // reflects what's actually in the database.
   const refreshCollection = useCallback(
     async (collection: string): Promise<void> => {
-      const token = state.token ?? getJwt();
-      syncEngine.setToken(token);
-      try {
-        const rows = await syncEngine.refreshCollection(collection);
-        dispatch({
-          type: "UPDATE_COLLECTION",
-          collection,
-          records: rows as unknown[],
-        });
-      } catch {
-        // If refresh fails, fall back to current cache — do NOT clear data
-        const rows = syncEngine.getCache(collection);
-        dispatch({
-          type: "UPDATE_COLLECTION",
-          collection,
-          records: rows,
-        });
-      }
+      const rows = await syncEngine.refreshCollection(collection);
+      dispatch({
+        type: "UPDATE_COLLECTION",
+        collection,
+        records: rows as unknown[],
+      });
     },
-    [state.token],
+    [],
   );
 
-  // ── saveData — LOCAL-FIRST create ────────────────────────────────────────
-  // Pattern:
-  //   1. Write to localStorage immediately (permanent — never lost)
-  //   2. Update in-memory cache → UI re-renders instantly via SyncEngine subscriber
-  //   3. Return success to caller IMMEDIATELY (no waiting for server)
-  //   4. Server push happens in background via SyncQueue
-  //   5. After server confirms, SyncEngine fires onCollectionUpdated → UI updates again
-  //   6. NEVER rollback — data stays in localStorage even if server fails
-  //
-  // NOTE: We do NOT call refreshCollection() here — that would race against the
-  // background push and overwrite the local record with stale server data.
-  // The SyncEngine subscriber (above) will dispatch UPDATE_COLLECTION from the
-  // local cache immediately. The post-push refresh happens via onCollectionUpdated.
   const saveData = useCallback(
     async (
       collection: string,
       item: Record<string, unknown>,
     ): Promise<Record<string, unknown>> => {
-      const token = state.token ?? getJwt();
-      syncEngine.setToken(token);
-
-      // saveRecord() writes to localStorage + cache first, then pushes to server
-      // in background. Returns immediately — no awaiting server.
       const saved = await syncEngine.saveRecord(collection, item, "create");
-
-      // Dispatch the local cache immediately so the UI shows the new record
-      // without waiting for any server response.
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getLocalCollection(collection),
       });
-
-      // NO void refreshCollection() here — that is the root cause of the
-      // disappearing-record bug. Server fetch will happen after pushQueueEntry
-      // succeeds, via onCollectionUpdated callback registered above.
-
       return saved;
     },
-    [state.token],
+    [],
   );
 
-  // ── updateData — LOCAL-FIRST edit ──────────────────────────────────────────
   const updateData = useCallback(
     async (
       collection: string,
       id: string,
       changes: Record<string, unknown>,
     ): Promise<void> => {
-      const token = state.token ?? getJwt();
-      syncEngine.setToken(token);
-
       const existing = syncEngine.getCache(collection) as Array<
         Record<string, unknown>
       >;
       const currentRecord = existing.find((r) => r.id === id);
       const merged = { ...(currentRecord ?? {}), ...changes, id };
-
-      // Write locally + queue for background push
       await syncEngine.saveRecord(collection, merged, "update");
-
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getLocalCollection(collection),
       });
-
-      // NO void refreshCollection() — same reason as saveData above.
     },
-    [state.token],
+    [],
   );
 
-  // ── deleteData — LOCAL-FIRST delete ──────────────────────────────────────
   const deleteData = useCallback(
     async (collection: string, id: string): Promise<void> => {
-      const token = state.token ?? getJwt();
-      syncEngine.setToken(token);
-
-      // Remove from cache immediately + queue delete for background push
       await syncEngine.saveRecord(collection, { id }, "delete");
-
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
         records: syncEngine.getLocalCollection(collection),
       });
-
-      // For deletes, it's safe to refresh after the local remove since the
-      // record is already gone locally — no race condition.
       void refreshCollection(collection);
     },
-    [state.token, refreshCollection],
+    [refreshCollection],
   );
 
-  // ── Computed values ────────────────────────────────────────────────────────
+  // ── Computed ──────────────────────────────────────────────────────────────
+
   const isReadOnly = state.currentSession?.isArchived ?? false;
   const canWrite = !isReadOnly || state.currentUser?.role === "superadmin";
   const unreadCount = state.notifications.filter((n) => !n.isRead).length;
   const isSyncLoading = state.syncStatus.state === "loading";
   const serverCounts = state.syncStatus.serverCounts;
-  // Legacy compat: build syncCounts from data keys
   const syncCounts: Record<string, number> = {};
-  for (const [k, v] of Object.entries(state.data)) {
-    syncCounts[k] = v.length;
-  }
+  for (const [k, v] of Object.entries(state.data)) syncCounts[k] = v.length;
 
-  // ── LOCAL-FIRST: Only show loading screen when we have NO cached data ──────
-  // If we have cached data, render the app immediately.
-  // The server fetch happening in background will update via subscribers.
   const hasCachedData = Object.keys(state.data).length > 0;
   const showLoading =
     state.currentUser !== null && state.isInitializing && !hasCachedData;
@@ -1108,7 +876,7 @@ export function useApp() {
   return ctx;
 }
 
-// ── Type alias for credentials used in login checks ──────────────────────────
+// ── Type alias ────────────────────────────────────────────────────────────────
 interface Credentials {
   username: string;
   password: string;

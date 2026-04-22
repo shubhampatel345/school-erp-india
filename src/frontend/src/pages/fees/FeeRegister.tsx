@@ -167,7 +167,7 @@ export default function FeeRegister() {
   async function handleDelete(id: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-    await deleteData("feeReceipts", id);
+    await deleteData("fee_receipts", id);
     setDetailOpen(false);
     addNotification("Receipt deleted", "info");
   }
@@ -176,7 +176,7 @@ export default function FeeRegister() {
     if (!editTarget) return;
     const newAmount = Number(editAmount);
     if (Number.isNaN(newAmount) || newAmount <= 0) return;
-    await updateData("feeReceipts", editTarget.id, {
+    await updateData("fee_receipts", editTarget.id, {
       paymentMode: editMode,
       totalAmount: newAmount,
       paidAmount: newAmount,
