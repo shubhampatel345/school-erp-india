@@ -1,3 +1,25 @@
 service : {
+  /// Batch upsert array of JSON records. Returns count upserted.
+  batchUpsert: (collection: text, recordsJson: vec text) -> (nat);
+  /// Create a new record. Returns "ok".
+  createRecord: (collection: text, recordJson: text) -> (text);
+  /// Delete a record by id. Returns "ok" or "not_found".
+  deleteRecord: (collection: text, id: text) -> (text);
+  /// Fetch all collections in one shot (WhatsApp-style initial load).
+  fetchAll: () -> (text) query;
+  /// Return recent changelog entries as JSON array (last 100)
+  getChangelog: () -> (text) query;
+  /// Return record counts for all collections (for dashboard stats)
+  getCounts: () -> (text) query;
+  /// Return a single record by id (JSON string or empty string if not found)
+  getRecord: (collection: text, id: text) -> (text) query;
+  /// Return all records in a collection as a JSON array string
+  listRecords: (collection: text) -> (text) query;
   ping: () -> (text) query;
+  /// Replace entire collection with new records. Returns count.
+  replaceCollection: (collection: text, recordsJson: vec text) -> (nat);
+  /// Update an existing record by id. Returns "ok" or "not_found".
+  updateRecord: (collection: text, id: text, recordJson: text) -> (text);
+  /// Upsert a record: update if id exists, create otherwise. Returns "ok".
+  upsertRecord: (collection: text, id: text, recordJson: text) -> (text);
 }

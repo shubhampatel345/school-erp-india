@@ -9,13 +9,41 @@
 import { IDL } from '@icp-sdk/core/candid';
 
 export const idlService = IDL.Service({
+  'batchUpsert' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
+  'createRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+  'deleteRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+  'fetchAll' : IDL.Func([], [IDL.Text], ['query']),
+  'getChangelog' : IDL.Func([], [IDL.Text], ['query']),
+  'getCounts' : IDL.Func([], [IDL.Text], ['query']),
+  'getRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
+  'listRecords' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
   'ping' : IDL.Func([], [IDL.Text], ['query']),
+  'replaceCollection' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
+  'updateRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
+  'upsertRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
 });
 
 export const idlInitArgs = [];
 
 export const idlFactory = ({ IDL }) => {
-  return IDL.Service({ 'ping' : IDL.Func([], [IDL.Text], ['query']) });
+  return IDL.Service({
+    'batchUpsert' : IDL.Func([IDL.Text, IDL.Vec(IDL.Text)], [IDL.Nat], []),
+    'createRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'deleteRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], []),
+    'fetchAll' : IDL.Func([], [IDL.Text], ['query']),
+    'getChangelog' : IDL.Func([], [IDL.Text], ['query']),
+    'getCounts' : IDL.Func([], [IDL.Text], ['query']),
+    'getRecord' : IDL.Func([IDL.Text, IDL.Text], [IDL.Text], ['query']),
+    'listRecords' : IDL.Func([IDL.Text], [IDL.Text], ['query']),
+    'ping' : IDL.Func([], [IDL.Text], ['query']),
+    'replaceCollection' : IDL.Func(
+        [IDL.Text, IDL.Vec(IDL.Text)],
+        [IDL.Nat],
+        [],
+      ),
+    'updateRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
+    'upsertRecord' : IDL.Func([IDL.Text, IDL.Text, IDL.Text], [IDL.Text], []),
+  });
 };
 
 export const init = ({ IDL }) => { return []; };

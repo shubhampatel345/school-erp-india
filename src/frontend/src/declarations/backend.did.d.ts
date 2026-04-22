@@ -10,7 +10,53 @@ import type { ActorMethod } from '@icp-sdk/core/agent';
 import type { IDL } from '@icp-sdk/core/candid';
 import type { Principal } from '@icp-sdk/core/principal';
 
-export interface _SERVICE { 'ping' : ActorMethod<[], string> }
+export interface _SERVICE {
+  /**
+   * / Batch upsert array of JSON records. Returns count upserted.
+   */
+  'batchUpsert' : ActorMethod<[string, Array<string>], bigint>,
+  /**
+   * / Create a new record. Returns "ok".
+   */
+  'createRecord' : ActorMethod<[string, string], string>,
+  /**
+   * / Delete a record by id. Returns "ok" or "not_found".
+   */
+  'deleteRecord' : ActorMethod<[string, string], string>,
+  /**
+   * / Fetch all collections in one shot (WhatsApp-style initial load).
+   */
+  'fetchAll' : ActorMethod<[], string>,
+  /**
+   * / Return recent changelog entries as JSON array (last 100)
+   */
+  'getChangelog' : ActorMethod<[], string>,
+  /**
+   * / Return record counts for all collections (for dashboard stats)
+   */
+  'getCounts' : ActorMethod<[], string>,
+  /**
+   * / Return a single record by id (JSON string or empty string if not found)
+   */
+  'getRecord' : ActorMethod<[string, string], string>,
+  /**
+   * / Return all records in a collection as a JSON array string
+   */
+  'listRecords' : ActorMethod<[string], string>,
+  'ping' : ActorMethod<[], string>,
+  /**
+   * / Replace entire collection with new records. Returns count.
+   */
+  'replaceCollection' : ActorMethod<[string, Array<string>], bigint>,
+  /**
+   * / Update an existing record by id. Returns "ok" or "not_found".
+   */
+  'updateRecord' : ActorMethod<[string, string, string], string>,
+  /**
+   * / Upsert a record: update if id exists, create otherwise. Returns "ok".
+   */
+  'upsertRecord' : ActorMethod<[string, string, string], string>,
+}
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];
 export declare const idlFactory: IDL.InterfaceFactory;

@@ -90,10 +90,166 @@ export class ExternalBlob {
     }
 }
 export interface backendInterface {
+    /**
+     * / Batch upsert array of JSON records. Returns count upserted.
+     */
+    batchUpsert(collection: string, recordsJson: Array<string>): Promise<bigint>;
+    /**
+     * / Create a new record. Returns "ok".
+     */
+    createRecord(collection: string, recordJson: string): Promise<string>;
+    /**
+     * / Delete a record by id. Returns "ok" or "not_found".
+     */
+    deleteRecord(collection: string, id: string): Promise<string>;
+    /**
+     * / Fetch all collections in one shot (WhatsApp-style initial load).
+     */
+    fetchAll(): Promise<string>;
+    /**
+     * / Return recent changelog entries as JSON array (last 100)
+     */
+    getChangelog(): Promise<string>;
+    /**
+     * / Return record counts for all collections (for dashboard stats)
+     */
+    getCounts(): Promise<string>;
+    /**
+     * / Return a single record by id (JSON string or empty string if not found)
+     */
+    getRecord(collection: string, id: string): Promise<string>;
+    /**
+     * / Return all records in a collection as a JSON array string
+     */
+    listRecords(collection: string): Promise<string>;
     ping(): Promise<string>;
+    /**
+     * / Replace entire collection with new records. Returns count.
+     */
+    replaceCollection(collection: string, recordsJson: Array<string>): Promise<bigint>;
+    /**
+     * / Update an existing record by id. Returns "ok" or "not_found".
+     */
+    updateRecord(collection: string, id: string, recordJson: string): Promise<string>;
+    /**
+     * / Upsert a record: update if id exists, create otherwise. Returns "ok".
+     */
+    upsertRecord(collection: string, id: string, recordJson: string): Promise<string>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async batchUpsert(arg0: string, arg1: Array<string>): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.batchUpsert(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.batchUpsert(arg0, arg1);
+            return result;
+        }
+    }
+    async createRecord(arg0: string, arg1: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.createRecord(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.createRecord(arg0, arg1);
+            return result;
+        }
+    }
+    async deleteRecord(arg0: string, arg1: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.deleteRecord(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.deleteRecord(arg0, arg1);
+            return result;
+        }
+    }
+    async fetchAll(): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.fetchAll();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.fetchAll();
+            return result;
+        }
+    }
+    async getChangelog(): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getChangelog();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getChangelog();
+            return result;
+        }
+    }
+    async getCounts(): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getCounts();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getCounts();
+            return result;
+        }
+    }
+    async getRecord(arg0: string, arg1: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getRecord(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getRecord(arg0, arg1);
+            return result;
+        }
+    }
+    async listRecords(arg0: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.listRecords(arg0);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.listRecords(arg0);
+            return result;
+        }
+    }
     async ping(): Promise<string> {
         if (this.processError) {
             try {
@@ -105,6 +261,48 @@ export class Backend implements backendInterface {
             }
         } else {
             const result = await this.actor.ping();
+            return result;
+        }
+    }
+    async replaceCollection(arg0: string, arg1: Array<string>): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.replaceCollection(arg0, arg1);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.replaceCollection(arg0, arg1);
+            return result;
+        }
+    }
+    async updateRecord(arg0: string, arg1: string, arg2: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.updateRecord(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.updateRecord(arg0, arg1, arg2);
+            return result;
+        }
+    }
+    async upsertRecord(arg0: string, arg1: string, arg2: string): Promise<string> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.upsertRecord(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.upsertRecord(arg0, arg1, arg2);
             return result;
         }
     }

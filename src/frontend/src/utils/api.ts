@@ -85,8 +85,21 @@ export function setApiUrl(rawUrl: string) {
   localStorage.setItem(KEY_API_BASE, clean);
 }
 
+/**
+ * Returns true ONLY when the user has explicitly stored a custom server URL
+ * in localStorage. Returns false for the default (shubh.psmkgs.com) so the
+ * app renders in offline/local-first mode instead of crashing trying to
+ * reach a MySQL server that may not exist.
+ *
+ * This is the root fix for the "preview is blank" bug: previously this
+ * always returned true (hardcoded default URL), causing syncEngine to call
+ * the MySQL API on every load, which failed with CORS/network errors and
+ * left the app stuck on the loading screen.
+ */
 export function isApiConfigured(): boolean {
-  return getBaseUrl().length > 0;
+  const stored = localStorage.getItem(KEY_API_BASE);
+  // Only configured when the user has explicitly set a URL
+  return stored !== null && stored.trim().length > 0;
 }
 
 // ── JWT helpers ────────────────────────────────────────────

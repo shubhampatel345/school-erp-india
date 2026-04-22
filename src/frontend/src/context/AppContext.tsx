@@ -465,10 +465,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void (async () => {
       dispatch({ type: "SET_INIT_START" });
 
+      // ── OFFLINE / LOCAL-FIRST MODE ─────────────────────────────────────────
+      // When no MySQL server is configured (the default state), skip the
+      // server fetch entirely and render immediately from localStorage.
+      // This is what makes the preview work: no server call = no crash.
+      if (!isApiConfigured()) {
+        const localData: Record<string, unknown[]> = {};
+        // Load all known collections from localStorage cache
+        const knownCollections = [
+          "students",
+          "staff",
+          "sessions",
+          "classes",
+          "sections",
+          "subjects",
+          "attendance",
+          "fee_receipts",
+          "fees_plan",
+          "fee_heads",
+          "fee_headings",
+          "fee_balances",
+          "transport_routes",
+          "pickup_points",
+          "inventory_items",
+          "expenses",
+          "expense_heads",
+          "homework",
+          "alumni",
+          "payroll_setup",
+          "payslips",
+          "notices",
+          "examinations",
+          "exam_results",
+          "library",
+        ];
+        for (const col of knownCollections) {
+          const cached = localStorage.getItem(`erp_cache_${col}`);
+          if (cached) {
+            try {
+              const entry = JSON.parse(cached) as { data: unknown[] };
+              if (Array.isArray(entry.data)) localData[col] = entry.data;
+            } catch {
+              /* corrupt cache — skip */
+            }
+          }
+        }
+        const localSessions = localData.sessions as
+          | Array<{ id: string; label: string; isActive: boolean }>
+          | undefined;
+        const defaultSessions =
+          localSessions && localSessions.length > 0
+            ? (localSessions as Session[])
+            : [makeDefaultSession()];
+        syncEngine.setToken(null);
+        dispatch({
+          type: "SET_INIT_DONE",
+          data: localData,
+          sessions: defaultSessions,
+        });
+        return;
+      }
+
       const token = state.token ?? getJwt();
 
-      if (!isApiConfigured() || !token) {
-        // Offline mode — use localStorage fallback immediately
+      if (!token) {
+        // No token and API is configured but not authenticated — use localStorage
         const localSessions = ls.get<Session[]>("sessions", []);
         const defaultSessions =
           localSessions.length > 0 ? localSessions : [makeDefaultSession()];
