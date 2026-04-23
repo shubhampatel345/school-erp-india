@@ -581,6 +581,29 @@ export default function Students({ onNavigate }: StudentsProps) {
     URL.revokeObjectURL(url);
   }
 
+  async function handleExportExcel() {
+    try {
+      const { utils, writeFile } = await import("xlsx");
+      const cols = PRINT_COLS;
+      const header = cols.map((c) => c.label);
+      const rows = filtered.map((s) => cols.map((c) => getCellValue(s, c.key)));
+      const ws = utils.aoa_to_sheet([header, ...rows]);
+      // Auto-fit column widths
+      ws["!cols"] = header.map((h, i) => ({
+        wch: Math.max(
+          h.length + 2,
+          ...rows.map((r) => (r[i]?.length ?? 0) + 1),
+        ),
+      }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, "Students");
+      writeFile(wb, `Students_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch {
+      // fallback to CSV if xlsx fails
+      handleExportCSV();
+    }
+  }
+
   function toggleCol(key: string) {
     setVisibleCols((prev) =>
       prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
@@ -744,6 +767,14 @@ export default function Students({ onNavigate }: StudentsProps) {
             </Button>
             <Button size="sm" variant="outline" onClick={handleExportCSV}>
               <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => void handleExportExcel()}
+              data-ocid="students.excel_export_button"
+            >
+              <Download className="w-3.5 h-3.5 mr-1" /> Export Excel
             </Button>
             <Button
               size="sm"

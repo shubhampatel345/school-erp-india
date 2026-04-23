@@ -1,10 +1,9 @@
 /**
  * SHUBH SCHOOL ERP — Canister Sync Status Hook
  *
- * Replaces the old MySQL/cPanel polling hook.
  * - Reads sync state from syncEngine (canister-native)
  * - Fetches getCounts() from canister every 30 s
- * - Exposes triggerFullSync() to manually reload all collections
+ * - Exposes triggerSync() to manually reload all collections
  *
  * No JWT, no PHP, no server URL configuration needed.
  */
@@ -19,7 +18,7 @@ export type SyncMode =
   | "connected" // canister reachable, data loaded
   | "syncing" // in-flight canister fetch
   | "offline" // no network or canister unreachable
-  | "auth_error"; // kept for backward compat — canister has no auth errors
+  | "auth_error"; // kept for backward compat
 
 export interface SyncState {
   mode: SyncMode;
@@ -28,7 +27,6 @@ export interface SyncState {
   isSynced: boolean;
   isPolling: boolean;
   needsAuth: boolean;
-  /** Version info — null for canister (no version endpoint like PHP) */
   serverInfo: {
     version?: string;
     db_version?: string;
@@ -69,6 +67,9 @@ export function useSync(): SyncState {
       } else if (status.state === "loading") {
         setMode("syncing");
       } else if (status.state === "offline") {
+        setMode("offline");
+        setLastSyncError(status.lastError);
+      } else if (status.state === "error") {
         setMode("offline");
         setLastSyncError(status.lastError);
       }

@@ -1,133 +1,144 @@
+/**
+ * Attendance — Main module shell for SHUBH SCHOOL ERP
+ * Tabs: Daily Attendance | QR/RFID Scanner | Face Recognition | Welcome Display | Summary | Settings
+ */
 import { Badge } from "@/components/ui/badge";
 import {
   Brain,
-  ClipboardList,
-  Cpu,
-  Fingerprint,
+  CalendarCheck,
   Monitor,
   PieChart,
   QrCode,
+  Settings,
 } from "lucide-react";
 import { useState } from "react";
+import ErrorBoundary from "../components/ErrorBoundary";
+import AttendanceSettings from "./attendance/AttendanceSettings";
 import AttendanceSummary from "./attendance/AttendanceSummary";
-import BiometricDevices from "./attendance/BiometricDevices";
-import FaceAttendance from "./attendance/FaceAttendance";
-import ManualAttendance from "./attendance/ManualAttendance";
-import QRAttendance from "./attendance/QRAttendance";
-import RFIDAttendance from "./attendance/RFIDAttendance";
+import DailyAttendance from "./attendance/DailyAttendance";
+import FaceRecognition from "./attendance/FaceRecognition";
+import QRScanner from "./attendance/QRScanner";
 import WelcomeDisplay from "./attendance/WelcomeDisplay";
 
 const TABS = [
-  { id: "manual", label: "Manual Entry", icon: ClipboardList },
-  { id: "rfid", label: "RFID / Biometric", icon: Fingerprint },
-  { id: "qr", label: "QR Scanner", icon: QrCode },
-  { id: "face", label: "Face Recognition", icon: Brain },
-  { id: "display", label: "Welcome Display", icon: Monitor },
-  { id: "summary", label: "Summary", icon: PieChart },
-  { id: "biometric", label: "Biometric Devices", icon: Cpu },
+  {
+    id: "daily",
+    label: "Daily Attendance",
+    short: "Daily",
+    icon: CalendarCheck,
+  },
+  { id: "qr", label: "QR / RFID", short: "QR", icon: QrCode, badge: "Scanner" },
+  {
+    id: "face",
+    label: "Face Recognition",
+    short: "Face",
+    icon: Brain,
+    badge: "AI",
+  },
+  {
+    id: "display",
+    label: "Welcome Display",
+    short: "Display",
+    icon: Monitor,
+    badge: "TV",
+  },
+  { id: "summary", label: "Reports", short: "Reports", icon: PieChart },
+  { id: "settings", label: "Settings", short: "Settings", icon: Settings },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
 
 export default function Attendance() {
-  const [activeTab, setActiveTab] = useState<TabId>("manual");
+  const [activeTab, setActiveTab] = useState<TabId>("daily");
   const [date, setDate] = useState(
     () => new Date().toISOString().split("T")[0],
   );
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
-      <div>
-        <h1 className="text-2xl font-bold font-display text-foreground">
-          Attendance
-        </h1>
-        <p className="text-muted-foreground text-sm mt-0.5">
-          Track student and staff attendance via manual entry, QR code, RFID,
-          and biometric scanning
-        </p>
+    <div className="flex flex-col h-full">
+      {/* Header */}
+      <div className="bg-card border-b px-4 lg:px-6 pt-5 pb-0">
+        <div className="mb-3">
+          <h1 className="text-xl font-bold font-display text-foreground">
+            Attendance
+          </h1>
+          <p className="text-muted-foreground text-sm mt-0.5">
+            Daily entry, QR scanning, and AI face recognition
+          </p>
+        </div>
+
+        {/* Tab bar */}
+        <div
+          className="flex gap-0 overflow-x-auto scrollbar-thin"
+          role="tablist"
+          aria-label="Attendance navigation"
+        >
+          {TABS.map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-ocid={`attendance.${tab.id}.tab`}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors flex-shrink-0 ${
+                  active
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
+                }`}
+              >
+                <Icon className="w-4 h-4 flex-shrink-0" />
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.short}</span>
+                {"badge" in tab && (
+                  <Badge
+                    variant="secondary"
+                    className="text-xs px-1.5 py-0 hidden sm:inline-flex"
+                  >
+                    {tab.badge}
+                  </Badge>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      <div
-        className="flex gap-1 bg-muted/50 rounded-xl p-1 flex-wrap"
-        role="tablist"
-      >
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              data-ocid={`attendance.${tab.id}.tab`}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all flex-1 justify-center min-w-[100px] ${
-                active
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              <span className="hidden sm:inline">{tab.label}</span>
-              <span className="sm:hidden">
-                {tab.id === "manual"
-                  ? "Manual"
-                  : tab.id === "rfid"
-                    ? "RFID"
-                    : tab.id === "qr"
-                      ? "QR"
-                      : tab.id === "face"
-                        ? "Face"
-                        : tab.id === "display"
-                          ? "Display"
-                          : tab.id === "biometric"
-                            ? "Devices"
-                            : "Summary"}
-              </span>
-              {tab.id === "face" && (
-                <Badge
-                  variant="secondary"
-                  className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
-                >
-                  AI
-                </Badge>
-              )}
-              {tab.id === "display" && (
-                <Badge
-                  variant="secondary"
-                  className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
-                >
-                  TV
-                </Badge>
-              )}
-              {tab.id === "biometric" && (
-                <Badge
-                  variant="secondary"
-                  className="text-xs px-1.5 py-0 ml-1 hidden sm:inline-flex"
-                >
-                  ESSL
-                </Badge>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      <div>
-        {activeTab === "manual" && (
-          <ManualAttendance date={date} onDateChange={setDate} />
+      {/* Tab content */}
+      <div className="flex-1 overflow-auto animate-fade-in">
+        {activeTab === "daily" && (
+          <ErrorBoundary key="daily">
+            <DailyAttendance date={date} onDateChange={setDate} />
+          </ErrorBoundary>
         )}
-        {activeTab === "rfid" && (
-          <RFIDAttendance date={date} onDateChange={setDate} />
+        {activeTab === "qr" && (
+          <ErrorBoundary key="qr">
+            <QRScanner date={date} />
+          </ErrorBoundary>
         )}
-        {activeTab === "qr" && <QRAttendance date={date} />}
-        {activeTab === "face" && <FaceAttendance date={date} />}
-        {activeTab === "display" && <WelcomeDisplay />}
+        {activeTab === "face" && (
+          <ErrorBoundary key="face">
+            <FaceRecognition date={date} />
+          </ErrorBoundary>
+        )}
+        {activeTab === "display" && (
+          <ErrorBoundary key="display">
+            <WelcomeDisplay />
+          </ErrorBoundary>
+        )}
         {activeTab === "summary" && (
-          <AttendanceSummary date={date} onDateChange={setDate} />
+          <ErrorBoundary key="summary">
+            <AttendanceSummary date={date} onDateChange={setDate} />
+          </ErrorBoundary>
         )}
-        {activeTab === "biometric" && <BiometricDevices />}
+        {activeTab === "settings" && (
+          <ErrorBoundary key="settings">
+            <AttendanceSettings />
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   );

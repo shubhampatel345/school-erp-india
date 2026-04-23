@@ -1,583 +1,637 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
-import { Edit2, FileText, Printer, Save } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import type { SchoolProfile, Student } from "../types";
 import { ls } from "../utils/localStorage";
 
-// ── Certificate types ─────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
-type CertType =
+type TemplateType =
+  | "id_card"
+  | "fee_receipt"
+  | "admission"
+  | "result"
+  | "admit_card"
   | "bonafide"
   | "transfer"
-  | "experience"
-  | "idcard"
-  | "admission"
-  | "character";
+  | "experience";
 
-interface CertTemplate {
-  type: CertType;
-  title: string;
-  paperSize: "A4" | "A5" | "Letter";
-  headerText: string;
-  footerText: string;
-  bodyTemplate: string;
+interface TemplateField {
+  id: string;
+  label: string;
+  x: number;
+  y: number;
   fontSize: number;
-  showSchoolLogo: boolean;
-  showPrincipalSign: boolean;
+  bold: boolean;
+  align: "left" | "center" | "right";
 }
 
-const CERT_TYPES: { key: CertType; label: string; description: string }[] = [
+interface Template {
+  id: string;
+  type: TemplateType;
+  name: string;
+  paperSize: "A4" | "A5" | "Letter";
+  orientation: "portrait" | "landscape";
+  bgColor: string;
+  bgImage?: string;
+  fields: TemplateField[];
+  isDefault: boolean;
+  watermark?: string;
+  stamp?: boolean;
+}
+
+// ── Template types config ────────────────────────────────────────────────────
+
+const TEMPLATE_TYPES: {
+  id: TemplateType;
+  label: string;
+  icon: string;
+  defaultFields: string[];
+}[] = [
   {
-    key: "bonafide",
-    label: "Bonafide Certificate",
-    description: "Confirms student is enrolled",
+    id: "id_card",
+    label: "ID Card",
+    icon: "🪪",
+    defaultFields: [
+      "School Name",
+      "Student Name",
+      "Class & Section",
+      "Adm No",
+      "Father Name",
+      "Mobile",
+      "Blood Group",
+      "Session",
+    ],
   },
   {
-    key: "transfer",
-    label: "Transfer Certificate (TC)",
-    description: "Issued on student leaving",
+    id: "fee_receipt",
+    label: "Fee Receipt",
+    icon: "🧾",
+    defaultFields: [
+      "Receipt No",
+      "Student Name",
+      "Class",
+      "Adm No",
+      "Date",
+      "Amount Paid",
+      "Payment Mode",
+      "Received By",
+    ],
   },
   {
-    key: "experience",
-    label: "Experience Certificate",
-    description: "For staff leaving",
-  },
-  { key: "idcard", label: "ID Card", description: "Student identity card" },
-  {
-    key: "admission",
+    id: "admission",
     label: "Admission Form",
-    description: "New student admission document",
+    icon: "📝",
+    defaultFields: [
+      "Student Name",
+      "Father Name",
+      "Mother Name",
+      "DOB",
+      "Address",
+      "Mobile",
+      "Class",
+      "Adm No",
+    ],
   },
   {
-    key: "character",
-    label: "Character Certificate",
-    description: "Student character attestation",
+    id: "result",
+    label: "Result Card",
+    icon: "📊",
+    defaultFields: [
+      "Student Name",
+      "Roll No",
+      "Class",
+      "Subject Marks",
+      "Total",
+      "Percentage",
+      "Grade",
+      "Exam Name",
+    ],
+  },
+  {
+    id: "admit_card",
+    label: "Admit Card",
+    icon: "🎫",
+    defaultFields: [
+      "Exam Name",
+      "Student Name",
+      "Roll No",
+      "Class",
+      "Exam Dates",
+      "Centre",
+      "Adm No",
+    ],
+  },
+  {
+    id: "bonafide",
+    label: "Bonafide Cert.",
+    icon: "📜",
+    defaultFields: [
+      "Student Name",
+      "Adm No",
+      "Class",
+      "DOB",
+      "Issue Date",
+      "Purpose",
+      "Principal Signature",
+    ],
+  },
+  {
+    id: "transfer",
+    label: "Transfer Cert.",
+    icon: "🔀",
+    defaultFields: [
+      "Student Name",
+      "Adm No",
+      "Class",
+      "Date of Leaving",
+      "Conduct",
+      "TC No",
+      "Reason",
+    ],
+  },
+  {
+    id: "experience",
+    label: "Experience Cert.",
+    icon: "🏆",
+    defaultFields: [
+      "Staff Name",
+      "Designation",
+      "Joining Date",
+      "Leaving Date",
+      "Conduct",
+      "Principal Signature",
+    ],
   },
 ];
 
-const DEFAULT_TEMPLATES: Record<CertType, CertTemplate> = {
-  bonafide: {
-    type: "bonafide",
-    title: "Bonafide Certificate",
+function makeDefaultTemplate(type: TemplateType): Template {
+  const meta = TEMPLATE_TYPES.find((t) => t.id === type);
+  return {
+    id: `default_${type}`,
+    type,
+    name: `${meta?.label ?? type} Template`,
     paperSize: "A4",
-    headerText: "TO WHOMSOEVER IT MAY CONCERN",
-    bodyTemplate:
-      "This is to certify that {studentName}, son/daughter of {fatherName}, bearing Admission No. {admNo}, is a bonafide student of Class {class} Section {section} during the academic session {session}. His/Her Date of Birth as per school records is {dob}.\n\nThis certificate is issued on request of the student/parents for the purpose of {purpose}.",
-    footerText: "Principal",
-    fontSize: 12,
-    showSchoolLogo: true,
-    showPrincipalSign: true,
-  },
-  transfer: {
-    type: "transfer",
-    title: "Transfer Certificate",
-    paperSize: "A4",
-    headerText: "",
-    bodyTemplate:
-      "This is to certify that {studentName}, Admission No. {admNo}, studied in this school from {admissionDate} to {leavingDate}. He/She was a student of Class {class} at the time of leaving.\n\nHis/Her Date of Birth is {dob}. His/Her conduct and character were {character}.\n\nHe/She has cleared all school dues.",
-    footerText: "Principal",
-    fontSize: 12,
-    showSchoolLogo: true,
-    showPrincipalSign: true,
-  },
-  experience: {
-    type: "experience",
-    title: "Experience Certificate",
-    paperSize: "A4",
-    headerText: "TO WHOMSOEVER IT MAY CONCERN",
-    bodyTemplate:
-      "This is to certify that {staffName} was employed as {designation} in our school from {joiningDate} to {leavingDate}.\n\nDuring his/her tenure, he/she performed his/her duties sincerely and with dedication. His/Her conduct was good.\n\nWe wish him/her all the best for future endeavors.",
-    footerText: "Principal",
-    fontSize: 12,
-    showSchoolLogo: true,
-    showPrincipalSign: true,
-  },
-  idcard: {
-    type: "idcard",
-    title: "Student ID Card",
-    paperSize: "A5",
-    headerText: "",
-    bodyTemplate:
-      "Name: {studentName}\nClass: {class} - {section}\nAdm No: {admNo}\nFather: {fatherName}\nMobile: {mobile}",
-    footerText: "",
-    fontSize: 11,
-    showSchoolLogo: true,
-    showPrincipalSign: false,
-  },
-  admission: {
-    type: "admission",
-    title: "Admission Form",
-    paperSize: "A4",
-    headerText: "APPLICATION FOR ADMISSION",
-    bodyTemplate:
-      "Student Name: {studentName}\nDate of Birth: {dob}\nGender: {gender}\nClass Applying for: {class}\nFather's Name: {fatherName}\nMother's Name: {motherName}\nMobile: {mobile}\nAddress: {address}\nPrevious School: {previousSchool}",
-    footerText: "Signature of Parent/Guardian",
-    fontSize: 12,
-    showSchoolLogo: true,
-    showPrincipalSign: false,
-  },
-  character: {
-    type: "character",
-    title: "Character Certificate",
-    paperSize: "A4",
-    headerText: "TO WHOMSOEVER IT MAY CONCERN",
-    bodyTemplate:
-      "This is to certify that {studentName}, Admission No. {admNo}, is a student of Class {class} of this school. His/Her character and conduct during his/her stay in the school have been {character}.\n\nThis certificate is issued on the request of the student.",
-    footerText: "Principal",
-    fontSize: 12,
-    showSchoolLogo: true,
-    showPrincipalSign: true,
-  },
-};
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function fillTemplate(
-  template: string,
-  student: Student | null,
-  profile: SchoolProfile | null,
-  extras: Record<string, string>,
-): string {
-  if (!student) return template;
-  const vars: Record<string, string> = {
-    studentName: student.fullName ?? "",
-    admNo: student.admNo ?? "",
-    class: student.class ?? "",
-    section: student.section ?? "",
-    dob: student.dob ?? "",
-    fatherName: student.fatherName ?? "",
-    motherName: student.motherName ?? "",
-    mobile: student.mobile ?? student.guardianMobile ?? "",
-    address: student.address ?? "",
-    previousSchool: student.previousSchool ?? "",
-    gender: student.gender ?? "",
-    admissionDate: student.admissionDate ?? "",
-    leavingDate: student.leavingDate ?? "",
-    session: profile
-      ? `${new Date().getFullYear()}-${new Date().getFullYear() + 1}`
-      : "",
-    ...extras,
+    orientation: type === "id_card" ? "landscape" : "portrait",
+    bgColor: "#ffffff",
+    fields: (meta?.defaultFields ?? []).map((label, i) => ({
+      id: `f${i}`,
+      label,
+      x: 40,
+      y: 60 + i * 35,
+      fontSize: i === 0 ? 16 : 12,
+      bold: i === 0,
+      align: "left" as const,
+    })),
+    isDefault: true,
+    watermark: "",
+    stamp: false,
   };
-  return template.replace(/\{(\w+)\}/g, (_, k) => vars[k] ?? `{${k}}`);
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+
+function TemplatePreview({
+  template,
+  scale = 1,
+}: { template: Template; scale?: number }) {
+  const w = template.orientation === "landscape" ? 560 : 340;
+  const h = template.orientation === "landscape" ? 300 : 480;
+
+  return (
+    <div
+      className="relative border border-border rounded-lg overflow-hidden bg-white shadow-sm"
+      style={{
+        width: w * scale,
+        height: h * scale,
+        background: template.bgColor || "#fff",
+      }}
+    >
+      {template.bgImage && (
+        <img
+          src={template.bgImage}
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover opacity-25"
+        />
+      )}
+      {template.watermark && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none select-none">
+          <span
+            className="font-black opacity-10 rotate-[-30deg]"
+            style={{ fontSize: 32 * scale, color: "#1a1a2e" }}
+          >
+            {template.watermark}
+          </span>
+        </div>
+      )}
+      {template.fields.slice(0, 7).map((field) => (
+        <div
+          key={field.id}
+          className="absolute whitespace-nowrap"
+          style={{
+            left: field.x * scale,
+            top: field.y * scale,
+            fontSize: field.fontSize * scale,
+            fontWeight: field.bold ? 700 : 400,
+            textAlign: field.align,
+            color: "#1a1a2e",
+          }}
+        >
+          {field.label}: <span style={{ opacity: 0.45 }}>[sample]</span>
+        </div>
+      ))}
+      {template.stamp && (
+        <div
+          className="absolute border-2 border-primary/40 rounded-full flex items-center justify-center text-center text-primary/50 font-semibold"
+          style={{
+            width: 60 * scale,
+            height: 60 * scale,
+            bottom: 16 * scale,
+            right: 16 * scale,
+            fontSize: 8 * scale,
+          }}
+        >
+          School
+          <br />
+          STAMP
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Field Editor Row ──────────────────────────────────────────────────────────
+
+function FieldRow({
+  field,
+  onChange,
+}: { field: TemplateField; onChange: (f: TemplateField) => void }) {
+  const upd = (k: keyof TemplateField, v: unknown) =>
+    onChange({ ...field, [k]: v });
+  return (
+    <div className="flex items-center gap-1.5 text-xs bg-muted/30 rounded px-2 py-1.5">
+      <span className="w-28 font-medium text-foreground truncate shrink-0">
+        {field.label}
+      </span>
+      <Input
+        value={field.x}
+        onChange={(e) => upd("x", Number.parseInt(e.target.value, 10) || 0)}
+        className="w-14 h-6 text-xs px-1"
+        inputMode="numeric"
+        placeholder="X"
+      />
+      <Input
+        value={field.y}
+        onChange={(e) => upd("y", Number.parseInt(e.target.value, 10) || 0)}
+        className="w-14 h-6 text-xs px-1"
+        inputMode="numeric"
+        placeholder="Y"
+      />
+      <Input
+        value={field.fontSize}
+        onChange={(e) =>
+          upd("fontSize", Number.parseInt(e.target.value, 10) || 12)
+        }
+        className="w-12 h-6 text-xs px-1"
+        inputMode="numeric"
+        placeholder="Sz"
+      />
+      <button
+        type="button"
+        onClick={() => upd("bold", !field.bold)}
+        className={`w-6 h-6 rounded text-[10px] font-bold border transition-colors ${field.bold ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground"}`}
+      >
+        B
+      </button>
+      <select
+        value={field.align}
+        onChange={(e) => upd("align", e.target.value)}
+        className="h-6 text-[10px] rounded border border-input bg-background px-0.5"
+      >
+        <option value="left">L</option>
+        <option value="center">C</option>
+        <option value="right">R</option>
+      </select>
+    </div>
+  );
 }
 
 // ── Template Editor ───────────────────────────────────────────────────────────
 
-function TemplateEditor({
-  template,
-  onSave,
-  onClose,
-}: {
-  template: CertTemplate;
-  onSave: (t: CertTemplate) => void;
-  onClose: () => void;
-}) {
-  const [form, setForm] = useState({ ...template });
-  const set = (k: keyof CertTemplate, v: CertTemplate[keyof CertTemplate]) =>
-    setForm((f) => ({ ...f, [k]: v }));
+function TemplateEditor({ type }: { type: TemplateType }) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const { addNotification } = useApp();
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const [templates, setTemplates] = useState<Template[]>(() => {
+    const all = ls.get<Template[]>("cert_templates", []);
+    const existing = all.filter((t) => t.type === type);
+    return existing.length > 0 ? existing : [makeDefaultTemplate(type)];
+  });
+
+  const [selectedId, setSelectedId] = useState(templates[0]?.id ?? "");
+  const tpl = templates.find((t) => t.id === selectedId) ?? templates[0];
+
+  const persistAll = (next: Template[]) => {
+    setTemplates(next);
+    const all = ls.get<Template[]>("cert_templates", []);
+    ls.set("cert_templates", [...all.filter((t) => t.type !== type), ...next]);
+  };
+
+  const updateTpl = (changes: Partial<Template>) => {
+    persistAll(
+      templates.map((t) => (t.id === selectedId ? { ...t, ...changes } : t)),
+    );
+  };
+
+  const setDefault = (id: string) => {
+    persistAll(templates.map((t) => ({ ...t, isDefault: t.id === id })));
+    addNotification("Default template updated", "success");
+  };
+
+  const uploadBg = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => updateTpl({ bgImage: e.target?.result as string });
+    reader.readAsDataURL(file);
+  };
+
+  const exportTpl = () => {
+    const blob = new Blob([JSON.stringify(tpl, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${type}-template.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  if (!tpl) return null;
 
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label>Paper Size</Label>
-          <Select
-            value={form.paperSize}
-            onValueChange={(v) => set("paperSize", v as "A4" | "A5" | "Letter")}
-          >
-            <SelectTrigger>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {["A4", "A5", "Letter"].map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label>Font Size</Label>
-          <Input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={form.fontSize}
-            onChange={(e) =>
-              set(
-                "fontSize",
-                Number(e.target.value.replace(/[^0-9]/g, "")) || 12,
-              )
-            }
-          />
-        </div>
-        <div className="col-span-2">
-          <Label>Header Text</Label>
-          <Input
-            value={form.headerText}
-            onChange={(e) => set("headerText", e.target.value)}
-          />
-        </div>
-        <div className="col-span-2">
-          <Label>Body Template</Label>
-          <p className="text-xs text-muted-foreground mb-1">
-            Use &#123;studentName&#125;, &#123;admNo&#125;, &#123;class&#125;,
-            &#123;fatherName&#125;, &#123;dob&#125;, etc.
-          </p>
-          <Textarea
-            value={form.bodyTemplate}
-            onChange={(e) => set("bodyTemplate", e.target.value)}
-            rows={6}
-            className="text-sm"
-          />
-        </div>
-        <div className="col-span-2">
-          <Label>Footer / Signature Line</Label>
-          <Input
-            value={form.footerText}
-            onChange={(e) => set("footerText", e.target.value)}
-          />
-        </div>
-      </div>
-      <div className="flex gap-2 justify-end">
-        <Button variant="outline" onClick={onClose}>
-          Cancel
+    <div className="space-y-4">
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          value={selectedId}
+          onChange={(e) => setSelectedId(e.target.value)}
+          data-ocid={`certificates.template_select.${type}`}
+          className="h-8 text-sm rounded border border-input bg-background px-2"
+        >
+          {templates.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+              {t.isDefault ? " ★" : ""}
+            </option>
+          ))}
+        </select>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setDefault(selectedId)}
+          data-ocid={`certificates.set_default.${type}`}
+          className="h-8 text-xs"
+        >
+          ★ Default
         </Button>
         <Button
-          onClick={() => {
-            onSave(form);
-            onClose();
-          }}
-          data-ocid="certificates.template.save_button"
+          size="sm"
+          variant="outline"
+          onClick={() => setPreviewOpen(true)}
+          data-ocid={`certificates.preview_button.${type}`}
+          className="h-8 text-xs"
         >
-          <Save className="w-4 h-4 mr-1" /> Save Template
+          Preview
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={exportTpl}
+          data-ocid={`certificates.export_button.${type}`}
+          className="h-8 text-xs"
+        >
+          Export
         </Button>
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
+        {/* Controls */}
+        <div className="space-y-4">
+          <div className="bg-card border border-border rounded-xl p-4 space-y-3">
+            <h4 className="text-sm font-semibold text-foreground">
+              Layout Options
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">
+                  Paper Size
+                </Label>
+                <select
+                  value={tpl.paperSize}
+                  onChange={(e) =>
+                    updateTpl({
+                      paperSize: e.target.value as Template["paperSize"],
+                    })
+                  }
+                  className="w-full h-8 text-xs rounded border border-input bg-background px-2"
+                >
+                  {["A4", "A5", "Letter"].map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">
+                  Orientation
+                </Label>
+                <select
+                  value={tpl.orientation}
+                  onChange={(e) =>
+                    updateTpl({
+                      orientation: e.target.value as Template["orientation"],
+                    })
+                  }
+                  className="w-full h-8 text-xs rounded border border-input bg-background px-2"
+                >
+                  <option value="portrait">Portrait</option>
+                  <option value="landscape">Landscape</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">
+                  Background Color
+                </Label>
+                <Input
+                  type="color"
+                  value={tpl.bgColor}
+                  onChange={(e) =>
+                    updateTpl({ bgColor: e.target.value, bgImage: undefined })
+                  }
+                  className="h-8"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1 block">
+                  Watermark
+                </Label>
+                <Input
+                  value={tpl.watermark ?? ""}
+                  onChange={(e) => updateTpl({ watermark: e.target.value })}
+                  placeholder="e.g. OFFICIAL"
+                  className="h-8 text-xs"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) uploadBg(f);
+                }}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                data-ocid={`certificates.upload_bg.${type}`}
+                onClick={() => fileRef.current?.click()}
+                className="h-8 text-xs"
+              >
+                Upload BG Image
+              </Button>
+              {tpl.bgImage && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => updateTpl({ bgImage: undefined })}
+                  className="h-8 text-xs text-destructive"
+                >
+                  Remove
+                </Button>
+              )}
+              <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={tpl.stamp ?? false}
+                  onChange={(e) => updateTpl({ stamp: e.target.checked })}
+                  className="rounded"
+                />
+                School Stamp
+              </label>
+            </div>
+          </div>
+
+          <div className="bg-card border border-border rounded-xl p-4 space-y-2">
+            <div className="flex items-center justify-between mb-1">
+              <h4 className="text-sm font-semibold text-foreground">Fields</h4>
+              <span className="text-[10px] text-muted-foreground">
+                X · Y · Size · Bold · Align
+              </span>
+            </div>
+            <div className="space-y-1.5 max-h-64 overflow-y-auto">
+              {tpl.fields.map((field) => (
+                <FieldRow
+                  key={field.id}
+                  field={field}
+                  onChange={(f) =>
+                    updateTpl({
+                      fields: tpl.fields.map((x) =>
+                        x.id === field.id ? f : x,
+                      ),
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Live preview */}
+        <div className="flex flex-col items-start">
+          <p className="text-xs text-muted-foreground mb-2">Live Preview</p>
+          <TemplatePreview template={tpl} scale={0.65} />
+        </div>
+      </div>
+
+      {/* Full preview dialog */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent
+          className="max-w-3xl"
+          data-ocid={`certificates.preview_dialog.${type}`}
+        >
+          <DialogHeader>
+            <DialogTitle>{tpl.name} — Preview</DialogTitle>
+          </DialogHeader>
+          <div className="flex justify-center py-4 overflow-auto">
+            <TemplatePreview template={tpl} scale={1} />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => window.print()}
+              data-ocid={`certificates.print_button.${type}`}
+            >
+              🖨 Print Sample
+            </Button>
+            <Button
+              variant="ghost"
+              onClick={() => setPreviewOpen(false)}
+              data-ocid={`certificates.close_preview.${type}`}
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
-// ── Certificate Preview ────────────────────────────────────────────────────────
-
-function CertificatePreview({
-  template,
-  student,
-  profile,
-  extras,
-}: {
-  template: CertTemplate;
-  student: Student | null;
-  profile: SchoolProfile | null;
-  extras: Record<string, string>;
-}) {
-  const body = fillTemplate(template.bodyTemplate, student, profile, extras);
-  const header = fillTemplate(template.headerText, student, profile, extras);
-
-  return (
-    <div
-      id="certificate-print-area"
-      className="bg-card border-2 border-border rounded-xl p-8 space-y-4 min-h-[400px]"
-      style={{ fontSize: `${template.fontSize}px` }}
-    >
-      {/* School Header */}
-      <div className="text-center border-b border-border pb-4">
-        {template.showSchoolLogo && (
-          <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-2">
-            <FileText className="w-8 h-8 text-primary" />
-          </div>
-        )}
-        <p className="font-bold text-lg text-foreground font-display">
-          {profile?.name ?? "School Name"}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {profile?.address ?? "School Address"}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {profile?.phone ?? ""} | {profile?.email ?? ""}
-        </p>
-      </div>
-
-      {/* Certificate Title */}
-      <div className="text-center">
-        <h2 className="text-xl font-bold text-foreground underline decoration-1 underline-offset-4">
-          {template.title}
-        </h2>
-        {header && (
-          <p className="text-sm text-muted-foreground mt-1">{header}</p>
-        )}
-      </div>
-
-      {/* Body */}
-      <div className="whitespace-pre-wrap text-foreground leading-relaxed">
-        {body}
-      </div>
-
-      {/* Footer */}
-      {template.showPrincipalSign && (
-        <div className="pt-8 flex justify-end">
-          <div className="text-center">
-            <div className="h-8 border-b border-foreground w-32 mb-1" />
-            <p className="text-xs text-muted-foreground">
-              {template.footerText}
-            </p>
-          </div>
-        </div>
-      )}
-
-      {!student && (
-        <div className="absolute inset-0 flex items-center justify-center bg-background/60 rounded-xl">
-          <p className="text-muted-foreground text-sm">
-            Select a student to fill the certificate
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main Page ─────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Certificates() {
-  const { getData } = useApp();
-  const students = getData("students") as Student[];
-  const profile = ls.get<SchoolProfile | null>("school_profile", null);
-
-  const [customTemplates, setCustomTemplates] = useState<
-    Partial<Record<CertType, CertTemplate>>
-  >({});
-  const [editingType, setEditingType] = useState<CertType | null>(null);
-  const [selectedType, setSelectedType] = useState<CertType>("bonafide");
-  const [selectedStudentId, setSelectedStudentId] = useState("");
-  const [extras, setExtras] = useState({
-    purpose: "general purpose",
-    character: "Good",
-  });
-  const [studentSearch, setStudentSearch] = useState("");
-
-  const getTemplate = (t: CertType) =>
-    customTemplates[t] ?? DEFAULT_TEMPLATES[t];
-
-  const handleSaveTemplate = (t: CertTemplate) => {
-    setCustomTemplates((prev) => ({ ...prev, [t.type]: t }));
-  };
-
-  const selectedStudent = useMemo(
-    () => students.find((s) => s.id === selectedStudentId) ?? null,
-    [students, selectedStudentId],
-  );
-
-  const filteredStudents = useMemo(() => {
-    if (!studentSearch) return students.slice(0, 30);
-    const q = studentSearch.toLowerCase();
-    return students
-      .filter(
-        (s) =>
-          s.fullName?.toLowerCase().includes(q) ||
-          s.admNo?.toLowerCase().includes(q),
-      )
-      .slice(0, 30);
-  }, [students, studentSearch]);
-
-  const printCertificate = () => {
-    const el = document.getElementById("certificate-print-area");
-    if (!el) return;
-    const w = window.open("", "_blank");
-    if (!w) return;
-    w.document.write(
-      `<html><head><title>${getTemplate(selectedType).title}</title><style>body{font-family:serif;padding:40px;font-size:${getTemplate(selectedType).fontSize}px}@media print{body{padding:0}}</style></head><body>${el.innerHTML}<script>window.print();window.close();<\/script></body></html>`,
-    );
-    w.document.close();
-  };
-
   return (
-    <div className="p-4 md:p-6 bg-background min-h-screen space-y-4">
+    <div className="p-4 md:p-6 space-y-4" data-ocid="certificates.page">
       <div>
         <h1 className="text-2xl font-bold text-foreground font-display">
           Certificate Studio
         </h1>
-        <p className="text-muted-foreground text-sm mt-0.5">
-          Customize and generate school certificates
+        <p className="text-muted-foreground text-sm">
+          Design, customize, and print all school certificates and cards
         </p>
       </div>
 
-      <Tabs defaultValue="templates">
-        <TabsList>
-          <TabsTrigger value="templates" data-ocid="certificates.templates.tab">
-            Templates
-          </TabsTrigger>
-          <TabsTrigger value="generate" data-ocid="certificates.generate.tab">
-            Generate Certificate
-          </TabsTrigger>
-        </TabsList>
-
-        {/* Templates Tab */}
-        <TabsContent value="templates" className="mt-4">
-          {editingType ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Edit2 className="w-4 h-4" />
-                  Editing: {getTemplate(editingType).title}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <TemplateEditor
-                  template={getTemplate(editingType)}
-                  onSave={handleSaveTemplate}
-                  onClose={() => setEditingType(null)}
-                />
-              </CardContent>
-            </Card>
-          ) : (
-            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {CERT_TYPES.map((ct, i) => {
-                const hasCustom = !!customTemplates[ct.key];
-                return (
-                  <Card
-                    key={ct.key}
-                    data-ocid={`certificates.template.item.${i + 1}`}
-                  >
-                    <CardContent className="pt-4 pb-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <p className="font-semibold text-foreground text-sm">
-                            {ct.label}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">
-                            {ct.description}
-                          </p>
-                          {hasCustom && (
-                            <Badge variant="secondary" className="mt-1 text-xs">
-                              Customized
-                            </Badge>
-                          )}
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="ml-2"
-                          onClick={() => setEditingType(ct.key)}
-                          data-ocid={`certificates.edit_button.${i + 1}`}
-                        >
-                          <Edit2 className="w-3.5 h-3.5 mr-1" /> Edit
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
-          )}
-        </TabsContent>
-
-        {/* Generate Tab */}
-        <TabsContent value="generate" className="mt-4 space-y-4">
-          <Card>
-            <CardContent className="pt-4 pb-3 space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Certificate Type</Label>
-                  <Select
-                    value={selectedType}
-                    onValueChange={(v) => setSelectedType(v as CertType)}
-                  >
-                    <SelectTrigger data-ocid="certificates.generate.type_select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {CERT_TYPES.map((ct) => (
-                        <SelectItem key={ct.key} value={ct.key}>
-                          {ct.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label>Search Student</Label>
-                  <Input
-                    placeholder="Name or adm no…"
-                    value={studentSearch}
-                    onChange={(e) => setStudentSearch(e.target.value)}
-                    data-ocid="certificates.generate.student_search"
-                  />
-                </div>
-              </div>
-              <div>
-                <Label>Select Student</Label>
-                <Select
-                  value={selectedStudentId}
-                  onValueChange={setSelectedStudentId}
-                >
-                  <SelectTrigger data-ocid="certificates.generate.student_select">
-                    <SelectValue placeholder="Select student" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredStudents.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.fullName} — {s.admNo} (Class {s.class}-{s.section})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label>Purpose (for bonafide)</Label>
-                  <Input
-                    value={extras.purpose}
-                    onChange={(e) =>
-                      setExtras((x) => ({ ...x, purpose: e.target.value }))
-                    }
-                  />
-                </div>
-                <div>
-                  <Label>Character (for TC/character cert)</Label>
-                  <Input
-                    value={extras.character}
-                    onChange={(e) =>
-                      setExtras((x) => ({ ...x, character: e.target.value }))
-                    }
-                  />
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <div className="relative">
-            <CertificatePreview
-              template={getTemplate(selectedType)}
-              student={selectedStudent}
-              profile={profile}
-              extras={extras}
-            />
-          </div>
-
-          <div className="flex gap-2">
-            <Button
-              onClick={printCertificate}
-              disabled={!selectedStudent}
-              data-ocid="certificates.print_button"
+      <Tabs defaultValue="id_card">
+        <TabsList className="mb-4 flex-wrap h-auto gap-0.5">
+          {TEMPLATE_TYPES.map((t) => (
+            <TabsTrigger
+              key={t.id}
+              value={t.id}
+              data-ocid={`certificates.tab.${t.id}`}
+              className="text-xs gap-1"
             >
-              <Printer className="w-4 h-4 mr-1" /> Print Certificate
-            </Button>
-          </div>
-        </TabsContent>
+              {t.icon} {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {TEMPLATE_TYPES.map((t) => (
+          <TabsContent key={t.id} value={t.id}>
+            <TemplateEditor type={t.id} />
+          </TabsContent>
+        ))}
       </Tabs>
     </div>
   );

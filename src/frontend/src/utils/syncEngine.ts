@@ -1,24 +1,26 @@
 /**
- * SHUBH SCHOOL ERP — SyncEngine (Canister-Native)
+ * SHUBH SCHOOL ERP — SyncEngine (Canister-Native, Local-First)
  *
- * Local-first, canister-backed sync:
+ * Architecture:
  * 1. localState (in-memory Map) is the UI source of truth — reads are instant
  * 2. Every write updates localState immediately → UI re-renders with no wait
  * 3. Background: canister write fires; on confirm, local cache is authoritative
- * 4. pendingWrites tracks writes in-flight until canister confirms
+ * 4. pendingWrites Set tracks writes in-flight — background fetch NEVER
+ *    overwrites a record that has a pending write queued for it
  * 5. On reconnect / online event: flush all pending writes
  *
- * No PHP, no MySQL, no JWT tokens. The canister IS the database.
+ * CRITICAL INVARIANT: A record in pendingWrites can never be overwritten
+ * by a server fetch. The pending write is the source of truth until confirmed.
  */
 
 import type { SyncStatus } from "../types";
 import { canisterService, generateId } from "./canisterService";
 
-// ── Cache helpers (localStorage mirror for fast startup) ─────────────────────
+// ── localStorage cache helpers ────────────────────────────────────────────────
 
 const CACHE_PREFIX = "erp_cache_";
 const CACHE_VER_KEY = "erp_cache_version";
-const CACHE_VER = "c1"; // bump to invalidate when schema changes
+const CACHE_VER = "c2"; // bump to invalidate stale caches
 
 function writeCache(collection: string, data: unknown[]) {
   try {
@@ -56,14 +58,14 @@ interface PendingWrite {
   retries: number;
 }
 
-// ── Callback types ────────────────────────────────────────────────────────────
+// ── Collection update callback type ──────────────────────────────────────────
 
 type CollectionUpdateCallback = (
   collection: string,
   records: unknown[],
 ) => void;
 
-// ── Known collections ─────────────────────────────────────────────────────────
+// ── Known collections (exhaustive list) ──────────────────────────────────────
 
 const KNOWN_COLLECTIONS = [
   "students",
@@ -108,8 +110,19 @@ class SyncEngine {
   /** Primary data store: collection → Map<id, record> */
   private localState: Map<string, Map<string, Record<string, unknown>>> =
     new Map();
-  /** Writes pending canister confirmation */
+
+  /**
+   * CRITICAL: pendingWrites tracks every write queued for the canister.
+   * Key is `collection::recordId` — so per-record tracking is O(1).
+   * Background fetches MUST check this set before overwriting any record.
+   */
   private pendingWrites: Map<string, PendingWrite> = new Map();
+
+  /**
+   * In-flight record IDs per collection: `collection::recordId` → true.
+   * These records must never be overwritten by server data until confirmed.
+   */
+  private inFlightIds: Set<string> = new Set();
 
   private syncStatus: SyncStatus = {
     state: "idle",
@@ -122,18 +135,20 @@ class SyncEngine {
   private subscribers: Set<() => void> = new Set();
   private collectionCallbacks: Set<CollectionUpdateCallback> = new Set();
   private flushTimer: ReturnType<typeof setInterval> | null = null;
-  private isOnline = navigator.onLine;
+  private isOnline = typeof navigator !== "undefined" ? navigator.onLine : true;
   private isFlushing = false;
 
   constructor() {
-    window.addEventListener("online", () => {
-      this.isOnline = true;
-      void this.flushPending();
-    });
-    window.addEventListener("offline", () => {
-      this.isOnline = false;
-      this.setStatus("offline");
-    });
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", () => {
+        this.isOnline = true;
+        void this.flushPending();
+      });
+      window.addEventListener("offline", () => {
+        this.isOnline = false;
+        this.setStatus("offline");
+      });
+    }
   }
 
   // ── Subscriptions ─────────────────────────────────────────────────────────
@@ -228,7 +243,10 @@ class SyncEngine {
 
   /**
    * saveRecord — instant local update, background canister push.
-   * The UI sees the change IMMEDIATELY. No waiting for the canister.
+   *
+   * The UI sees the change IMMEDIATELY via localState update.
+   * The record is tracked in inFlightIds until the canister confirms.
+   * Background fetches will never overwrite a record in inFlightIds.
    */
   async saveRecord(
     collection: string,
@@ -239,7 +257,11 @@ class SyncEngine {
     const recordId = (record.id as string | undefined) ?? generateId();
     const withId = { ...record, id: recordId };
 
-    // 1. Update localState immediately
+    // 1. Mark this record as in-flight BEFORE any async work
+    const inFlightKey = `${collection}::${recordId}`;
+    this.inFlightIds.add(inFlightKey);
+
+    // 2. Update localState immediately — UI re-renders instantly
     if (action === "delete") {
       map.delete(recordId);
     } else {
@@ -247,29 +269,37 @@ class SyncEngine {
       map.set(recordId, existing ? { ...existing, ...withId } : withId);
     }
 
-    // 2. Write-through to localStorage cache
+    // 3. Write-through to localStorage cache
     writeCache(collection, Array.from(map.values()));
 
-    // 3. Notify subscribers so UI re-renders instantly
+    // 4. Update pending count and notify subscribers so UI re-renders
     this.syncStatus = {
       ...this.syncStatus,
       pendingCount: this.pendingWrites.size + 1,
     };
     this.notify();
 
-    // 4. Queue for canister push
-    const queueId = `${collection}::${recordId}::${action}::${Date.now()}`;
+    // 5. Add to write queue
+    // Use collection::recordId as key so we deduplicate per-record
+    // (latest write for same record wins)
+    const queueId = `${collection}::${recordId}`;
+    // If there's already a pending write for this record, replace it
+    // (e.g. two quick edits — only push the latest)
+    const existing = this.pendingWrites.get(queueId);
     this.pendingWrites.set(queueId, {
       id: queueId,
       collection,
       recordId,
       data: action === "delete" ? { id: recordId } : withId,
-      operation: action,
+      operation:
+        existing?.operation === "create" && action !== "delete"
+          ? "create" // preserve "create" if it's never been confirmed
+          : action,
       createdAt: Date.now(),
       retries: 0,
     });
 
-    // 5. Fire background push (non-blocking)
+    // 6. Fire background push (non-blocking)
     void this.pushOne(queueId);
 
     return withId;
@@ -292,7 +322,6 @@ class SyncEngine {
           pw.recordId,
           pw.data,
         );
-        // If "already exists" error, fall through to update
         if (!result.ok && result.err.includes("already exists")) {
           result = await canisterService.updateRecord(
             pw.collection,
@@ -306,7 +335,6 @@ class SyncEngine {
           pw.recordId,
           pw.data,
         );
-        // If "not found" error, create instead
         if (!result.ok && result.err.includes("not found")) {
           result = await canisterService.createRecord(
             pw.collection,
@@ -318,8 +346,9 @@ class SyncEngine {
 
       if (result.ok) {
         this.pendingWrites.delete(queueId);
+        // Remove from inFlightIds only after canister confirms
+        this.inFlightIds.delete(`${pw.collection}::${pw.recordId}`);
         this.setStatus("synced");
-        // Notify with current local state (already up-to-date — no server re-fetch needed)
         const records = this.getLocalCollection(pw.collection);
         this.notifyCollection(pw.collection, records);
       } else {
@@ -333,10 +362,11 @@ class SyncEngine {
   private scheduleRetry(queueId: string, pw: PendingWrite) {
     pw.retries++;
     if (pw.retries >= MAX_RETRIES) {
-      // Mark as permanently failed — data is still safe in localState
+      // Max retries — data is safe in localState; inFlight stays set
+      // to protect data until user explicitly retries or reloads
       this.setStatus(
         "error",
-        `Failed to sync ${pw.collection} record after ${MAX_RETRIES} attempts (data saved locally)`,
+        `Failed to sync ${pw.collection} after ${MAX_RETRIES} attempts (data saved locally)`,
       );
       return;
     }
@@ -362,21 +392,24 @@ class SyncEngine {
 
   // ── Load from canister ────────────────────────────────────────────────────
 
-  /** Load a single collection from the canister and merge into localState */
+  /**
+   * Load a single collection from the canister and merge into localState.
+   *
+   * CRITICAL: Any record whose `collection::id` key is in inFlightIds
+   * is SKIPPED — the local pending write is authoritative.
+   */
   async loadFromCanister(collection: string): Promise<void> {
     try {
       const rows = await canisterService.listRecords(collection);
       const map = this.getMap(collection);
 
-      // Overlay: server rows go into map, but pending writes win for same id
-      const pendingIds = new Set<string>();
-      for (const [, pw] of this.pendingWrites) {
-        if (pw.collection === collection) pendingIds.add(pw.recordId);
-      }
-
       for (const row of rows as Record<string, unknown>[]) {
         const id = (row.id as string | undefined) ?? "";
-        if (!id || pendingIds.has(id)) continue; // pending write wins
+        if (!id) continue;
+        // CRITICAL: skip records that have a pending or in-flight write
+        if (this.inFlightIds.has(`${collection}::${id}`)) continue;
+        // Also check pendingWrites by queueId (belt + suspenders)
+        if (this.pendingWrites.has(`${collection}::${id}`)) continue;
         map.set(id, row);
       }
 
@@ -406,19 +439,22 @@ class SyncEngine {
 
   /**
    * Initialize:
-   * 1. Load localStorage cache immediately (instant — no flicker)
-   * 2. Fetch from canister in background
-   * 3. Start background flush timer
+   * 1. Warm localStorage cache instantly (no server round-trip, no flicker)
+   * 2. Fetch fresh from canister in background (non-blocking)
+   * 3. Start background flush timer for pending writes
    */
   async initialize(): Promise<Record<string, unknown[]>> {
-    // Step 1: Warm up from localStorage cache
+    // Step 1: Warm from localStorage cache
     for (const col of KNOWN_COLLECTIONS) {
       const cached = readCache(col);
       if (cached) {
         const map = this.getMap(col);
         for (const r of cached as Record<string, unknown>[]) {
           const id = (r.id as string | undefined) ?? "";
-          if (id && !map.has(id)) map.set(id, r);
+          // Don't overwrite records that are in-flight
+          if (id && !map.has(id) && !this.inFlightIds.has(`${col}::${id}`)) {
+            map.set(id, r);
+          }
         }
       }
     }
@@ -449,7 +485,7 @@ class SyncEngine {
     return this.getAllCache();
   }
 
-  // ── Collection refresh (called post-mutation) ─────────────────────────────
+  // ── Collection refresh (called after mutations) ───────────────────────────
 
   async refreshCollection(collection: string): Promise<unknown[]> {
     await this.loadFromCanister(collection);
@@ -467,6 +503,7 @@ class SyncEngine {
   reset() {
     this.localState.clear();
     this.pendingWrites.clear();
+    this.inFlightIds.clear();
     if (this.flushTimer !== null) {
       clearInterval(this.flushTimer);
       this.flushTimer = null;

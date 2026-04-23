@@ -16,7 +16,9 @@ interface State {
 /**
  * ErrorBoundary — catches any render error in child components
  * and shows a user-friendly recovery UI instead of a white screen.
- * Wrap every page route in App.tsx with this component.
+ *
+ * Every page route in App.tsx is wrapped with this component so
+ * one module crash NEVER blanks the whole app.
  *
  * Usage:
  *   <ErrorBoundary moduleName="Students">
@@ -62,6 +64,7 @@ export default class ErrorBoundary extends Component<Props, State> {
         <div
           role="alert"
           className="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center"
+          data-ocid="error-boundary.error_state"
         >
           {/* Icon */}
           <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4">
@@ -105,7 +108,8 @@ export default class ErrorBoundary extends Component<Props, State> {
             <button
               type="button"
               onClick={this.handleReload}
-              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+              className="px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+              data-ocid="error-boundary.retry_button"
             >
               Try Again
             </button>
@@ -113,6 +117,7 @@ export default class ErrorBoundary extends Component<Props, State> {
               type="button"
               onClick={this.handleRefresh}
               className="px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors"
+              data-ocid="error-boundary.reload_button"
             >
               Reload Page
             </button>

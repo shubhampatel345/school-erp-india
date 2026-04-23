@@ -148,7 +148,7 @@ export default function MobileNav({
             <button
               type="button"
               key={tab.id}
-              data-ocid={`mobile-nav-${tab.id.replace(/\//g, "-")}`}
+              data-ocid={`mobile-nav.${tab.id.replace(/\//g, "-")}`}
               onClick={() =>
                 tab.id === "__menu__"
                   ? isOpen
@@ -158,6 +158,7 @@ export default function MobileNav({
               }
               className={`flex-1 flex flex-col items-center justify-center gap-0.5 py-2 text-[10px] font-medium transition-colors min-h-[44px]
                 ${active ? "text-primary" : "text-muted-foreground"}`}
+              aria-current={active ? "page" : undefined}
             >
               <Icon className="w-5 h-5" />
               <span>{tab.label}</span>
@@ -171,6 +172,7 @@ export default function MobileNav({
         <aside
           className="fixed inset-0 z-50 md:hidden flex flex-col justify-end"
           aria-label="Navigation drawer"
+          data-ocid="mobile-nav.drawer"
           onKeyDown={(e) => {
             if (e.key === "Escape") onClose();
           }}
@@ -187,7 +189,7 @@ export default function MobileNav({
             aria-label="Close menu"
           />
 
-          {/* Drawer panel — slides up from bottom */}
+          {/* Drawer panel */}
           <div className="relative bg-card rounded-t-2xl max-h-[85vh] overflow-hidden flex flex-col shadow-elevated animate-slide-up">
             {/* Handle bar + close */}
             <div className="flex items-center justify-between px-4 pt-4 pb-3 border-b border-border flex-shrink-0">
@@ -211,10 +213,7 @@ export default function MobileNav({
             </div>
 
             {/* Scrollable module list */}
-            <nav
-              className="overflow-y-auto p-3 pb-8 flex-1"
-              data-ocid="mobile-nav.drawer"
-            >
+            <nav className="overflow-y-auto p-3 pb-8 flex-1">
               {DRAWER_SECTIONS.map((section) => (
                 <div key={section.title || "main"} className="mb-3">
                   {section.title && (
@@ -230,7 +229,7 @@ export default function MobileNav({
                         <button
                           type="button"
                           key={item.id}
-                          data-ocid={`drawer-nav-${item.id.replace(/\//g, "-")}`}
+                          data-ocid={`drawer-nav.${item.id.replace(/\//g, "-")}`}
                           onClick={() => handleNav(item.id)}
                           className={`flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm transition-smooth
                             ${
@@ -238,6 +237,7 @@ export default function MobileNav({
                                 ? "bg-primary text-primary-foreground font-semibold"
                                 : "hover:bg-muted text-foreground"
                             }`}
+                          aria-current={active ? "page" : undefined}
                         >
                           <Icon className="w-4 h-4 flex-shrink-0" />
                           <span className="text-left text-[13px] truncate">

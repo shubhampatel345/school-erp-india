@@ -1,18 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
+/**
+ * SHUBH SCHOOL ERP — Inventory Module (Rebuilt)
+ * Tabs: Items | Stores | Stock Report | Purchase
+ * ALL price/rate/quantity fields: type="text" inputMode="decimal" — NO spinners
+ */
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+  AlertTriangle,
+  Download,
+  Edit2,
+  Package,
+  Plus,
+  Trash2,
+  Warehouse,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import { formatCurrency, generateId } from "../utils/localStorage";
 
-// ── Types ────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────
+
 interface InvItem {
   id: string;
   name: string;
@@ -21,24 +32,34 @@ interface InvItem {
   costPrice: number;
   sellingPrice: number;
   currentStock: number;
+  reorderLevel: number;
   storeLocation: string;
   sessionId?: string;
 }
 
-interface InvCategory {
+interface InvStore {
   id: string;
-  name: string;
-  description: string;
+  storeName: string;
+  location: string;
+  incharge: string;
 }
 
-type Tab = "items" | "categories" | "report";
-const TABS: { id: Tab; label: string; icon: string }[] = [
-  { id: "items", label: "Items", icon: "📦" },
-  { id: "categories", label: "Categories", icon: "🗂️" },
-  { id: "report", label: "Stock Report", icon: "📊" },
-];
+interface InvPurchase {
+  id: string;
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  rate: number;
+  totalCost: number;
+  vendor: string;
+  date: string;
+  sessionId?: string;
+}
 
-const LOW_STOCK = 5;
+type Tab = "items" | "stores" | "report" | "purchase";
+
+const LOW_STOCK_DEFAULT = 5;
+
 const DEFAULT_CATEGORIES = [
   "Uniform",
   "Tie",
@@ -60,21 +81,8 @@ function exportCSV(rows: string[][], filename: string) {
   a.click();
 }
 
-const EMPTY_ITEM: Omit<InvItem, "id"> = {
-  name: "",
-  category: "",
-  unit: "Pcs",
-  costPrice: 0,
-  sellingPrice: 0,
-  currentStock: 0,
-  storeLocation: "",
-};
-const EMPTY_CAT: Omit<InvCategory, "id"> = { name: "", description: "" };
+// ── Modal — defined OUTSIDE Inventory to prevent remounts ────
 
-// ── Modal extracted OUTSIDE the main component ───────────────────────────────
-// CRITICAL: If Modal were defined inside Inventory(), React would see a brand-new
-// component type on every parent render, causing the modal to unmount+remount
-// and lose input focus on every keystroke.
 function InvModal({
   title,
   onClose,
@@ -82,9 +90,9 @@ function InvModal({
 }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-lg shadow-elevated animate-slide-up">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-base">{title}</CardTitle>
+      <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-elevated animate-slide-up max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 pt-4 pb-3 border-b border-border">
+          <h3 className="text-base font-semibold text-foreground">{title}</h3>
           <button
             type="button"
             onClick={onClose}
@@ -93,11 +101,58 @@ function InvModal({
           >
             ×
           </button>
-        </CardHeader>
-        <CardContent className="space-y-3">{children}</CardContent>
-      </Card>
+        </div>
+        <div className="p-5 space-y-3">{children}</div>
+      </div>
     </div>
   );
+}
+
+// ── Items form fields ─────────────────────────────────────────
+
+interface ItemFormState {
+  name: string;
+  category: string;
+  unit: string;
+  costPriceStr: string;
+  sellingPriceStr: string;
+  currentStockStr: string;
+  reorderLevelStr: string;
+  storeLocation: string;
+}
+
+const EMPTY_ITEM_FORM: ItemFormState = {
+  name: "",
+  category: "",
+  unit: "Pcs",
+  costPriceStr: "",
+  sellingPriceStr: "",
+  currentStockStr: "",
+  reorderLevelStr: "5",
+  storeLocation: "",
+};
+
+// ── Store form ────────────────────────────────────────────────
+
+interface StoreFormState {
+  storeName: string;
+  location: string;
+  incharge: string;
+}
+const EMPTY_STORE_FORM: StoreFormState = {
+  storeName: "",
+  location: "",
+  incharge: "",
+};
+
+// ── Purchase form ─────────────────────────────────────────────
+
+interface PurchaseFormState {
+  itemId: string;
+  quantityStr: string;
+  rateStr: string;
+  vendor: string;
+  date: string;
 }
 
 export default function Inventory() {
@@ -111,57 +166,61 @@ export default function Inventory() {
     currentSession,
   } = useApp();
   const sessionId = currentSession?.id ?? "sess_2025";
+
   const [tab, setTab] = useState<Tab>("items");
 
   const [items, setItems] = useState<InvItem[]>([]);
-  const [categories, setCategories] = useState<InvCategory[]>([]);
+  const [stores, setStores] = useState<InvStore[]>([]);
+  const [purchases, setPurchases] = useState<InvPurchase[]>([]);
+
+  const categories = useMemo(() => {
+    const fromItems = [
+      ...new Set(items.map((i) => i.category).filter(Boolean)),
+    ];
+    return [...new Set([...DEFAULT_CATEGORIES, ...fromItems])].sort();
+  }, [items]);
 
   useEffect(() => {
-    const raw = getData("inventory_items") as InvItem[];
-    setItems(raw);
-    const cats = getData("inv_categories") as InvCategory[];
-    if (cats.length > 0) {
-      setCategories(cats);
-    } else {
-      setCategories(
-        DEFAULT_CATEGORIES.map((name) => ({
-          id: generateId(),
-          name,
-          description: "",
-        })),
-      );
-    }
+    setItems(getData("inventory_items") as InvItem[]);
+    setStores(getData("inv_stores") as InvStore[]);
+    setPurchases(getData("inv_purchases") as InvPurchase[]);
   }, [getData]);
 
-  // ── Items ─────────────────────────────────────────────────
+  // ── Items state ────────────────────────────────────────────
+
   const [itemSearch, setItemSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [showItemModal, setShowItemModal] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
-  const [itemForm, setItemForm] = useState(EMPTY_ITEM);
+  const [itemForm, setItemForm] = useState<ItemFormState>(EMPTY_ITEM_FORM);
 
-  const openAddItem = useCallback(() => {
-    setItemForm((prev) => ({ ...EMPTY_ITEM, category: prev.category || "" }));
-    setEditItemId(null);
-    setShowItemModal(true);
-  }, []);
+  // Stock action modal
+  const [stockItemId, setStockItemId] = useState<string | null>(null);
+  const [stockAction, setStockAction] = useState<"in" | "out">("in");
+  const [stockQtyStr, setStockQtyStr] = useState("1");
+  const [stockNote, setStockNote] = useState("");
+  const [stockError, setStockError] = useState("");
 
-  const openEditItem = useCallback((item: InvItem) => {
-    setItemForm({
-      name: item.name,
-      category: item.category,
-      unit: item.unit,
-      costPrice: item.costPrice,
-      sellingPrice: item.sellingPrice,
-      currentStock: item.currentStock,
-      storeLocation: item.storeLocation,
-    });
-    setEditItemId(item.id);
-    setShowItemModal(true);
-  }, []);
+  // ── Store state ────────────────────────────────────────────
 
-  // ── Stable per-field setters — CRITICAL: these must be useCallback with []
-  // so their references never change, which would cause Input to remount mid-type.
+  const [showStoreModal, setShowStoreModal] = useState(false);
+  const [editStoreId, setEditStoreId] = useState<string | null>(null);
+  const [storeForm, setStoreForm] = useState<StoreFormState>(EMPTY_STORE_FORM);
+
+  // ── Purchase state ─────────────────────────────────────────
+
+  const [showPurchaseModal, setShowPurchaseModal] = useState(false);
+  const [purchaseForm, setPurchaseForm] = useState<PurchaseFormState>({
+    itemId: "",
+    quantityStr: "",
+    rateStr: "",
+    vendor: "",
+    date: new Date().toISOString().split("T")[0],
+  });
+
+  // ── Stable item field handlers ─────────────────────────────
+  // CRITICAL: useCallback([]) prevents remount on every keystroke
+
   const handleItemNameChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setItemForm((p) => ({ ...p, name: e.target.value })),
@@ -181,10 +240,9 @@ export default function Inventory() {
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setItemForm((p) => ({
         ...p,
-        costPrice:
-          Number(
-            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
-          ) || 0,
+        costPriceStr: e.target.value
+          .replace(/[^0-9.]/g, "")
+          .replace(/(\..*)\./g, "$1"),
       })),
     [],
   );
@@ -192,10 +250,9 @@ export default function Inventory() {
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setItemForm((p) => ({
         ...p,
-        sellingPrice:
-          Number(
-            e.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"),
-          ) || 0,
+        sellingPriceStr: e.target.value
+          .replace(/[^0-9.]/g, "")
+          .replace(/(\..*)\./g, "$1"),
       })),
     [],
   );
@@ -203,7 +260,15 @@ export default function Inventory() {
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setItemForm((p) => ({
         ...p,
-        currentStock: Number(e.target.value.replace(/[^0-9]/g, "")) || 0,
+        currentStockStr: e.target.value.replace(/[^0-9]/g, ""),
+      })),
+    [],
+  );
+  const handleItemReorderChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setItemForm((p) => ({
+        ...p,
+        reorderLevelStr: e.target.value.replace(/[^0-9]/g, ""),
       })),
     [],
   );
@@ -213,32 +278,84 @@ export default function Inventory() {
     [],
   );
 
+  // ── Stable store field handlers ────────────────────────────
+
+  const handleStoreNameChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setStoreForm((p) => ({ ...p, storeName: e.target.value })),
+    [],
+  );
+  const handleStoreLocationChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setStoreForm((p) => ({ ...p, location: e.target.value })),
+    [],
+  );
+  const handleStoreInchargeChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) =>
+      setStoreForm((p) => ({ ...p, incharge: e.target.value })),
+    [],
+  );
+
+  // ── Item CRUD ──────────────────────────────────────────────
+
+  const openAddItem = useCallback(() => {
+    setItemForm(EMPTY_ITEM_FORM);
+    setEditItemId(null);
+    setShowItemModal(true);
+  }, []);
+
+  const openEditItem = useCallback((item: InvItem) => {
+    setItemForm({
+      name: item.name,
+      category: item.category,
+      unit: item.unit,
+      costPriceStr: item.costPrice ? String(item.costPrice) : "",
+      sellingPriceStr: item.sellingPrice ? String(item.sellingPrice) : "",
+      currentStockStr: item.currentStock ? String(item.currentStock) : "",
+      reorderLevelStr: item.reorderLevel ? String(item.reorderLevel) : "5",
+      storeLocation: item.storeLocation,
+    });
+    setEditItemId(item.id);
+    setShowItemModal(true);
+  }, []);
+
   const handleSaveItem = useCallback(async () => {
     if (!itemForm.name.trim()) return;
+    const itemData: InvItem = {
+      id: editItemId ?? generateId(),
+      name: itemForm.name.trim(),
+      category: itemForm.category,
+      unit: itemForm.unit,
+      costPrice: Number(itemForm.costPriceStr) || 0,
+      sellingPrice: Number(itemForm.sellingPriceStr) || 0,
+      currentStock: Number(itemForm.currentStockStr) || 0,
+      reorderLevel: Number(itemForm.reorderLevelStr) || LOW_STOCK_DEFAULT,
+      storeLocation: itemForm.storeLocation,
+      sessionId,
+    };
     if (editItemId) {
-      const updated: InvItem = { id: editItemId, ...itemForm, sessionId };
       await updateData(
         "inventory_items",
         editItemId,
-        updated as unknown as Record<string, unknown>,
+        itemData as unknown as Record<string, unknown>,
       );
-      setItems((prev) => prev.map((i) => (i.id === editItemId ? updated : i)));
-      addNotification(`"${itemForm.name}" updated`, "success", "📦");
+      setItems((prev) => prev.map((i) => (i.id === editItemId ? itemData : i)));
+      addNotification(`"${itemData.name}" updated`, "success", "📦");
     } else {
-      const newItem: InvItem = { id: generateId(), ...itemForm, sessionId };
       await saveData(
         "inventory_items",
-        newItem as unknown as Record<string, unknown>,
+        itemData as unknown as Record<string, unknown>,
       );
-      setItems((prev) => [...prev, newItem]);
-      addNotification(`"${itemForm.name}" added`, "success", "📦");
+      setItems((prev) => [...prev, itemData]);
+      addNotification(`"${itemData.name}" added`, "success", "📦");
     }
     setShowItemModal(false);
     setEditItemId(null);
-  }, [itemForm, editItemId, sessionId, saveData, updateData, addNotification]);
+  }, [itemForm, editItemId, sessionId, updateData, saveData, addNotification]);
 
   const handleDeleteItem = useCallback(
     async (id: string) => {
+      if (!confirm("Delete this item?")) return;
       await deleteData("inventory_items", id);
       setItems((prev) => prev.filter((i) => i.id !== id));
       addNotification("Item deleted", "info");
@@ -246,17 +363,12 @@ export default function Inventory() {
     [deleteData, addNotification],
   );
 
-  // ── Stock In / Out ─────────────────────────────────────────
-  const [stockItemId, setStockItemId] = useState<string | null>(null);
-  const [stockAction, setStockAction] = useState<"in" | "out">("in");
-  const [stockQty, setStockQty] = useState(1);
-  const [stockNote, setStockNote] = useState("");
-  const [stockError, setStockError] = useState("");
+  // ── Stock In/Out ───────────────────────────────────────────
 
   const openStockModal = useCallback((item: InvItem, action: "in" | "out") => {
     setStockItemId(item.id);
     setStockAction(action);
-    setStockQty(1);
+    setStockQtyStr("1");
     setStockNote("");
     setStockError("");
   }, []);
@@ -264,29 +376,29 @@ export default function Inventory() {
   const handleStockQtyChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       setStockError("");
-      setStockQty(Number(e.target.value.replace(/[^0-9]/g, "")) || 0);
+      setStockQtyStr(e.target.value.replace(/[^0-9]/g, ""));
     },
     [],
   );
+
   const handleStockNoteChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => setStockNote(e.target.value),
     [],
   );
 
   const handleStockUpdate = useCallback(async () => {
-    if (!stockItemId || stockQty <= 0) return;
+    const qty = Number(stockQtyStr) || 0;
+    if (!stockItemId || qty <= 0) return;
     const item = items.find((i) => i.id === stockItemId);
     if (!item) return;
-    if (stockAction === "out" && stockQty > item.currentStock) {
+    if (stockAction === "out" && qty > item.currentStock) {
       setStockError(
         `Insufficient stock. Available: ${item.currentStock} ${item.unit}`,
       );
       return;
     }
     const newStock =
-      stockAction === "in"
-        ? item.currentStock + stockQty
-        : item.currentStock - stockQty;
+      stockAction === "in" ? item.currentStock + qty : item.currentStock - qty;
     const updated: InvItem = { ...item, currentStock: newStock };
     await updateData(
       "inventory_items",
@@ -295,79 +407,123 @@ export default function Inventory() {
     );
     setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
     addNotification(
-      `${stockAction === "in" ? "Added" : "Issued"} ${stockQty} × ${item.name}`,
+      `${stockAction === "in" ? "Added" : "Issued"} ${qty} × ${item.name}`,
       "success",
     );
-    if (stockAction === "out" && newStock < LOW_STOCK) {
+    if (newStock <= item.reorderLevel)
       addNotification(
-        `⚠️ Low stock: ${item.name} — only ${newStock} left`,
+        `⚠️ Low stock: ${item.name} — ${newStock} left`,
         "warning",
       );
-    }
     setStockItemId(null);
-  }, [stockItemId, stockAction, stockQty, items, updateData, addNotification]);
+  }, [
+    stockItemId,
+    stockAction,
+    stockQtyStr,
+    items,
+    updateData,
+    addNotification,
+  ]);
 
-  // ── Categories ────────────────────────────────────────────
-  const [showCatModal, setShowCatModal] = useState(false);
-  const [editCatId, setEditCatId] = useState<string | null>(null);
-  const [catForm, setCatForm] = useState(EMPTY_CAT);
+  // ── Store CRUD ─────────────────────────────────────────────
 
-  const openAddCat = useCallback(() => {
-    setCatForm(EMPTY_CAT);
-    setEditCatId(null);
-    setShowCatModal(true);
+  const openAddStore = useCallback(() => {
+    setStoreForm(EMPTY_STORE_FORM);
+    setEditStoreId(null);
+    setShowStoreModal(true);
+  }, []);
+  const openEditStore = useCallback((s: InvStore) => {
+    setStoreForm({
+      storeName: s.storeName,
+      location: s.location,
+      incharge: s.incharge,
+    });
+    setEditStoreId(s.id);
+    setShowStoreModal(true);
   }, []);
 
-  const openEditCat = useCallback((c: InvCategory) => {
-    setCatForm({ name: c.name, description: c.description });
-    setEditCatId(c.id);
-    setShowCatModal(true);
-  }, []);
-
-  const handleCatNameChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setCatForm((p) => ({ ...p, name: e.target.value })),
-    [],
-  );
-  const handleCatDescriptionChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setCatForm((p) => ({ ...p, description: e.target.value })),
-    [],
-  );
-
-  const handleSaveCat = useCallback(async () => {
-    if (!catForm.name.trim()) return;
-    if (editCatId) {
-      await updateData("inv_categories", editCatId, {
-        id: editCatId,
-        ...catForm,
+  const handleSaveStore = useCallback(async () => {
+    if (!storeForm.storeName.trim()) return;
+    if (editStoreId) {
+      await updateData("inv_stores", editStoreId, {
+        id: editStoreId,
+        ...storeForm,
       });
-      setCategories((prev) =>
-        prev.map((c) =>
-          c.id === editCatId ? { id: editCatId, ...catForm } : c,
+      setStores((prev) =>
+        prev.map((s) =>
+          s.id === editStoreId ? { id: editStoreId, ...storeForm } : s,
         ),
       );
     } else {
-      const newCat: InvCategory = { id: generateId(), ...catForm };
+      const newStore: InvStore = { id: generateId(), ...storeForm };
       await saveData(
-        "inv_categories",
-        newCat as unknown as Record<string, unknown>,
+        "inv_stores",
+        newStore as unknown as Record<string, unknown>,
       );
-      setCategories((prev) => [...prev, newCat]);
+      setStores((prev) => [...prev, newStore]);
     }
-    setShowCatModal(false);
-    setEditCatId(null);
-  }, [catForm, editCatId, saveData, updateData]);
+    setShowStoreModal(false);
+    setEditStoreId(null);
+  }, [storeForm, editStoreId, updateData, saveData]);
 
-  const handleDeleteCat = useCallback(
+  const handleDeleteStore = useCallback(
     async (id: string) => {
-      await deleteData("inv_categories", id);
-      setCategories((prev) => prev.filter((c) => c.id !== id));
+      await deleteData("inv_stores", id);
+      setStores((prev) => prev.filter((s) => s.id !== id));
     },
     [deleteData],
   );
 
-  // ── Derived ───────────────────────────────────────────────
+  // ── Purchase ──────────────────────────────────────────────
+
+  const handleSavePurchase = useCallback(async () => {
+    const { itemId, quantityStr, rateStr, vendor, date } = purchaseForm;
+    if (!itemId || !quantityStr || !rateStr) return;
+    const item = items.find((i) => i.id === itemId);
+    if (!item) return;
+    const qty = Number(quantityStr) || 0;
+    const rate = Number(rateStr) || 0;
+    const purchase: InvPurchase = {
+      id: generateId(),
+      itemId,
+      itemName: item.name,
+      quantity: qty,
+      rate,
+      totalCost: qty * rate,
+      vendor,
+      date,
+      sessionId,
+    };
+    await saveData(
+      "inv_purchases",
+      purchase as unknown as Record<string, unknown>,
+    );
+    setPurchases((prev) => [...prev, purchase]);
+    // Update stock
+    const updated: InvItem = { ...item, currentStock: item.currentStock + qty };
+    await updateData(
+      "inventory_items",
+      item.id,
+      updated as unknown as Record<string, unknown>,
+    );
+    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
+    addNotification(
+      `Purchase recorded: ${qty} × ${item.name}`,
+      "success",
+      "🛒",
+    );
+    setShowPurchaseModal(false);
+    setPurchaseForm({
+      itemId: "",
+      quantityStr: "",
+      rateStr: "",
+      vendor: "",
+      date: new Date().toISOString().split("T")[0],
+    });
+  }, [purchaseForm, items, sessionId, saveData, updateData, addNotification]);
+
+  // ── Derived ────────────────────────────────────────────────
+
   const filteredItems = useMemo(() => {
     return items.filter((i) => {
       const ms =
@@ -381,15 +537,35 @@ export default function Inventory() {
     () => items.reduce((a, i) => a + i.currentStock * i.costPrice, 0),
     [items],
   );
-  const lowCount = useMemo(
-    () => items.filter((i) => i.currentStock < LOW_STOCK).length,
+  const lowStockItems = useMemo(
+    () => items.filter((i) => i.currentStock <= i.reorderLevel),
     [items],
   );
   const stockItem = items.find((i) => i.id === stockItemId);
 
+  const TABS: {
+    id: Tab;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    { id: "items", label: "Items", icon: Package },
+    { id: "stores", label: "Stores", icon: Warehouse },
+    { id: "report", label: "Stock Report", icon: AlertTriangle },
+    { id: "purchase", label: "Purchase", icon: Plus },
+  ];
+
   return (
-    <div className="space-y-4">
-      {/* Summary Cards */}
+    <div className="p-4 md:p-6 bg-background min-h-screen space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-foreground font-display">
+          Inventory
+        </h1>
+        <p className="text-muted-foreground text-sm mt-0.5">
+          Manage school store items, purchases, and stock levels
+        </p>
+      </div>
+
+      {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="py-3 text-center">
@@ -410,23 +586,23 @@ export default function Inventory() {
         <Card>
           <CardContent className="py-3 text-center">
             <div className="text-2xl font-bold text-foreground">
-              {categories.length}
+              {stores.length}
             </div>
-            <div className="text-xs text-muted-foreground">Categories</div>
+            <div className="text-xs text-muted-foreground">Stores</div>
           </CardContent>
         </Card>
         <Card
           className={
-            lowCount > 0
+            lowStockItems.length > 0
               ? "bg-destructive/5 border-destructive/20"
               : "bg-muted/30"
           }
         >
           <CardContent className="py-3 text-center">
             <div
-              className={`text-2xl font-bold ${lowCount > 0 ? "text-destructive" : "text-foreground"}`}
+              className={`text-2xl font-bold ${lowStockItems.length > 0 ? "text-destructive" : "text-foreground"}`}
             >
-              {lowCount}
+              {lowStockItems.length}
             </div>
             <div className="text-xs text-muted-foreground">Low Stock</div>
           </CardContent>
@@ -435,18 +611,21 @@ export default function Inventory() {
 
       {/* Tabs */}
       <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setTab(t.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${tab === t.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
-            data-ocid={`inventory.${t.id}_tab`}
-          >
-            <span>{t.icon}</span>
-            {t.label}
-          </button>
-        ))}
+        {TABS.map((t) => {
+          const Icon = t.icon;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${tab === t.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+              data-ocid={`inventory.${t.id}_tab`}
+            >
+              <Icon className="w-4 h-4" />
+              {t.label}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── ITEMS TAB ── */}
@@ -457,7 +636,7 @@ export default function Inventory() {
               <Input
                 value={itemSearch}
                 onChange={(e) => setItemSearch(e.target.value)}
-                placeholder="Search items..."
+                placeholder="Search items…"
                 className="w-44"
                 data-ocid="inventory.search_input"
               />
@@ -469,20 +648,60 @@ export default function Inventory() {
               >
                 <option value="">All Categories</option>
                 {categories.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
+                  <option key={c} value={c}>
+                    {c}
                   </option>
                 ))}
               </select>
             </div>
-            {!isReadOnly && (
+            <div className="flex gap-2">
+              {!isReadOnly && (
+                <Button
+                  onClick={openAddItem}
+                  data-ocid="inventory.add_item_button"
+                >
+                  <Plus className="w-4 h-4 mr-1" />
+                  Add Item
+                </Button>
+              )}
               <Button
-                onClick={openAddItem}
-                data-ocid="inventory.add_item_button"
+                variant="outline"
+                size="sm"
+                onClick={() =>
+                  exportCSV(
+                    [
+                      [
+                        "Item",
+                        "Category",
+                        "Unit",
+                        "Cost Price",
+                        "Sell Price",
+                        "Stock",
+                        "Reorder Level",
+                        "Location",
+                        "Value",
+                      ],
+                      ...items.map((i) => [
+                        i.name,
+                        i.category,
+                        i.unit,
+                        String(i.costPrice),
+                        String(i.sellingPrice),
+                        String(i.currentStock),
+                        String(i.reorderLevel),
+                        i.storeLocation,
+                        String(i.currentStock * i.costPrice),
+                      ]),
+                    ],
+                    "inventory.csv",
+                  )
+                }
+                data-ocid="inventory.export_button"
               >
-                + Add Item
+                <Download className="w-4 h-4 mr-1" />
+                Export
               </Button>
-            )}
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded-xl border border-border">
@@ -496,7 +715,6 @@ export default function Inventory() {
                     "Cost Price",
                     "Sell Price",
                     "Stock",
-                    "Location",
                     "Actions",
                   ].map((h) => (
                     <th
@@ -512,7 +730,7 @@ export default function Inventory() {
                 {filteredItems.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={7}
                       className="px-4 py-12 text-center text-muted-foreground"
                       data-ocid="inventory.items_empty_state"
                     >
@@ -525,7 +743,7 @@ export default function Inventory() {
                   </tr>
                 ) : (
                   filteredItems.map((item, idx) => {
-                    const isLow = item.currentStock < LOW_STOCK;
+                    const isLow = item.currentStock <= item.reorderLevel;
                     return (
                       <tr
                         key={item.id}
@@ -544,7 +762,9 @@ export default function Inventory() {
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant="secondary">{item.category}</Badge>
+                          <Badge variant="secondary">
+                            {item.category || "—"}
+                          </Badge>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {item.unit}
@@ -552,17 +772,13 @@ export default function Inventory() {
                         <td className="px-4 py-3 font-medium">
                           {formatCurrency(item.costPrice)}
                         </td>
-                        <td className="px-4 py-3 font-medium text-accent">
+                        <td className="px-4 py-3 text-accent font-medium">
                           {formatCurrency(item.sellingPrice)}
                         </td>
                         <td className="px-4 py-3">
                           <Badge variant={isLow ? "destructive" : "outline"}>
                             {item.currentStock} {item.unit}
-                            {isLow ? " ⚠️" : ""}
                           </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">
-                          {item.storeLocation || "—"}
                         </td>
                         <td className="px-4 py-3">
                           {!isReadOnly && (
@@ -584,20 +800,22 @@ export default function Inventory() {
                                 Issue
                               </Button>
                               <Button
-                                variant="outline"
-                                size="sm"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
                                 onClick={() => openEditItem(item)}
                                 data-ocid={`inventory.edit_button.${idx + 1}`}
                               >
-                                Edit
+                                <Edit2 className="w-3.5 h-3.5" />
                               </Button>
                               <Button
-                                variant="destructive"
-                                size="sm"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive"
                                 onClick={() => handleDeleteItem(item.id)}
                                 data-ocid={`inventory.delete_button.${idx + 1}`}
                               >
-                                Delete
+                                <Trash2 className="w-3.5 h-3.5" />
                               </Button>
                             </div>
                           )}
@@ -617,7 +835,7 @@ export default function Inventory() {
                       Total Stock Value:
                     </td>
                     <td
-                      colSpan={3}
+                      colSpan={2}
                       className="px-4 py-3 font-bold text-primary"
                     >
                       {formatCurrency(
@@ -635,34 +853,39 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* ── CATEGORIES TAB ── */}
-      {tab === "categories" && (
+      {/* ── STORES TAB ── */}
+      {tab === "stores" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">
-              Categories
-            </h2>
+            <h2 className="text-lg font-semibold text-foreground">Stores</h2>
             {!isReadOnly && (
-              <Button onClick={openAddCat} data-ocid="inventory.add_cat_button">
-                + Add Category
+              <Button
+                onClick={openAddStore}
+                data-ocid="inventory.add_store_button"
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Add Store
               </Button>
             )}
           </div>
-          {categories.length === 0 ? (
-            <Card data-ocid="inventory.categories_empty_state">
-              <CardContent className="py-12 text-center text-muted-foreground">
-                No categories yet.
-              </CardContent>
-            </Card>
+          {stores.length === 0 ? (
+            <div
+              className="py-12 text-center text-muted-foreground"
+              data-ocid="inventory.stores_empty_state"
+            >
+              <Warehouse className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p>No stores added yet</p>
+            </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-muted/50">
                   <tr>
                     {[
-                      "Category Name",
-                      "Description",
-                      "Item Count",
+                      "Store Name",
+                      "Location",
+                      "Incharge",
+                      "Items",
                       "Actions",
                     ].map((h) => (
                       <th
@@ -675,21 +898,27 @@ export default function Inventory() {
                   </tr>
                 </thead>
                 <tbody>
-                  {categories.map((cat, idx) => (
+                  {stores.map((s, idx) => (
                     <tr
-                      key={cat.id}
+                      key={s.id}
                       className="border-t border-border hover:bg-muted/30"
-                      data-ocid={`inventory.category.${idx + 1}`}
+                      data-ocid={`inventory.store.${idx + 1}`}
                     >
                       <td className="px-4 py-3 font-medium text-foreground">
-                        {cat.name}
+                        {s.storeName}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-sm">
-                        {cat.description || "—"}
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {s.location || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {s.incharge || "—"}
                       </td>
                       <td className="px-4 py-3">
                         <Badge variant="secondary">
-                          {items.filter((i) => i.category === cat.name).length}{" "}
+                          {
+                            items.filter((i) => i.storeLocation === s.storeName)
+                              .length
+                          }{" "}
                           items
                         </Badge>
                       </td>
@@ -699,16 +928,16 @@ export default function Inventory() {
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => openEditCat(cat)}
-                              data-ocid={`inventory.edit_cat_button.${idx + 1}`}
+                              onClick={() => openEditStore(s)}
+                              data-ocid={`inventory.edit_store_button.${idx + 1}`}
                             >
                               Edit
                             </Button>
                             <Button
                               variant="destructive"
                               size="sm"
-                              onClick={() => handleDeleteCat(cat.id)}
-                              data-ocid={`inventory.delete_cat_button.${idx + 1}`}
+                              onClick={() => handleDeleteStore(s.id)}
+                              data-ocid={`inventory.delete_store_button.${idx + 1}`}
                             >
                               Delete
                             </Button>
@@ -734,62 +963,58 @@ export default function Inventory() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => {
-                const rows: string[][] = [
-                  [
-                    "Item",
-                    "Category",
-                    "Unit",
-                    "Cost Price",
-                    "Sell Price",
-                    "Stock",
-                    "Location",
-                    "Value",
-                  ],
-                ];
-                for (const i of items)
-                  rows.push([
-                    i.name,
-                    i.category,
-                    i.unit,
-                    String(i.costPrice),
-                    String(i.sellingPrice),
-                    String(i.currentStock),
-                    i.storeLocation,
-                    String(i.currentStock * i.costPrice),
-                  ]);
+              onClick={() =>
                 exportCSV(
-                  rows,
+                  [
+                    [
+                      "Item",
+                      "Category",
+                      "Unit",
+                      "Cost",
+                      "Sell",
+                      "Stock",
+                      "Reorder Level",
+                      "Status",
+                      "Value",
+                    ],
+                    ...items.map((i) => [
+                      i.name,
+                      i.category,
+                      i.unit,
+                      String(i.costPrice),
+                      String(i.sellingPrice),
+                      String(i.currentStock),
+                      String(i.reorderLevel),
+                      i.currentStock <= i.reorderLevel ? "Low Stock" : "OK",
+                      String(i.currentStock * i.costPrice),
+                    ]),
+                  ],
                   `stock_report_${new Date().toISOString().split("T")[0]}.csv`,
-                );
-              }}
+                )
+              }
               data-ocid="inventory.export_report_button"
             >
+              <Download className="w-4 h-4 mr-1" />
               Export CSV
             </Button>
           </div>
 
-          {lowCount > 0 && (
-            <Card className="border-destructive/30 bg-destructive/5">
-              <CardContent className="py-3">
-                <p className="text-sm font-semibold text-destructive">
-                  ⚠️ {lowCount} item(s) have low stock (below {LOW_STOCK} units)
-                </p>
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {items
-                    .filter((i) => i.currentStock < LOW_STOCK)
-                    .map((i) => (
-                      <Badge
-                        key={i.id}
-                        variant="destructive"
-                        className="text-xs"
-                      >
-                        {i.name}: {i.currentStock} {i.unit}
-                      </Badge>
-                    ))}
-                </div>
-              </CardContent>
-            </Card>
+          {lowStockItems.length > 0 && (
+            <div
+              className="bg-destructive/5 border border-destructive/30 rounded-xl p-3"
+              data-ocid="inventory.low_stock_alert"
+            >
+              <p className="text-sm font-semibold text-destructive mb-2">
+                ⚠️ {lowStockItems.length} item(s) at or below reorder level
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {lowStockItems.map((i) => (
+                  <Badge key={i.id} variant="destructive" className="text-xs">
+                    {i.name}: {i.currentStock} {i.unit}
+                  </Badge>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="overflow-x-auto rounded-xl border border-border">
@@ -802,7 +1027,8 @@ export default function Inventory() {
                     "Unit",
                     "Cost Price",
                     "Sell Price",
-                    "Stock",
+                    "Current Stock",
+                    "Reorder Level",
                     "Status",
                     "Value",
                   ].map((h) => (
@@ -819,19 +1045,18 @@ export default function Inventory() {
                 {items.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="px-4 py-12 text-center text-muted-foreground"
                       data-ocid="inventory.report_empty_state"
                     >
-                      <div className="text-4xl mb-2">📊</div>No inventory items
-                      to report.
+                      No inventory items yet.
                     </td>
                   </tr>
                 ) : (
                   [...items]
                     .sort((a, b) => a.currentStock - b.currentStock)
                     .map((item, idx) => {
-                      const isLow = item.currentStock < LOW_STOCK;
+                      const isLow = item.currentStock <= item.reorderLevel;
                       return (
                         <tr
                           key={item.id}
@@ -856,13 +1081,16 @@ export default function Inventory() {
                           <td className="px-4 py-3 font-bold">
                             {item.currentStock}
                           </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {item.reorderLevel}
+                          </td>
                           <td className="px-4 py-3">
                             {isLow ? (
                               <Badge variant="destructive">Low Stock</Badge>
                             ) : (
                               <Badge
                                 variant="outline"
-                                className="text-green-700"
+                                className="text-foreground"
                               >
                                 OK
                               </Badge>
@@ -880,7 +1108,7 @@ export default function Inventory() {
                 <tfoot className="bg-muted/40">
                   <tr>
                     <td
-                      colSpan={7}
+                      colSpan={8}
                       className="px-4 py-3 text-right font-semibold text-foreground"
                     >
                       Total Inventory Value:
@@ -896,7 +1124,104 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* Item Modal */}
+      {/* ── PURCHASE TAB ── */}
+      {tab === "purchase" && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-foreground">
+              Purchase Register
+            </h2>
+            {!isReadOnly && (
+              <Button
+                onClick={() => setShowPurchaseModal(true)}
+                data-ocid="inventory.add_purchase_button"
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Record Purchase
+              </Button>
+            )}
+          </div>
+          {purchases.length === 0 ? (
+            <div
+              className="py-12 text-center text-muted-foreground"
+              data-ocid="inventory.purchase_empty_state"
+            >
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-30" />
+              <p>No purchases recorded yet</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    {[
+                      "Date",
+                      "Item",
+                      "Qty",
+                      "Rate (₹)",
+                      "Total Cost",
+                      "Vendor",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
+                      >
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...purchases]
+                    .sort((a, b) => b.date.localeCompare(a.date))
+                    .map((p, idx) => (
+                      <tr
+                        key={p.id}
+                        className="border-t border-border hover:bg-muted/30"
+                        data-ocid={`inventory.purchase.${idx + 1}`}
+                      >
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {p.date}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-foreground">
+                          {p.itemName}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">{p.quantity}</td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {formatCurrency(p.rate)}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-primary tabular-nums">
+                          {formatCurrency(p.totalCost)}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {p.vendor || "—"}
+                        </td>
+                      </tr>
+                    ))}
+                </tbody>
+                <tfoot className="bg-muted/40">
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-4 py-3 text-right font-semibold text-foreground"
+                    >
+                      Total:
+                    </td>
+                    <td className="px-4 py-3 font-bold text-primary">
+                      {formatCurrency(
+                        purchases.reduce((a, p) => a + p.totalCost, 0),
+                      )}
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Item Modal ── */}
       {showItemModal && (
         <InvModal
           title={editItemId ? "Edit Item" : "Add Item"}
@@ -912,19 +1237,21 @@ export default function Inventory() {
                 value={itemForm.name}
                 onChange={handleItemNameChange}
                 placeholder="e.g. School Dress"
+                className="mt-1"
                 data-ocid="inventory.item_name_input"
               />
             </div>
             <div>
               <Label>Category</Label>
               <select
-                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background"
+                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1"
                 value={itemForm.category}
                 onChange={handleItemCategoryChange}
               >
+                <option value="">Select Category</option>
                 {categories.map((c) => (
-                  <option key={c.id} value={c.name}>
-                    {c.name}
+                  <option key={c} value={c}>
+                    {c}
                   </option>
                 ))}
               </select>
@@ -935,17 +1262,18 @@ export default function Inventory() {
                 value={itemForm.unit}
                 onChange={handleItemUnitChange}
                 placeholder="Pcs / Pair / Set"
+                className="mt-1"
               />
             </div>
             <div>
               <Label>Cost Price (₹)</Label>
               <Input
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={itemForm.costPrice || ""}
+                inputMode="decimal"
+                value={itemForm.costPriceStr}
                 onChange={handleItemCostChange}
                 placeholder="0"
+                className="mt-1"
                 data-ocid="inventory.item_cost_input"
               />
             </div>
@@ -953,11 +1281,11 @@ export default function Inventory() {
               <Label>Selling Price (₹)</Label>
               <Input
                 type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={itemForm.sellingPrice || ""}
+                inputMode="decimal"
+                value={itemForm.sellingPriceStr}
                 onChange={handleItemSellChange}
                 placeholder="0"
+                className="mt-1"
                 data-ocid="inventory.item_sell_input"
               />
             </div>
@@ -966,19 +1294,32 @@ export default function Inventory() {
               <Input
                 type="text"
                 inputMode="numeric"
-                pattern="[0-9]*"
-                value={itemForm.currentStock || ""}
+                value={itemForm.currentStockStr}
                 onChange={handleItemStockChange}
                 placeholder="0"
+                className="mt-1"
                 data-ocid="inventory.item_stock_input"
               />
             </div>
             <div>
+              <Label>Reorder Level</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={itemForm.reorderLevelStr}
+                onChange={handleItemReorderChange}
+                placeholder="5"
+                className="mt-1"
+                data-ocid="inventory.item_reorder_input"
+              />
+            </div>
+            <div className="md:col-span-2">
               <Label>Store Location</Label>
               <Input
                 value={itemForm.storeLocation}
                 onChange={handleItemLocationChange}
                 placeholder="e.g. Room 2 Shelf A"
+                className="mt-1"
               />
             </div>
           </div>
@@ -1003,46 +1344,57 @@ export default function Inventory() {
         </InvModal>
       )}
 
-      {/* Category Modal */}
-      {showCatModal && (
+      {/* ── Store Modal ── */}
+      {showStoreModal && (
         <InvModal
-          title={editCatId ? "Edit Category" : "Add Category"}
+          title={editStoreId ? "Edit Store" : "Add Store"}
           onClose={() => {
-            setShowCatModal(false);
-            setEditCatId(null);
+            setShowStoreModal(false);
+            setEditStoreId(null);
           }}
         >
           <div>
-            <Label>Category Name *</Label>
+            <Label>Store Name *</Label>
             <Input
-              value={catForm.name}
-              onChange={handleCatNameChange}
-              placeholder="e.g. Uniform"
-              data-ocid="inventory.cat_name_input"
+              value={storeForm.storeName}
+              onChange={handleStoreNameChange}
+              placeholder="e.g. Main Store"
+              className="mt-1"
+              data-ocid="inventory.store_name_input"
             />
           </div>
           <div>
-            <Label>Description</Label>
+            <Label>Location</Label>
             <Input
-              value={catForm.description}
-              onChange={handleCatDescriptionChange}
-              placeholder="Optional description"
+              value={storeForm.location}
+              onChange={handleStoreLocationChange}
+              placeholder="e.g. Ground Floor, Block B"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label>Incharge</Label>
+            <Input
+              value={storeForm.incharge}
+              onChange={handleStoreInchargeChange}
+              placeholder="Staff name"
+              className="mt-1"
             />
           </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={handleSaveCat}
-              data-ocid="inventory.cat_save_button"
+              onClick={handleSaveStore}
+              data-ocid="inventory.store_save_button"
             >
-              Save
+              Save Store
             </Button>
             <Button
               variant="outline"
               onClick={() => {
-                setShowCatModal(false);
-                setEditCatId(null);
+                setShowStoreModal(false);
+                setEditStoreId(null);
               }}
-              data-ocid="inventory.cat_cancel_button"
+              data-ocid="inventory.store_cancel_button"
             >
               Cancel
             </Button>
@@ -1050,7 +1402,7 @@ export default function Inventory() {
         </InvModal>
       )}
 
-      {/* Stock Modal */}
+      {/* ── Stock Modal ── */}
       {stockItemId && (
         <InvModal
           title={stockAction === "in" ? "📥 Add Stock" : "📤 Issue Stock"}
@@ -1076,9 +1428,9 @@ export default function Inventory() {
             <Input
               type="text"
               inputMode="numeric"
-              pattern="[0-9]*"
-              value={stockQty || ""}
+              value={stockQtyStr}
               onChange={handleStockQtyChange}
+              className="mt-1"
               data-ocid="inventory.stock_qty_input"
             />
           </div>
@@ -1088,8 +1440,11 @@ export default function Inventory() {
               value={stockNote}
               onChange={handleStockNoteChange}
               placeholder={
-                stockAction === "in" ? "Supplier, etc." : "Student / buyer"
+                stockAction === "in"
+                  ? "Supplier / purchase order"
+                  : "Issued to (student/staff)"
               }
+              className="mt-1"
             />
           </div>
           <div className="flex gap-2 pt-1">
@@ -1106,6 +1461,118 @@ export default function Inventory() {
                 setStockError("");
               }}
               data-ocid="inventory.stock_cancel_button"
+            >
+              Cancel
+            </Button>
+          </div>
+        </InvModal>
+      )}
+
+      {/* ── Purchase Modal ── */}
+      {showPurchaseModal && (
+        <InvModal
+          title="Record Purchase"
+          onClose={() => setShowPurchaseModal(false)}
+        >
+          <div>
+            <Label>Item *</Label>
+            <select
+              className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1"
+              value={purchaseForm.itemId}
+              onChange={(e) =>
+                setPurchaseForm((p) => ({ ...p, itemId: e.target.value }))
+              }
+              data-ocid="inventory.purchase_item_select"
+            >
+              <option value="">— Select Item —</option>
+              {items.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.name} ({i.currentStock} {i.unit})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label>Quantity *</Label>
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={purchaseForm.quantityStr}
+                onChange={(e) =>
+                  setPurchaseForm((p) => ({
+                    ...p,
+                    quantityStr: e.target.value.replace(/[^0-9]/g, ""),
+                  }))
+                }
+                placeholder="0"
+                className="mt-1"
+                data-ocid="inventory.purchase_qty_input"
+              />
+            </div>
+            <div>
+              <Label>Rate per unit (₹) *</Label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                value={purchaseForm.rateStr}
+                onChange={(e) =>
+                  setPurchaseForm((p) => ({
+                    ...p,
+                    rateStr: e.target.value
+                      .replace(/[^0-9.]/g, "")
+                      .replace(/(\..*)\./g, "$1"),
+                  }))
+                }
+                placeholder="0.00"
+                className="mt-1"
+                data-ocid="inventory.purchase_rate_input"
+              />
+            </div>
+          </div>
+          {purchaseForm.quantityStr && purchaseForm.rateStr && (
+            <p className="text-sm font-semibold text-primary">
+              Total Cost:{" "}
+              {formatCurrency(
+                (Number(purchaseForm.quantityStr) || 0) *
+                  (Number(purchaseForm.rateStr) || 0),
+              )}
+            </p>
+          )}
+          <div>
+            <Label>Vendor / Supplier</Label>
+            <Input
+              value={purchaseForm.vendor}
+              onChange={(e) =>
+                setPurchaseForm((p) => ({ ...p, vendor: e.target.value }))
+              }
+              placeholder="Vendor name"
+              className="mt-1"
+              data-ocid="inventory.purchase_vendor_input"
+            />
+          </div>
+          <div>
+            <Label>Date *</Label>
+            <Input
+              type="date"
+              value={purchaseForm.date}
+              onChange={(e) =>
+                setPurchaseForm((p) => ({ ...p, date: e.target.value }))
+              }
+              className="mt-1"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              onClick={handleSavePurchase}
+              data-ocid="inventory.purchase_save_button"
+            >
+              Save Purchase
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowPurchaseModal(false)}
+              data-ocid="inventory.purchase_cancel_button"
             >
               Cancel
             </Button>

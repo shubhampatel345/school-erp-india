@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-// Prevent BigInt JSON serialization errors
+// Prevent BigInt JSON serialization errors from IC canister responses
 BigInt.prototype.toJSON = function () {
   return this.toString();
 };

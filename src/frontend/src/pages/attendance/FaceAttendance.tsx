@@ -212,7 +212,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
   }, [activeStudents, enrollSearch]);
 
   // Cleanup on unmount
-  // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup only
   useEffect(() => {
     return () => {
       stopEnrollCamera();
@@ -445,7 +444,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
   ]);
 
   // Start/stop detection loop when detectionOn changes
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional
   useEffect(() => {
     if (detectionOn) {
       if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);

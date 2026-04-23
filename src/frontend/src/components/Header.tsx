@@ -52,20 +52,26 @@ function getSiblingCount(student: Student, allStudents: Student[]): number {
   ).length;
 }
 
-/** Small colored dot indicating sync state */
+/** Sync status indicator dot */
 function SyncDot() {
   const { mode } = useSync();
   const [tooltip, setTooltip] = useState(false);
 
-  const config = {
-    connected: { color: "bg-emerald-500", label: "Synced to MySQL server" },
-    syncing: { color: "bg-amber-400 animate-pulse", label: "Syncing data…" },
-    offline: { color: "bg-destructive", label: "Server unreachable" },
+  const config: Record<string, { color: string; label: string }> = {
+    connected: { color: "bg-emerald-500", label: "Synced to canister" },
+    syncing: {
+      color: "bg-amber-400 animate-pulse",
+      label: "Syncing data…",
+    },
+    offline: { color: "bg-destructive", label: "Canister unreachable" },
     auth_error: {
       color: "bg-amber-500",
-      label: "Auth required — check Settings",
+      label: "Auth required",
     },
-    local: { color: "bg-muted-foreground/40", label: "Local mode (no server)" },
+    local: {
+      color: "bg-muted-foreground/40",
+      label: "Local mode",
+    },
   };
 
   const cfg = config[mode] ?? config.offline;
@@ -117,7 +123,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
   const sessionRef = useRef<HTMLDivElement>(null);
   const userRef = useRef<HTMLDivElement>(null);
 
-  // ── Global Search ─────────────────────────────────────────
+  // ── Global Search ──────────────────────────────────────────
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<Student[]>([]);
   const [showSearch, setShowSearch] = useState(false);
@@ -126,7 +132,6 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [allStudents, setAllStudents] = useState<Student[]>([]);
 
-  // Load students from context data or localStorage
   useEffect(() => {
     setAllStudents(
       ls.get<Student[]>("students", []).filter((s) => s.status === "active"),
@@ -216,7 +221,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
   return (
     <>
       <header className="h-14 bg-card border-b border-border flex items-center px-3 gap-2 shadow-subtle z-40 relative flex-shrink-0">
-        {/* Mobile hamburger — only on small screens */}
+        {/* Mobile hamburger */}
         <button
           type="button"
           onClick={onMenuToggle}
@@ -232,16 +237,21 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
           <div className="w-7 h-7 rounded-lg bg-primary flex items-center justify-center">
             <GraduationCap className="w-4 h-4 text-primary-foreground" />
           </div>
-          <span className="hidden sm:block font-display font-bold text-sm text-foreground tracking-tight leading-none">
-            SCHOOL LEDGER ERP
-          </span>
+          <div className="hidden sm:block leading-none">
+            <span className="font-display font-bold text-sm text-foreground tracking-tight block">
+              SHUBH SCHOOL ERP
+            </span>
+            <span className="text-[10px] text-primary font-medium block">
+              School B
+            </span>
+          </div>
         </div>
 
         {/* Current Session + switcher */}
         <div className="relative ml-1 flex-shrink-0" ref={sessionRef}>
           <button
             type="button"
-            data-ocid="session-switcher"
+            data-ocid="header.session_switcher"
             onClick={() => setSessionOpen((v) => !v)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary/10 border border-primary/20 hover:bg-primary/15 transition-colors"
           >
@@ -318,14 +328,14 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
             <input
               ref={searchInputRef}
               type="text"
-              placeholder="Search student by name, mobile, father, mother, village, class…"
+              placeholder="Search student by name, mobile, father, class…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => {
                 if (searchQuery.length >= 2) setSearchOpen(true);
               }}
               className="w-full h-8 pl-8 pr-3 text-xs border border-input rounded-lg bg-muted/30 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-primary/40 focus:bg-background transition-colors"
-              data-ocid="global-search-input"
+              data-ocid="header.search_input"
             />
             {searchQuery && (
               <button
@@ -355,7 +365,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                   <button
                     key={s.id}
                     type="button"
-                    data-ocid="global-search-result"
+                    data-ocid="header.search_result"
                     onClick={() => handleSearchSelect(s)}
                     className="w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-3 border-b border-border/50 last:border-0 transition-colors"
                   >
@@ -386,7 +396,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                           #{s.admNo}
                         </span>
                         <span className="text-[11px] text-muted-foreground">
-                          Class {s.class}-{s.section}
+                          {s.class}-{s.section}
                         </span>
                         {s.fatherName && (
                           <span className="text-[10px] text-muted-foreground truncate">
@@ -414,7 +424,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
             setShowSearch((v) => !v);
             setTimeout(() => searchInputRef.current?.focus(), 50);
           }}
-          data-ocid="mobile-search-toggle"
+          data-ocid="header.mobile_search_toggle"
         >
           <Search className="w-4 h-4 text-foreground" />
         </button>
@@ -429,7 +439,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
         <div className="relative" ref={userRef}>
           <button
             type="button"
-            data-ocid="user-menu"
+            data-ocid="header.user_menu"
             onClick={() => setUserOpen((v) => !v)}
             className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-muted transition-colors"
           >
@@ -469,6 +479,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                   setPwModal(true);
                 }}
                 className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-muted text-foreground transition-colors"
+                data-ocid="header.change_password"
               >
                 <KeyRound className="w-4 h-4 text-muted-foreground" />
                 Change Password
@@ -477,7 +488,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                 type="button"
                 onClick={logout}
                 className="w-full text-left flex items-center gap-2.5 px-3 py-2.5 text-sm hover:bg-destructive/10 text-destructive transition-colors"
-                data-ocid="logout-btn"
+                data-ocid="header.logout_button"
               >
                 <LogOut className="w-4 h-4" />
                 Logout
@@ -524,7 +535,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                   placeholder="Minimum 4 characters"
                   required
                   autoFocus
-                  data-ocid="new-password-input"
+                  data-ocid="change-password.new_password_input"
                 />
               </div>
               <div>
@@ -536,7 +547,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                   className="mt-1"
                   placeholder="Repeat new password"
                   required
-                  data-ocid="confirm-password-input"
+                  data-ocid="change-password.confirm_password_input"
                 />
               </div>
               {pwError && (

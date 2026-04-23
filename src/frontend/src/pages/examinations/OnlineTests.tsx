@@ -31,12 +31,8 @@ import type {
   OnlineExam,
   Student,
 } from "../../types";
-import {
-  canisterService,
-  generateId as genId,
-} from "../../utils/canisterService";
 import { CLASSES, SECTIONS, generateId } from "../../utils/localStorage";
-import { syncEngine } from "../../utils/syncEngine";
+import { phpApiService } from "../../utils/phpApiService";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -326,15 +322,15 @@ function CreateExamDialog({
     setSaving(true);
     try {
       if (editingExam) {
-        await canisterService.updateRecord("online_exams", editingExam.id, {
+        await phpApiService.post("exams/update", {
           ...exam,
           questionsData: JSON.stringify(exam.questions),
-        } as Record<string, unknown>);
+        });
       } else {
-        await canisterService.createRecord("online_exams", exam.id, {
+        await phpApiService.createExam({
           ...exam,
           questionsData: JSON.stringify(exam.questions),
-        } as Record<string, unknown>);
+        });
       }
       addNotification(
         `Exam "${exam.title}" ${editingExam ? "updated" : "created"} successfully.`,
@@ -559,10 +555,10 @@ function ExamManager() {
   const loadExams = useCallback(async () => {
     setLoading(true);
     try {
-      const rows =
-        await canisterService.listRecords<Record<string, unknown>>(
-          "online_exams",
-        );
+      const rows = (await phpApiService.getExams()) as Record<
+        string,
+        unknown
+      >[];
       const parsed: OnlineExam[] = rows.map((r) => ({
         id: String(r.id ?? r.examId ?? generateId()),
         title: String(r.title ?? ""),
@@ -612,10 +608,10 @@ function ExamManager() {
           ? "active"
           : "draft";
     try {
-      await canisterService.updateRecord("online_exams", exam.id, {
+      await phpApiService.post("exams/update", {
         id: exam.id,
         status: nextStatus,
-      } as Record<string, unknown>);
+      });
       setExams((prev) =>
         prev.map((e) => (e.id === exam.id ? { ...e, status: nextStatus } : e)),
       );
@@ -630,7 +626,7 @@ function ExamManager() {
 
   async function handleDelete(examId: string) {
     try {
-      await canisterService.deleteRecord("online_exams", examId);
+      await phpApiService.post("exams/delete", { id: examId });
       setExams((prev) => prev.filter((e) => e.id !== examId));
       addNotification("Exam deleted.", "success");
     } catch {
@@ -884,15 +880,11 @@ function ExamInterface({
     };
 
     try {
-      await canisterService.createRecord(
-        "exam_attempts",
-        attempt.id ?? genId(),
-        {
-          ...attempt,
-          answersData: JSON.stringify(answers),
-          breakdownData: JSON.stringify(breakdown),
-        } as Record<string, unknown>,
-      );
+      await phpApiService.post("exams/attempt", {
+        ...attempt,
+        answersData: JSON.stringify(answers),
+        breakdownData: JSON.stringify(breakdown),
+      });
     } catch {
       if (!auto)
         addNotification(
@@ -1236,10 +1228,10 @@ function TakeExam({
     async function load() {
       setLoading(true);
       try {
-        const rows =
-          await canisterService.listRecords<Record<string, unknown>>(
-            "online_exams",
-          );
+        const rows = (await phpApiService.getExams()) as Record<
+          string,
+          unknown
+        >[];
         const parsed: OnlineExam[] = rows
           .filter(
             (r) =>
@@ -1408,8 +1400,10 @@ function ResultsDashboard() {
       setLoadingExams(true);
       try {
         const [examRows, studentRows] = await Promise.all([
-          canisterService.listRecords<Record<string, unknown>>("online_exams"),
-          canisterService.listRecords<Student>("students"),
+          phpApiService.getExams() as Promise<Record<string, unknown>[]>,
+          phpApiService
+            .getStudents()
+            .then((r) => r.data as unknown as Student[]),
         ]);
         setStudents(studentRows);
         setExams(
@@ -1450,8 +1444,8 @@ function ResultsDashboard() {
       return;
     }
     setLoadingAttempts(true);
-    canisterService
-      .listRecords<Record<string, unknown>>("exam_attempts")
+    phpApiService
+      .get<Record<string, unknown>[]>(`exams/attempts&examId=${selectedExamId}`)
       .then((rows) => {
         const filtered = rows.filter(
           (r) => String(r.examId ?? "") === selectedExamId,
@@ -1528,14 +1522,14 @@ function ResultsDashboard() {
       const newPassed = selectedExam
         ? newPct >= selectedExam.passPercentage
         : false;
-      await canisterService.updateRecord("exam_attempts", attemptId, {
+      await phpApiService.post("exams/attempts/update", {
         id: attemptId,
         score: newScore,
         percentage: newPct,
         passed: newPassed,
         overrideReason,
         overriddenAt: now(),
-      } as Record<string, unknown>);
+      });
       setAttempts((prev) =>
         prev.map((a) =>
           a.id === attemptId

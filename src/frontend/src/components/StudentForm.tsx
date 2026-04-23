@@ -25,7 +25,7 @@ import type {
   Student,
   TransportRoute,
 } from "../types";
-import { DEFAULT_TRANSPORT_MONTHS, MONTHS } from "../types";
+import { CLASS_ORDER, DEFAULT_TRANSPORT_MONTHS, MONTHS } from "../types";
 import { generateId, ls } from "../utils/localStorage";
 
 interface StudentFormProps {
@@ -55,44 +55,30 @@ function parseDobToParts(dob: string): [string, string, string] {
   return [parts[0] ?? "", parts[1] ?? "", parts[2] ?? ""];
 }
 
-const CLASS_ORDER_LOCAL = [
-  "Nursery",
-  "LKG",
-  "UKG",
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "10",
-  "11",
-  "12",
-] as const;
-
-function classDisplayName(name: string): string {
+/**
+ * Normalize a stored class name to match CLASS_ORDER format.
+ * Handles both "1" and "Class 1" formats for reliable sorting.
+ */
+function normalizeClassName(name: string): string {
   const n = Number(name);
   if (!Number.isNaN(n) && n >= 1 && n <= 12) return `Class ${name}`;
   return name;
+}
+
+function classOrderIndex(name: string): number {
+  const normalized = normalizeClassName(name);
+  const idx = CLASS_ORDER.indexOf(normalized);
+  if (idx !== -1) return idx;
+  // Try direct match (e.g. already "Class 1")
+  const directIdx = CLASS_ORDER.indexOf(name);
+  return directIdx !== -1 ? directIdx : CLASS_ORDER.length;
 }
 
 function sortClasses(classes: ClassSection[]): ClassSection[] {
   return [...classes].sort((a, b) => {
     const an = a.className ?? (a as unknown as { name?: string }).name ?? "";
     const bn = b.className ?? (b as unknown as { name?: string }).name ?? "";
-    const ai = CLASS_ORDER_LOCAL.indexOf(
-      an as (typeof CLASS_ORDER_LOCAL)[number],
-    );
-    const bi = CLASS_ORDER_LOCAL.indexOf(
-      bn as (typeof CLASS_ORDER_LOCAL)[number],
-    );
-    return (
-      (ai === -1 ? CLASS_ORDER_LOCAL.length : ai) -
-      (bi === -1 ? CLASS_ORDER_LOCAL.length : bi)
-    );
+    return classOrderIndex(an) - classOrderIndex(bn);
   });
 }
 
@@ -1208,7 +1194,7 @@ const BasicInfoFields = memo(function BasicInfoFields({
                   c.className ?? (c as unknown as { name?: string }).name ?? "";
                 return (
                   <SelectItem key={c.id} value={cn}>
-                    {classDisplayName(cn)}
+                    {normalizeClassName(cn)}
                   </SelectItem>
                 );
               })}

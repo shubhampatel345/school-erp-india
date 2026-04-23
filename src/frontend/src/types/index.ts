@@ -1,12 +1,7 @@
 // ──────────────────────────────────────────────────────────
-// SCHOOL LEDGER ERP — Complete Type Definitions
-// All field names match PHP API camelCase MySQL columns
+// SHUBH SCHOOL ERP — Complete Type Definitions (School B)
+// All data stored in Internet Computer canister — no PHP/MySQL
 // ──────────────────────────────────────────────────────────
-
-export interface MySQLRecord {
-  dbId?: number;
-  syncedAt?: string;
-}
 
 export type UserRole =
   | "superadmin"
@@ -43,9 +38,7 @@ export interface AppUser {
   id: string;
   username: string;
   role: UserRole;
-  /** Preferred display name — use this in new code */
   fullName?: string;
-  /** Primary display name field — kept for backward compatibility */
   name: string;
   mobile?: string;
   email?: string;
@@ -71,7 +64,7 @@ export type PermissionMatrix = Record<string, Permission>;
 // ──────────────────────────────────────────────────────────
 // Session
 // ──────────────────────────────────────────────────────────
-export interface Session extends MySQLRecord {
+export interface Session {
   id: string;
   label: string;
   startYear: number;
@@ -84,14 +77,13 @@ export interface Session extends MySQLRecord {
 // ──────────────────────────────────────────────────────────
 // Student
 // ──────────────────────────────────────────────────────────
-export interface Student extends MySQLRecord {
+export interface Student {
   id: string;
   admNo: string;
   fullName: string;
-  /** MySQL column alias — always set equal to fullName when saving */
   name?: string;
   photo?: string;
-  dob?: string; // DD/MM/YYYY
+  dob?: string;
   gender: "Male" | "Female" | "Other";
   class: string;
   section: string;
@@ -116,7 +108,6 @@ export interface Student extends MySQLRecord {
   status: "active" | "discontinued";
   leavingDate?: string;
   leavingReason?: string;
-  /** @deprecated Use leavingReason */
   leavingRemarks?: string;
   sessionId: string;
   transportId?: string;
@@ -139,7 +130,7 @@ export interface SubjectAssignment {
   classTo: string;
 }
 
-export interface Staff extends MySQLRecord {
+export interface Staff {
   id: string;
   empId: string;
   name: string;
@@ -204,6 +195,9 @@ export interface FeesPlan {
   amounts?: Record<string, number>;
 }
 
+/** Alias for backward compatibility */
+export type FeePlan = FeesPlan;
+
 export interface OtherCharge {
   label: string;
   paidAmount: number;
@@ -217,7 +211,7 @@ export interface ReceiptItem {
   amount: number;
 }
 
-export interface FeeReceipt extends MySQLRecord {
+export interface FeeReceipt {
   id: string;
   receiptNo: string;
   studentId: string;
@@ -279,11 +273,11 @@ export interface OldFeeEntry {
 // ──────────────────────────────────────────────────────────
 // Attendance
 // ──────────────────────────────────────────────────────────
-export interface AttendanceRecord extends MySQLRecord {
+export interface AttendanceRecord {
   id: string;
   studentId?: string;
   staffId?: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   status: "Present" | "Absent" | "Late" | "Half Day";
   timeIn?: string;
   timeOut?: string;
@@ -320,6 +314,8 @@ export interface SyncStatus {
   serverCounts: Record<string, number>;
 }
 
+export type SyncStatusState = "idle" | "syncing" | "error" | "offline";
+
 export interface ChangelogEntry {
   id: string;
   collection: string;
@@ -336,7 +332,6 @@ export interface ChangelogEntry {
 // App Config
 // ──────────────────────────────────────────────────────────
 export interface AppConfig {
-  apiBaseUrl: string;
   schoolId: string;
   defaultSession: string;
   syncIntervalMs: number;
@@ -344,7 +339,7 @@ export interface AppConfig {
 }
 
 // ──────────────────────────────────────────────────────────
-// All data loaded from server in one call
+// All data loaded from canister in one call
 // ──────────────────────────────────────────────────────────
 export interface AllData {
   students: Student[];
@@ -745,76 +740,6 @@ export interface Call {
 }
 
 // ──────────────────────────────────────────────────────────
-// Constants
-// ──────────────────────────────────────────────────────────
-
-/** Class name ordering for Indian schools */
-export const CLASS_ORDER = [
-  "Nursery",
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
-
-/** Indian academic year months (April start) */
-export const MONTHS = [
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-  "Jan",
-  "Feb",
-  "Mar",
-];
-
-/** Full month names for display */
-export const MONTHS_FULL = [
-  "April",
-  "May",
-  "June",
-  "July",
-  "August",
-  "September",
-  "October",
-  "November",
-  "December",
-  "January",
-  "February",
-  "March",
-];
-
-/** Transport months — 11 months auto-selected (June deselected) */
-export const DEFAULT_TRANSPORT_MONTHS = [
-  "Apr",
-  "May",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-  "Jan",
-  "Feb",
-  "Mar",
-];
-
-// ──────────────────────────────────────────────────────────
 // Face Recognition Attendance
 // ──────────────────────────────────────────────────────────
 export interface FaceDescriptor {
@@ -1001,4 +926,105 @@ export interface StudentAnalytics {
   marksHistory: MarksHistoryEntry[];
   attendanceSummary: AttendanceSummaryEntry[];
   feesHistory: FeesHistoryEntry[];
+}
+
+// ──────────────────────────────────────────────────────────
+// Constants
+// ──────────────────────────────────────────────────────────
+
+/** 10 selectable themes */
+export const THEMES = [
+  { id: "default", label: "Navy Blue", description: "Dark navy + cyan" },
+  { id: "ocean", label: "Deep Ocean", description: "Deep blue + teal" },
+  { id: "forest", label: "Forest Green", description: "Forest + lime" },
+  { id: "rose", label: "Sunset Rose", description: "Rose + coral" },
+  { id: "dark-navy", label: "Dark Night", description: "Midnight dark mode" },
+  { id: "slate", label: "Slate Gray", description: "Cool slate + indigo" },
+  { id: "purple", label: "Royal Purple", description: "Deep purple + violet" },
+  { id: "copper", label: "Copper Bronze", description: "Warm copper + gold" },
+  { id: "cherry", label: "Cherry Red", description: "Deep red + orange" },
+  { id: "midnight", label: "Midnight Teal", description: "Midnight + teal" },
+] as const;
+
+export type ThemeId = (typeof THEMES)[number]["id"];
+
+/** Indian school class ordering — Nursery → Class 12 */
+export const CLASSES_ORDER: string[] = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
+/** Alias for backward compatibility */
+export const CLASS_ORDER: string[] = CLASSES_ORDER;
+
+/** Indian academic year months (April start) */
+export const MONTHS: string[] = [
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+  "January",
+  "February",
+  "March",
+];
+
+/** Short month labels */
+export const MONTHS_SHORT: string[] = [
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];
+
+/** Alias for backward compatibility */
+export const MONTHS_FULL = MONTHS;
+
+/** Transport months — 11 months auto-selected (June deselected by default) */
+export const DEFAULT_TRANSPORT_MONTHS = [
+  "Apr",
+  "May",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];
+
+/** Format a number as Indian currency: ₹1,23,456 */
+export function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 2,
+  }).format(amount);
 }

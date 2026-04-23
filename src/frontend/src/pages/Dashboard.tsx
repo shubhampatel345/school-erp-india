@@ -26,6 +26,15 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import type React from "react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { useApp } from "../context/AppContext";
 import { useSync } from "../hooks/useSync";
 import type { AttendanceRecord, FeeReceipt, Staff, Student } from "../types";
@@ -123,7 +132,7 @@ function SyncBar() {
     local: {
       bg: "bg-card border-b border-border",
       icon: <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" />,
-      label: "Local Mode — syncing to Internet Computer canister",
+      label: "Local Mode — syncing to MySQL server",
       labelClass: "text-xs font-medium text-muted-foreground",
       badgeCls: "bg-muted text-muted-foreground border-border",
       badgeText: "Local",
@@ -132,8 +141,8 @@ function SyncBar() {
       bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
       icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
       label: countSummary
-        ? `Synced to Internet Computer — ${countSummary} — all devices share this data`
-        : "Synced to Internet Computer canister — all devices see the same data",
+        ? `Synced to MySQL server — ${countSummary} — all devices share this data`
+        : "Synced to MySQL server — all devices see the same data",
       labelClass: "text-xs font-medium text-emerald-700",
       badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
       badgeText: "Synced",
@@ -284,7 +293,7 @@ function SyncBar() {
               {mode === "connected" ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
-                  Internet Computer Canister
+                  MySQL Server
                 </>
               ) : mode === "local" ? (
                 <>
@@ -298,7 +307,7 @@ function SyncBar() {
                 </>
               ) : mode === "offline" ? (
                 <>
-                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Canister
+                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Server
                   Unreachable
                 </>
               ) : (
@@ -312,7 +321,7 @@ function SyncBar() {
                 {serverInfo?.version && <p>API v{serverInfo.version}</p>}
                 <div className="mt-1 pt-1 border-t border-border/50">
                   <p className="font-medium text-foreground mb-0.5">
-                    Records on Internet Computer:
+                    Records on MySQL server:
                   </p>
                   {Object.entries(displayCounts)
                     .filter(([, count]) => count > 0)
@@ -331,8 +340,8 @@ function SyncBar() {
             )}
             {mode === "local" && (
               <p className="text-muted-foreground leading-relaxed">
-                Data is stored locally and syncing to the Internet Computer
-                canister in the background.
+                Data is stored locally and syncing to the MySQL server in the
+                background.
               </p>
             )}
             {mode === "auth_error" && (
@@ -343,8 +352,8 @@ function SyncBar() {
             )}
             {mode === "offline" && (
               <p className="text-muted-foreground leading-relaxed">
-                Canister is configured but unreachable. Check your internet
-                connection or canister status.
+                MySQL server is configured but unreachable. Check your internet
+                connection or server status.
               </p>
             )}
           </div>
@@ -354,7 +363,7 @@ function SyncBar() {
       {mode === "local" && (
         <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors">
           <Server className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Internet Computer</span>
+          <span className="hidden sm:inline">MySQL Server</span>
         </div>
       )}
     </div>
@@ -635,6 +644,56 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       .filter((r) => r.sessionId === sessionId && !r.isDeleted)
       .sort((a, b) => b.date.localeCompare(a.date))
       .slice(0, 5);
+  }, [sessionId]);
+
+  // ── Monthly fee collection chart data (Apr → Mar) ─────────────────────────
+  const monthlyCollectionData = useMemo(() => {
+    const allReceipts =
+      dataService.get<FeeReceipt>("fee_receipts").length > 0
+        ? dataService.get<FeeReceipt>("fee_receipts")
+        : ls.get<FeeReceipt[]>("fee_receipts", []);
+
+    const sessionReceipts = allReceipts.filter(
+      (r) => r.sessionId === sessionId && !r.isDeleted,
+    );
+
+    // MONTHS = ["April","May","June",...,"March"] (academic year order)
+    const totals: Record<string, number> = {};
+    for (const month of MONTHS) totals[month] = 0;
+
+    const monthNames = [
+      "January",
+      "February",
+      "March",
+      "April",
+      "May",
+      "June",
+      "July",
+      "August",
+      "September",
+      "October",
+      "November",
+      "December",
+    ];
+
+    for (const receipt of sessionReceipts) {
+      if (receipt.date) {
+        const parts = receipt.date.split("-");
+        if (parts.length >= 2) {
+          const monthIdx = Number.parseInt(parts[1], 10) - 1;
+          const mName = monthNames[monthIdx];
+          if (mName && totals[mName] !== undefined) {
+            totals[mName] += receipt.totalAmount;
+          }
+        }
+      }
+    }
+
+    return MONTHS.map((m) => ({
+      month: m.slice(0, 3),
+      fullMonth: m,
+      amount: totals[m] ?? 0,
+    }));
   }, [sessionId]);
 
   const greeting = () => {
@@ -1050,6 +1109,106 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
               </Button>
             </div>
           </div>
+        </Card>
+
+        {/* Fee Collection Bar Chart */}
+        <Card className="p-5" data-ocid="dashboard.fee_chart.card">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
+                <BarChart2 className="w-4 h-4 text-emerald-700" />
+              </div>
+              <div>
+                <h2 className="font-display font-semibold text-foreground text-sm">
+                  Monthly Fee Collection
+                </h2>
+                <p className="text-xs text-muted-foreground">
+                  Academic year Apr → Mar
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigate("fees")}
+              className="text-xs text-primary hover:underline"
+            >
+              View all →
+            </button>
+          </div>
+          {monthlyCollectionData.every((d) => d.amount === 0) ? (
+            <div
+              className="py-10 text-center text-muted-foreground"
+              data-ocid="dashboard.fee_chart.empty_state"
+            >
+              <IndianRupee className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No fee collection data yet</p>
+              <button
+                type="button"
+                onClick={() => onNavigate("fees")}
+                className="text-primary text-sm hover:underline mt-1"
+              >
+                Collect Fees →
+              </button>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={monthlyCollectionData}
+                margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="hsl(var(--border))"
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={55}
+                  tickFormatter={(v: number) =>
+                    v >= 100000
+                      ? `₹${(v / 100000).toFixed(1)}L`
+                      : v >= 1000
+                        ? `₹${(v / 1000).toFixed(0)}K`
+                        : `₹${v}`
+                  }
+                />
+                <Tooltip
+                  cursor={{ fill: "hsl(var(--muted)/0.3)" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0]?.payload as {
+                      fullMonth: string;
+                      amount: number;
+                    };
+                    return (
+                      <div className="bg-card border border-border rounded-lg px-3 py-2 shadow-elevated text-xs">
+                        <p className="font-semibold text-foreground mb-0.5">
+                          {d.fullMonth}
+                        </p>
+                        <p className="text-emerald-700 font-bold">
+                          {formatCurrency(d.amount)}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar
+                  dataKey="amount"
+                  fill="hsl(var(--primary))"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={36}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </Card>
 
         {/* Fee due alert */}

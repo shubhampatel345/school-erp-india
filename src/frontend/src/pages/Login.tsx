@@ -25,10 +25,7 @@ export default function Login() {
     e.preventDefault();
     setError("");
     setLoading(true);
-
     try {
-      // login() checks local credentials first, then falls back to the server API.
-      // It handles JWT storage and dispatch internally.
       const ok = await login(username.trim(), password.trim());
       if (!ok) {
         setError(
@@ -47,17 +44,17 @@ export default function Login() {
       className="min-h-screen flex items-center justify-center p-4"
       style={{
         background:
-          "linear-gradient(135deg, oklch(0.18 0.12 260) 0%, oklch(0.26 0.16 250) 50%, oklch(0.20 0.10 255) 100%)",
+          "linear-gradient(135deg, oklch(0.15 0.05 265) 0%, oklch(0.22 0.08 260) 50%, oklch(0.18 0.06 265) 100%)",
       }}
     >
       <div className="w-full max-w-md animate-slide-up">
         {/* Branding */}
         <div className="text-center mb-8">
           <div
-            className="inline-flex items-center justify-center w-18 h-18 rounded-2xl mb-4"
+            className="inline-flex items-center justify-center w-20 h-20 rounded-2xl mb-5"
             style={{
               background: "oklch(0.55 0.14 200 / 0.25)",
-              border: "2px solid oklch(0.55 0.14 200 / 0.35)",
+              border: "2px solid oklch(0.55 0.14 200 / 0.40)",
             }}
           >
             <GraduationCap
@@ -66,12 +63,21 @@ export default function Login() {
             />
           </div>
           <h1
-            className="text-3xl font-bold tracking-tight"
-            style={{ fontFamily: "var(--font-display)", color: "white" }}
+            className="text-3xl font-bold tracking-tight font-display"
+            style={{ color: "white" }}
           >
-            SCHOOL LEDGER ERP
+            SHUBH SCHOOL ERP
           </h1>
-          <p style={{ color: "oklch(1 0 0 / 0.55)" }} className="mt-1 text-sm">
+          <p
+            className="mt-1 text-base font-semibold"
+            style={{ color: "oklch(0.82 0.14 200)" }}
+          >
+            School B
+          </p>
+          <p
+            style={{ color: "oklch(1 0 0 / 0.50)" }}
+            className="mt-0.5 text-sm"
+          >
             Complete School Management System
           </p>
         </div>
@@ -93,8 +99,8 @@ export default function Login() {
             }}
           >
             <h2
-              className="text-lg font-semibold"
-              style={{ fontFamily: "var(--font-display)", color: "white" }}
+              className="text-lg font-semibold font-display"
+              style={{ color: "white" }}
             >
               Sign In
             </h2>
@@ -198,9 +204,8 @@ export default function Login() {
             <Button
               type="submit"
               data-ocid="login.submit_button"
-              className="w-full font-semibold"
+              className="w-full font-semibold font-display"
               disabled={loading}
-              style={{ fontFamily: "var(--font-display)" }}
             >
               {loading ? (
                 <span className="flex items-center gap-2">
@@ -248,9 +253,8 @@ export default function Login() {
                   <em>Settings → User Management → Reset Password</em>.
                 </p>
                 <p className="mt-2">
-                  For Super Admin access issues, contact your system
-                  administrator or use the factory reset option in Settings →
-                  Data Management.
+                  For Super Admin access issues, use the factory reset option in
+                  Settings → Data Management.
                 </p>
               </div>
             )}
@@ -271,63 +275,29 @@ export default function Login() {
           >
             Default Login Credentials
           </p>
-          <div className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs"
-                style={{ color: "oklch(1 0 0 / 0.40)" }}
-              >
-                Super Admin
-              </span>
-              <code
-                className="text-xs font-mono"
-                style={{ color: "oklch(1 0 0 / 0.70)" }}
-              >
-                superadmin / admin123
-              </code>
-            </div>
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs"
-                style={{ color: "oklch(1 0 0 / 0.40)" }}
-              >
-                Teacher / Staff
-              </span>
-              <code
-                className="text-xs font-mono"
-                style={{ color: "oklch(1 0 0 / 0.55)" }}
-              >
-                mobile / DOB (ddmmyyyy)
-              </code>
-            </div>
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs"
-                style={{ color: "oklch(1 0 0 / 0.40)" }}
-              >
-                Student
-              </span>
-              <code
-                className="text-xs font-mono"
-                style={{ color: "oklch(1 0 0 / 0.55)" }}
-              >
-                Adm.No. / DOB (ddmmyyyy)
-              </code>
-            </div>
-            <div className="flex items-center justify-between">
-              <span
-                className="text-xs"
-                style={{ color: "oklch(1 0 0 / 0.40)" }}
-              >
-                Parent
-              </span>
-              <code
-                className="text-xs font-mono"
-                style={{ color: "oklch(1 0 0 / 0.55)" }}
-              >
-                mobile / mobile
-              </code>
-            </div>
+          <div className="space-y-1.5">
+            {[
+              { role: "Super Admin", cred: "superadmin / admin123" },
+              { role: "Admin", cred: "admin / admin123" },
+              { role: "Teacher / Staff", cred: "mobile / DOB (ddmmyyyy)" },
+              { role: "Student", cred: "Adm.No. / DOB (ddmmyyyy)" },
+              { role: "Parent", cred: "mobile / mobile" },
+            ].map(({ role, cred }) => (
+              <div key={role} className="flex items-center justify-between">
+                <span
+                  className="text-xs"
+                  style={{ color: "oklch(1 0 0 / 0.40)" }}
+                >
+                  {role}
+                </span>
+                <code
+                  className="text-xs font-mono"
+                  style={{ color: "oklch(1 0 0 / 0.70)" }}
+                >
+                  {cred}
+                </code>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -335,7 +305,16 @@ export default function Login() {
           className="text-center text-xs mt-5"
           style={{ color: "oklch(1 0 0 / 0.25)" }}
         >
-          © {new Date().getFullYear()} SCHOOL LEDGER ERP. All rights reserved.
+          © {new Date().getFullYear()} SHUBH SCHOOL ERP — School B. Built with{" "}
+          <a
+            href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline hover:opacity-80"
+            style={{ color: "oklch(1 0 0 / 0.35)" }}
+          >
+            caffeine.ai
+          </a>
         </p>
       </div>
     </div>

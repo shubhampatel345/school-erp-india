@@ -1,13 +1,13 @@
 {
-  "name": "School Ledger ERP",
-  "short_name": "School ERP",
-  "description": "Complete Indian school management ERP — students, fees, attendance, HR, transport, and more",
+  "name": "SHUBH SCHOOL ERP — School B",
+  "short_name": "SHUBH ERP B",
+  "description": "Complete Indian school management ERP — students, fees, attendance, HR, transport, and more. Powered by Internet Computer.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#0f172a",
-  "theme_color": "#0f172a",
+  "background_color": "#111827",
+  "theme_color": "#111827",
   "icons": [
     {
       "src": "/icons/icon-192.png",

@@ -11,6 +11,7 @@ import {
   HelpCircle,
   IndianRupee,
   LayoutDashboard,
+  Library,
   LineChart,
   MessageCircle,
   MessageSquare,
@@ -73,16 +74,16 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["superadmin", "admin", "driver"],
   },
   {
+    id: "library",
+    label: "Library",
+    icon: Library,
+    roles: ["superadmin", "admin", "librarian", "teacher"],
+  },
+  {
     id: "inventory",
     label: "Inventory",
     icon: Package,
     roles: ["superadmin", "admin", "librarian"],
-  },
-  {
-    id: "library",
-    label: "Library",
-    icon: BookText,
-    roles: ["superadmin", "admin", "librarian", "teacher"],
   },
   {
     id: "examinations",
@@ -91,16 +92,16 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["superadmin", "admin", "teacher"],
   },
   {
+    id: "certificates",
+    label: "Certificates",
+    icon: Award,
+    roles: ["superadmin", "admin"],
+  },
+  {
     id: "communication",
     label: "Communication",
     icon: MessageSquare,
     roles: ["superadmin", "admin"],
-  },
-  {
-    id: "virtualclasses",
-    label: "Virtual Classes",
-    icon: Video,
-    roles: ["superadmin", "admin", "teacher"],
   },
   { id: "chat", label: "Chat", icon: MessageCircle },
   {
@@ -110,10 +111,34 @@ const NAV_ITEMS: NavItem[] = [
     roles: ["superadmin", "admin"],
   },
   {
+    id: "virtualclasses",
+    label: "Virtual Classes",
+    icon: Video,
+    roles: ["superadmin", "admin", "teacher"],
+  },
+  {
     id: "expenses",
     label: "Expenses",
     icon: TrendingUp,
     roles: ["superadmin", "admin", "accountant"],
+  },
+  {
+    id: "homework",
+    label: "Homework",
+    icon: ClipboardList,
+    roles: ["superadmin", "admin", "teacher"],
+  },
+  {
+    id: "alumni",
+    label: "Alumni",
+    icon: UserCheck,
+    roles: ["superadmin", "admin"],
+  },
+  {
+    id: "promote",
+    label: "Promote Students",
+    icon: BookText,
+    roles: ["superadmin", "admin"],
   },
   {
     id: "reports",
@@ -126,24 +151,6 @@ const NAV_ITEMS: NavItem[] = [
     label: "Performance Analytics",
     icon: LineChart,
     roles: ["superadmin", "admin", "teacher", "parent", "student"],
-  },
-  {
-    id: "alumni",
-    label: "Alumni",
-    icon: UserCheck,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "homework",
-    label: "Homework",
-    icon: ClipboardList,
-    roles: ["superadmin", "admin", "teacher"],
-  },
-  {
-    id: "certificates",
-    label: "Certificates",
-    icon: Award,
-    roles: ["superadmin", "admin"],
   },
   {
     id: "settings",
@@ -200,6 +207,7 @@ export default function Sidebar({
         color: "oklch(var(--sidebar-foreground))",
         borderRight: "1px solid oklch(var(--sidebar-border))",
       }}
+      data-ocid="sidebar"
     >
       {/* Logo strip */}
       <div
@@ -208,25 +216,36 @@ export default function Sidebar({
       >
         <div
           className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ backgroundColor: "oklch(var(--sidebar-accent))" }}
+          style={{ backgroundColor: "oklch(var(--sidebar-accent) / 0.25)" }}
         >
           <GraduationCap
-            className="w-4 h-4"
+            className="w-4.5 h-4.5"
             style={{ color: "oklch(var(--sidebar-foreground))" }}
           />
         </div>
         {!collapsed && (
-          <span
-            className="font-display font-bold text-sm truncate leading-tight"
-            style={{ color: "oklch(var(--sidebar-foreground))" }}
-          >
-            SHUBH SCHOOL ERP
-          </span>
+          <div className="min-w-0">
+            <span
+              className="font-display font-bold text-sm truncate leading-tight block"
+              style={{ color: "oklch(var(--sidebar-foreground))" }}
+            >
+              SHUBH SCHOOL ERP
+            </span>
+            <span
+              className="text-[10px] font-medium leading-none opacity-60 block mt-0.5"
+              style={{ color: "oklch(var(--sidebar-foreground))" }}
+            >
+              School B
+            </span>
+          </div>
         )}
       </div>
 
       {/* Flat navigation — no submenus */}
-      <nav className="flex-1 overflow-y-auto p-2 space-y-0.5 scrollbar-thin">
+      <nav
+        className="flex-1 overflow-y-auto p-2 space-y-0.5 scrollbar-thin"
+        aria-label="Main navigation"
+      >
         {accessibleItems.map((item) => {
           const Icon = item.icon;
           const active = isActive(item.id);
@@ -236,21 +255,22 @@ export default function Sidebar({
             <button
               key={item.id}
               type="button"
-              data-ocid={`nav-${item.id.replace(/\//g, "-")}`}
+              data-ocid={`nav.${item.id.replace(/\//g, "-")}`}
               onClick={() => onNavigate(item.id)}
               title={collapsed ? item.label : undefined}
+              aria-current={active ? "page" : undefined}
               className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-smooth group relative"
               style={
                 active
                   ? {
-                      backgroundColor: "oklch(var(--sidebar-accent) / 0.35)",
+                      backgroundColor: "oklch(var(--sidebar-accent) / 0.30)",
                       color: "oklch(var(--sidebar-foreground))",
                       borderLeft: "3px solid oklch(var(--sidebar-accent))",
                       paddingLeft: collapsed ? "10px" : "9px",
                       fontWeight: 600,
                     }
                   : {
-                      color: "oklch(var(--sidebar-foreground) / 0.78)",
+                      color: "oklch(var(--sidebar-foreground) / 0.80)",
                       borderLeft: "3px solid transparent",
                       paddingLeft: collapsed ? "10px" : "9px",
                     }
@@ -268,14 +288,20 @@ export default function Sidebar({
                   (e.currentTarget as HTMLButtonElement).style.backgroundColor =
                     "transparent";
                   (e.currentTarget as HTMLButtonElement).style.color =
-                    "oklch(var(--sidebar-foreground) / 0.78)";
+                    "oklch(var(--sidebar-foreground) / 0.80)";
                 }
               }}
             >
               <div className="relative flex-shrink-0">
-                <Icon className="w-4 h-4 opacity-100" />
+                <Icon className="w-4 h-4" />
                 {collapsed && showUnread && (
-                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 rounded-full text-[8px] text-white font-bold flex items-center justify-center">
+                  <span
+                    className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[8px] font-bold flex items-center justify-center"
+                    style={{
+                      backgroundColor: "oklch(0.56 0.22 25)",
+                      color: "white",
+                    }}
+                  >
                     {chatUnread > 9 ? "9+" : chatUnread}
                   </span>
                 )}
@@ -286,7 +312,13 @@ export default function Sidebar({
                     {item.label}
                   </span>
                   {showUnread && (
-                    <span className="min-w-[18px] h-[18px] bg-red-500 rounded-full text-[10px] text-white font-bold flex items-center justify-center px-1">
+                    <span
+                      className="min-w-[18px] h-[18px] rounded-full text-[10px] font-bold flex items-center justify-center px-1"
+                      style={{
+                        backgroundColor: "oklch(0.56 0.22 25)",
+                        color: "white",
+                      }}
+                    >
                       {chatUnread > 99 ? "99+" : chatUnread}
                     </span>
                   )}
@@ -306,23 +338,23 @@ export default function Sidebar({
           <div className="flex items-center gap-2">
             <div
               className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-              style={{ backgroundColor: "oklch(var(--sidebar-accent) / 0.2)" }}
+              style={{ backgroundColor: "oklch(var(--sidebar-accent) / 0.18)" }}
             >
               <Users
                 className="w-3.5 h-3.5"
-                style={{ color: "oklch(var(--sidebar-foreground) / 0.7)" }}
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.65)" }}
               />
             </div>
             <div className="min-w-0">
               <p
                 className="text-[11px] truncate font-medium leading-none"
-                style={{ color: "oklch(var(--sidebar-foreground) / 0.85)" }}
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.90)" }}
               >
                 {currentUser?.fullName ?? currentUser?.name ?? "User"}
               </p>
               <p
                 className="text-[10px] mt-0.5 capitalize leading-none"
-                style={{ color: "oklch(var(--sidebar-foreground) / 0.5)" }}
+                style={{ color: "oklch(var(--sidebar-foreground) / 0.50)" }}
               >
                 {currentUser?.role ?? ""}
               </p>

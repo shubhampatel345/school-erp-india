@@ -27,7 +27,7 @@ import {
 } from "../../components/ui/tabs";
 import { useApp } from "../../context/AppContext";
 import { generateId } from "../../utils/localStorage";
-import { syncEngine } from "../../utils/syncEngine";
+import phpApiService from "../../utils/phpApiService";
 
 const PREFIX = "shubh_erp_";
 
@@ -321,10 +321,10 @@ export default function DataManagement() {
   async function handleSyncNow() {
     setIsSyncing(true);
     try {
-      await syncEngine.loadAllFromCanister?.();
-      toast.success("Data refreshed from Internet Computer canister.");
+      await phpApiService.checkHealth();
+      toast.success("Connection to MySQL server verified.");
     } catch {
-      toast.error("Sync failed. Please try again.");
+      toast.error("Server unreachable. Please check your connection.");
     } finally {
       setIsSyncing(false);
     }
@@ -352,12 +352,17 @@ export default function DataManagement() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-semibold text-foreground">
-              Internet Computer Storage
+              MySQL / cPanel Storage
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              All data is stored securely on the Internet Computer. Your data is
-              automatically available on all devices. No external server or
-              database is required.
+              All data is stored in your MySQL database on cPanel. Data is saved
+              locally first (IndexedDB) and synced to MySQL in the background.
+              Upload the latest{" "}
+              <code className="font-mono text-xs">api/index.php</code> to your
+              cPanel <code className="font-mono text-xs">public_html/api/</code>{" "}
+              folder, then visit{" "}
+              <code className="font-mono text-xs">/api/?route=migrate/run</code>{" "}
+              once to create all tables.
             </p>
             <div className="flex gap-4 mt-3 flex-wrap">
               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -384,9 +389,7 @@ export default function DataManagement() {
       <Card className="p-5 space-y-4">
         <div className="flex items-center gap-2">
           <RefreshCcw className="w-4 h-4 text-primary" />
-          <h3 className="font-semibold text-foreground">
-            Canister Sync Status
-          </h3>
+          <h3 className="font-semibold text-foreground">MySQL Sync Status</h3>
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
@@ -401,7 +404,7 @@ export default function DataManagement() {
             {pendingCount === 0 ? (
               <>
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>All data synced to canister</span>
+                <span>All data synced to MySQL</span>
               </>
             ) : (
               <>

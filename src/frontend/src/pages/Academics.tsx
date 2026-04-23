@@ -1,3 +1,7 @@
+/**
+ * Academics — Main module shell for SHUBH SCHOOL ERP
+ * Tabs: Classes & Sections | Subjects | Class Timetable | Teacher Timetable | Class Teachers | Syllabus
+ */
 import {
   BookOpen,
   CalendarCheck,
@@ -7,9 +11,10 @@ import {
   Users2,
 } from "lucide-react";
 import { useState } from "react";
+import ErrorBoundary from "../components/ErrorBoundary";
 import ClassTeachers from "./academics/ClassTeachers";
 import ClassTimetable from "./academics/ClassTimetable";
-import ClassesSections from "./academics/ClassesSections";
+import Classes from "./academics/Classes";
 import Subjects from "./academics/Subjects";
 import Syllabus from "./academics/Syllabus";
 import TeacherTimetable from "./academics/TeacherTimetable";
@@ -35,6 +40,9 @@ const TAB_MAP: Record<string, TabId> = {
   timetable: "teacher-timetable",
   syllabus: "syllabus",
   classteachers: "class-teachers",
+  "class-timetable": "class-timetable",
+  "teacher-timetable": "teacher-timetable",
+  "class-teachers": "class-teachers",
 };
 
 export default function Academics({ initialTab }: AcademicsProps) {
@@ -45,35 +53,81 @@ export default function Academics({ initialTab }: AcademicsProps) {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="bg-card border-b px-4 lg:px-6 flex gap-1 overflow-x-auto">
+      {/* Tab bar — sticky top */}
+      <div
+        className="bg-card border-b px-4 lg:px-6 flex gap-0 overflow-x-auto sticky top-0 z-10 scrollbar-thin"
+        role="tablist"
+        aria-label="Academics navigation"
+      >
         {TABS.map((tab) => {
           const Icon = tab.icon;
+          const active = activeTab === tab.id;
           return (
             <button
               key={tab.id}
               type="button"
+              role="tab"
+              aria-selected={active}
               data-ocid={`academics.${tab.id}.tab`}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap transition-colors ${
-                activeTab === tab.id
+              className={`flex items-center gap-2 px-4 py-3.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors min-w-0 ${
+                active
                   ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:border-border"
               }`}
             >
-              <Icon className="w-4 h-4" />
-              {tab.label}
+              <Icon className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden md:inline">{tab.label}</span>
+              <span className="md:hidden">
+                {tab.id === "classes"
+                  ? "Classes"
+                  : tab.id === "subjects"
+                    ? "Subjects"
+                    : tab.id === "class-timetable"
+                      ? "CL TT"
+                      : tab.id === "teacher-timetable"
+                        ? "TR TT"
+                        : tab.id === "class-teachers"
+                          ? "Teachers"
+                          : "Syllabus"}
+              </span>
             </button>
           );
         })}
       </div>
 
-      <div className="flex-1 overflow-auto">
-        {activeTab === "classes" && <ClassesSections />}
-        {activeTab === "subjects" && <Subjects />}
-        {activeTab === "class-timetable" && <ClassTimetable />}
-        {activeTab === "teacher-timetable" && <TeacherTimetable />}
-        {activeTab === "class-teachers" && <ClassTeachers />}
-        {activeTab === "syllabus" && <Syllabus />}
+      {/* Tab content — each wrapped in its own error boundary */}
+      <div className="flex-1 overflow-auto animate-fade-in">
+        {activeTab === "classes" && (
+          <ErrorBoundary key="classes">
+            <Classes />
+          </ErrorBoundary>
+        )}
+        {activeTab === "subjects" && (
+          <ErrorBoundary key="subjects">
+            <Subjects />
+          </ErrorBoundary>
+        )}
+        {activeTab === "class-timetable" && (
+          <ErrorBoundary key="class-timetable">
+            <ClassTimetable />
+          </ErrorBoundary>
+        )}
+        {activeTab === "teacher-timetable" && (
+          <ErrorBoundary key="teacher-timetable">
+            <TeacherTimetable />
+          </ErrorBoundary>
+        )}
+        {activeTab === "class-teachers" && (
+          <ErrorBoundary key="class-teachers">
+            <ClassTeachers />
+          </ErrorBoundary>
+        )}
+        {activeTab === "syllabus" && (
+          <ErrorBoundary key="syllabus">
+            <Syllabus />
+          </ErrorBoundary>
+        )}
       </div>
     </div>
   );

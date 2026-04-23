@@ -48,6 +48,16 @@ export default function NotificationBell() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
+  // Close on Escape
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [open]);
+
   return (
     <div className="relative" ref={ref}>
       <button
@@ -56,6 +66,8 @@ export default function NotificationBell() {
         onClick={() => setOpen((v) => !v)}
         className="relative p-2 rounded-lg hover:bg-muted transition-colors"
         aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-expanded={open}
+        aria-haspopup="true"
       >
         <Bell className="w-5 h-5 text-foreground" />
         {unreadCount > 0 && (
@@ -66,7 +78,11 @@ export default function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-80 bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up">
+        <div
+          className="absolute right-0 top-full mt-2 w-80 bg-popover border border-border rounded-xl shadow-elevated z-50 overflow-hidden animate-slide-up"
+          aria-label="Notifications"
+          data-ocid="notification-bell.popover"
+        >
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
             <span className="font-semibold text-sm text-foreground font-display">
@@ -84,7 +100,7 @@ export default function NotificationBell() {
                   variant="ghost"
                   className="h-7 px-2 text-xs"
                   onClick={markAllRead}
-                  data-ocid="mark-all-read"
+                  data-ocid="notification-bell.mark-all-read"
                 >
                   <Check className="w-3 h-3 mr-1" /> Mark read
                 </Button>
@@ -95,7 +111,7 @@ export default function NotificationBell() {
                   variant="ghost"
                   className="h-7 px-2 text-xs text-destructive hover:text-destructive"
                   onClick={clearNotifications}
-                  data-ocid="clear-notifications"
+                  data-ocid="notification-bell.clear-all"
                   aria-label="Clear all notifications"
                 >
                   <Trash2 className="w-3 h-3" />
@@ -107,7 +123,10 @@ export default function NotificationBell() {
           {/* Notification list */}
           <div className="max-h-80 overflow-y-auto scrollbar-thin">
             {notifications.length === 0 ? (
-              <div className="py-8 text-center text-muted-foreground text-sm">
+              <div
+                className="py-8 text-center text-muted-foreground text-sm"
+                data-ocid="notification-bell.empty_state"
+              >
                 <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 No notifications yet
               </div>
@@ -135,7 +154,7 @@ export default function NotificationBell() {
                       </p>
                     </div>
                     {!n.isRead && (
-                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0" />
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5 flex-shrink-0 flex-none" />
                     )}
                   </div>
                 );

@@ -45,7 +45,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../../context/AppContext";
 import type { Route, Staff, Student } from "../../types";
 import { generateId, ls } from "../../utils/localStorage";
-import { sendWhatsApp } from "../../utils/whatsapp";
+import { getWhatsAppSettings, sendWhatsApp } from "../../utils/whatsapp";
 
 // ── Types ──────────────────────────────────────────────────
 type Channel = "whatsapp" | "sms" | "both";
@@ -1359,6 +1359,368 @@ function TemplatesTab({ onUseTemplate }: { onUseTemplate: () => void }) {
   );
 }
 
+// ── Types for exam results broadcast ──────────────────────
+interface SubjectMarkBroadcast {
+  subject: string;
+  maxMarks: number;
+  marksObtained: number;
+}
+interface StudentResultBroadcast {
+  studentId: string;
+  studentName: string;
+  admNo: string;
+  subjects: SubjectMarkBroadcast[];
+}
+interface ExamResultGroupBroadcast {
+  id: string;
+  examName: string;
+  classKey: string;
+  subjects: string[];
+  maxMarks: number;
+  studentResults: StudentResultBroadcast[];
+  sessionId: string;
+}
+
+function calcGradeBroadcast(pct: number): string {
+  if (pct >= 90) return "A+";
+  if (pct >= 80) return "A";
+  if (pct >= 70) return "B+";
+  if (pct >= 60) return "B";
+  if (pct >= 50) return "C";
+  if (pct >= 40) return "D";
+  return "F";
+}
+
+function buildResultMsgBroadcast(
+  r: StudentResultBroadcast,
+  examName: string,
+  schoolName: string,
+): string {
+  const total = r.subjects.reduce((s, sub) => s + sub.marksObtained, 0);
+  const maxTotal = r.subjects.reduce((s, sub) => s + sub.maxMarks, 0);
+  const pct = maxTotal > 0 ? Math.round((total / maxTotal) * 100) : 0;
+  const grade = calcGradeBroadcast(pct);
+  const lines = r.subjects
+    .map((s) => {
+      const sp =
+        s.maxMarks > 0 ? Math.round((s.marksObtained / s.maxMarks) * 100) : 0;
+      return `  ${s.subject.padEnd(14, " ")} ${String(s.marksObtained).padStart(3)}/${s.maxMarks}  ${calcGradeBroadcast(sp)}`;
+    })
+    .join("\n");
+  return `📊 *Result Card - ${schoolName}*\n\nDear Parent,\n\n*${r.studentName}* | Adm No: ${r.admNo}\n*Exam:* ${examName}\n\n${"─".repeat(34)}\n${lines}\n${"─".repeat(34)}\n*Total:* ${total}/${maxTotal}  *Grade:* ${grade}  *%:* ${pct}%\n*Result:* ${pct >= 40 ? "✅ PASS" : "❌ FAIL"}\n\n${schoolName}`;
+}
+
+// ── RESULTS BROADCAST TAB ──────────────────────────────────
+function ResultsBroadcastTab() {
+  const { getData } = useApp();
+  const [groups, setGroups] = useState<ExamResultGroupBroadcast[]>([]);
+  const [selectedGroupId, setSelectedGroupId] = useState("");
+  const [sending, setSending] = useState(false);
+  const [done, setDone] = useState(0);
+  const [sentCount, setSentCount] = useState(0);
+  const [failedCount, setFailedCount] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const abortRef = useRef(false);
+
+  useEffect(() => {
+    const local = ls.get<ExamResultGroupBroadcast[]>("exam_result_groups", []);
+    const ctxGroups = getData("examResultGroups") as ExamResultGroupBroadcast[];
+    setGroups(ctxGroups.length > 0 ? ctxGroups : local);
+  }, [getData]);
+
+  const waSettings = getWhatsAppSettings();
+  const allStudents = getData("students") as Student[];
+  const studentMap = new Map(allStudents.map((s) => [s.id, s]));
+  const school = getSchoolName();
+
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
+
+  const withPhone = selectedGroup
+    ? selectedGroup.studentResults.filter((r) => {
+        const s = studentMap.get(r.studentId);
+        return s && (s.guardianMobile || s.fatherMobile);
+      })
+    : [];
+
+  const handleReset = () => {
+    setFinished(false);
+    setDone(0);
+    setSentCount(0);
+    setFailedCount(0);
+    setSelectedGroupId("");
+  };
+
+  const handleSend = async () => {
+    if (!selectedGroup) return;
+    setConfirmOpen(false);
+    setSending(true);
+    abortRef.current = false;
+    let sent = 0;
+    let failed = 0;
+
+    for (let i = 0; i < withPhone.length; i++) {
+      if (abortRef.current) break;
+      const r = withPhone[i];
+      const s = studentMap.get(r.studentId);
+      if (!s) {
+        setDone(i + 1);
+        continue;
+      }
+      const phone = String(s.guardianMobile || s.fatherMobile || "");
+      const message = buildResultMsgBroadcast(
+        r,
+        selectedGroup.examName,
+        school,
+      );
+      const res = await sendWhatsApp(phone, message);
+      if (res.success) sent++;
+      else failed++;
+      setSentCount(sent);
+      setFailedCount(failed);
+      setDone(i + 1);
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+
+    // Save to campaign history
+    const campaign: BroadcastCampaign = {
+      id: generateId(),
+      title: `Results: ${selectedGroup.examName} — ${selectedGroup.classKey}`,
+      channel: "whatsapp",
+      msgType: "exam_result",
+      recipientFilter: "all_parents",
+      message: `Result broadcast for ${selectedGroup.examName}`,
+      recipientCount: withPhone.length,
+      sentCount: sent,
+      failedCount: withPhone.length - sent,
+      status: "sent",
+      createdAt: new Date().toISOString(),
+    };
+    const saved = ls.get<BroadcastCampaign[]>(LS_CAMPAIGNS, []);
+    ls.set(LS_CAMPAIGNS, [campaign, ...saved].slice(0, 200));
+
+    setSending(false);
+    setFinished(true);
+  };
+
+  if (!waSettings.enabled) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground"
+        data-ocid="results-broadcast.wa-not-configured"
+      >
+        <AlertCircle className="w-10 h-10 opacity-30" />
+        <p className="text-sm font-medium">WhatsApp Not Configured</p>
+        <p className="text-xs text-center max-w-xs">
+          Go to <strong>Settings → Communication → WhatsApp</strong> and enter
+          your API credentials before sending results.
+        </p>
+      </div>
+    );
+  }
+
+  if (groups.length === 0) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground"
+        data-ocid="results-broadcast.empty_state"
+      >
+        <span className="text-4xl">📊</span>
+        <p className="text-sm font-medium">No exam result sheets found</p>
+        <p className="text-xs text-center max-w-xs">
+          Create result sheets in Examinations → Exam Results first, then come
+          back here to broadcast them.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <span className="text-lg">📊</span> Send Exam Results via WhatsApp
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!finished ? (
+            <>
+              <div className="space-y-2">
+                <Label>Select Exam Result Group</Label>
+                <Select
+                  value={selectedGroupId}
+                  onValueChange={(v) => {
+                    setSelectedGroupId(v);
+                    setDone(0);
+                    setSentCount(0);
+                    setFailedCount(0);
+                  }}
+                >
+                  <SelectTrigger data-ocid="results-broadcast-group-select">
+                    <SelectValue placeholder="— Select exam & class —" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {groups.map((g) => (
+                      <SelectItem key={g.id} value={g.id}>
+                        {g.examName} — {g.classKey} ({g.studentResults.length}{" "}
+                        students)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {selectedGroup && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="p-3 rounded-lg bg-muted/40 border border-border text-center">
+                    <p className="text-2xl font-bold">
+                      {selectedGroup.studentResults.length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Total Students
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 text-center">
+                    <p className="text-2xl font-bold text-primary">
+                      {withPhone.length}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Have Phone No.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {selectedGroup &&
+                selectedGroup.studentResults.length - withPhone.length > 0 && (
+                  <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-2.5">
+                    ⚠️ {selectedGroup.studentResults.length - withPhone.length}{" "}
+                    students will be skipped (no phone number on record).
+                  </p>
+                )}
+
+              {sending && (
+                <div
+                  className="space-y-2 p-4 rounded-lg bg-blue-50 border border-blue-200"
+                  data-ocid="results-broadcast.loading_state"
+                >
+                  <div className="flex items-center justify-between text-sm font-medium">
+                    <span className="text-blue-700">
+                      Sending {done} of {withPhone.length}…
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        abortRef.current = true;
+                      }}
+                      className="text-xs text-destructive hover:underline"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <Progress
+                    value={
+                      withPhone.length > 0
+                        ? Math.round((done / withPhone.length) * 100)
+                        : 0
+                    }
+                    className="h-2"
+                  />
+                  <div className="flex gap-3 text-xs">
+                    <span className="text-green-600">✓ Sent: {sentCount}</span>
+                    <span className="text-destructive">
+                      ✗ Failed: {failedCount}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setConfirmOpen(true)}
+                  disabled={!selectedGroup || withPhone.length === 0 || sending}
+                  data-ocid="results-broadcast.send_button"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  Send to {withPhone.length} Parent
+                  {withPhone.length !== 1 ? "s" : ""}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div
+              className="space-y-4 text-center py-4"
+              data-ocid="results-broadcast.success_state"
+            >
+              <div className="text-4xl">📱</div>
+              <p className="font-semibold text-lg">Results Sent!</p>
+              <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
+                <div className="p-3 rounded-lg bg-green-50 border border-green-200">
+                  <p className="text-xl font-bold text-green-600">
+                    {sentCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Sent</p>
+                </div>
+                <div className="p-3 rounded-lg bg-red-50 border border-red-200">
+                  <p className="text-xl font-bold text-destructive">
+                    {failedCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Failed</p>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                onClick={handleReset}
+                data-ocid="results-broadcast.reset_button"
+              >
+                Send Another
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Confirm Dialog */}
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent data-ocid="results-broadcast-confirm.dialog">
+          <DialogHeader>
+            <DialogTitle>Confirm Results Broadcast</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm">
+            <p>
+              You are about to send personalized result cards to{" "}
+              <strong>
+                {withPhone.length} parent{withPhone.length !== 1 ? "s" : ""}
+              </strong>{" "}
+              via WhatsApp.
+            </p>
+            <p className="text-muted-foreground">
+              Each message includes the student's full marks, grades, and result
+              status. Rate-limited to 2 messages/second.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmOpen(false)}
+              data-ocid="results-broadcast-confirm.cancel_button"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSend}
+              data-ocid="results-broadcast-confirm.confirm_button"
+            >
+              <Send className="w-4 h-4 mr-2" /> Confirm &amp; Send
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 // ── MAIN COMPONENT ─────────────────────────────────────────
 export function BulkBroadcast() {
   const { currentUser } = useApp();
@@ -1455,6 +1817,15 @@ export function BulkBroadcast() {
               <BookTemplate className="w-4 h-4" /> Templates
             </TabsTrigger>
           )}
+          {!isViewOnly && (
+            <TabsTrigger
+              value="results"
+              data-ocid="broadcast-tab-results"
+              className="flex items-center gap-1.5"
+            >
+              <span className="text-sm">📊</span> Send Results
+            </TabsTrigger>
+          )}
         </TabsList>
 
         {!isViewOnly && (
@@ -1472,6 +1843,11 @@ export function BulkBroadcast() {
         {!isViewOnly && (
           <TabsContent value="templates" className="mt-4">
             <TemplatesTab onUseTemplate={() => setActiveTab("new")} />
+          </TabsContent>
+        )}
+        {!isViewOnly && (
+          <TabsContent value="results" className="mt-4">
+            <ResultsBroadcastTab />
           </TabsContent>
         )}
       </Tabs>

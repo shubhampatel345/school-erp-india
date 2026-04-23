@@ -20,8 +20,8 @@ import type {
   TransportRoute,
   TransportTrip,
 } from "../../types";
-import { canisterService, generateId } from "../../utils/canisterService";
-import { syncEngine } from "../../utils/syncEngine";
+import { generateId } from "../../utils/localStorage";
+import { phpApiService } from "../../utils/phpApiService";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -128,17 +128,19 @@ function TrackBus({ routes }: { routes: TransportRoute[] }) {
     setLoading(true);
     setError(null);
     try {
-      // Load driver location from canister
-      const driverLocations = syncEngine.getLocalCollection(
-        "driver_locations",
-      ) as Array<{
-        routeId?: string;
-        latitude?: number;
-        longitude?: number;
-        accuracy?: number;
-        timestamp?: string;
-        isActive?: boolean;
-      }>;
+      // Load driver location from MySQL server
+      const driverLocations = await phpApiService
+        .get<
+          Array<{
+            routeId?: string;
+            latitude?: number;
+            longitude?: number;
+            accuracy?: number;
+            timestamp?: string;
+            isActive?: boolean;
+          }>
+        >(`transport/driver-locations&routeId=${routeId}`)
+        .catch(() => [] as typeof driverLocations);
       const latest = driverLocations
         .filter((d) => d.routeId === routeId && d.isActive)
         .sort(
@@ -414,9 +416,8 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
           tripId,
           isActive: true,
         };
-        await canisterService.createRecord(
-          "driver_locations",
-          locationRecord.id,
+        await phpApiService.post(
+          "transport/driver-locations/add",
           locationRecord,
         );
       } catch {
@@ -444,7 +445,7 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         setCurrentPos(pos);
-        // Create trip record in canister
+        // Create trip record in MySQL server
         let tripId = `trip_${Date.now()}`;
         try {
           const tripRecord = {
@@ -455,13 +456,9 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
             startTime: new Date().toISOString(),
             status: "active",
           };
-          await canisterService.createRecord(
-            "transport_trips",
-            tripId,
-            tripRecord,
-          );
+          await phpApiService.post("transport/trips/add", tripRecord);
         } catch {
-          // Proceed with local id if canister unreachable
+          // Proceed with local id if server unreachable
         }
 
         const trip: TransportTrip = {
@@ -523,7 +520,7 @@ function ShareLocation({ routes }: { routes: TransportRoute[] }) {
 
     if (activeTrip) {
       try {
-        await canisterService.updateRecord("transport_trips", activeTrip.id, {
+        await phpApiService.post("transport/trips/update", {
           id: activeTrip.id,
           status: "completed",
           endTime: new Date().toISOString(),
@@ -729,9 +726,9 @@ function TripHistory() {
     const load = async () => {
       setLoading(true);
       try {
-        // Load trips from canister
+        // Load trips from MySQL server
         const trips =
-          await canisterService.listRecords<TransportTrip>("transport_trips");
+          await phpApiService.get<TransportTrip[]>("transport/trips");
         const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
         const recent = trips.filter((t) => {
           const ts = new Date(t.startTime ?? 0).getTime();
@@ -739,7 +736,7 @@ function TripHistory() {
         });
         setTrips(recent);
       } catch {
-        setError("Could not load trip history from canister.");
+        setError("Could not load trip history from server.");
       } finally {
         setLoading(false);
       }

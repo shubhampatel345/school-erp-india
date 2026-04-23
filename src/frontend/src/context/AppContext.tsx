@@ -1,15 +1,19 @@
 /**
- * SHUBH SCHOOL ERP — AppContext (Canister-Native)
+ * SHUBH SCHOOL ERP — AppContext (PHP/MySQL, Local-First)
  *
- * LOCAL-FIRST with Internet Computer canister backend:
- * - On login: show locally cached data immediately (from syncEngine localStorage cache)
- *   Then load fresh data from canister in background
- * - All writes: instant locally via syncEngine → background canister push
- * - No PHP, no MySQL, no JWT tokens, no serverUrl configuration
- * - Auth: local password check only (canister auth is platform-managed)
+ * Auth: JWT via phpApiService.login() — token stored in localStorage.
+ * Data: localFirstSync (IndexedDB first, MySQL in background).
  *
- * The canister actor is injected via canisterService.setActorProvider()
- * so this context is pure React — no direct actor dependency.
+ * On app open:
+ *  1. Restore user from sessionStorage if token is still valid
+ *  2. Show locally cached data immediately (IndexedDB)
+ *  3. Fetch fresh data from MySQL in background
+ *
+ * All writes: instant locally via localFirstSync → background MySQL push.
+ * Success notification should listen to 'sync:complete' event.
+ *
+ * CRITICAL: pendingWrites in localFirstSync ensures background fetch
+ * never overwrites records that are pending MySQL confirmation.
  */
 
 import {
@@ -30,11 +34,55 @@ import type {
   SyncStatus,
   UserRole,
 } from "../types";
-import { generateId } from "../utils/canisterService";
+import { localFirstSync } from "../utils/localFirstSync";
 import { ls } from "../utils/localStorage";
-import { syncEngine } from "../utils/syncEngine";
+import phpApiService from "../utils/phpApiService";
+
+// ── ID generator ──────────────────────────────────────────────────────────────
+
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 // ── Default permissions per role ──────────────────────────────────────────────
+
+const ALL_MODULES = [
+  "dashboard",
+  "students",
+  "fees",
+  "attendance",
+  "hr",
+  "academics",
+  "transport",
+  "inventory",
+  "expenses",
+  "homework",
+  "communication",
+  "examinations",
+  "certificates",
+  "alumni",
+  "reports",
+  "settings",
+  "chat",
+  "calling",
+  "virtualclasses",
+  "library",
+  "analytics",
+  "promote",
+];
+
+function buildMatrix(
+  canView: boolean,
+  canAdd: boolean,
+  canEdit: boolean,
+  canDelete: boolean,
+): PermissionMatrix {
+  const matrix: PermissionMatrix = {};
+  for (const m of ALL_MODULES) {
+    matrix[m] = { module: m, canView, canAdd, canEdit, canDelete };
+  }
+  return matrix;
+}
 
 const ROLE_DEFAULTS: Record<UserRole, PermissionMatrix> = {
   superadmin: {} as PermissionMatrix,
@@ -48,39 +96,6 @@ const ROLE_DEFAULTS: Record<UserRole, PermissionMatrix> = {
   student: buildMatrix(true, false, false, false),
 };
 
-function buildMatrix(
-  canView: boolean,
-  canAdd: boolean,
-  canEdit: boolean,
-  canDelete: boolean,
-): PermissionMatrix {
-  const modules = [
-    "dashboard",
-    "students",
-    "fees",
-    "attendance",
-    "hr",
-    "academics",
-    "transport",
-    "inventory",
-    "expenses",
-    "homework",
-    "communication",
-    "examinations",
-    "certificates",
-    "alumni",
-    "reports",
-    "settings",
-    "chat",
-    "calling",
-  ];
-  const matrix: PermissionMatrix = {};
-  for (const m of modules) {
-    matrix[m] = { module: m, canView, canAdd, canEdit, canDelete };
-  }
-  return matrix;
-}
-
 // ── App state ─────────────────────────────────────────────────────────────────
 
 interface AppState {
@@ -93,6 +108,7 @@ interface AppState {
   permissions: PermissionMatrix;
   data: Record<string, unknown[]>;
   notifications: Notification[];
+  serverConnected: boolean;
 }
 
 type AppAction =
@@ -112,7 +128,8 @@ type AppAction =
   | { type: "UPDATE_COLLECTION"; collection: string; records: unknown[] }
   | { type: "ADD_NOTIFICATION"; notification: Notification }
   | { type: "MARK_ALL_READ" }
-  | { type: "CLEAR_NOTIFICATIONS" };
+  | { type: "CLEAR_NOTIFICATIONS" }
+  | { type: "SET_SERVER_CONNECTED"; connected: boolean };
 
 function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -141,7 +158,9 @@ function appReducer(state: AppState, action: AppAction): AppState {
             ? state.sessions
             : [makeDefaultSession()];
       const activeSession =
-        serverSessions.find((s) => s.isActive) ?? serverSessions[0];
+        serverSessions.find((s) => s.isActive && !s.isArchived) ??
+        serverSessions.find((s) => s.isActive) ??
+        serverSessions[0];
       return {
         ...state,
         isInitializing: false,
@@ -203,20 +222,25 @@ function appReducer(state: AppState, action: AppAction): AppState {
     case "CLEAR_NOTIFICATIONS":
       return { ...state, notifications: [] };
 
+    case "SET_SERVER_CONNECTED":
+      return { ...state, serverConnected: action.connected };
+
     default:
       return state;
   }
 }
 
 function makeDefaultSession(): Session {
+  const now = new Date();
+  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
   return {
-    id: "sess_2025",
-    label: "2025-26",
-    startYear: 2025,
-    endYear: 2026,
+    id: `sess_${year}`,
+    label: `${year}-${String(year + 1).slice(2)}`,
+    startYear: year,
+    endYear: year + 1,
     isArchived: false,
     isActive: true,
-    createdAt: new Date().toISOString(),
+    createdAt: now.toISOString(),
   };
 }
 
@@ -236,6 +260,7 @@ const INITIAL_STATE: AppState = {
   permissions: {} as PermissionMatrix,
   data: {},
   notifications: [],
+  serverConnected: false,
 };
 
 // ── Context value interface ───────────────────────────────────────────────────
@@ -252,6 +277,7 @@ interface AppContextValue {
   syncStatus: SyncStatus;
   serverCounts: Record<string, number>;
   syncCounts: Record<string, number>;
+  serverConnected: boolean;
   // Auth
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
@@ -309,8 +335,8 @@ function AppLoading({
     <div className="min-h-screen flex flex-col items-center justify-center gap-5 bg-background">
       <div className="flex flex-col items-center gap-4">
         <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center"
-          style={{ background: "oklch(0.45 0.18 260)" }}
+          className="w-16 h-16 rounded-2xl flex items-center justify-center shadow-elevated"
+          style={{ background: "oklch(0.3 0.12 260)" }}
         >
           <svg
             width="36"
@@ -321,7 +347,7 @@ function AppLoading({
             strokeWidth="2"
             role="img"
           >
-            <title>School logo</title>
+            <title>SHUBH School ERP</title>
             <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
             <path d="M6 12v5c3 3 9 3 12 0v-5" />
           </svg>
@@ -332,18 +358,21 @@ function AppLoading({
           </p>
           {error ? (
             <>
-              <p className="text-sm text-destructive mt-2 max-w-xs">{error}</p>
+              <p className="text-sm text-destructive mt-3 max-w-xs bg-destructive/10 px-3 py-2 rounded-lg">
+                {error}
+              </p>
               <button
                 type="button"
                 onClick={onRetry}
                 className="mt-3 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity"
+                data-ocid="app-loading.retry_button"
               >
                 Retry
               </button>
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground mt-1">
+              <p className="text-sm text-muted-foreground mt-2">
                 Loading school data…
               </p>
               <div className="flex items-center gap-1.5 justify-center mt-3">
@@ -373,56 +402,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   });
 
-  // ── Subscribe to SyncEngine status changes ────────────────────────────────
-  useEffect(() => {
-    const unsub = syncEngine.subscribe(() => {
-      dispatch({ type: "SET_SYNC_STATUS", status: syncEngine.getSyncStatus() });
-      // Propagate collection updates — skip if content unchanged to avoid focus loss
-      const cache = syncEngine.getAllCache();
-      for (const [collection, records] of Object.entries(cache)) {
-        if (!Array.isArray(records)) continue;
-        const existing = stateRef.current.data[collection];
-        if (
-          Array.isArray(existing) &&
-          existing.length === records.length &&
-          JSON.stringify(existing) === JSON.stringify(records)
-        )
-          continue;
-        dispatch({ type: "UPDATE_COLLECTION", collection, records });
-      }
-    });
-    return unsub;
-  }, []);
-
-  // ── Subscribe to post-push collection updates ─────────────────────────────
-  useEffect(() => {
-    const unsub = syncEngine.onCollectionUpdated((collection, records) => {
-      const existing = stateRef.current.data[collection];
-      if (
-        Array.isArray(existing) &&
-        existing.length === records.length &&
-        JSON.stringify(existing) === JSON.stringify(records)
-      )
-        return;
-      dispatch({ type: "UPDATE_COLLECTION", collection, records });
-    });
-    return unsub;
-  }, []);
-
   // ── Restore user from sessionStorage on page reload ───────────────────────
   useEffect(() => {
     const storedUserRaw = sessionStorage.getItem("shubh_current_user");
     if (storedUserRaw) {
       try {
         const user = JSON.parse(storedUserRaw) as AppUser;
-        dispatch({ type: "SET_USER", user });
+        // If token still in localStorage, restore session directly
+        const token = phpApiService.getToken();
+        if (token) {
+          dispatch({ type: "SET_USER", user });
+        } else {
+          // Token gone — need to re-login
+          sessionStorage.removeItem("shubh_current_user");
+        }
       } catch {
         /* corrupt storage */
       }
     }
   }, []);
 
-  // ── Initialize: load canister data after login ────────────────────────────
+  // ── Verify token validity on restore ─────────────────────────────────────
+  useEffect(() => {
+    if (!state.currentUser || !state.isInitializing) return;
+    const token = phpApiService.getToken();
+    if (!token) return; // fresh login handled separately — skip verify
+    // For superadmin local login, skip server verify
+    if (state.currentUser.role === "superadmin") return;
+
+    void (async () => {
+      const verified = await phpApiService.verifyToken();
+      if (!verified) {
+        // Token expired — force re-login
+        phpApiService.clearToken();
+        sessionStorage.removeItem("shubh_current_user");
+        dispatch({ type: "LOGOUT" });
+      }
+    })();
+  }, [state.currentUser, state.isInitializing]);
+
+  // ── Server health check — show banner but don't block rendering ───────────
+  useEffect(() => {
+    void (async () => {
+      const ok = await phpApiService.checkHealth();
+      dispatch({ type: "SET_SERVER_CONNECTED", connected: ok });
+    })();
+  }, []);
+
+  // ── Initialize: load MySQL data after login ───────────────────────────────
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     if (initStartedRef.current) return;
@@ -431,26 +458,111 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void (async () => {
       dispatch({ type: "SET_INIT_START" });
       try {
-        // syncEngine.initialize() loads localStorage cache instantly,
-        // then fetches from canister in background — no blank screen.
-        const allData = await syncEngine.initialize();
+        // Step 1: Warm from IndexedDB instantly (no server round-trip)
+        const collections = [
+          "students",
+          "staff",
+          "classes",
+          "sessions",
+          "fee_headings",
+          "fees_plan",
+          "fee_receipts",
+          "attendance",
+          "transport_routes",
+          "inventory_items",
+          "expenses",
+          "homework",
+          "alumni",
+          "subjects",
+        ];
+        await Promise.allSettled(
+          collections.map((col) => localFirstSync.load(col)),
+        );
 
-        const serverSessions = (allData.sessions ?? []) as Session[];
-        if (serverSessions.length === 0) {
+        // Step 2: Show IndexedDB data immediately
+        const cachedData: Record<string, unknown[]> = {};
+        for (const col of collections) {
+          cachedData[col] = localFirstSync.getSnapshot(col);
+        }
+
+        // Determine sessions from cache
+        const cachedSessions = (cachedData.sessions ?? []) as Session[];
+        if (cachedSessions.length === 0) {
           const defaultSession = makeDefaultSession();
-          void syncEngine.saveRecord(
+          cachedSessions.push(defaultSession);
+          void localFirstSync.save(
             "sessions",
             defaultSession as unknown as Record<string, unknown>,
             "create",
           );
-          serverSessions.push(defaultSession);
         }
 
         dispatch({
           type: "SET_INIT_DONE",
-          data: allData,
-          sessions: serverSessions,
+          data: cachedData,
+          sessions: cachedSessions,
         });
+
+        // Step 3: Fetch fresh from MySQL in background
+        void (async () => {
+          try {
+            await localFirstSync.restorePendingQueue();
+            await localFirstSync.forceSync();
+            const allData = await phpApiService.loadAll();
+            const freshData: Record<string, unknown[]> = {};
+            for (const [collection, rows] of Object.entries(allData)) {
+              if (Array.isArray(rows)) {
+                localFirstSync.mergeServerRecords(
+                  collection,
+                  rows as Record<string, unknown>[],
+                );
+                freshData[collection] = localFirstSync.getSnapshot(collection);
+              }
+            }
+            const freshSessions = (freshData.sessions ?? []) as Session[];
+            if (freshSessions.length > 0) {
+              dispatch({
+                type: "SET_INIT_DONE",
+                data: freshData,
+                sessions: freshSessions,
+              });
+            } else {
+              // Update data collections even if no sessions changed
+              for (const [col, rows] of Object.entries(freshData)) {
+                dispatch({
+                  type: "UPDATE_COLLECTION",
+                  collection: col,
+                  records: rows,
+                });
+              }
+            }
+            dispatch({
+              type: "SET_SYNC_STATUS",
+              status: {
+                state: "synced",
+                lastSyncTime: new Date(),
+                lastError: null,
+                pendingCount: localFirstSync.getPendingCount(),
+                serverCounts: {},
+              },
+            });
+            dispatch({ type: "SET_SERVER_CONNECTED", connected: true });
+          } catch {
+            dispatch({
+              type: "SET_SYNC_STATUS",
+              status: {
+                state: "offline",
+                lastSyncTime: null,
+                lastError: "Could not reach MySQL server — using local data",
+                pendingCount: localFirstSync.getPendingCount(),
+                serverCounts: {},
+              },
+            });
+            dispatch({ type: "SET_SERVER_CONNECTED", connected: false });
+          } finally {
+            localFirstSync.startFlushTimer();
+          }
+        })();
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to load data";
         dispatch({ type: "SET_INIT_ERROR", error: msg });
@@ -462,7 +574,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── Login ─────────────────────────────────────────────────────────────────
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
-      // 1. Super Admin — local password check
+      // 1. Super Admin — always local password check first (no server needed)
       if (username === "superadmin") {
         const passwords = ls.get<Record<string, string>>("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
@@ -476,33 +588,42 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return true;
       }
 
-      // 2. Custom staff users
-      const customUsers = ls.get<Array<AppUser & { password?: string }>>(
-        "custom_users",
-        [],
-      );
-      const customUser = customUsers.find((u) => u.username === username);
-      if (customUser) {
-        const passwords = ls.get<Record<string, string>>("user_passwords", {});
-        if (passwords[username] === password) {
-          const displayName =
-            customUser.fullName ?? customUser.name ?? username;
+      // 2. Try PHP API login
+      try {
+        const result = await phpApiService.login(username, password);
+        if (result?.token && result.user) {
+          const serverUser = result.user;
           const user: AppUser = {
-            id: customUser.id,
-            username: customUser.username,
-            role: customUser.role,
-            fullName: displayName,
-            name: displayName,
-            position: customUser.position,
+            id: serverUser.id,
+            username: serverUser.username,
+            role: (serverUser.role as UserRole) ?? "teacher",
+            fullName: serverUser.fullName ?? serverUser.name ?? username,
+            name: serverUser.name ?? serverUser.fullName ?? username,
           };
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+          // Apply server-side permissions if provided
+          if (serverUser.permissions) {
+            const matrix: PermissionMatrix = {};
+            for (const [mod, perms] of Object.entries(serverUser.permissions)) {
+              matrix[mod] = {
+                module: mod,
+                canView: perms.canView ?? true,
+                canAdd: perms.canAdd ?? false,
+                canEdit: perms.canEdit ?? false,
+                canDelete: perms.canDelete ?? false,
+              };
+            }
+            dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
+          }
           initStartedRef.current = false;
           dispatch({ type: "SET_USER", user });
           return true;
         }
+      } catch {
+        /* server down — fall through to local checks */
       }
 
-      // 3. Staff (Teacher/Driver/etc.)
+      // 3. Fallback: check local staff/student data (offline mode)
       const staffList = ls.get<
         Array<{
           id: string;
@@ -510,7 +631,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           mobile: string;
           dob: string;
           designation: string;
-          credentials: Credentials;
+          credentials: { username: string; password: string };
         }>
       >("staff", []);
       const staffMember = staffList.find(
@@ -545,13 +666,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return true;
       }
 
-      // 4. Students
+      // 4. Students (local offline check)
       const students = ls.get<
         Array<{
           id: string;
           fullName: string;
           admNo: string;
-          credentials: Credentials;
+          credentials: { username: string; password: string };
         }>
       >("students", []);
       const student = students.find(
@@ -612,7 +733,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");
-    syncEngine.reset();
+    phpApiService.clearToken();
+    localFirstSync.stopFlushTimer();
     initStartedRef.current = false;
     dispatch({ type: "LOGOUT" });
   }, []);
@@ -645,6 +767,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ) => addNotification(msg, (type as Notification["type"]) ?? "info", icon);
   }, [addNotification]);
 
+  // ── Listen for sync:complete events to update sync status ────────────────
+  useEffect(() => {
+    const handleSyncComplete = () => {
+      dispatch({
+        type: "SET_SYNC_STATUS",
+        status: {
+          state: "synced",
+          lastSyncTime: new Date(),
+          lastError: null,
+          pendingCount: localFirstSync.getPendingCount(),
+          serverCounts: {},
+        },
+      });
+    };
+    const handleSyncError = (e: Event) => {
+      const detail = (e as CustomEvent).detail as
+        | { error?: string }
+        | undefined;
+      dispatch({
+        type: "SET_SYNC_STATUS",
+        status: {
+          state: "error",
+          lastSyncTime: stateRef.current.syncStatus.lastSyncTime,
+          lastError: detail?.error ?? "Sync error",
+          pendingCount: localFirstSync.getPendingCount(),
+          serverCounts: {},
+        },
+      });
+    };
+    window.addEventListener("sync:complete", handleSyncComplete);
+    window.addEventListener("sync:error", handleSyncError);
+    return () => {
+      window.removeEventListener("sync:complete", handleSyncComplete);
+      window.removeEventListener("sync:error", handleSyncError);
+    };
+  }, []);
+
   const changePassword = useCallback(
     (userId: string, newPassword: string): boolean => {
       let username: string | undefined;
@@ -662,26 +821,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
             )
             .find((s) => s.id === userId);
           if (staff) username = staff.credentials?.username;
-          else {
-            const students2 = ls.get<
-              Array<{
-                id: string;
-                credentials: { username: string; password: string };
-              }>
-            >("students", []);
-            const idx = students2.findIndex((s) => s.id === userId);
-            if (idx !== -1) {
-              students2[idx].credentials.password = newPassword;
-              ls.set("students", students2);
-              return true;
-            }
-          }
         }
       }
       if (!username) return false;
       const passwords = ls.get<Record<string, string>>("user_passwords", {});
       passwords[username] = newPassword;
       ls.set("user_passwords", passwords);
+      // Also push to server
+      void phpApiService.resetPassword(userId, newPassword);
       return true;
     },
     [],
@@ -705,11 +852,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       createdAt: new Date().toISOString(),
     };
     dispatch({ type: "ADD_SESSION", session });
-    void syncEngine.saveRecord(
-      "sessions",
-      session as unknown as Record<string, unknown>,
-      "create",
-    );
+    void phpApiService.createSession({
+      label: session.label,
+      startYear: session.startYear,
+      endYear: session.endYear,
+    });
     ls.set("current_session", session.id);
     return session;
   }, []);
@@ -743,18 +890,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     (collection: string): unknown[] => {
       const fromState = state.data[collection];
       if (fromState && fromState.length > 0) return fromState;
-      return syncEngine.getCache(collection);
+      return localFirstSync.getSnapshot(collection);
     },
     [state.data],
   );
 
   const refreshCollection = useCallback(
     async (collection: string): Promise<void> => {
-      const rows = await syncEngine.refreshCollection(collection);
+      try {
+        const allData = await phpApiService.loadAll();
+        const rows = (allData[collection] ?? []) as Record<string, unknown>[];
+        localFirstSync.mergeServerRecords(collection, rows);
+      } catch {
+        /* offline — keep local */
+      }
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: rows as unknown[],
+        records: localFirstSync.getSnapshot(collection),
       });
     },
     [],
@@ -765,11 +918,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
       collection: string,
       item: Record<string, unknown>,
     ): Promise<Record<string, unknown>> => {
-      const saved = await syncEngine.saveRecord(collection, item, "create");
+      // Write to IndexedDB + queue MySQL push
+      const saved = await localFirstSync.save(collection, item, "create");
+      // Immediately reflect in context state
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getLocalCollection(collection),
+        records: localFirstSync.getSnapshot(collection),
       });
       return saved;
     },
@@ -782,16 +937,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       id: string,
       changes: Record<string, unknown>,
     ): Promise<void> => {
-      const existing = syncEngine.getCache(collection) as Array<
-        Record<string, unknown>
-      >;
-      const currentRecord = existing.find((r) => r.id === id);
-      const merged = { ...(currentRecord ?? {}), ...changes, id };
-      await syncEngine.saveRecord(collection, merged, "update");
+      const existing = localFirstSync
+        .getSnapshot<Record<string, unknown>>(collection)
+        .find((r) => r.id === id);
+      const merged = { ...(existing ?? {}), ...changes, id };
+      await localFirstSync.save(collection, merged, "update");
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getLocalCollection(collection),
+        records: localFirstSync.getSnapshot(collection),
       });
     },
     [],
@@ -799,15 +953,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteData = useCallback(
     async (collection: string, id: string): Promise<void> => {
-      await syncEngine.saveRecord(collection, { id }, "delete");
+      await localFirstSync.save(collection, { id }, "delete");
       dispatch({
         type: "UPDATE_COLLECTION",
         collection,
-        records: syncEngine.getLocalCollection(collection),
+        records: localFirstSync.getSnapshot(collection),
       });
-      void refreshCollection(collection);
     },
-    [refreshCollection],
+    [],
   );
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -820,7 +973,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const syncCounts: Record<string, number> = {};
   for (const [k, v] of Object.entries(state.data)) syncCounts[k] = v.length;
 
-  const hasCachedData = Object.keys(state.data).length > 0;
+  // Show loading screen only when we have NO cached data yet
+  const hasCachedData = Object.values(state.data).some(
+    (v) => Array.isArray(v) && v.length > 0,
+  );
   const showLoading =
     state.currentUser !== null && state.isInitializing && !hasCachedData;
   const showError =
@@ -842,6 +998,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         syncStatus: state.syncStatus,
         serverCounts,
         syncCounts,
+        serverConnected: state.serverConnected,
         login,
         logout,
         changePassword,
@@ -874,10 +1031,4 @@ export function useApp() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
-}
-
-// ── Type alias ────────────────────────────────────────────────────────────────
-interface Credentials {
-  username: string;
-  password: string;
 }

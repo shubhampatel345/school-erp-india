@@ -50,7 +50,7 @@ import type {
   Student,
   StudentAnalytics as StudentAnalyticsType,
 } from "../../types";
-import { syncEngine } from "../../utils/syncEngine";
+import { phpApiService } from "../../utils/phpApiService";
 
 // ── Colour helpers ─────────────────────────────────────────────────────────────
 
@@ -676,36 +676,23 @@ function AnalyticsPanel({ studentId }: { studentId: string }) {
     setLoading(true);
     setError(null);
 
-    // Build analytics from local canister-synced data
-    Promise.resolve()
-      .then(() => {
-        const attendance = syncEngine.getLocalCollection(
-          "attendance",
-        ) as Array<{
-          studentId?: string;
-          date?: string;
-          status?: string;
-          subject?: string;
-        }>;
-        const feeReceipts = syncEngine.getLocalCollection(
-          "fee_receipts",
-        ) as Array<{
-          studentId?: string;
-          admNo?: string;
-          amount?: number;
-          date?: string;
-          months?: string[];
-        }>;
-        const examResults = syncEngine.getLocalCollection(
-          "exam_results",
-        ) as Array<{
-          studentId?: string;
-          subject?: string;
-          marks?: number;
-          maxMarks?: number;
-          examDate?: string;
-        }>;
-
+    // Build analytics from real MySQL data via phpApiService
+    Promise.all([
+      phpApiService
+        .getAttendance("", "")
+        .catch(
+          () => [] as import("../../utils/phpApiService").AttendanceRecord[],
+        ),
+      phpApiService
+        .getReceipts(studentId)
+        .catch(
+          () => [] as import("../../utils/phpApiService").FeeReceiptRecord[],
+        ),
+      phpApiService
+        .getResults({ studentId })
+        .catch(() => [] as Record<string, unknown>[]),
+    ])
+      .then(([attendance, feeReceipts, examResults]) => {
         const stdAttendance = attendance.filter(
           (a) => a.studentId === studentId,
         );
@@ -727,21 +714,19 @@ function AnalyticsPanel({ studentId }: { studentId: string }) {
           }),
         );
 
-        const stdResults = examResults.filter((r) => r.studentId === studentId);
-        const marksHistory = stdResults.map((r) => ({
+        const marksHistory = examResults.map((r) => ({
           examTitle: String((r as Record<string, unknown>).examTitle ?? "Exam"),
-          subject: r.subject ?? "Unknown",
-          score: r.marks ?? 0,
-          totalMarks: r.maxMarks ?? 100,
-          date: r.examDate ?? "",
+          subject: String((r as Record<string, unknown>).subject ?? "Unknown"),
+          score: Number((r as Record<string, unknown>).marks ?? 0),
+          totalMarks: Number((r as Record<string, unknown>).maxMarks ?? 100),
+          date: String((r as Record<string, unknown>).examDate ?? ""),
         }));
 
-        const stdFees = feeReceipts.filter(
-          (r) => r.studentId === studentId || r.admNo === studentId,
-        );
-        const feesHistory = stdFees.map((r) => ({
-          month: Array.isArray(r.months) ? (r.months[0] ?? "") : "",
-          paid: r.amount ?? 0,
+        const feesHistory = feeReceipts.map((r) => ({
+          month: Array.isArray((r as Record<string, unknown>).months)
+            ? (((r as Record<string, unknown>).months as string[])[0] ?? "")
+            : "",
+          paid: Number(r.totalAmount ?? 0),
           due: 0,
         }));
 

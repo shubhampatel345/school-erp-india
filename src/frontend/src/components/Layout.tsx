@@ -58,31 +58,37 @@ export default function Layout({
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-background">
-      {/* Header — elevated bg-card */}
+      {/* Header — elevated bg-card with border-b */}
       <Header onMenuToggle={handleMenuToggle} onNavigate={handleNavigate} />
 
       {/* Archived session banner */}
       {isArchived && (
-        <div className="session-banner px-4 py-2 flex items-center justify-center gap-2 flex-shrink-0 z-30">
-          <span className="text-sm font-medium">
-            📁 Viewing archived session:{" "}
-            <strong>{currentSession?.label}</strong> — Read Only
-          </span>
+        <div
+          className="px-4 py-2 flex items-center justify-center gap-2 flex-shrink-0 z-30 text-sm font-medium"
+          style={{
+            background: "oklch(0.97 0.03 85)",
+            borderBottom: "1px solid oklch(0.85 0.06 85)",
+            color: "oklch(0.4 0.1 85)",
+          }}
+        >
+          📁 Viewing archived session: <strong>{currentSession?.label}</strong>{" "}
+          — Read Only
         </div>
       )}
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Desktop Sidebar — visible on md+ */}
+        {/* Desktop Sidebar — dark navy, visible on md+ */}
         <div className="hidden md:block flex-shrink-0">
           <Sidebar activePage={activePage} onNavigate={handleNavigate} />
         </div>
 
-        {/* Main Content Area */}
+        {/* Main Content Area — bg-background to contrast with card header */}
         <main
           className="flex-1 overflow-y-auto bg-background"
           id="main-content"
+          data-ocid="main-content"
         >
-          {/* Bottom padding on mobile to avoid MobileNav overlap */}
+          {/* Extra bottom padding on mobile for MobileNav */}
           <div className="min-h-full pb-20 md:pb-0">{children}</div>
         </main>
       </div>

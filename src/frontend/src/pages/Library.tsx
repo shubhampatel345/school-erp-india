@@ -1,9 +1,7 @@
 /**
- * SHUBH SCHOOL ERP — Library + Barcode Scanning Module
- *
- * Tabs: Books Catalog | Issue/Return | Overdue Books | Barcode Scanner
- * Uses jsQR for barcode scanning (same pattern as QRAttendance)
- * All amount fields are plain text — NO spinner controls
+ * SHUBH SCHOOL ERP — Library Module
+ * Tabs: Books Catalog | Issue/Return | Reports
+ * All amount fields: type="text" inputMode="decimal" — NO spinners
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -27,41 +25,26 @@ import {
 import {
   AlertTriangle,
   BookOpen,
-  Camera,
   CheckCircle2,
   Download,
   Edit2,
   History,
-  Keyboard,
   Loader2,
-  RefreshCw,
   RotateCcw,
   Search,
   Settings,
   Trash2,
-  Upload,
-  X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
 import type { BookIssue, LibraryBook, Student } from "../types";
-import { dataService } from "../utils/dataService";
 import { generateId } from "../utils/localStorage";
 
-// ── Types ──────────────────────────────────────────────────
-
-interface LibrarySettings {
-  finePerDay: number;
-  defaultLoanDays: number;
-}
-
-const DEFAULT_SETTINGS: LibrarySettings = {
-  finePerDay: 5,
-  defaultLoanDays: 14,
-};
+// ── Constants ──────────────────────────────────────────────
 
 const BOOK_CATEGORIES = [
+  "Textbook",
   "Fiction",
   "Non-Fiction",
   "Science",
@@ -70,25 +53,15 @@ const BOOK_CATEGORIES = [
   "Geography",
   "Literature",
   "Reference",
-  "Textbook",
   "Magazine",
   "Other",
 ];
 
-type TabId = "catalog" | "issue-return" | "overdue" | "scanner";
-
-const TABS: {
-  id: TabId;
-  label: string;
-  icon: React.ComponentType<{ className?: string }>;
-}[] = [
-  { id: "catalog", label: "Books Catalog", icon: BookOpen },
-  { id: "issue-return", label: "Issue / Return", icon: History },
-  { id: "overdue", label: "Overdue Books", icon: AlertTriangle },
-  { id: "scanner", label: "Barcode Scanner", icon: Camera },
-];
-
 const ALLOWED_WRITE_ROLES = new Set(["superadmin", "admin", "librarian"]);
+
+type TabId = "catalog" | "issue-return" | "reports";
+
+// ── Helpers ─────────────────────────────────────────────────
 
 function daysOverdue(dueDate: string): number {
   const due = new Date(dueDate);
@@ -105,13 +78,32 @@ function defaultDueDate(days: number): string {
   return d.toISOString().split("T")[0];
 }
 
-function todayStr(): string {
+function todayStr() {
   return new Date().toISOString().split("T")[0];
 }
 
-// ── Settings Panel ─────────────────────────────────────────
+function exportCSV(rows: string[][], filename: string) {
+  const csv = rows
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+}
 
-function LibrarySettingsPanel({
+// ── Settings ─────────────────────────────────────────────────
+
+interface LibrarySettings {
+  finePerDay: number;
+  defaultLoanDays: number;
+}
+const DEFAULT_LIB_SETTINGS: LibrarySettings = {
+  finePerDay: 5,
+  defaultLoanDays: 14,
+};
+
+function SettingsDialog({
   settings,
   onSave,
   onClose,
@@ -120,11 +112,8 @@ function LibrarySettingsPanel({
   onSave: (s: LibrarySettings) => void;
   onClose: () => void;
 }) {
-  const [finePerDay, setFinePerDay] = useState(String(settings.finePerDay));
-  const [defaultLoanDays, setDefaultLoanDays] = useState(
-    String(settings.defaultLoanDays),
-  );
-
+  const [fine, setFine] = useState(String(settings.finePerDay));
+  const [days, setDays] = useState(String(settings.defaultLoanDays));
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="max-w-sm">
@@ -136,18 +125,16 @@ function LibrarySettingsPanel({
             <Label>Fine per overdue day (₹)</Label>
             <Input
               type="text"
-              inputMode="numeric"
-              pattern="[0-9]*"
+              inputMode="decimal"
               className="mt-1"
-              value={finePerDay}
+              value={fine}
               onChange={(e) =>
-                setFinePerDay(
+                setFine(
                   e.target.value
                     .replace(/[^0-9.]/g, "")
                     .replace(/(\..*)\./g, "$1"),
                 )
               }
-              placeholder="5"
               data-ocid="library.settings.fine_input"
             />
           </div>
@@ -156,25 +143,21 @@ function LibrarySettingsPanel({
             <Input
               type="text"
               inputMode="numeric"
-              pattern="[0-9]*"
               className="mt-1"
-              value={defaultLoanDays}
-              onChange={(e) =>
-                setDefaultLoanDays(e.target.value.replace(/[^0-9]/g, ""))
-              }
-              placeholder="14"
+              value={days}
+              onChange={(e) => setDays(e.target.value.replace(/[^0-9]/g, ""))}
               data-ocid="library.settings.loan_days_input"
             />
           </div>
-          <div className="flex gap-2 pt-2">
+          <div className="flex gap-2 pt-1">
             <Button
               className="flex-1"
-              onClick={() => {
+              onClick={() =>
                 onSave({
-                  finePerDay: Math.max(0, Number(finePerDay) || 5),
-                  defaultLoanDays: Math.max(1, Number(defaultLoanDays) || 14),
-                });
-              }}
+                  finePerDay: Math.max(0, Number(fine) || 5),
+                  defaultLoanDays: Math.max(1, Number(days) || 14),
+                })
+              }
               data-ocid="library.settings.save_button"
             >
               Save Settings
@@ -193,16 +176,17 @@ function LibrarySettingsPanel({
   );
 }
 
-// ── Add/Edit Book Dialog ───────────────────────────────────
+// ── Book Form ─────────────────────────────────────────────────
 
-interface BookFormProps {
+function BookFormDialog({
+  book,
+  onSave,
+  onClose,
+}: {
   book?: LibraryBook;
   onSave: (b: Omit<LibraryBook, "id" | "addedAt">) => Promise<void>;
   onClose: () => void;
-  onScanISBN: (cb: (isbn: string) => void) => void;
-}
-
-function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
+}) {
   const [isbn, setIsbn] = useState(book?.isbn ?? "");
   const [title, setTitle] = useState(book?.title ?? "");
   const [author, setAuthor] = useState(book?.author ?? "");
@@ -214,10 +198,6 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
   );
   const [location, setLocation] = useState(book?.location ?? "");
   const [saving, setSaving] = useState(false);
-
-  const handleScan = () => {
-    onScanISBN((scanned) => setIsbn(scanned));
-  };
 
   const handleSubmit = async () => {
     if (!title.trim()) {
@@ -254,23 +234,13 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
         <div className="space-y-3 py-2">
           <div>
             <Label>ISBN</Label>
-            <div className="flex gap-2 mt-1">
-              <Input
-                value={isbn}
-                onChange={(e) => setIsbn(e.target.value)}
-                placeholder="978-0-000-00000-0"
-                data-ocid="library.book.isbn_input"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleScan}
-                data-ocid="library.book.scan_isbn_button"
-              >
-                <Camera className="w-4 h-4 mr-1" /> Scan
-              </Button>
-            </div>
+            <Input
+              className="mt-1"
+              value={isbn}
+              onChange={(e) => setIsbn(e.target.value)}
+              placeholder="978-0-000-00000-0"
+              data-ocid="library.book.isbn_input"
+            />
           </div>
           <div>
             <Label>
@@ -303,16 +273,12 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
               value={publisher}
               onChange={(e) => setPublisher(e.target.value)}
               placeholder="Publisher"
-              data-ocid="library.book.publisher_input"
             />
           </div>
           <div>
             <Label>Category</Label>
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger
-                className="mt-1"
-                data-ocid="library.book.category_select"
-              >
+              <SelectTrigger className="mt-1">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -330,7 +296,6 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
               <Input
                 type="text"
                 inputMode="numeric"
-                pattern="[0-9]*"
                 className="mt-1"
                 value={totalQty}
                 onChange={(e) =>
@@ -344,7 +309,6 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
               <Input
                 type="text"
                 inputMode="numeric"
-                pattern="[0-9]*"
                 className="mt-1"
                 value={availableQty}
                 onChange={(e) =>
@@ -371,9 +335,7 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
               disabled={saving}
               data-ocid="library.book.submit_button"
             >
-              {saving ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : null}
+              {saving && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {book ? "Save Changes" : "Add Book"}
             </Button>
             <Button
@@ -390,42 +352,165 @@ function BookFormDialog({ book, onSave, onClose, onScanISBN }: BookFormProps) {
   );
 }
 
-// ── Books Catalog Tab ──────────────────────────────────────
+// ── Main Library Page ─────────────────────────────────────────
 
-function BooksCatalogTab({
-  books,
-  issues,
-  canWrite,
-  canDelete,
-  onAddBook,
-  onEditBook,
-  onDeleteBook,
-  onImportCSV,
-}: {
-  books: LibraryBook[];
-  issues: BookIssue[];
-  canWrite: boolean;
-  canDelete: boolean;
-  onAddBook: () => void;
-  onEditBook: (b: LibraryBook) => void;
-  onDeleteBook: (id: string) => void;
-  onImportCSV: () => void;
-}) {
-  const [search, setSearch] = useState("");
-  const [filterCat, setFilterCat] = useState("all");
+export default function Library() {
+  const {
+    getData,
+    saveData,
+    updateData,
+    deleteData,
+    addNotification,
+    currentUser,
+  } = useApp();
+
+  const books = getData("library") as LibraryBook[];
+  const issues = getData("library_issues") as BookIssue[];
+  const students = getData("students") as Student[];
+
+  const [activeTab, setActiveTab] = useState<TabId>("catalog");
+  const [showBookForm, setShowBookForm] = useState(false);
+  const [editBook, setEditBook] = useState<LibraryBook | undefined>(undefined);
+  const [showSettings, setShowSettings] = useState(false);
+  const [libSettings, setLibSettings] =
+    useState<LibrarySettings>(DEFAULT_LIB_SETTINGS);
+  const [catalogSearch, setCatalogSearch] = useState("");
+  const [catalogCat, setCatalogCat] = useState("all");
+
+  const canWrite = ALLOWED_WRITE_ROLES.has(currentUser?.role ?? "");
+
+  // ── Book CRUD ────────────────────────────────────────────────
+
+  const handleSaveBook = useCallback(
+    async (data: Omit<LibraryBook, "id" | "addedAt">) => {
+      if (editBook) {
+        await updateData("library", editBook.id, {
+          ...data,
+          id: editBook.id,
+          addedAt: editBook.addedAt,
+        });
+        addNotification(`Book updated: ${data.title}`, "success", "📚");
+      } else {
+        const id = generateId();
+        await saveData("library", {
+          ...data,
+          id,
+          addedAt: todayStr(),
+        } as unknown as Record<string, unknown>);
+        addNotification(`Book added: ${data.title}`, "success", "📚");
+      }
+      setShowBookForm(false);
+      setEditBook(undefined);
+    },
+    [editBook, updateData, saveData, addNotification],
+  );
+
+  const handleDeleteBook = useCallback(
+    async (id: string) => {
+      if (!confirm("Delete this book from the catalog?")) return;
+      await deleteData("library", id);
+      addNotification("Book removed from catalog", "info");
+    },
+    [deleteData, addNotification],
+  );
+
+  // ── Issue / Return ────────────────────────────────────────────
+
+  const handleIssue = useCallback(
+    async (bookId: string, studentId: string, dueDate: string) => {
+      const book = books.find((b) => b.id === bookId);
+      if (!book) return;
+      if (book.availableQty < 1) {
+        toast.error("No copies available");
+        return;
+      }
+
+      const issueId = generateId();
+      await saveData("library_issues", {
+        id: issueId,
+        bookId,
+        studentId,
+        issueDate: todayStr(),
+        dueDate,
+        fine: 0,
+        status: "issued",
+      } as unknown as Record<string, unknown>);
+      await updateData("library", bookId, {
+        ...book,
+        availableQty: book.availableQty - 1,
+      });
+
+      const student = students.find((s) => s.id === studentId);
+      addNotification(
+        `Book issued to ${student?.fullName ?? "student"}`,
+        "success",
+        "📗",
+      );
+      toast.success("Book issued successfully");
+    },
+    [books, students, saveData, updateData, addNotification],
+  );
+
+  const handleReturn = useCallback(
+    async (issueId: string, fine: number) => {
+      const issue = issues.find((i) => i.id === issueId);
+      if (!issue) return;
+      const book = books.find((b) => b.id === issue.bookId);
+
+      await updateData("library_issues", issueId, {
+        ...issue,
+        returnDate: todayStr(),
+        fine,
+        status: "returned",
+      });
+      if (book)
+        await updateData("library", book.id, {
+          ...book,
+          availableQty: book.availableQty + 1,
+        });
+
+      addNotification(
+        `Book returned${fine > 0 ? ` — Fine: ₹${fine}` : ""}`,
+        "success",
+        "📘",
+      );
+      toast.success(
+        fine > 0
+          ? `Book returned. Fine collected: ₹${fine}`
+          : "Book returned successfully",
+      );
+    },
+    [issues, books, updateData, addNotification],
+  );
+
+  const handleSendReminder = useCallback(
+    async (_issue: BookIssue, student: Student | null) => {
+      toast.success(
+        `Reminder sent to ${student?.fullName ?? "student"} (simulated)`,
+      );
+    },
+    [],
+  );
+
+  const handleBulkRemind = useCallback(
+    async (list: { issue: BookIssue; student: Student | null }[]) => {
+      toast.success(
+        `Bulk reminders sent to ${list.length} students (simulated)`,
+      );
+    },
+    [],
+  );
+
+  // ── Catalog stats ─────────────────────────────────────────────
 
   const totalIssued = useMemo(
-    () =>
-      issues.filter((i) => i.status === "issued" || i.status === "overdue")
-        .length,
+    () => issues.filter((i) => i.status === "issued").length,
     [issues],
   );
   const overdueCount = useMemo(
     () =>
-      issues.filter((i) => {
-        if (i.status !== "issued") return false;
-        return daysOverdue(i.dueDate) > 0;
-      }).length,
+      issues.filter((i) => i.status === "issued" && daysOverdue(i.dueDate) > 0)
+        .length,
     [issues],
   );
   const totalAvailable = useMemo(
@@ -433,321 +518,64 @@ function BooksCatalogTab({
     [books],
   );
 
-  const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return books.filter((b) => {
-      const matchSearch =
-        !q ||
-        b.title.toLowerCase().includes(q) ||
-        b.author.toLowerCase().includes(q) ||
-        b.isbn.toLowerCase().includes(q);
-      const matchCat = filterCat === "all" || b.category === filterCat;
-      return matchSearch && matchCat;
-    });
-  }, [books, search, filterCat]);
-
-  const exportCSV = () => {
-    const header =
-      "ISBN,Title,Author,Publisher,Category,TotalQty,AvailableQty,Location";
-    const rows = books.map((b) =>
-      [
-        b.isbn,
-        b.title,
-        b.author,
-        b.publisher ?? "",
-        b.category,
-        b.totalQty,
-        b.availableQty,
-        b.location ?? "",
-      ]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`)
-        .join(","),
+  const filteredBooks = useMemo(() => {
+    const q = catalogSearch.toLowerCase();
+    return books.filter(
+      (b) =>
+        (catalogCat === "all" || b.category === catalogCat) &&
+        (!q ||
+          b.title.toLowerCase().includes(q) ||
+          b.author.toLowerCase().includes(q) ||
+          b.isbn.toLowerCase().includes(q)),
     );
-    const csv = [header, ...rows].join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    a.download = "library_books.csv";
-    a.click();
-  };
+  }, [books, catalogSearch, catalogCat]);
 
-  return (
-    <div className="space-y-4">
-      {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: "Total Books", value: books.length, color: "text-primary" },
-          { label: "Total Issued", value: totalIssued, color: "text-warning" },
-          { label: "Available", value: totalAvailable, color: "text-success" },
-          { label: "Overdue", value: overdueCount, color: "text-destructive" },
-        ].map((s) => (
-          <Card key={s.label} className="text-center py-3">
-            <p className={`text-2xl font-bold font-display ${s.color}`}>
-              {s.value}
-            </p>
-            <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-          </Card>
-        ))}
-      </div>
+  // ── Overdue list ──────────────────────────────────────────────
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Search by title, author, ISBN…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            data-ocid="library.catalog.search_input"
-          />
-        </div>
-        <Select value={filterCat} onValueChange={setFilterCat}>
-          <SelectTrigger
-            className="w-36"
-            data-ocid="library.catalog.category_filter"
-          >
-            <SelectValue placeholder="Category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {BOOK_CATEGORIES.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {canWrite && (
-          <>
-            <Button
-              onClick={onAddBook}
-              data-ocid="library.catalog.add_book_button"
-            >
-              <BookOpen className="w-4 h-4 mr-2" /> Add Book
-            </Button>
-            <Button
-              variant="outline"
-              onClick={onImportCSV}
-              data-ocid="library.catalog.import_button"
-            >
-              <Upload className="w-4 h-4 mr-2" /> Import CSV
-            </Button>
-          </>
-        )}
-        <Button
-          variant="outline"
-          onClick={exportCSV}
-          data-ocid="library.catalog.export_button"
-        >
-          <Download className="w-4 h-4 mr-2" /> Export
-        </Button>
-      </div>
-
-      {/* Table */}
-      {filtered.length === 0 ? (
-        <div
-          className="flex flex-col items-center justify-center py-16 text-center"
-          data-ocid="library.catalog.empty_state"
-        >
-          <BookOpen className="w-12 h-12 text-muted-foreground/40 mb-3" />
-          <p className="text-muted-foreground font-medium">
-            {books.length === 0
-              ? "No books in catalog yet. Add your first book to get started."
-              : "No books match your search."}
-          </p>
-          {books.length === 0 && canWrite && (
-            <Button
-              className="mt-4"
-              onClick={onAddBook}
-              data-ocid="library.catalog.add_first_book_button"
-            >
-              Add First Book
-            </Button>
-          )}
-        </div>
-      ) : (
-        <div className="rounded-lg border border-border overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b border-border">
-                <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
-                  Title
-                </th>
-                <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell">
-                  Author
-                </th>
-                <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
-                  ISBN
-                </th>
-                <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
-                  Category
-                </th>
-                <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
-                  Total
-                </th>
-                <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
-                  Avail.
-                </th>
-                <th className="text-right px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell">
-                  Issued
-                </th>
-                <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
-                  Location
-                </th>
-                {(canWrite || canDelete) && (
-                  <th className="text-center px-3 py-2.5 text-muted-foreground font-medium">
-                    Actions
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((b, idx) => {
-                const issuedQty = b.totalQty - b.availableQty;
-                const isLow = b.availableQty === 0;
-                return (
-                  <tr
-                    key={b.id}
-                    className={`border-b border-border last:border-0 hover:bg-muted/20 transition-colors ${isLow ? "bg-destructive/5" : ""}`}
-                    data-ocid={`library.catalog.item.${idx + 1}`}
-                  >
-                    <td className="px-3 py-2.5 font-medium text-foreground">
-                      <div className="flex items-center gap-2">
-                        {isLow && (
-                          <span
-                            className="w-2 h-2 rounded-full bg-destructive flex-shrink-0"
-                            title="Out of stock"
-                          />
-                        )}
-                        <span
-                          className="truncate max-w-[160px]"
-                          title={b.title}
-                        >
-                          {b.title}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground hidden md:table-cell">
-                      {b.author}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs hidden lg:table-cell">
-                      {b.isbn || "—"}
-                    </td>
-                    <td className="px-3 py-2.5">
-                      <Badge variant="secondary" className="text-xs">
-                        {b.category}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums">
-                      {b.totalQty}
-                    </td>
-                    <td
-                      className={`px-3 py-2.5 text-right tabular-nums font-medium ${isLow ? "text-destructive" : "text-success"}`}
-                    >
-                      {b.availableQty}
-                    </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground hidden md:table-cell">
-                      {issuedQty}
-                    </td>
-                    <td className="px-3 py-2.5 text-muted-foreground text-xs hidden lg:table-cell">
-                      {b.location || "—"}
-                    </td>
-                    {(canWrite || canDelete) && (
-                      <td className="px-3 py-2.5">
-                        <div className="flex items-center justify-center gap-1">
-                          {canWrite && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => onEditBook(b)}
-                              data-ocid={`library.catalog.edit_button.${idx + 1}`}
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </Button>
-                          )}
-                          {canDelete && (
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-destructive hover:text-destructive"
-                              onClick={() => onDeleteBook(b.id)}
-                              data-ocid={`library.catalog.delete_button.${idx + 1}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+  const overdueList = useMemo(
+    () =>
+      issues
+        .filter((i) => i.status === "issued" && daysOverdue(i.dueDate) > 0)
+        .map((i) => ({
+          issue: i,
+          student: students.find((s) => s.id === i.studentId) ?? null,
+          book: books.find((b) => b.id === i.bookId),
+          days: daysOverdue(i.dueDate),
+          fine: daysOverdue(i.dueDate) * libSettings.finePerDay,
+        }))
+        .sort((a, b) => b.days - a.days),
+    [issues, students, books, libSettings],
   );
-}
 
-// ── Issue/Return Tab ───────────────────────────────────────
+  // ── Issue form state ──────────────────────────────────────────
 
-function IssueReturnTab({
-  books,
-  issues,
-  students,
-  settings,
-  canWrite,
-  onIssue,
-  onReturn,
-}: {
-  books: LibraryBook[];
-  issues: BookIssue[];
-  students: Student[];
-  settings: LibrarySettings;
-  canWrite: boolean;
-  onIssue: (
-    bookId: string,
-    studentId: string,
-    dueDate: string,
-  ) => Promise<void>;
-  onReturn: (issueId: string, fine: number) => Promise<void>;
-}) {
-  // Issue form state
   const [issueStudentQ, setIssueStudentQ] = useState("");
   const [issueStudentId, setIssueStudentId] = useState("");
   const [issueBookQ, setIssueBookQ] = useState("");
   const [issueBookId, setIssueBookId] = useState("");
   const [issueDue, setIssueDue] = useState(() =>
-    defaultDueDate(settings.defaultLoanDays),
+    defaultDueDate(libSettings.defaultLoanDays),
   );
   const [issueLoading, setIssueLoading] = useState(false);
   const [showStudentDD, setShowStudentDD] = useState(false);
-  const [showBookDD, setShowBookDD] = useState(false);
-
-  // Return form state
+  const [showIssueBookDD, setShowIssueBookDD] = useState(false);
   const [returnBookQ, setReturnBookQ] = useState("");
   const [returnBookId, setReturnBookId] = useState("");
+  const [showReturnDD, setShowReturnDD] = useState(false);
   const [returnLoading, setReturnLoading] = useState(false);
-  const [showReturnBookDD, setShowReturnBookDD] = useState(false);
-
-  const activeStudents = useMemo(
-    () => students.filter((s) => s.status === "active"),
-    [students],
-  );
 
   const studentMatches = useMemo(() => {
     const q = issueStudentQ.toLowerCase();
     if (!q) return [];
-    return activeStudents
+    return students
       .filter(
         (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          s.admNo.toLowerCase().includes(q),
+          s.status === "active" &&
+          (s.fullName.toLowerCase().includes(q) ||
+            s.admNo.toLowerCase().includes(q)),
       )
       .slice(0, 8);
-  }, [issueStudentQ, activeStudents]);
+  }, [issueStudentQ, students]);
 
   const issueBookMatches = useMemo(() => {
     const q = issueBookQ.toLowerCase();
@@ -773,15 +601,11 @@ function IssueReturnTab({
       .slice(0, 8);
   }, [returnBookQ, books]);
 
-  // Current open issue for selected return book
   const currentIssue = useMemo(() => {
     if (!returnBookId) return null;
     return (
-      issues.find(
-        (i) =>
-          i.bookId === returnBookId &&
-          (i.status === "issued" || i.status === "overdue"),
-      ) ?? null
+      issues.find((i) => i.bookId === returnBookId && i.status === "issued") ??
+      null
     );
   }, [returnBookId, issues]);
 
@@ -791,9 +615,9 @@ function IssueReturnTab({
   }, [currentIssue, students]);
 
   const daysOD = currentIssue ? daysOverdue(currentIssue.dueDate) : 0;
-  const calculatedFine = daysOD * settings.finePerDay;
+  const calcFine = daysOD * libSettings.finePerDay;
 
-  const handleIssue = async () => {
+  const handleIssueSubmit = async () => {
     if (!issueStudentId) {
       toast.error("Select a student");
       return;
@@ -804,25 +628,25 @@ function IssueReturnTab({
     }
     setIssueLoading(true);
     try {
-      await onIssue(issueBookId, issueStudentId, issueDue);
+      await handleIssue(issueBookId, issueStudentId, issueDue);
       setIssueStudentQ("");
       setIssueStudentId("");
       setIssueBookQ("");
       setIssueBookId("");
-      setIssueDue(defaultDueDate(settings.defaultLoanDays));
+      setIssueDue(defaultDueDate(libSettings.defaultLoanDays));
     } finally {
       setIssueLoading(false);
     }
   };
 
-  const handleReturn = async () => {
+  const handleReturnSubmit = async () => {
     if (!currentIssue) {
       toast.error("No open issue found for this book");
       return;
     }
     setReturnLoading(true);
     try {
-      await onReturn(currentIssue.id, calculatedFine);
+      await handleReturn(currentIssue.id, calcFine);
       setReturnBookQ("");
       setReturnBookId("");
     } finally {
@@ -830,1342 +654,960 @@ function IssueReturnTab({
     }
   };
 
-  const recentIssues = useMemo(
-    () => [...issues].reverse().slice(0, 10),
-    [issues],
-  );
+  const TABS: {
+    id: TabId;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }[] = [
+    { id: "catalog", label: "Books Catalog", icon: BookOpen },
+    { id: "issue-return", label: "Issue / Return", icon: History },
+    { id: "reports", label: "Reports", icon: Download },
+  ];
 
   return (
-    <div className="space-y-5">
-      <div className="grid md:grid-cols-2 gap-4">
-        {/* Issue Book */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <BookOpen className="w-4 h-4 text-primary" /> Issue Book
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {/* Student search */}
-            <div className="relative">
-              <Label className="text-xs text-muted-foreground mb-1 block">
-                Student
-              </Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  className="pl-9"
-                  placeholder="Type student name or adm. no…"
-                  value={issueStudentQ}
-                  onChange={(e) => {
-                    setIssueStudentQ(e.target.value);
-                    setIssueStudentId("");
-                    setShowStudentDD(true);
-                  }}
-                  onFocus={() => setShowStudentDD(true)}
-                  data-ocid="library.issue.student_search_input"
-                />
-                {issueStudentId && (
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-success" />
-                )}
-              </div>
-              {showStudentDD && studentMatches.length > 0 && (
-                <div
-                  className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto"
-                  data-ocid="library.issue.student_dropdown"
-                >
-                  {studentMatches.map((s) => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center gap-2 text-sm"
-                      onClick={() => {
-                        setIssueStudentQ(`${s.fullName} (${s.admNo})`);
-                        setIssueStudentId(s.id);
-                        setShowStudentDD(false);
-                      }}
-                      data-ocid={`library.issue.student_option.${s.id}`}
-                    >
-                      <span className="font-medium">{s.fullName}</span>
-                      <span className="text-muted-foreground text-xs">
-                        {s.class}-{s.section} · {s.admNo}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Book search */}
-            <div className="relative">
-              <Label className="text-xs text-muted-foreground mb-1 block">
-                Book
-              </Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  className="pl-9"
-                  placeholder="Type book title or scan barcode…"
-                  value={issueBookQ}
-                  onChange={(e) => {
-                    setIssueBookQ(e.target.value);
-                    setIssueBookId("");
-                    setShowBookDD(true);
-                  }}
-                  onFocus={() => setShowBookDD(true)}
-                  data-ocid="library.issue.book_search_input"
-                />
-                {issueBookId && (
-                  <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-success" />
-                )}
-              </div>
-              {showBookDD && issueBookMatches.length > 0 && (
-                <div
-                  className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto"
-                  data-ocid="library.issue.book_dropdown"
-                >
-                  {issueBookMatches.map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center justify-between text-sm"
-                      onClick={() => {
-                        setIssueBookQ(b.title);
-                        setIssueBookId(b.id);
-                        setShowBookDD(false);
-                      }}
-                      data-ocid={`library.issue.book_option.${b.id}`}
-                    >
-                      <span className="font-medium">{b.title}</span>
-                      <span className="text-xs text-success">
-                        {b.availableQty} avail.
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div>
-              <Label className="text-xs text-muted-foreground mb-1 block">
-                Due Date
-              </Label>
-              <Input
-                type="date"
-                value={issueDue}
-                onChange={(e) => setIssueDue(e.target.value)}
-                min={todayStr()}
-                data-ocid="library.issue.due_date_input"
-              />
-            </div>
-
-            <Button
-              className="w-full"
-              onClick={handleIssue}
-              disabled={
-                !canWrite || issueLoading || !issueStudentId || !issueBookId
-              }
-              data-ocid="library.issue.submit_button"
-            >
-              {issueLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <BookOpen className="w-4 h-4 mr-2" />
-              )}
-              Issue Book
-            </Button>
-            {!canWrite && (
-              <p className="text-xs text-muted-foreground text-center">
-                Librarian/Admin access required
-              </p>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Return Book */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <RotateCcw className="w-4 h-4 text-accent" /> Return Book
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="relative">
-              <Label className="text-xs text-muted-foreground mb-1 block">
-                Book
-              </Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                <Input
-                  className="pl-9"
-                  placeholder="Search book to return…"
-                  value={returnBookQ}
-                  onChange={(e) => {
-                    setReturnBookQ(e.target.value);
-                    setReturnBookId("");
-                    setShowReturnBookDD(true);
-                  }}
-                  onFocus={() => setShowReturnBookDD(true)}
-                  data-ocid="library.return.book_search_input"
-                />
-              </div>
-              {showReturnBookDD && returnBookMatches.length > 0 && (
-                <div
-                  className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg overflow-hidden max-h-48 overflow-y-auto"
-                  data-ocid="library.return.book_dropdown"
-                >
-                  {returnBookMatches.map((b) => (
-                    <button
-                      key={b.id}
-                      type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-muted/50 flex items-center justify-between text-sm"
-                      onClick={() => {
-                        setReturnBookQ(b.title);
-                        setReturnBookId(b.id);
-                        setShowReturnBookDD(false);
-                      }}
-                    >
-                      <span className="font-medium">{b.title}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {b.isbn || "No ISBN"}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {currentIssue ? (
-              <div className="bg-muted/40 rounded-lg p-3 space-y-1.5 text-sm border border-border">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Student</span>
-                  <span className="font-medium">
-                    {issueStudent?.fullName ?? "Unknown"}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Issue Date</span>
-                  <span>{currentIssue.issueDate}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Due Date</span>
-                  <span
-                    className={daysOD > 0 ? "text-destructive font-medium" : ""}
-                  >
-                    {currentIssue.dueDate}
-                  </span>
-                </div>
-                <div className="flex justify-between font-medium">
-                  <span className="text-muted-foreground">Days Overdue</span>
-                  <span
-                    className={daysOD > 0 ? "text-destructive" : "text-success"}
-                  >
-                    {daysOD > 0 ? `${daysOD} days` : "On time"}
-                  </span>
-                </div>
-                <div className="flex justify-between font-bold border-t border-border pt-1.5 mt-1">
-                  <span>Fine Amount</span>
-                  <span
-                    className={
-                      calculatedFine > 0 ? "text-destructive" : "text-success"
-                    }
-                  >
-                    ₹{calculatedFine}{" "}
-                    {daysOD > 0
-                      ? `(₹${settings.finePerDay}/day × ${daysOD} days)`
-                      : ""}
-                  </span>
-                </div>
-              </div>
-            ) : returnBookId ? (
-              <div
-                className="bg-muted/30 rounded-lg p-3 text-sm text-muted-foreground text-center border border-dashed border-border"
-                data-ocid="library.return.no_issue_state"
-              >
-                No open issue found for this book.
-              </div>
-            ) : null}
-
-            <Button
-              className="w-full"
-              variant={calculatedFine > 0 ? "destructive" : "default"}
-              onClick={handleReturn}
-              disabled={!canWrite || returnLoading || !currentIssue}
-              data-ocid="library.return.submit_button"
-            >
-              {returnLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <RotateCcw className="w-4 h-4 mr-2" />
-              )}
-              {calculatedFine > 0
-                ? `Return & Collect Fine ₹${calculatedFine}`
-                : "Return Book"}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Recent Issues Log */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <History className="w-4 h-4 text-muted-foreground" /> Recent
-            Transactions
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          {recentIssues.length === 0 ? (
-            <div
-              className="py-8 text-center text-muted-foreground text-sm"
-              data-ocid="library.recent.empty_state"
-            >
-              No transactions yet.
-            </div>
-          ) : (
-            <div className="divide-y divide-border">
-              {recentIssues.map((issue, idx) => {
-                const book = books.find((b) => b.id === issue.bookId);
-                const student = students.find((s) => s.id === issue.studentId);
-                const overdueDays =
-                  issue.status === "issued" ? daysOverdue(issue.dueDate) : 0;
-                return (
-                  <div
-                    key={issue.id}
-                    className="flex items-center gap-3 px-4 py-2.5 text-sm"
-                    data-ocid={`library.recent.item.${idx + 1}`}
-                  >
-                    <Badge
-                      variant={
-                        issue.status === "returned"
-                          ? "secondary"
-                          : overdueDays > 0
-                            ? "destructive"
-                            : "default"
-                      }
-                      className="text-xs flex-shrink-0"
-                    >
-                      {issue.status === "returned"
-                        ? "Returned"
-                        : overdueDays > 0
-                          ? "Overdue"
-                          : "Issued"}
-                    </Badge>
-                    <span className="font-medium truncate flex-1">
-                      {book?.title ?? "Unknown Book"}
-                    </span>
-                    <span className="text-muted-foreground truncate hidden sm:block">
-                      {student?.fullName ?? "Unknown"}
-                    </span>
-                    <span className="text-muted-foreground text-xs flex-shrink-0">
-                      {issue.issueDate}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// ── Overdue Tab ────────────────────────────────────────────
-
-function OverdueTab({
-  books,
-  issues,
-  students,
-  settings,
-  onSendReminder,
-  onBulkRemind,
-}: {
-  books: LibraryBook[];
-  issues: BookIssue[];
-  students: Student[];
-  settings: LibrarySettings;
-  onSendReminder: (issue: BookIssue, student: Student | null) => Promise<void>;
-  onBulkRemind: (
-    overdueList: { issue: BookIssue; student: Student | null }[],
-  ) => Promise<void>;
-}) {
-  const [bulkLoading, setBulkLoading] = useState(false);
-  const [remindingId, setRemindingId] = useState<string | null>(null);
-
-  const overdueList = useMemo(() => {
-    return issues
-      .filter((i) => i.status === "issued" && daysOverdue(i.dueDate) > 0)
-      .map((i) => ({
-        issue: i,
-        student: students.find((s) => s.id === i.studentId) ?? null,
-        book: books.find((b) => b.id === i.bookId),
-        days: daysOverdue(i.dueDate),
-        fine: daysOverdue(i.dueDate) * settings.finePerDay,
-      }))
-      .sort((a, b) => b.days - a.days);
-  }, [issues, students, books, settings]);
-
-  function severityClass(days: number) {
-    if (days > 7) return "border-l-4 border-l-destructive bg-destructive/5";
-    if (days >= 3) return "border-l-4 border-l-warning bg-warning/5";
-    return "border-l-4 border-l-yellow-500 bg-yellow-50/30 dark:bg-yellow-900/10";
-  }
-
-  const handleRemind = async (entry: {
-    issue: BookIssue;
-    student: Student | null;
-  }) => {
-    setRemindingId(entry.issue.id);
-    try {
-      await onSendReminder(entry.issue, entry.student);
-    } finally {
-      setRemindingId(null);
-    }
-  };
-
-  const handleBulkRemind = async () => {
-    setBulkLoading(true);
-    try {
-      await onBulkRemind(
-        overdueList.map((e) => ({ issue: e.issue, student: e.student })),
-      );
-    } finally {
-      setBulkLoading(false);
-    }
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">
-            {overdueList.length} overdue book
-            {overdueList.length !== 1 ? "s" : ""}
-          </p>
-          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-2 bg-yellow-500 rounded-sm inline-block" />{" "}
-              1–3 days
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-2 bg-warning rounded-sm inline-block" />{" "}
-              3–7 days
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-3 h-2 bg-destructive rounded-sm inline-block" />{" "}
-              7+ days
-            </span>
-          </div>
-        </div>
-        {overdueList.length > 0 && (
-          <Button
-            onClick={handleBulkRemind}
-            disabled={bulkLoading}
-            variant="outline"
-            data-ocid="library.overdue.bulk_remind_button"
-          >
-            {bulkLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin mr-2" />
-            ) : null}
-            Bulk Remind All ({overdueList.length})
-          </Button>
-        )}
-      </div>
-
-      {overdueList.length === 0 ? (
-        <div
-          className="flex flex-col items-center justify-center py-16 text-center"
-          data-ocid="library.overdue.empty_state"
-        >
-          <CheckCircle2 className="w-12 h-12 text-success/60 mb-3" />
-          <p className="text-muted-foreground font-medium">
-            No overdue books! All issues are on time.
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {overdueList.map((entry, idx) => (
-            <div
-              key={entry.issue.id}
-              className={`rounded-lg bg-card border border-border p-3 flex flex-wrap items-center gap-3 ${severityClass(entry.days)}`}
-              data-ocid={`library.overdue.item.${idx + 1}`}
-            >
-              <div className="flex-1 min-w-0 space-y-0.5">
-                <p className="font-medium text-sm truncate">
-                  {entry.book?.title ?? "Unknown Book"}
-                </p>
-                <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                  <span>{entry.student?.fullName ?? "Unknown Student"}</span>
-                  {entry.student && (
-                    <span>
-                      {entry.student.class}-{entry.student.section}
-                    </span>
-                  )}
-                  <span>Due: {entry.issue.dueDate}</span>
-                </div>
-              </div>
-              <div className="text-right flex-shrink-0 space-y-0.5">
-                <p className="text-sm font-bold text-destructive">
-                  {entry.days} days overdue
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Fine: ₹{entry.fine}
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="flex-shrink-0 text-xs h-7"
-                disabled={remindingId === entry.issue.id}
-                onClick={() => handleRemind(entry)}
-                data-ocid={`library.overdue.remind_button.${idx + 1}`}
-              >
-                {remindingId === entry.issue.id ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                ) : (
-                  "Send Reminder"
-                )}
-              </Button>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Barcode Scanner Tab ────────────────────────────────────
-
-type JsQRFn = (
-  data: Uint8ClampedArray,
-  width: number,
-  height: number,
-) => { data: string } | null;
-
-function BarcodeScannerTab({
-  books,
-  issues,
-  onQuickIssue,
-  onQuickReturn,
-  onIsbnDetected,
-}: {
-  books: LibraryBook[];
-  issues: BookIssue[];
-  onQuickIssue: (bookId: string) => void;
-  onQuickReturn: (bookId: string) => void;
-  onIsbnDetected?: (isbn: string) => void;
-}) {
-  const [scanning, setScanning] = useState(false);
-  const [cameraError, setCameraError] = useState("");
-  const [manualIsbn, setManualIsbn] = useState("");
-  const [detectedBook, setDetectedBook] = useState<LibraryBook | null>(null);
-  const [scanHistory, setScanHistory] = useState<LibraryBook[]>([]);
-
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const animRef = useRef<number>(0);
-  const jsQRRef = useRef<JsQRFn | null>(null);
-  const lastDecodedRef = useRef("");
-  const lastTimeRef = useRef(0);
-
-  const lookupIsbn = useCallback(
-    (isbn: string) => {
-      const book = books.find((b) => b.isbn === isbn || b.isbn === isbn.trim());
-      if (book) {
-        setDetectedBook(book);
-        setScanHistory((prev) => {
-          const next = [book, ...prev.filter((b) => b.id !== book.id)].slice(
-            0,
-            5,
-          );
-          return next;
-        });
-        if (onIsbnDetected) onIsbnDetected(isbn);
-      } else {
-        toast.error(`No book found for ISBN: ${isbn}`);
-        setDetectedBook(null);
-      }
-    },
-    [books, onIsbnDetected],
-  );
-
-  function tryDecode() {
-    const canvas = canvasRef.current;
-    const video = videoRef.current;
-    if (!canvas || !video || !jsQRRef.current) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    canvas.width = video.videoWidth || 320;
-    canvas.height = video.videoHeight || 240;
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const code = jsQRRef.current(
-      imageData.data,
-      imageData.width,
-      imageData.height,
-    );
-    if (code?.data) {
-      const decoded = code.data.trim();
-      const now = Date.now();
-      if (
-        decoded === lastDecodedRef.current &&
-        now - lastTimeRef.current < 2000
-      )
-        return;
-      lastDecodedRef.current = decoded;
-      lastTimeRef.current = now;
-      lookupIsbn(decoded);
-    }
-  }
-
-  function scanLoop() {
-    tryDecode();
-    animRef.current = requestAnimationFrame(scanLoop);
-  }
-
-  async function startCamera() {
-    setCameraError("");
-    if (!jsQRRef.current) {
-      const globalJsQR = (window as Window & { jsQR?: JsQRFn }).jsQR;
-      if (typeof globalJsQR === "function") {
-        jsQRRef.current = globalJsQR;
-      }
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" } },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setScanning(true);
-      scanLoop();
-    } catch {
-      setCameraError(
-        "Camera access denied or unavailable. Use manual entry below.",
-      );
-    }
-  }
-
-  function stopCamera() {
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-    for (const t of streamRef.current?.getTracks() ?? []) t.stop();
-    streamRef.current = null;
-    setScanning(false);
-  }
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: cleanup only
-  useEffect(() => () => stopCamera(), []);
-
-  const handleManualLookup = () => {
-    if (!manualIsbn.trim()) return;
-    lookupIsbn(manualIsbn.trim());
-    setManualIsbn("");
-  };
-
-  const openIssue = detectedBook
-    ? issues.find((i) => i.bookId === detectedBook.id && i.status === "issued")
-    : null;
-
-  return (
-    <div className="space-y-4">
-      {/* Camera viewer */}
-      <Card className="overflow-hidden">
-        <div className="relative bg-muted min-h-[260px] flex items-center justify-center">
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className={`w-full max-h-[320px] object-contain ${scanning ? "block" : "hidden"}`}
-          />
-          <canvas ref={canvasRef} className="hidden" />
-
-          {!scanning && (
-            <div className="flex flex-col items-center gap-3 p-8">
-              <Camera className="w-12 h-12 text-muted-foreground/40" />
-              <p className="text-muted-foreground text-sm text-center">
-                {cameraError ||
-                  "Start camera to scan book barcodes (ISBN/EAN-13/Code 128)"}
-              </p>
-              {cameraError && (
-                <p className="text-xs text-muted-foreground/70 text-center">
-                  {cameraError}
-                </p>
-              )}
-            </div>
-          )}
-
-          {scanning && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-64 h-24 border-2 border-primary/70 rounded-md relative">
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-primary rounded-tl" />
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-primary rounded-tr" />
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-primary rounded-bl" />
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-primary rounded-br" />
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="h-px w-full bg-primary/50 animate-pulse" />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-        <div className="p-3 flex gap-2">
-          {!scanning ? (
-            <Button
-              onClick={startCamera}
-              className="flex-1"
-              data-ocid="library.scanner.start_button"
-            >
-              <Camera className="w-4 h-4 mr-2" /> Start Camera
-            </Button>
-          ) : (
-            <Button
-              onClick={stopCamera}
-              variant="outline"
-              className="flex-1"
-              data-ocid="library.scanner.stop_button"
-            >
-              <X className="w-4 h-4 mr-2" /> Stop Camera
-            </Button>
-          )}
-        </div>
-      </Card>
-
-      {/* Manual entry */}
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Keyboard className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            placeholder="Enter ISBN manually…"
-            value={manualIsbn}
-            onChange={(e) => setManualIsbn(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleManualLookup()}
-            data-ocid="library.scanner.manual_isbn_input"
-          />
-        </div>
-        <Button
-          onClick={handleManualLookup}
-          variant="outline"
-          data-ocid="library.scanner.manual_lookup_button"
-        >
-          <Search className="w-4 h-4" />
-        </Button>
-      </div>
-
-      {/* Detected book card */}
-      {detectedBook && (
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <p className="font-semibold text-base">{detectedBook.title}</p>
-                <p className="text-sm text-muted-foreground">
-                  {detectedBook.author}
-                </p>
-                <div className="flex flex-wrap gap-2 mt-2 text-xs text-muted-foreground">
-                  <span>ISBN: {detectedBook.isbn || "N/A"}</span>
-                  <span>·</span>
-                  <span>{detectedBook.category}</span>
-                  <span>·</span>
-                  <span
-                    className={
-                      detectedBook.availableQty > 0
-                        ? "text-success font-medium"
-                        : "text-destructive font-medium"
-                    }
-                  >
-                    {detectedBook.availableQty > 0
-                      ? `${detectedBook.availableQty} available`
-                      : "Out of stock"}
-                  </span>
-                </div>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="flex-shrink-0"
-                onClick={() => setDetectedBook(null)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="flex gap-2 mt-3">
-              {detectedBook.availableQty > 0 ? (
-                <Button
-                  size="sm"
-                  className="flex-1"
-                  onClick={() => onQuickIssue(detectedBook.id)}
-                  data-ocid="library.scanner.quick_issue_button"
-                >
-                  <BookOpen className="w-4 h-4 mr-2" /> Issue to Student
-                </Button>
-              ) : openIssue ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="flex-1"
-                  onClick={() => onQuickReturn(detectedBook.id)}
-                  data-ocid="library.scanner.quick_return_button"
-                >
-                  <RotateCcw className="w-4 h-4 mr-2" /> Return
-                </Button>
-              ) : null}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Scan history */}
-      {scanHistory.length > 0 && (
-        <div>
-          <p className="text-xs text-muted-foreground mb-2 font-medium">
-            Recently Scanned
-          </p>
-          <div className="space-y-1.5">
-            {scanHistory.map((b, idx) => (
-              <button
-                key={b.id}
-                type="button"
-                className="w-full text-left flex items-center gap-3 px-3 py-2 rounded-lg border border-border bg-card hover:bg-muted/30 text-sm transition-colors"
-                onClick={() => setDetectedBook(b)}
-                data-ocid={`library.scanner.history.item.${idx + 1}`}
-              >
-                <BookOpen className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                <span className="flex-1 truncate font-medium">{b.title}</span>
-                <Badge
-                  variant={b.availableQty > 0 ? "secondary" : "destructive"}
-                  className="text-xs flex-shrink-0"
-                >
-                  {b.availableQty > 0 ? "Available" : "Issued"}
-                </Badge>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main Library Component ─────────────────────────────────
-
-export default function Library() {
-  const { getData, currentUser } = useApp();
-  const [activeTab, setActiveTab] = useState<TabId>("catalog");
-  const [books, setBooks] = useState<LibraryBook[]>([]);
-  const [issues, setIssues] = useState<BookIssue[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
-  const [showAddBook, setShowAddBook] = useState(false);
-  const [editBook, setEditBook] = useState<LibraryBook | null>(null);
-  const [settings, setSettings] = useState<LibrarySettings>(() => {
-    try {
-      return (
-        JSON.parse(localStorage.getItem("shubh_library_settings") ?? "null") ??
-        DEFAULT_SETTINGS
-      );
-    } catch {
-      return DEFAULT_SETTINGS;
-    }
-  });
-  const [scanIsbnCallback, setScanIsbnCallback] = useState<
-    ((isbn: string) => void) | null
-  >(null);
-
-  const students = useMemo(() => getData("students") as Student[], [getData]);
-
-  const canWrite = currentUser
-    ? ALLOWED_WRITE_ROLES.has(currentUser.role)
-    : false;
-  const canDelete = currentUser
-    ? currentUser.role === "superadmin" || currentUser.role === "admin"
-    : false;
-
-  const loadData = useCallback(() => {
-    setLoading(true);
-    setError("");
-    try {
-      const booksData = dataService.get<LibraryBook>("library");
-      const issuesData = dataService.get<BookIssue>("libraryTransactions");
-      setBooks(booksData);
-      setIssues(issuesData);
-    } catch (e) {
-      const msg =
-        e instanceof Error ? e.message : "Failed to load library data";
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
-
-  const saveSettings = (s: LibrarySettings) => {
-    setSettings(s);
-    localStorage.setItem("shubh_library_settings", JSON.stringify(s));
-    setShowSettings(false);
-    toast.success("Library settings saved");
-  };
-
-  const handleAddBook = async (data: Omit<LibraryBook, "id" | "addedAt">) => {
-    try {
-      const newBook: LibraryBook = {
-        id: generateId(),
-        addedAt: todayStr(),
-        ...data,
-      };
-      await dataService.save(
-        "library",
-        newBook as unknown as Record<string, unknown>,
-      );
-      setBooks((prev) => [...prev, newBook]);
-      toast.success(`Book "${data.title}" added successfully`);
-      setShowAddBook(false);
-    } catch {
-      toast.error("Failed to add book");
-    }
-  };
-
-  const handleEditBook = async (data: Omit<LibraryBook, "id" | "addedAt">) => {
-    if (!editBook) return;
-    try {
-      const updated: LibraryBook = { ...editBook, ...data };
-      await dataService.update(
-        "library",
-        editBook.id,
-        updated as unknown as Record<string, unknown>,
-      );
-      setBooks((prev) => prev.map((b) => (b.id === editBook.id ? updated : b)));
-      toast.success("Book updated");
-      setEditBook(null);
-    } catch {
-      toast.error("Failed to update book");
-    }
-  };
-
-  const handleDeleteBook = async (id: string) => {
-    const book = books.find((b) => b.id === id);
-    if (!book) return;
-    if (!window.confirm(`Delete "${book.title}"? This cannot be undone.`))
-      return;
-    try {
-      await dataService.delete("library", id);
-      setBooks((prev) => prev.filter((b) => b.id !== id));
-      toast.success("Book deleted");
-    } catch {
-      toast.error("Failed to delete book");
-    }
-  };
-
-  const handleIssue = async (
-    bookId: string,
-    studentId: string,
-    dueDate: string,
-  ) => {
-    const book = books.find((b) => b.id === bookId);
-    if (!book || book.availableQty <= 0) {
-      toast.error("Book is not available");
-      return;
-    }
-    try {
-      const issue: BookIssue = {
-        id: generateId(),
-        bookId,
-        studentId,
-        issueDate: todayStr(),
-        dueDate,
-        fine: 0,
-        status: "issued",
-      };
-      await dataService.save(
-        "libraryTransactions",
-        issue as unknown as Record<string, unknown>,
-      );
-      const updatedBook: LibraryBook = {
-        ...book,
-        availableQty: book.availableQty - 1,
-      };
-      await dataService.update(
-        "library",
-        bookId,
-        updatedBook as unknown as Record<string, unknown>,
-      );
-      setIssues((prev) => [...prev, issue]);
-      setBooks((prev) => prev.map((b) => (b.id === bookId ? updatedBook : b)));
-      toast.success(`Book issued successfully. Due: ${dueDate}`);
-    } catch {
-      toast.error("Failed to issue book");
-    }
-  };
-
-  const handleReturn = async (issueId: string, fine: number) => {
-    const issue = issues.find((i) => i.id === issueId);
-    if (!issue) return;
-    const book = books.find((b) => b.id === issue.bookId);
-    try {
-      const updated: BookIssue = {
-        ...issue,
-        returnDate: todayStr(),
-        fine,
-        status: "returned",
-      };
-      await dataService.update(
-        "libraryTransactions",
-        issueId,
-        updated as unknown as Record<string, unknown>,
-      );
-      if (book) {
-        const updatedBook: LibraryBook = {
-          ...book,
-          availableQty: book.availableQty + 1,
-        };
-        await dataService.update(
-          "library",
-          book.id,
-          updatedBook as unknown as Record<string, unknown>,
-        );
-        setBooks((prev) =>
-          prev.map((b) => (b.id === book.id ? updatedBook : b)),
-        );
-      }
-      setIssues((prev) => prev.map((i) => (i.id === issueId ? updated : i)));
-      toast.success(
-        fine > 0
-          ? `Book returned. Fine collected: ₹${fine}`
-          : "Book returned successfully",
-      );
-    } catch {
-      toast.error("Failed to return book");
-    }
-  };
-
-  const sendWhatsAppReminder = async (
-    mobile: string,
-    studentName: string,
-    bookTitle: string,
-    fine: number,
-  ) => {
-    const wa = (() => {
-      try {
-        return JSON.parse(
-          localStorage.getItem("shubh_erp_whatsapp_settings") ?? "{}",
-        ) as { appKey?: string; authKey?: string };
-      } catch {
-        return {};
-      }
-    })();
-    if (!wa.appKey || !wa.authKey) return false;
-    const message = `Dear Parent of ${studentName}, the library book "${bookTitle}" is overdue. Fine: ₹${fine}. Please return immediately.`;
-    try {
-      await fetch(
-        `https://wacoder.in/api/send?route=api&appkey=${wa.appKey}&authkey=${wa.authKey}&to=${mobile}&message=${encodeURIComponent(message)}`,
-        { signal: AbortSignal.timeout(8000) },
-      );
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleSendReminder = async (
-    issue: BookIssue,
-    student: Student | null,
-  ) => {
-    if (!student) {
-      toast.error("Student not found");
-      return;
-    }
-    const book = books.find((b) => b.id === issue.bookId);
-    const fine = daysOverdue(issue.dueDate) * settings.finePerDay;
-    const mobile = student.guardianMobile || student.mobile;
-    const sent = await sendWhatsAppReminder(
-      mobile,
-      student.fullName,
-      book?.title ?? "Library Book",
-      fine,
-    );
-    if (sent) toast.success(`Reminder sent to ${student.fullName}'s guardian`);
-    else
-      toast.info(
-        "WhatsApp credentials not configured. Go to Communication > WhatsApp to set them up.",
-      );
-  };
-
-  const handleBulkRemind = async (
-    list: { issue: BookIssue; student: Student | null }[],
-  ) => {
-    let sent = 0;
-    for (const entry of list) {
-      if (!entry.student) continue;
-      const book = books.find((b) => b.id === entry.issue.bookId);
-      const fine = daysOverdue(entry.issue.dueDate) * settings.finePerDay;
-      const mobile = entry.student.guardianMobile || entry.student.mobile;
-      const ok = await sendWhatsAppReminder(
-        mobile,
-        entry.student.fullName,
-        book?.title ?? "Library Book",
-        fine,
-      );
-      if (ok) sent++;
-    }
-    toast.success(`Reminders sent to ${sent}/${list.length} guardians`);
-  };
-
-  const handleImportCSV = () => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = ".csv";
-    input.onchange = async (e) => {
-      const file = (e.target as HTMLInputElement).files?.[0];
-      if (!file) return;
-      const text = await file.text();
-      const lines = text.trim().split("\n");
-      const headers = lines[0]
-        .split(",")
-        .map((h) => h.trim().replace(/^"|"$/g, "").toLowerCase());
-      let added = 0;
-      const newBooks: LibraryBook[] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i]
-          .split(",")
-          .map((v) => v.trim().replace(/^"|"$/g, ""));
-        const row: Record<string, string> = {};
-        headers.forEach((h, idx) => {
-          row[h] = values[idx] ?? "";
-        });
-        if (!row.title) continue;
-        const book: LibraryBook = {
-          id: generateId(),
-          isbn: row.isbn ?? "",
-          title: row.title,
-          author: row.author ?? "",
-          publisher: row.publisher || undefined,
-          category: row.category ?? "Other",
-          totalQty:
-            Number.parseInt(row.totalqty ?? row["total qty"] ?? "1", 10) || 1,
-          availableQty:
-            Number.parseInt(
-              row.availableqty ?? row["available qty"] ?? "1",
-              10,
-            ) || 1,
-          location: row.location || undefined,
-          addedAt: todayStr(),
-        };
-        try {
-          await dataService.save(
-            "library",
-            book as unknown as Record<string, unknown>,
-          );
-          newBooks.push(book);
-          added++;
-        } catch {
-          // skip row
-        }
-      }
-      setBooks((prev) => [...prev, ...newBooks]);
-      toast.success(`Imported ${added} books`);
-    };
-    input.click();
-  };
-
-  // Expose ISBN scan callback for barcode tab → book form
-  const openIsbnScanner = (cb: (isbn: string) => void) => {
-    setScanIsbnCallback(() => cb);
-    setActiveTab("scanner");
-  };
-
-  const handleIsbnDetectedInScanner = (isbn: string) => {
-    if (scanIsbnCallback) {
-      scanIsbnCallback(isbn);
-      setScanIsbnCallback(null);
-      setActiveTab("catalog");
-    }
-  };
-
-  const quickIssueToTab = (bookId: string) => {
-    setActiveTab("issue-return");
-    const book = books.find((b) => b.id === bookId);
-    if (book)
-      toast.info(`Switch to Issue/Return tab and search for "${book.title}"`);
-  };
-
-  const quickReturnFromTab = (bookId: string) => {
-    setActiveTab("issue-return");
-    const book = books.find((b) => b.id === bookId);
-    if (book)
-      toast.info(
-        `Switch to Issue/Return tab and search for "${book.title}" to return`,
-      );
-  };
-
-  return (
-    <div className="p-4 lg:p-6 space-y-5">
+    <div className="p-4 md:p-6 bg-background min-h-screen space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold font-display text-foreground">
+          <h1 className="text-2xl font-bold text-foreground font-display">
             Library
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            Manage books, issue/return, overdue tracking with barcode scanning
+            {books.length} books in catalog · {totalIssued} issued
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => loadData()}
-            title="Refresh"
-            data-ocid="library.refresh_button"
-          >
-            <RefreshCw className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setShowSettings(true)}
-            data-ocid="library.settings.open_modal_button"
-          >
-            <Settings className="w-4 h-4" />
-          </Button>
-        </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setShowSettings(true)}
+          data-ocid="library.settings_button"
+        >
+          <Settings className="w-5 h-5" />
+        </Button>
+      </div>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {[
+          { label: "Total Books", value: books.length, color: "text-primary" },
+          { label: "Issued", value: totalIssued, color: "text-warning" },
+          {
+            label: "Available",
+            value: totalAvailable,
+            color: "text-foreground",
+          },
+          { label: "Overdue", value: overdueCount, color: "text-destructive" },
+        ].map((s) => (
+          <Card key={s.label}>
+            <CardContent className="pt-4 pb-3 text-center">
+              <p className={`text-2xl font-bold font-display ${s.color}`}>
+                {s.value}
+              </p>
+              <p className="text-xs text-muted-foreground">{s.label}</p>
+            </CardContent>
+          </Card>
+        ))}
       </div>
 
       {/* Tabs */}
-      <div
-        className="flex gap-1 bg-muted/50 rounded-xl p-1 flex-wrap"
-        role="tablist"
-      >
-        {TABS.map((tab) => {
-          const Icon = tab.icon;
-          const active = activeTab === tab.id;
+      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
+        {TABS.map((t) => {
+          const Icon = t.icon;
           return (
             <button
-              key={tab.id}
+              key={t.id}
               type="button"
-              role="tab"
-              aria-selected={active}
-              data-ocid={`library.${tab.id}.tab`}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all flex-1 justify-center min-w-[100px] ${
-                active
-                  ? "bg-card text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
+              onClick={() => setActiveTab(t.id)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${activeTab === t.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+              data-ocid={`library.${t.id}_tab`}
             >
-              <Icon className="w-4 h-4 flex-shrink-0" />
-              <span className="hidden sm:inline">{tab.label}</span>
-              <span className="sm:hidden">
-                {tab.id === "catalog"
-                  ? "Books"
-                  : tab.id === "issue-return"
-                    ? "Issue"
-                    : tab.id === "overdue"
-                      ? "Overdue"
-                      : "Scan"}
-              </span>
+              <Icon className="w-4 h-4" />
+              {t.label}
             </button>
           );
         })}
       </div>
 
-      {/* Content */}
-      {loading ? (
-        <div
-          className="flex items-center justify-center py-16"
-          data-ocid="library.loading_state"
-        >
-          <Loader2 className="w-6 h-6 animate-spin text-primary mr-3" />
-          <span className="text-muted-foreground">Loading library data…</span>
+      {/* ── Catalog Tab ── */}
+      {activeTab === "catalog" && (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+              <Input
+                className="pl-9"
+                placeholder="Search title, author, ISBN…"
+                value={catalogSearch}
+                onChange={(e) => setCatalogSearch(e.target.value)}
+                data-ocid="library.catalog.search_input"
+              />
+            </div>
+            <Select value={catalogCat} onValueChange={setCatalogCat}>
+              <SelectTrigger
+                className="w-36"
+                data-ocid="library.catalog.category_filter"
+              >
+                <SelectValue placeholder="Category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {BOOK_CATEGORIES.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {canWrite && (
+              <Button
+                onClick={() => {
+                  setEditBook(undefined);
+                  setShowBookForm(true);
+                }}
+                data-ocid="library.catalog.add_book_button"
+              >
+                <BookOpen className="w-4 h-4 mr-2" />
+                Add Book
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCSV(
+                  [
+                    [
+                      "ISBN",
+                      "Title",
+                      "Author",
+                      "Publisher",
+                      "Category",
+                      "Total Qty",
+                      "Available",
+                      "Location",
+                    ],
+                    ...books.map((b) => [
+                      b.isbn,
+                      b.title,
+                      b.author,
+                      b.publisher ?? "",
+                      b.category,
+                      String(b.totalQty),
+                      String(b.availableQty),
+                      b.location ?? "",
+                    ]),
+                  ],
+                  "library_catalog.csv",
+                )
+              }
+              data-ocid="library.catalog.export_button"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </div>
+
+          {filteredBooks.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center py-16 text-center"
+              data-ocid="library.catalog.empty_state"
+            >
+              <BookOpen className="w-12 h-12 text-muted-foreground/30 mb-3" />
+              <p className="text-muted-foreground font-medium">
+                {books.length === 0
+                  ? "No books yet. Add your first book."
+                  : "No books match your search."}
+              </p>
+              {books.length === 0 && canWrite && (
+                <Button className="mt-4" onClick={() => setShowBookForm(true)}>
+                  Add First Book
+                </Button>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl border border-border overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/40 border-b border-border">
+                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
+                      Title
+                    </th>
+                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell">
+                      Author
+                    </th>
+                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
+                      ISBN
+                    </th>
+                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
+                      Category
+                    </th>
+                    <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
+                      Total
+                    </th>
+                    <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
+                      Avail.
+                    </th>
+                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
+                      Location
+                    </th>
+                    {canWrite && (
+                      <th className="text-center px-3 py-2.5 text-muted-foreground font-medium">
+                        Actions
+                      </th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredBooks.map((b, idx) => (
+                    <tr
+                      key={b.id}
+                      className={`border-b border-border last:border-0 hover:bg-muted/20 ${b.availableQty === 0 ? "bg-destructive/5" : ""}`}
+                      data-ocid={`library.catalog.item.${idx + 1}`}
+                    >
+                      <td className="px-3 py-2.5 font-medium text-foreground">
+                        <div className="flex items-center gap-1.5">
+                          {b.availableQty === 0 && (
+                            <span
+                              className="w-2 h-2 rounded-full bg-destructive flex-shrink-0"
+                              title="Out of stock"
+                            />
+                          )}
+                          <span
+                            className="truncate max-w-[160px]"
+                            title={b.title}
+                          >
+                            {b.title}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground hidden md:table-cell">
+                        {b.author}
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs hidden lg:table-cell">
+                        {b.isbn || "—"}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <Badge variant="secondary" className="text-xs">
+                          {b.category}
+                        </Badge>
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">
+                        {b.totalQty}
+                      </td>
+                      <td
+                        className={`px-3 py-2.5 text-right tabular-nums font-medium ${b.availableQty === 0 ? "text-destructive" : "text-foreground"}`}
+                      >
+                        {b.availableQty}
+                      </td>
+                      <td className="px-3 py-2.5 text-muted-foreground text-xs hidden lg:table-cell">
+                        {b.location || "—"}
+                      </td>
+                      {canWrite && (
+                        <td className="px-3 py-2.5">
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => {
+                                setEditBook(b);
+                                setShowBookForm(true);
+                              }}
+                              data-ocid={`library.catalog.edit_button.${idx + 1}`}
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7 text-destructive"
+                              onClick={() => handleDeleteBook(b.id)}
+                              data-ocid={`library.catalog.delete_button.${idx + 1}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      ) : error ? (
-        <div
-          className="flex flex-col items-center justify-center py-16 text-center"
-          data-ocid="library.error_state"
-        >
-          <AlertTriangle className="w-10 h-10 text-destructive/60 mb-3" />
-          <p className="text-muted-foreground mb-4">{error}</p>
-          <Button onClick={() => loadData()} variant="outline">
-            <RefreshCw className="w-4 h-4 mr-2" /> Retry
-          </Button>
-        </div>
-      ) : (
-        <>
-          {activeTab === "catalog" && (
-            <BooksCatalogTab
-              books={books}
-              issues={issues}
-              canWrite={canWrite}
-              canDelete={canDelete}
-              onAddBook={() => setShowAddBook(true)}
-              onEditBook={(b) => setEditBook(b)}
-              onDeleteBook={handleDeleteBook}
-              onImportCSV={handleImportCSV}
-            />
-          )}
-          {activeTab === "issue-return" && (
-            <IssueReturnTab
-              books={books}
-              issues={issues}
-              students={students}
-              settings={settings}
-              canWrite={canWrite}
-              onIssue={handleIssue}
-              onReturn={handleReturn}
-            />
-          )}
-          {activeTab === "overdue" && (
-            <OverdueTab
-              books={books}
-              issues={issues}
-              students={students}
-              settings={settings}
-              onSendReminder={handleSendReminder}
-              onBulkRemind={handleBulkRemind}
-            />
-          )}
-          {activeTab === "scanner" && (
-            <BarcodeScannerTab
-              books={books}
-              issues={issues}
-              onQuickIssue={quickIssueToTab}
-              onQuickReturn={quickReturnFromTab}
-              onIsbnDetected={handleIsbnDetectedInScanner}
-            />
-          )}
-        </>
       )}
 
-      {/* Dialogs */}
+      {/* ── Issue/Return Tab ── */}
+      {activeTab === "issue-return" && (
+        <div className="space-y-5">
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Issue Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-primary" />
+                  Issue Book
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Student search */}
+                <div className="relative">
+                  <Label className="text-xs text-muted-foreground mb-1 block">
+                    Student
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Student name or adm. no…"
+                      value={issueStudentQ}
+                      onChange={(e) => {
+                        setIssueStudentQ(e.target.value);
+                        setIssueStudentId("");
+                        setShowStudentDD(true);
+                      }}
+                      onFocus={() => setShowStudentDD(true)}
+                      data-ocid="library.issue.student_search_input"
+                    />
+                    {issueStudentId && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
+                    )}
+                  </div>
+                  {showStudentDD && studentMatches.length > 0 && (
+                    <div
+                      className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto"
+                      data-ocid="library.issue.student_dropdown"
+                    >
+                      {studentMatches.map((s) => (
+                        <button
+                          key={s.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex items-center gap-2"
+                          onClick={() => {
+                            setIssueStudentQ(`${s.fullName} (${s.admNo})`);
+                            setIssueStudentId(s.id);
+                            setShowStudentDD(false);
+                          }}
+                        >
+                          <span className="font-medium">{s.fullName}</span>
+                          <span className="text-muted-foreground text-xs">
+                            {s.class}-{s.section} · {s.admNo}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Book search */}
+                <div className="relative">
+                  <Label className="text-xs text-muted-foreground mb-1 block">
+                    Book
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Book title or ISBN…"
+                      value={issueBookQ}
+                      onChange={(e) => {
+                        setIssueBookQ(e.target.value);
+                        setIssueBookId("");
+                        setShowIssueBookDD(true);
+                      }}
+                      onFocus={() => setShowIssueBookDD(true)}
+                      data-ocid="library.issue.book_search_input"
+                    />
+                    {issueBookId && (
+                      <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
+                    )}
+                  </div>
+                  {showIssueBookDD && issueBookMatches.length > 0 && (
+                    <div className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {issueBookMatches.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex justify-between items-center"
+                          onClick={() => {
+                            setIssueBookQ(b.title);
+                            setIssueBookId(b.id);
+                            setShowIssueBookDD(false);
+                          }}
+                        >
+                          <span className="font-medium">{b.title}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {b.availableQty} avail.
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">
+                    Due Date
+                  </Label>
+                  <Input
+                    type="date"
+                    value={issueDue}
+                    onChange={(e) => setIssueDue(e.target.value)}
+                    min={todayStr()}
+                    data-ocid="library.issue.due_date_input"
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleIssueSubmit}
+                  disabled={
+                    !canWrite || issueLoading || !issueStudentId || !issueBookId
+                  }
+                  data-ocid="library.issue.submit_button"
+                >
+                  {issueLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <BookOpen className="w-4 h-4 mr-2" />
+                  )}
+                  Issue Book
+                </Button>
+              </CardContent>
+            </Card>
+
+            {/* Return Card */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-accent" />
+                  Return Book
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="relative">
+                  <Label className="text-xs text-muted-foreground mb-1 block">
+                    Book
+                  </Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      className="pl-9"
+                      placeholder="Search book to return…"
+                      value={returnBookQ}
+                      onChange={(e) => {
+                        setReturnBookQ(e.target.value);
+                        setReturnBookId("");
+                        setShowReturnDD(true);
+                      }}
+                      onFocus={() => setShowReturnDD(true)}
+                      data-ocid="library.return.book_search_input"
+                    />
+                  </div>
+                  {showReturnDD && returnBookMatches.length > 0 && (
+                    <div className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                      {returnBookMatches.map((b) => (
+                        <button
+                          key={b.id}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex justify-between"
+                          onClick={() => {
+                            setReturnBookQ(b.title);
+                            setReturnBookId(b.id);
+                            setShowReturnDD(false);
+                          }}
+                        >
+                          <span className="font-medium">{b.title}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {b.isbn || "No ISBN"}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {currentIssue ? (
+                  <div className="bg-muted/40 rounded-lg p-3 space-y-1.5 text-sm border border-border">
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Student</span>
+                      <span className="font-medium">
+                        {issueStudent?.fullName ?? "Unknown"}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Issue Date</span>
+                      <span>{currentIssue.issueDate}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Due Date</span>
+                      <span
+                        className={
+                          daysOD > 0 ? "text-destructive font-medium" : ""
+                        }
+                      >
+                        {currentIssue.dueDate}
+                      </span>
+                    </div>
+                    <div className="flex justify-between border-t border-border pt-1.5 font-bold">
+                      <span>Fine</span>
+                      <span
+                        className={
+                          calcFine > 0 ? "text-destructive" : "text-foreground"
+                        }
+                      >
+                        ₹{calcFine}{" "}
+                        {daysOD > 0
+                          ? `(${daysOD} days × ₹${libSettings.finePerDay})`
+                          : ""}
+                      </span>
+                    </div>
+                  </div>
+                ) : returnBookId ? (
+                  <div
+                    className="bg-muted/30 rounded-lg p-3 text-sm text-muted-foreground text-center border border-dashed border-border"
+                    data-ocid="library.return.no_issue_state"
+                  >
+                    No open issue found for this book.
+                  </div>
+                ) : null}
+
+                <Button
+                  className="w-full"
+                  variant={calcFine > 0 ? "destructive" : "default"}
+                  onClick={handleReturnSubmit}
+                  disabled={!canWrite || returnLoading || !currentIssue}
+                  data-ocid="library.return.submit_button"
+                >
+                  {returnLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <RotateCcw className="w-4 h-4 mr-2" />
+                  )}
+                  {calcFine > 0
+                    ? `Return & Collect ₹${calcFine}`
+                    : "Return Book"}
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Recent transactions */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <History className="w-4 h-4 text-muted-foreground" />
+                Recent Transactions
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              {issues.length === 0 ? (
+                <div
+                  className="py-8 text-center text-muted-foreground text-sm"
+                  data-ocid="library.recent.empty_state"
+                >
+                  No transactions yet.
+                </div>
+              ) : (
+                <div className="divide-y divide-border">
+                  {[...issues]
+                    .reverse()
+                    .slice(0, 12)
+                    .map((issue, idx) => {
+                      const book = books.find((b) => b.id === issue.bookId);
+                      const student = students.find(
+                        (s) => s.id === issue.studentId,
+                      );
+                      const od =
+                        issue.status === "issued"
+                          ? daysOverdue(issue.dueDate)
+                          : 0;
+                      return (
+                        <div
+                          key={issue.id}
+                          className="flex items-center gap-3 px-4 py-2.5 text-sm"
+                          data-ocid={`library.recent.item.${idx + 1}`}
+                        >
+                          <Badge
+                            variant={
+                              issue.status === "returned"
+                                ? "secondary"
+                                : od > 0
+                                  ? "destructive"
+                                  : "default"
+                            }
+                            className="text-xs flex-shrink-0"
+                          >
+                            {issue.status === "returned"
+                              ? "Returned"
+                              : od > 0
+                                ? "Overdue"
+                                : "Issued"}
+                          </Badge>
+                          <span className="font-medium truncate flex-1">
+                            {book?.title ?? "Unknown Book"}
+                          </span>
+                          <span className="text-muted-foreground truncate hidden sm:block">
+                            {student?.fullName ?? "—"}
+                          </span>
+                          <span className="text-muted-foreground text-xs flex-shrink-0">
+                            {issue.issueDate}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Reports Tab ── */}
+      {activeTab === "reports" && (
+        <div className="space-y-6">
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {[
+              {
+                label: "Total Issued",
+                value: issues.filter((i) => i.status === "issued").length,
+                color: "text-primary",
+              },
+              {
+                label: "Returned",
+                value: issues.filter((i) => i.status === "returned").length,
+                color: "text-foreground",
+              },
+              {
+                label: "Overdue",
+                value: overdueCount,
+                color: "text-destructive",
+              },
+              {
+                label: "Total Fines (₹)",
+                value: issues
+                  .filter((i) => i.fine > 0)
+                  .reduce((s, i) => s + i.fine, 0),
+                color: "text-warning",
+              },
+            ].map((s) => (
+              <Card key={s.label}>
+                <CardContent className="pt-4 pb-3 text-center">
+                  <p className={`text-2xl font-bold font-display ${s.color}`}>
+                    {s.value}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{s.label}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {/* Overdue alerts */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-foreground flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-destructive" />
+                Overdue Books ({overdueList.length})
+              </h3>
+              {overdueList.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    handleBulkRemind(
+                      overdueList.map((e) => ({
+                        issue: e.issue,
+                        student: e.student,
+                      })),
+                    )
+                  }
+                  data-ocid="library.reports.bulk_remind_button"
+                >
+                  Bulk Remind All
+                </Button>
+              )}
+            </div>
+            {overdueList.length === 0 ? (
+              <div
+                className="flex flex-col items-center justify-center py-10 text-center bg-muted/30 rounded-xl"
+                data-ocid="library.reports.overdue_empty_state"
+              >
+                <CheckCircle2 className="w-10 h-10 text-muted-foreground/30 mb-2" />
+                <p className="text-muted-foreground text-sm font-medium">
+                  No overdue books! All issues are on time.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {overdueList.map((entry, idx) => (
+                  <div
+                    key={entry.issue.id}
+                    className={`rounded-lg bg-card border border-border p-3 flex flex-wrap items-center gap-3 ${entry.days > 7 ? "border-l-4 border-l-destructive bg-destructive/5" : entry.days >= 3 ? "border-l-4 border-l-warning" : "border-l-4 border-l-yellow-500"}`}
+                    data-ocid={`library.reports.overdue.item.${idx + 1}`}
+                  >
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <p className="font-medium text-sm truncate">
+                        {entry.book?.title ?? "Unknown Book"}
+                      </p>
+                      <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                        <span>{entry.student?.fullName ?? "Unknown"}</span>
+                        {entry.student && (
+                          <span>
+                            {entry.student.class}-{entry.student.section}
+                          </span>
+                        )}
+                        <span>Due: {entry.issue.dueDate}</span>
+                      </div>
+                    </div>
+                    <div className="text-right flex-shrink-0">
+                      <p className="text-sm font-bold text-destructive">
+                        {entry.days} days overdue
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Fine: ₹{entry.fine}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-shrink-0 h-7 text-xs"
+                      onClick={() =>
+                        handleSendReminder(entry.issue, entry.student)
+                      }
+                      data-ocid={`library.reports.overdue.remind_button.${idx + 1}`}
+                    >
+                      Send Reminder
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Popular books */}
+          <div>
+            <h3 className="font-semibold text-foreground mb-3">
+              Popular Books (Most Issued)
+            </h3>
+            {books.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No books yet.</p>
+            ) : (
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border">
+                      {["Book Title", "Author", "Category", "Total Issues"].map(
+                        (h) => (
+                          <th
+                            key={h}
+                            className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground"
+                          >
+                            {h}
+                          </th>
+                        ),
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {books
+                      .map((b) => ({
+                        ...b,
+                        issueCount: issues.filter((i) => i.bookId === b.id)
+                          .length,
+                      }))
+                      .sort((a, b) => b.issueCount - a.issueCount)
+                      .slice(0, 10)
+                      .map((b, idx) => (
+                        <tr
+                          key={b.id}
+                          className="border-b border-border last:border-0 hover:bg-muted/20"
+                          data-ocid={`library.reports.popular.item.${idx + 1}`}
+                        >
+                          <td className="px-3 py-2.5 font-medium">{b.title}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">
+                            {b.author}
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <Badge variant="secondary" className="text-xs">
+                              {b.category}
+                            </Badge>
+                          </td>
+                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
+                            {b.issueCount}
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Fine collection summary */}
+          <div>
+            <h3 className="font-semibold text-foreground mb-3">
+              Fine Collection Summary
+            </h3>
+            {issues.filter((i) => i.fine > 0).length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No fines collected yet.
+              </p>
+            ) : (
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border">
+                      {[
+                        "Student",
+                        "Book",
+                        "Issue Date",
+                        "Return Date",
+                        "Fine (₹)",
+                      ].map((h) => (
+                        <th
+                          key={h}
+                          className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground"
+                        >
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {issues
+                      .filter((i) => i.fine > 0)
+                      .map((issue, idx) => {
+                        const book = books.find((b) => b.id === issue.bookId);
+                        const student = students.find(
+                          (s) => s.id === issue.studentId,
+                        );
+                        return (
+                          <tr
+                            key={issue.id}
+                            className="border-b border-border last:border-0 hover:bg-muted/20"
+                            data-ocid={`library.reports.fine.item.${idx + 1}`}
+                          >
+                            <td className="px-3 py-2.5 font-medium">
+                              {student?.fullName ?? "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[160px]">
+                              {book?.title ?? "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground">
+                              {issue.issueDate}
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground">
+                              {issue.returnDate ?? "—"}
+                            </td>
+                            <td className="px-3 py-2.5 text-right font-semibold text-destructive tabular-nums">
+                              ₹{issue.fine}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Export buttons */}
+          <div className="flex flex-wrap gap-2" data-print-hide>
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCSV(
+                  [
+                    [
+                      "Student",
+                      "Adm No",
+                      "Class",
+                      "Book",
+                      "Issue Date",
+                      "Due Date",
+                      "Return Date",
+                      "Fine",
+                      "Status",
+                    ],
+                    ...issues.map((issue) => {
+                      const b = books.find((bk) => bk.id === issue.bookId);
+                      const s = students.find(
+                        (st) => st.id === issue.studentId,
+                      );
+                      return [
+                        s?.fullName ?? "",
+                        s?.admNo ?? "",
+                        s ? `${s.class}-${s.section}` : "",
+                        b?.title ?? "",
+                        issue.issueDate,
+                        issue.dueDate,
+                        issue.returnDate ?? "",
+                        String(issue.fine),
+                        issue.status,
+                      ];
+                    }),
+                  ],
+                  "library_issue_history.csv",
+                )
+              }
+              data-ocid="library.reports.export_issues_button"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export Issue History
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() =>
+                exportCSV(
+                  [
+                    ["Student", "Adm No", "Class", "Book", "Fine (₹)"],
+                    ...issues
+                      .filter((i) => i.fine > 0)
+                      .map((issue) => {
+                        const b = books.find((bk) => bk.id === issue.bookId);
+                        const s = students.find(
+                          (st) => st.id === issue.studentId,
+                        );
+                        return [
+                          s?.fullName ?? "",
+                          s?.admNo ?? "",
+                          s ? `${s.class}-${s.section}` : "",
+                          b?.title ?? "",
+                          String(issue.fine),
+                        ];
+                      }),
+                  ],
+                  "library_fines.csv",
+                )
+              }
+              data-ocid="library.reports.export_fines_button"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Export Fines
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Settings Dialog */}
       {showSettings && (
-        <LibrarySettingsPanel
-          settings={settings}
-          onSave={saveSettings}
+        <SettingsDialog
+          settings={libSettings}
+          onSave={(s) => {
+            setLibSettings(s);
+            setShowSettings(false);
+          }}
           onClose={() => setShowSettings(false)}
         />
       )}
-      {showAddBook && (
-        <BookFormDialog
-          onSave={handleAddBook}
-          onClose={() => setShowAddBook(false)}
-          onScanISBN={openIsbnScanner}
-        />
-      )}
-      {editBook && (
+
+      {/* Book Form Dialog */}
+      {showBookForm && (
         <BookFormDialog
           book={editBook}
-          onSave={handleEditBook}
-          onClose={() => setEditBook(null)}
-          onScanISBN={openIsbnScanner}
+          onSave={handleSaveBook}
+          onClose={() => {
+            setShowBookForm(false);
+            setEditBook(undefined);
+          }}
         />
       )}
     </div>

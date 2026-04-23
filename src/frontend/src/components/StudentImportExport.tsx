@@ -1,10 +1,17 @@
 import { Button } from "@/components/ui/button";
-import { Download, FileSpreadsheet, Loader2, Upload, X } from "lucide-react";
+import {
+  Download,
+  FileSpreadsheet,
+  Loader2,
+  Table2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
-import { canisterService } from "../utils/canisterService";
 import { generateId, ls } from "../utils/localStorage";
+import { phpApiService } from "../utils/phpApiService";
 
 /**
  * Single source of truth for CSV column headers.
@@ -124,7 +131,7 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
     failed: number;
   } | null>(null);
 
-  // ─── EXPORT ──────────────────────────────────────────────────────────────────
+  // ─── EXPORT CSV ──────────────────────────────────────────────────────────────
 
   function handleExport() {
     // Always read from context (server data)
@@ -165,6 +172,63 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
     );
     downloadCSV(csv, `students_${new Date().toISOString().slice(0, 10)}.csv`);
     addNotification(`Exported ${list.length} students`, "success", "📥");
+  }
+
+  // ─── EXPORT EXCEL ────────────────────────────────────────────────────────────
+
+  async function handleExportExcel() {
+    const students = getData("students") as Student[];
+    const list =
+      students.length > 0 ? students : ls.get<Student[]>("students", []);
+    if (list.length === 0) {
+      addNotification("No students to export", "warning");
+      return;
+    }
+    try {
+      const { utils, writeFile } = await import("xlsx");
+      const headers = Array.from(CSV_HEADERS);
+      const rows = list.map((s) => [
+        s.admNo,
+        s.fullName,
+        s.fatherName,
+        s.fatherMobile ?? "",
+        s.motherName ?? "",
+        s.motherMobile ?? "",
+        normaliseExportDob(s.dob ?? ""),
+        s.gender,
+        s.class,
+        s.section,
+        s.mobile,
+        s.guardianMobile ?? "",
+        s.category ?? "",
+        s.address ?? "",
+        s.village ?? "",
+        s.aadhaarNo ?? "",
+        s.srNo ?? "",
+        s.penNo ?? "",
+        s.apaarNo ?? "",
+        s.previousSchool ?? "",
+        normaliseExportDob(s.admissionDate ?? ""),
+        s.status ?? "active",
+      ]);
+      const ws = utils.aoa_to_sheet([headers, ...rows]);
+      ws["!cols"] = headers.map((h, i) => ({
+        wch: Math.max(
+          h.length + 2,
+          ...rows.map((r) => (r[i]?.toString().length ?? 0) + 1),
+        ),
+      }));
+      const wb = utils.book_new();
+      utils.book_append_sheet(wb, ws, "Students");
+      writeFile(wb, `Students_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      addNotification(
+        `Exported ${list.length} students to Excel`,
+        "success",
+        "📊",
+      );
+    } catch {
+      addNotification("Excel export failed — try CSV instead", "error");
+    }
   }
 
   // ─── SAMPLE TEMPLATE ─────────────────────────────────────────────────────────
@@ -335,17 +399,15 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
 
       for (let i = 0; i < studentsToSave.length; i += CHUNK) {
         const chunk = studentsToSave.slice(i, i + CHUNK);
-        // Send chunk as a batch to canister — waits for real confirmation
+        // Send chunk as a batch to MySQL server — waits for real confirmation
         try {
-          const result = await canisterService.batchUpsert(
-            "students",
-            chunk.map((s) => s as unknown as Record<string, unknown>),
+          const result = await phpApiService.bulkImportStudents(
+            chunk.map(
+              (s) =>
+                s as Partial<import("../utils/phpApiService").StudentRecord>,
+            ),
           );
-          if (result.ok) {
-            saved += result.count;
-          } else {
-            failed += chunk.length;
-          }
+          saved += result.count ?? 0;
         } catch {
           failed += chunk.length;
         }
@@ -409,21 +471,32 @@ export default function StudentImportExport({ onClose, onImported }: Props) {
           <div className="border border-border rounded-lg p-4 space-y-3">
             <h3 className="font-medium text-foreground flex items-center gap-2">
               <Download className="w-4 h-4 text-primary" />
-              Export Students to CSV
+              Export Students
             </h3>
             <p className="text-sm text-muted-foreground">
-              Downloads all students as a CSV with all columns. DOB is exported
-              as <span className="font-mono">DD/MM/YYYY</span>.
+              Downloads all students with all columns. DOB exported as{" "}
+              <span className="font-mono">DD/MM/YYYY</span>.
             </p>
-            <Button
-              onClick={handleExport}
-              className="w-full"
-              variant="outline"
-              data-ocid="students.export_button"
-              disabled={importing}
-            >
-              <Download className="w-4 h-4 mr-2" /> Export CSV
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleExport}
+                className="flex-1"
+                variant="outline"
+                data-ocid="students.export_button"
+                disabled={importing}
+              >
+                <Download className="w-4 h-4 mr-2" /> Export CSV
+              </Button>
+              <Button
+                onClick={() => void handleExportExcel()}
+                className="flex-1"
+                variant="outline"
+                data-ocid="students.excel_export_button"
+                disabled={importing}
+              >
+                <Table2 className="w-4 h-4 mr-2" /> Export Excel
+              </Button>
+            </div>
           </div>
 
           {/* Import */}

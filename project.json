@@ -1,31 +1,27 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular school management system for Indian schools built on the Internet Computer. It supports multi-school/branch operations with all user roles (Super Admin, Admin, Teacher, Parent, Student, Driver). All data is stored natively in the Internet Computer canister for instant, reliable, cross-device sync — no PHP, MySQL, or cPanel required.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive school management system for Indian schools, covering Students, Fees, Attendance, HR/Payroll, Academics, Examinations, Transport, Library, Inventory, Communication, Chat, Certificates, Reports, and more. Runs on cPanel/PHP/MySQL — no Internet Computer deployment required. All data saves reliably to MySQL with local-first sync so records never disappear.",
   "features": [
-    "Student Information System with Excel-style grid and bulk import/export",
-    "Fees Collection with auto month selection, receipts, balance carry-forward",
-    "Attendance (QR, RFID, biometric, AI face recognition)",
-    "HR & Payroll management with payslips",
-    "Transport management with GPS tracking",
-    "Online Examinations with auto-grading",
-    "Library management with barcode scanning",
-    "Inventory management",
-    "Chat system with class/section and route-wise groups",
-    "Communication (WhatsApp, bulk broadcast, notifications)",
-    "Multiple color themes with dark sidebar",
-    "Mobile PWA with offline support",
-    "Role-based permissions (Super Admin, Admin, Teacher, Parent, Student, Driver)",
-    "Canister-native storage — no MySQL or cPanel sync needed"
+    "cPanel/PHP/MySQL backend — no deployment errors",
+    "25+ modules: Students, Fees, Attendance, HR, Academics, Exams, Transport, Library, Inventory, Chat, Reports",
+    "Local-first sync: saves to browser instantly, syncs to MySQL in background",
+    "Role-based access: Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver",
+    "Indian class ordering: Nursery → LKG → UKG → Class 1–12",
+    "10 color themes, dark navy sidebar, all menu names visible",
+    "PWA installable on Android and iOS",
+    "Changelog: every add/edit/delete logged with user and timestamp",
+    "Auto-migration: visit /api/?route=migrate/run once to create all MySQL tables",
+    "No spinner arrows on any amount fields — all plain text inputs"
   ],
-  "category": "education",
+  "category": "productivity",
   "tags": [
     "school-erp",
     "education",
     "india",
+    "cpanel",
+    "mysql",
     "pwa",
-    "multi-role",
-    "attendance",
     "fees",
-    "internet-computer"
+    "attendance"
   ],
-  "last_updated": "2026-04-22T12:45:26.919Z"
+  "last_updated": "2026-04-23T17:57:26.954Z"
 }

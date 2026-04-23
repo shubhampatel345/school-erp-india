@@ -1,16 +1,23 @@
 /**
- * SHUBH SCHOOL ERP — DataService (Canister-Native)
+ * SHUBH SCHOOL ERP — DataService (PHP/MySQL)
  *
- * Thin wrapper around syncEngine. All reads are instant (from memory).
- * All writes are local-first — instant UI update, background canister push.
+ * High-level data operations using localFirstSync (IndexedDB) + phpApiService (MySQL).
  *
- * No MySQL, no PHP, no JWT tokens.
+ * - save(): writes to IndexedDB immediately → background MySQL push
+ * - get(): returns in-memory cache instantly; server fetch merges in background
+ * - refresh(): fetches from MySQL and merges into local cache
+ *
+ * No canister, no Internet Computer, no syncEngine.
  */
 
-import { generateId } from "./canisterService";
-import { syncEngine } from "./syncEngine";
+import { localFirstSync } from "./localFirstSync";
+import phpApiService from "./phpApiService";
 
-export { generateId };
+export { localFirstSync };
+
+export function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 export const COLLECTIONS = [
   "students",
@@ -46,6 +53,7 @@ export type CollectionName = (typeof COLLECTIONS)[number];
 
 class DataService {
   private listeners: Set<() => void> = new Set();
+  private _ready = false;
 
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -57,103 +65,149 @@ class DataService {
   }
 
   getMode(): "idle" | "loading" | "ready" | "offline" {
-    const state = syncEngine.getSyncStatus().state;
-    if (state === "synced") return "ready";
-    if (state === "loading") return "loading";
-    if (state === "offline") return "offline";
-    return "idle";
+    return this._ready ? "ready" : "loading";
+  }
+
+  isReady(): boolean {
+    return this._ready;
   }
 
   getCounts(): Record<string, number> {
     const counts: Record<string, number> = {};
     for (const col of COLLECTIONS) {
-      counts[col] = syncEngine.getLocalCollection(col).length;
+      counts[col] = localFirstSync.getSnapshot(col).length;
     }
     return counts;
   }
 
-  /** Get records from in-memory cache — instant, no await */
+  /** Instant read from in-memory cache — no await */
   get<T>(collection: string): T[] {
-    return syncEngine.getLocalCollection(collection) as T[];
+    return localFirstSync.getSnapshot(collection) as T[];
   }
 
-  /** Async read — same as get() since all data is in memory */
+  /** Async read — loads IndexedDB if cache is empty */
   async getAsync<T>(collection: string): Promise<T[]> {
-    return this.get<T>(collection);
+    const rows = await localFirstSync.load(collection);
+    return rows as T[];
   }
 
-  /** Load a single collection fresh from the canister */
-  async refreshFromServer<T>(collection: string): Promise<T[]> {
-    await syncEngine.loadFromCanister(collection);
-    this.notify();
-    return this.get<T>(collection);
-  }
-
-  /** Save a new item (local-first, background canister push) */
-  async save<T extends Record<string, unknown>>(
-    collection: string,
-    item: T,
-  ): Promise<T> {
-    const id = (item.id as string | undefined) ?? generateId();
-    const withId = { ...item, id } as T;
-    const saved = await syncEngine.saveRecord(collection, withId, "create");
+  /**
+   * Save a new record (local-first, background MySQL push).
+   * Returns immediately — data is visible instantly.
+   */
+  async save<T>(collection: string, item: T): Promise<T> {
+    const rec = item as Record<string, unknown>;
+    const id = (rec.id as string | undefined) ?? generateId();
+    const withId = { ...rec, id };
+    const saved = await localFirstSync.save(collection, withId, "create");
     this.notify();
     return saved as T;
   }
 
-  /** Update an existing item */
-  async update<T extends Record<string, unknown>>(
+  /** Update an existing record */
+  async update(
     collection: string,
     localId: string,
-    changes: Partial<T>,
+    changes: Record<string, unknown>,
   ): Promise<void> {
-    const existing = this.get<T>(collection).find(
-      (r) => (r as Record<string, unknown>).id === localId,
+    const existing = (this.get(collection) as Record<string, unknown>[]).find(
+      (r) => r.id === localId,
     );
-    const merged = { ...(existing ?? {}), ...changes, id: localId } as Record<
-      string,
-      unknown
-    >;
-    await syncEngine.saveRecord(collection, merged, "update");
+    const merged = { ...(existing ?? {}), ...changes, id: localId };
+    await localFirstSync.save(collection, merged, "update");
     this.notify();
   }
 
-  /** Delete an item */
+  /** Delete a record */
   async delete(collection: string, localId: string): Promise<void> {
-    await syncEngine.saveRecord(collection, { id: localId }, "delete");
+    await localFirstSync.save(collection, { id: localId }, "delete");
     this.notify();
   }
 
-  /** Refresh a single collection */
-  async refresh(collection: string): Promise<void> {
-    await syncEngine.loadFromCanister(collection);
+  /** Load a collection fresh from MySQL and merge (preserving pending writes) */
+  async refreshFromServer<T>(collection: string): Promise<T[]> {
+    try {
+      const data = await phpApiService.loadAll();
+      const rows = (data[collection] ?? []) as Record<string, unknown>[];
+      localFirstSync.mergeServerRecords(collection, rows);
+    } catch {
+      /* network error — keep local data */
+    }
     this.notify();
+    return this.get(collection) as T[];
+  }
+
+  /** Alias for backward compatibility */
+  async refresh(collection: string): Promise<void> {
+    await this.refreshFromServer(collection);
   }
 
   /** Bulk-replace a collection (for import/restore) */
-  setAll<T>(collection: string, items: T[]): void {
-    syncEngine.setCollectionCache(collection, items as unknown[]);
+  setAll(collection: string, items: unknown[]): void {
+    localFirstSync.setCollection(
+      collection,
+      items as Record<string, unknown>[],
+    );
     this.notify();
   }
 
-  /** Initialize: load all data from canister (called on app startup) */
-  async initializeFromCanister(): Promise<void> {
-    await syncEngine.initialize();
+  /**
+   * Initialize: warm from IndexedDB immediately, then fetch from MySQL.
+   * Called once on login.
+   */
+  async initializeFromServer(): Promise<Record<string, unknown[]>> {
+    // 1. Warm from IndexedDB immediately (no server round-trip)
+    await Promise.allSettled(
+      COLLECTIONS.map((col) => localFirstSync.load(col)),
+    );
+    this._ready = true;
     this.notify();
+
+    // 2. Restore any pending writes from IndexedDB (surviving page reload)
+    await localFirstSync.restorePendingQueue();
+
+    // 3. Flush pending writes first
+    await localFirstSync.forceSync();
+
+    // 4. Fetch fresh data from MySQL
+    try {
+      const allData = await phpApiService.loadAll();
+      for (const [col, rows] of Object.entries(allData)) {
+        if (Array.isArray(rows)) {
+          localFirstSync.mergeServerRecords(
+            col,
+            rows as Record<string, unknown>[],
+          );
+        }
+      }
+      this.notify();
+      return allData as Record<string, unknown[]>;
+    } catch {
+      // Server unreachable — serve from IndexedDB (offline mode)
+      const out: Record<string, unknown[]> = {};
+      for (const col of COLLECTIONS) {
+        out[col] = localFirstSync.getSnapshot(col);
+      }
+      return out;
+    } finally {
+      localFirstSync.startFlushTimer();
+    }
   }
 
   /** Alias for backward compatibility */
   async init(_force = false): Promise<void> {
-    return this.initializeFromCanister();
+    await this.initializeFromServer();
+  }
+
+  /** Alias used by AppContext */
+  async initializeFromCanister(): Promise<void> {
+    await this.initializeFromServer();
   }
 
   reset(): void {
-    syncEngine.reset();
+    localFirstSync.reset();
+    this._ready = false;
     this.notify();
-  }
-
-  isReady(): boolean {
-    return this.getMode() === "ready";
   }
 
   waitForInit(): Promise<void> {
