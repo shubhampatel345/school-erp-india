@@ -1,25 +1,4 @@
-// Version: 3.0.0
-type OldChangelog__508781987 =
-  {
-    var blockIndex : Nat;
-    var blocks : [var [var ?Text]];
-    var elementIndex : Nat
-  };
-type OldData__631653343<K, V> = {var count : Nat; kvs : [var ?(K, V)]};
-type OldMap__30246564<K, V> =
-  {var root : OldNode__460320417<K, V>; var size : Nat};
-type OldNode__460320417<K, V> =
-  {
-    #internal :
-      {
-        children : [var ?OldNode__460320417<K, V>];
-        data : OldData__631653343<K, V>
-      };
-    #leaf : {data : OldData__631653343<K, V>}
-  };
-actor ({
-  in changelog : OldChangelog__508781987;
-  in store : OldMap__30246564<Text, OldMap__30246564<Text, Text>>
-}, {
+// Version: 1.0.0
+actor {
   
-}) ;
+};

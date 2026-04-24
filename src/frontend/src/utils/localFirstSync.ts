@@ -65,7 +65,7 @@ interface PendingItem {
 // ── IndexedDB helpers ─────────────────────────────────────────────────────────
 
 const DB_NAME = "shubh_erp_db";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = [
   "students",
@@ -100,6 +100,7 @@ const STORES = [
   "fee_balances",
   "fee_heads",
   "_pending_sync",
+  "sync_logs",
 ];
 
 let _db: IDBDatabase | null = null;
@@ -201,8 +202,12 @@ const memCache = new Map<string, Map<string, Record<string, unknown>>>();
 
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let isFlushing = false;
-const FLUSH_INTERVAL_MS = 30_000;
-const MAX_RETRIES = 3;
+let FLUSH_INTERVAL_MS = 15_000;
+let syncEnabled = true;
+const MAX_RETRIES = 5;
+
+/** Exponential backoff delays per retry: 5s, 15s, 30s, 60s, 120s */
+const RETRY_DELAYS = [5_000, 15_000, 30_000, 60_000, 120_000];
 
 function getMemMap(collection: string): Map<string, Record<string, unknown>> {
   if (!memCache.has(collection)) memCache.set(collection, new Map());
@@ -372,16 +377,17 @@ class LocalFirstSync {
 
   private scheduleRetry(queueId: string, item: PendingItem, errorMsg: string) {
     item.retries++;
-    if (item.retries >= MAX_RETRIES) {
+    if (item.retries > MAX_RETRIES) {
       emitSyncEvent("sync:error", {
         collection: item.collection,
         id: item.recordId,
-        error: errorMsg,
+        error: `${errorMsg} (permanently failed after ${MAX_RETRIES} retries)`,
       });
       // Keep in pending so next flush attempt retries after reload
       return;
     }
-    const delay = 1000 * 2 ** (item.retries - 1);
+    const delay =
+      RETRY_DELAYS[item.retries - 1] ?? RETRY_DELAYS[RETRY_DELAYS.length - 1];
     setTimeout(() => void this.pushOne(queueId), delay);
   }
 
@@ -415,12 +421,14 @@ class LocalFirstSync {
   startFlushTimer() {
     if (flushTimer) return;
     flushTimer = setInterval(() => {
-      if (pendingMap.size > 0) void this.forceSync();
+      if (syncEnabled && pendingMap.size > 0) void this.forceSync();
     }, FLUSH_INTERVAL_MS);
 
     // Also flush when coming back online
     if (typeof window !== "undefined") {
-      window.addEventListener("online", () => void this.forceSync());
+      window.addEventListener("online", () => {
+        if (syncEnabled) void this.forceSync();
+      });
     }
   }
 
@@ -429,6 +437,31 @@ class LocalFirstSync {
     if (flushTimer) {
       clearInterval(flushTimer);
       flushTimer = null;
+    }
+  }
+
+  /** Enable or disable background sync without losing pending data */
+  setSyncEnabled(enabled: boolean): void {
+    syncEnabled = enabled;
+    try {
+      localStorage.setItem("erp_sync_enabled", JSON.stringify(enabled));
+    } catch {
+      /* noop */
+    }
+    if (enabled && pendingMap.size > 0) void this.forceSync();
+  }
+
+  /** Change the flush interval (seconds) and restart timer */
+  setSyncInterval(seconds: number): void {
+    FLUSH_INTERVAL_MS = seconds * 1_000;
+    try {
+      localStorage.setItem("erp_sync_interval", JSON.stringify(seconds));
+    } catch {
+      /* noop */
+    }
+    if (flushTimer) {
+      this.stopFlushTimer();
+      this.startFlushTimer();
     }
   }
 

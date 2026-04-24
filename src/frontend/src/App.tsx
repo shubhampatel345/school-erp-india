@@ -89,9 +89,15 @@ function AppRoutes() {
       return <Communication initialTab={tab} />;
     }
     if (activePage.startsWith("settings") || activePage === "settings") {
-      const tab = activePage.includes("/")
-        ? activePage.split("/")[1]
-        : "profile";
+      // Support "settings:server" shorthand (from sync badge click)
+      const colonTab = activePage.includes(":")
+        ? activePage.split(":")[1]
+        : null;
+      const tab = colonTab
+        ? colonTab
+        : activePage.includes("/")
+          ? activePage.split("/")[1]
+          : "profile";
       return <Settings initialTab={tab} />;
     }
 

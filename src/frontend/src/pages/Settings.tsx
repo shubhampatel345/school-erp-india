@@ -8,6 +8,7 @@ import {
   MessageSquare,
   Palette,
   School,
+  Server,
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
@@ -21,6 +22,7 @@ import OnlinePaymentSettings from "./settings/OnlinePaymentSettings";
 import PermissionManagement from "./settings/PermissionManagement";
 import PushNotifications from "./settings/PushNotifications";
 import SchoolProfile from "./settings/SchoolProfile";
+import ServerOnlineSync from "./settings/ServerOnlineSync";
 import SessionManagement from "./settings/SessionManagement";
 import SystemUpdate from "./settings/SystemUpdate";
 import ThemeSettings from "./settings/ThemeSettings";
@@ -66,6 +68,12 @@ const TABS = [
     icon: Sparkles,
     superAdminOnly: true,
   },
+  {
+    id: "server",
+    label: "Server & Sync",
+    icon: Server,
+    superAdminOnly: true,
+  },
 ];
 
 interface SettingsProps {
@@ -84,6 +92,7 @@ const SETTINGS_TAB_MAP: Record<string, string> = {
   permissions: "permissions",
   data: "data",
   update: "update",
+  server: "server",
 };
 
 export default function Settings({
@@ -158,6 +167,7 @@ export default function Settings({
         {activeTab === "themes" && <ThemeSettings />}
         {activeTab === "data" && isSuperAdmin && <DataManagement />}
         {activeTab === "update" && isSuperAdmin && <SystemUpdate />}
+        {activeTab === "server" && isSuperAdmin && <ServerOnlineSync />}
       </div>
     </div>
   );

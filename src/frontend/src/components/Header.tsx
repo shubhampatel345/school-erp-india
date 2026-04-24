@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
-import { useSync } from "../hooks/useSync";
 import type { Student } from "../types";
 import { ls } from "../utils/localStorage";
 import NotificationBell from "./NotificationBell";
@@ -53,54 +52,73 @@ function getSiblingCount(student: Student, allStudents: Student[]): number {
 }
 
 /** Sync status indicator dot */
-function SyncDot() {
-  const { mode } = useSync();
+function SyncDot({ onNavigate }: { onNavigate?: (page: string) => void }) {
+  const { syncStatus, serverConnected } = useApp();
   const [tooltip, setTooltip] = useState(false);
 
-  const config: Record<string, { color: string; label: string }> = {
-    connected: { color: "bg-emerald-500", label: "Synced to canister" },
-    syncing: {
-      color: "bg-amber-400 animate-pulse",
-      label: "Syncing data…",
+  const pendingCount = syncStatus.pendingCount ?? 0;
+
+  type DotMode = "synced" | "pending" | "syncing" | "error" | "offline";
+  let mode: DotMode = "synced";
+  if (syncStatus.state === "loading") mode = "syncing";
+  else if (syncStatus.state === "error") mode = "error";
+  else if (!serverConnected) mode = "offline";
+  else if (pendingCount > 0) mode = "pending";
+
+  const config: Record<DotMode, { color: string; label: string }> = {
+    synced: { color: "bg-emerald-500", label: "All data synced to server" },
+    syncing: { color: "bg-amber-400 animate-pulse", label: "Syncing data…" },
+    pending: {
+      color: "bg-amber-400",
+      label: `${pendingCount} changes pending`,
     },
-    offline: { color: "bg-destructive", label: "Canister unreachable" },
-    auth_error: {
-      color: "bg-amber-500",
-      label: "Auth required",
-    },
-    local: {
-      color: "bg-muted-foreground/40",
-      label: "Local mode",
+    error: { color: "bg-destructive", label: "Sync error — tap to view" },
+    offline: {
+      color: "bg-destructive",
+      label: "Server offline — data queued locally",
     },
   };
 
-  const cfg = config[mode] ?? config.offline;
+  const cfg = config[mode];
+
+  const handleClick = () => {
+    if (onNavigate) onNavigate("settings:server");
+  };
 
   return (
-    <div
-      className="relative flex items-center"
+    <button
+      type="button"
+      className="relative flex items-center cursor-pointer bg-transparent border-0 p-0"
       onMouseEnter={() => setTooltip(true)}
       onMouseLeave={() => setTooltip(false)}
+      onClick={handleClick}
+      data-ocid="header.sync_badge"
+      aria-label={cfg.label}
     >
-      <span className={`w-2 h-2 rounded-full flex-shrink-0 ${cfg.color}`} />
+      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${cfg.color}`} />
+      {pendingCount > 0 && (
+        <span className="absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-white text-[8px] font-bold flex items-center justify-center leading-none">
+          {pendingCount > 9 ? "9+" : pendingCount}
+        </span>
+      )}
       {tooltip && (
-        <div className="absolute right-0 top-4 z-50 whitespace-nowrap bg-card border border-border shadow-elevated rounded-lg px-2.5 py-1.5 text-xs text-foreground">
-          {mode === "connected" && (
+        <div className="absolute right-0 top-5 z-50 whitespace-nowrap bg-card border border-border shadow-elevated rounded-lg px-2.5 py-1.5 text-xs text-foreground">
+          {mode === "synced" && (
             <CheckCircle2 className="w-3 h-3 text-emerald-500 inline mr-1" />
           )}
           {mode === "syncing" && (
             <Loader2 className="w-3 h-3 text-amber-500 animate-spin inline mr-1" />
           )}
-          {mode === "offline" && (
-            <WifiOff className="w-3 h-3 text-destructive inline mr-1" />
-          )}
-          {mode === "auth_error" && (
+          {mode === "pending" && (
             <AlertTriangle className="w-3 h-3 text-amber-500 inline mr-1" />
+          )}
+          {(mode === "error" || mode === "offline") && (
+            <WifiOff className="w-3 h-3 text-destructive inline mr-1" />
           )}
           {cfg.label}
         </div>
       )}
-    </div>
+    </button>
   );
 }
 
@@ -430,7 +448,7 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
         </button>
 
         {/* Sync status dot */}
-        <SyncDot />
+        <SyncDot onNavigate={onNavigate} />
 
         {/* Notification Bell */}
         <NotificationBell />
