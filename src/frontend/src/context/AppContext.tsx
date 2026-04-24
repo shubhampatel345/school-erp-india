@@ -401,6 +401,11 @@ function ReLoginModal({
 }: {
   onDismiss: () => void;
 }) {
+  const currentYear = new Date().getFullYear();
+  // Academic year: April starts new session; if before April use previous year as base
+  const baseYear = new Date().getMonth() >= 3 ? currentYear : currentYear - 1;
+  const sessionYear = `${baseYear}-${String(baseYear + 1).slice(-2)}`;
+
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
@@ -425,13 +430,15 @@ function ReLoginModal({
               Session Expired
             </p>
             <p className="text-xs text-muted-foreground">
-              Your login session has expired
+              Academic session {sessionYear}
             </p>
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          Your session has expired and could not be automatically renewed.
-          Please log out and sign in again to continue.
+          Your login session for{" "}
+          <span className="font-medium text-foreground">{sessionYear}</span> has
+          expired and could not be automatically renewed. Please log out and
+          sign in again to continue.
         </p>
         <button
           type="button"
@@ -439,7 +446,7 @@ function ReLoginModal({
           data-ocid="relogin.logout_button"
           className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
         >
-          Log Out & Sign In Again
+          Log Out &amp; Sign In Again
         </button>
       </div>
     </div>
@@ -461,46 +468,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   });
 
-  // ── FIX 5 — Listen for auth:token-expired and attempt silent re-login ──────
+  // ── Listen for auth:token-expired and attempt silent re-login ──────────────
   useEffect(() => {
     const handleTokenExpired = async () => {
       // Guard 1: never handle token expiry when nobody is logged in
       if (!stateRef.current.currentUser) return;
-      // Guard 2: don't show modal right after a fresh login (2-minute cool-down)
+      // Guard 2: don't show modal right after a fresh login (5-minute cool-down)
       if (
         freshLoginRef.current !== null &&
-        Date.now() - freshLoginRef.current < 120_000
+        Date.now() - freshLoginRef.current < 300_000
       )
         return;
 
-      // Try silent re-auth via phpApiService (tries refresh_token then stored creds)
-      try {
-        // phpApiService.silentRefresh() is private; trigger it via a lightweight request
-        // that will auto-refresh on 401
-        const verified = await phpApiService.verifyToken();
-        if (verified) {
-          window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
-          return;
-        }
-      } catch {
-        /* fall through */
+      // Use phpApiService.silentRefresh() directly — it tries refresh_token
+      // first, then falls back to stored credentials, and emits the appropriate
+      // DOM events on success or failure so localFirstSync resumes automatically.
+      const refreshed = await phpApiService.silentRefresh();
+      if (refreshed) {
+        // Resume stuck pending queue after token refresh
+        void localFirstSync.resumeAfterTokenRefresh();
+        return;
       }
-      // Try explicit re-login with stored credentials
-      try {
-        const u = localStorage.getItem("erp_username");
-        const p = localStorage.getItem("erp_password");
-        if (u && p) {
-          const result = await phpApiService.login(u, p);
-          if (result?.token) {
-            window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
-            return;
-          }
-        }
-      } catch {
-        /* fall through to show modal */
+
+      // All refresh methods failed AND user has been logged in for more than
+      // 5 minutes — safe to show the modal (not a false-positive on login).
+      const loggedInDuration =
+        freshLoginRef.current !== null
+          ? Date.now() - freshLoginRef.current
+          : Number.POSITIVE_INFINITY;
+      if (loggedInDuration > 300_000) {
+        setShowReLoginModal(true);
       }
-      // No credentials or re-auth failed — prompt user
-      setShowReLoginModal(true);
     };
 
     const listener = () => {
@@ -509,6 +507,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     window.addEventListener("auth:token-expired", listener);
     return () => {
       window.removeEventListener("auth:token-expired", listener);
+    };
+  }, []);
+
+  // ── Listen for auth:token-refreshed → resume stuck pending queue ──────────
+  useEffect(() => {
+    const handleTokenRefreshed = () => {
+      void localFirstSync.resumeAfterTokenRefresh();
+    };
+    window.addEventListener("auth:token-refreshed", handleTokenRefreshed);
+    return () => {
+      window.removeEventListener("auth:token-refreshed", handleTokenRefreshed);
     };
   }, []);
 
@@ -544,34 +553,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     // For superadmin local login, skip server verify
     if (state.currentUser.role === "superadmin") return;
 
-    // Guard 2: skip verification entirely for 2 minutes after a fresh login.
+    // Guard 2: skip verification entirely for 5 minutes after a fresh login.
     // A freshly issued token is always valid — verifying it immediately can
     // trigger a false-positive expiry event due to timing races.
     if (
       freshLoginRef.current !== null &&
-      Date.now() - freshLoginRef.current < 120_000
+      Date.now() - freshLoginRef.current < 300_000
     ) {
       return;
     }
 
     // Session restore path: do a lightweight token check
     void (async () => {
-      const verified = await phpApiService.verifyToken();
-      if (!verified) {
-        // Token expired — try silent refresh first (refresh_token or stored creds)
-        try {
-          const u = localStorage.getItem("erp_username");
-          const p = localStorage.getItem("erp_password");
-          if (u && p) {
-            const result = await phpApiService.login(u, p);
-            if (result?.token) {
-              window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
-              return; // Successfully refreshed — continue with existing session
-            }
-          }
-        } catch {
-          /* fall through to force re-login */
-        }
+      // Use ensureValidToken() — tries refresh_token silently if expired
+      const tokenValid = await phpApiService.ensureValidToken();
+      if (!tokenValid) {
         // Both refresh and re-login failed — show re-login modal
         phpApiService.clearToken();
         sessionStorage.removeItem("shubh_current_user");
@@ -646,7 +642,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
         // Step 3: Fetch fresh from MySQL in background
         void (async () => {
           try {
+            // Step 3a: Restore pending queue FIRST so stuck changes survive reload
             await localFirstSync.restorePendingQueue();
+
+            // Step 3b: Ensure token is valid before making any server requests
+            if (state.currentUser?.role !== "superadmin") {
+              const tokenOk = await phpApiService.ensureValidToken();
+              if (!tokenOk) {
+                // Token refresh failed — work offline from IndexedDB
+                dispatch({
+                  type: "SET_SYNC_STATUS",
+                  status: {
+                    state: "offline",
+                    lastSyncTime: null,
+                    lastError:
+                      "Session expired — please log out and sign in again",
+                    pendingCount: localFirstSync.getPendingCount(),
+                    serverCounts: {},
+                  },
+                });
+                localFirstSync.startFlushTimer();
+                return;
+              }
+            }
+
+            // Step 3c: Flush any pending changes to the server
             await localFirstSync.forceSync();
             const allData = await phpApiService.loadAll();
             const freshData: Record<string, unknown[]> = {};

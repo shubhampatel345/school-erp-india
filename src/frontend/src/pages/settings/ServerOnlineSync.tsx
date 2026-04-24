@@ -77,7 +77,8 @@ const LS_SYNC_INTERVAL = "erp_sync_interval";
 const LS_SYNC_LOGS = "erp_sync_logs";
 const LS_HEALTH_HISTORY = "erp_health_history";
 const LS_SYNC_STATS = "erp_sync_stats";
-const LS_LAST_TOKEN_REFRESH = "erp_last_token_refresh";
+// NOTE: This key MUST match phpApiService.recordTokenRefresh() which writes "lastTokenRefresh"
+const LS_LAST_TOKEN_REFRESH = "lastTokenRefresh";
 
 const DEFAULT_INTERVAL = 15;
 const DEFAULT_URL = "/api";
@@ -233,9 +234,22 @@ export default function ServerOnlineSync() {
   const [tokenRefreshState, setTokenRefreshState] = useState<
     "idle" | "refreshing" | "success" | "fail" | "no-credentials"
   >("idle");
+  // Read lastTokenRefresh from localStorage — phpApiService writes it as a plain
+  // string (Date.now().toString()), not JSON, so we read raw and parse as number.
   const [lastTokenRefresh, setLastTokenRefresh] = useState<number | null>(
-    () => loadLs(LS_LAST_TOKEN_REFRESH, null) as number | null,
+    () => {
+      try {
+        const raw = localStorage.getItem(LS_LAST_TOKEN_REFRESH);
+        if (!raw) return null;
+        const n = Number(raw);
+        return Number.isNaN(n) ? null : n;
+      } catch {
+        return null;
+      }
+    },
   );
+  // Derived: is the current JWT expired?
+  const _isTokenCurrentlyExpired = phpApiService.isTokenExpired();
   const hasStoredCredentials =
     !!localStorage.getItem("erp_username") &&
     !!localStorage.getItem("erp_password");

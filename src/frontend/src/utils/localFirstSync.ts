@@ -174,6 +174,22 @@ async function idbDelete(store: string, key: string): Promise<void> {
   }
 }
 
+/** Count items in a store without loading them all into memory */
+async function idbCount(store: string): Promise<number> {
+  try {
+    const db = await openDb();
+    if (!db.objectStoreNames.contains(store)) return 0;
+    return new Promise((resolve) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).count();
+      req.onsuccess = () => resolve(req.result ?? 0);
+      req.onerror = () => resolve(0);
+    });
+  } catch {
+    return 0;
+  }
+}
+
 // ── ID generator ──────────────────────────────────────────────────────────────
 
 function genId(): string {
@@ -208,6 +224,8 @@ let flushTimer: ReturnType<typeof setInterval> | null = null;
 let isFlushing = false;
 let FLUSH_INTERVAL_MS = 15_000;
 let syncEnabled = true;
+/** True while waiting for a token refresh before resuming sync */
+let waitingForTokenRefresh = false;
 const MAX_RETRIES = 5;
 
 /** Exponential backoff delays per retry: 5s, 15s, 30s, 60s, 120s */
@@ -219,7 +237,11 @@ function getMemMap(collection: string): Map<string, Record<string, unknown>> {
 }
 
 class LocalFirstSync {
-  /** Read pending count */
+  /**
+   * Read pending count — reflects both in-memory map and IDB count.
+   * The in-memory map is always the authoritative source after initialization;
+   * IDB count is only used before restorePendingQueue() has run.
+   */
   getPendingCount(): number {
     return pendingMap.size;
   }
@@ -335,6 +357,9 @@ class LocalFirstSync {
     const item = pendingMap.get(queueId);
     if (!item) return;
 
+    // If waiting for token refresh, do not attempt — will retry after refresh
+    if (waitingForTokenRefresh) return;
+
     const route =
       item.operation === "delete"
         ? DELETE_ROUTE_MAP[item.collection]
@@ -373,9 +398,16 @@ class LocalFirstSync {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : "Sync error";
 
-      // If phpApiService already silently refreshed and retried but still
-      // failed (e.g. credentials gone), the queue should re-flush after
-      // the token is refreshed externally (via 'auth:token-refreshed' event).
+      // If auth failed, pause and wait for token refresh
+      if (
+        errMsg.includes("Session expired") ||
+        errMsg.includes("401") ||
+        errMsg.includes("403")
+      ) {
+        waitingForTokenRefresh = true;
+        return; // will resume on 'auth:token-refreshed' event
+      }
+
       this.scheduleRetry(queueId, item, errMsg);
     }
   }
@@ -399,6 +431,16 @@ class LocalFirstSync {
   /** Flush all pending items to MySQL */
   async forceSync(): Promise<void> {
     if (isFlushing) return;
+    if (waitingForTokenRefresh) return;
+
+    // Ensure token is valid before flushing the entire queue
+    const tokenOk = await phpApiService.ensureValidToken();
+    if (!tokenOk) {
+      // Token refresh failed — pause sync, it will resume after 'auth:token-refreshed'
+      waitingForTokenRefresh = true;
+      return;
+    }
+
     isFlushing = true;
     try {
       const ids = Array.from(pendingMap.keys());
@@ -414,6 +456,7 @@ class LocalFirstSync {
    * Emits 'sync:resumed' when done.
    */
   async resumeAfterTokenRefresh(): Promise<void> {
+    waitingForTokenRefresh = false;
     // Reset retry counters so items that were blocked by 401/403 get a clean
     // attempt with the freshly issued token.
     for (const item of pendingMap.values()) {
@@ -425,25 +468,47 @@ class LocalFirstSync {
     });
   }
 
-  /** Load pending queue from IndexedDB (called on app init after page reload) */
+  /**
+   * Load pending queue from IndexedDB (called on app init after page reload).
+   * This restores the 16+ stuck changes into the in-memory pendingMap so
+   * the flush timer can pick them up on the next cycle.
+   */
   async restorePendingQueue(): Promise<void> {
     try {
       const rows = await idbGetAll<PendingItem & { id: string }>(
         "_pending_sync",
       );
+      let restored = 0;
       for (const row of rows) {
-        if (row.queueId) pendingMap.set(row.queueId, row);
+        if (row.queueId && !pendingMap.has(row.queueId)) {
+          pendingMap.set(row.queueId, row);
+          restored++;
+        }
+      }
+      if (restored > 0) {
+        // Emit sync:complete with zero items to update the badge count
+        emitSyncEvent("sync:complete", { restored });
       }
     } catch {
       /* noop */
     }
   }
 
+  /**
+   * Get the pending count from IDB — used before in-memory map is populated.
+   * After restorePendingQueue(), use getPendingCount() instead.
+   */
+  async getIdbPendingCount(): Promise<number> {
+    return idbCount("_pending_sync");
+  }
+
   /** Start background flush timer (call once on app init) */
   startFlushTimer() {
     if (flushTimer) return;
     flushTimer = setInterval(() => {
-      if (syncEnabled && pendingMap.size > 0) void this.forceSync();
+      if (syncEnabled && pendingMap.size > 0 && !waitingForTokenRefresh) {
+        void this.forceSync();
+      }
     }, FLUSH_INTERVAL_MS);
 
     // Also flush when coming back online
@@ -454,7 +519,7 @@ class LocalFirstSync {
 
       // Resume queue when token is refreshed (either by phpApiService or AppContext)
       window.addEventListener("auth:token-refreshed", () => {
-        if (syncEnabled && pendingMap.size > 0) {
+        if (syncEnabled) {
           void this.resumeAfterTokenRefresh();
         }
       });
@@ -467,6 +532,7 @@ class LocalFirstSync {
       clearInterval(flushTimer);
       flushTimer = null;
     }
+    waitingForTokenRefresh = false;
   }
 
   /** Enable or disable background sync without losing pending data */
@@ -498,6 +564,7 @@ class LocalFirstSync {
   reset() {
     memCache.clear();
     pendingMap.clear();
+    waitingForTokenRefresh = false;
     this.stopFlushTimer();
   }
 }

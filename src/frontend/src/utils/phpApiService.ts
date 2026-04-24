@@ -5,9 +5,12 @@
  * All data operations go through this service — no canister, no IC.
  *
  * Auth: JWT Bearer token stored in localStorage ('erp_token').
- * Silent re-auth: on 401/403, auto re-authenticates using stored credentials
- *   (erp_username / erp_password) and retries the request once.
- * If re-auth fails, emits 'auth:token-expired' DOM event.
+ * Token lifecycle:
+ *   - isTokenExpired(): reads JWT exp field, returns true if expiring within 30s
+ *   - ensureValidToken(): checks expiry, calls silentRefresh() if needed
+ *   - silentRefresh(): tries /auth/refresh first, then re-login with stored creds
+ *   - Every API call calls ensureValidToken() first
+ * If all refresh methods fail, emits 'auth:token-expired' DOM event.
  */
 
 const API_BASE = "/api";
@@ -151,6 +154,23 @@ export interface AllDataResult {
   [key: string]: unknown[];
 }
 
+// ── Token helpers ──────────────────────────────────────────────────────────────
+
+/** Decode JWT payload (base64url) without verifying signature */
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const parts = token.split(".");
+    if (parts.length !== 3) return null;
+    // Base64url → base64 → decode
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    const json = atob(padded);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 // ── PhpApiService ──────────────────────────────────────────────────────────────
 
 class PhpApiService {
@@ -159,7 +179,7 @@ class PhpApiService {
   private isRefreshing = false;
   /** Resolve/reject callbacks queued while refresh is in progress */
   private refreshQueue: Array<{
-    resolve: (token: string) => void;
+    resolve: (token: string | null) => void;
     reject: (err: Error) => void;
   }> = [];
 
@@ -235,6 +255,25 @@ class PhpApiService {
     return null;
   }
 
+  /** Record the time of the last successful token refresh */
+  private recordTokenRefresh(): void {
+    try {
+      localStorage.setItem("lastTokenRefresh", Date.now().toString());
+    } catch {
+      /* noop */
+    }
+  }
+
+  /** Get last token refresh timestamp (ms) or null */
+  getLastTokenRefresh(): number | null {
+    try {
+      const v = localStorage.getItem("lastTokenRefresh");
+      return v ? Number(v) : null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Emit 'auth:token-expired' so the UI can prompt re-login */
   private emitTokenExpired(): void {
     try {
@@ -254,17 +293,45 @@ class PhpApiService {
   }
 
   /**
+   * Check whether the current token is expired (or expiring within 30 seconds).
+   * Returns true if the token needs to be refreshed.
+   */
+  isTokenExpired(): boolean {
+    const token = this.getToken();
+    if (!token) return true;
+    const payload = decodeJwtPayload(token);
+    if (!payload) return true;
+    const exp = payload.exp as number | undefined;
+    if (!exp) return false; // no expiry claim — treat as valid
+    // Refresh 30 seconds before actual expiry to avoid race conditions
+    return exp < Math.floor(Date.now() / 1000) + 30;
+  }
+
+  /**
+   * Ensure the current token is valid. If expired, attempts a silent refresh.
+   * Returns true if token is valid (or was refreshed), false if all methods failed.
+   * Does NOT throw.
+   */
+  async ensureValidToken(): Promise<boolean> {
+    if (!this.isTokenExpired()) return true;
+    return this.silentRefresh();
+  }
+
+  /**
    * Attempt silent re-authentication.
    * Strategy: try /auth/refresh with stored refresh_token first (lightweight).
    * If that fails or no refresh_token, fall back to full re-login with stored credentials.
    * If a refresh is already in progress, queue the caller.
-   * Returns the new token on success, throws on failure.
+   * Returns true on success, false on failure (never throws).
    */
-  private async silentRefresh(): Promise<string> {
+  async silentRefresh(): Promise<boolean> {
     // If already refreshing, queue and wait
     if (this.isRefreshing) {
-      return new Promise<string>((resolve, reject) => {
-        this.refreshQueue.push({ resolve, reject });
+      return new Promise<boolean>((resolve) => {
+        this.refreshQueue.push({
+          resolve: (token) => resolve(token !== null),
+          reject: () => resolve(false),
+        });
       });
     }
 
@@ -289,13 +356,12 @@ class PhpApiService {
               // Update refresh token if a new one was returned
               if (refreshData.data.refresh_token) {
                 this.storeRefreshToken(refreshData.data.refresh_token);
-              } else {
-                // Keep existing refresh token (still valid for JWT_REFRESH window)
               }
+              this.recordTokenRefresh();
               this.emitTokenRefreshed();
               for (const q of this.refreshQueue) q.resolve(newToken);
               this.refreshQueue = [];
-              return newToken;
+              return true;
             }
           }
           // refresh_token invalid/expired — fall through to credential re-login
@@ -309,7 +375,10 @@ class PhpApiService {
       if (!creds) {
         this.clearToken();
         this.emitTokenExpired();
-        throw new Error("Session expired — please log in again");
+        for (const q of this.refreshQueue)
+          q.reject(new Error("No credentials"));
+        this.refreshQueue = [];
+        return false;
       }
 
       const url = `${API_BASE}/?route=auth/login`;
@@ -320,27 +389,30 @@ class PhpApiService {
       });
       const data = (await resp.json()) as ApiResponse<LoginResult>;
       if (!resp.ok || !data.success || !data.data?.token) {
-        throw new Error("Re-authentication failed");
+        this.clearToken();
+        this.emitTokenExpired();
+        for (const q of this.refreshQueue)
+          q.reject(new Error("Re-auth failed"));
+        this.refreshQueue = [];
+        return false;
       }
       const newToken = data.data.token;
       this.setToken(newToken);
-      // Store new refresh token if returned
       if (data.data.refresh_token) {
         this.storeRefreshToken(data.data.refresh_token);
       }
+      this.recordTokenRefresh();
       this.emitTokenRefreshed();
 
-      // Resolve all queued callers
       for (const q of this.refreshQueue) q.resolve(newToken);
       this.refreshQueue = [];
-      return newToken;
-    } catch (err) {
+      return true;
+    } catch {
       this.clearToken();
       this.emitTokenExpired();
-      const error = err instanceof Error ? err : new Error("Re-auth failed");
-      for (const q of this.refreshQueue) q.reject(error);
+      for (const q of this.refreshQueue) q.reject(new Error("Re-auth failed"));
       this.refreshQueue = [];
-      throw error;
+      return false;
     } finally {
       this.isRefreshing = false;
     }
@@ -348,6 +420,7 @@ class PhpApiService {
 
   /**
    * Internal request method.
+   * Calls ensureValidToken() before every request.
    * On 401/403: attempt silent re-auth, then retry exactly once.
    */
   private async request<T>(
@@ -355,6 +428,17 @@ class PhpApiService {
     options: RequestInit = {},
     isRetry = false,
   ): Promise<ApiResponse<T>> {
+    // Ensure token is valid before making the request (skip for auth routes)
+    const isAuthRoute =
+      route.startsWith("auth/login") || route.startsWith("auth/refresh");
+    if (!isAuthRoute && !isRetry) {
+      const tokenOk = await this.ensureValidToken();
+      if (!tokenOk) {
+        this.emitTokenExpired();
+        throw new Error("Session expired — please log in again");
+      }
+    }
+
     const token = this.getToken();
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -376,15 +460,18 @@ class PhpApiService {
 
       // Handle auth errors with silent re-auth (only once)
       if ((response.status === 401 || response.status === 403) && !isRetry) {
-        const newToken = await this.silentRefresh();
-        // Retry original request with the new token
+        const refreshed = await this.silentRefresh();
+        if (!refreshed) {
+          throw new Error("Session expired — please log in again");
+        }
+        const newToken = this.getToken();
         return this.request<T>(
           route,
           {
             ...options,
             headers: {
               ...((options.headers as Record<string, string>) ?? {}),
-              Authorization: `Bearer ${newToken}`,
+              Authorization: `Bearer ${newToken ?? ""}`,
             },
           },
           true,
@@ -452,9 +539,25 @@ class PhpApiService {
       });
       if (res.data?.token) {
         this.setToken(res.data.token);
-        // Store refresh token if returned
-        if (res.data.refresh_token) {
-          this.storeRefreshToken(res.data.refresh_token);
+        this.recordTokenRefresh();
+        // Store refresh token under both key names for broad compatibility
+        const rt = res.data.refresh_token ?? "";
+        if (rt) {
+          this.storeRefreshToken(rt);
+          try {
+            localStorage.setItem("refreshToken", rt);
+          } catch {
+            /* noop */
+          }
+        }
+        // Store credentials for silent re-auth under both key names
+        this.storeCredentials(username, password);
+        try {
+          localStorage.setItem("storedUsername", username);
+          localStorage.setItem("storedPassword", password);
+          localStorage.setItem("lastTokenRefresh", Date.now().toString());
+        } catch {
+          /* noop */
         }
       }
       return res.data ?? null;
