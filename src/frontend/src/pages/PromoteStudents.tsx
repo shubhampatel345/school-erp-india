@@ -41,7 +41,7 @@ import {
   Pencil,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type {
   ClassSection,
@@ -199,21 +199,36 @@ interface PromotionResult {
 }
 
 export default function PromoteStudents() {
-  const {
-    currentSession,
-    sessions,
-    getData,
-    saveData,
-    updateData,
-    addNotification,
-    currentUser,
-  } = useApp();
+  const { currentSession, sessions, addNotification, currentUser } = useApp();
 
-  const allStudents = getData("students") as Student[];
-  const allStaff = getData("staff") as Staff[];
-  // classSections reserved for future section-level promotion
-  void (getData("classes") as ClassSection[]);
-  const feeHeadings = getData("fee_headings") as FeeHeading[];
+  // ── Server-side data (direct API) ─────────────────────────────────────────
+  const [allStudents, setAllStudents] = useState<Student[]>([]);
+  const [allStaff, setAllStaff] = useState<Staff[]>([]);
+  const [feeHeadings, setFeeHeadings] = useState<FeeHeading[]>([]);
+  const [_dataLoading, setDataLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      setDataLoading(true);
+      try {
+        const [studRes, staffRes, headingsRes] = await Promise.all([
+          phpApiService
+            .getStudents({ limit: "2000" })
+            .catch(() => ({ data: [] })),
+          phpApiService.getStaff().catch(() => []),
+          phpApiService.getFeeHeadings().catch(() => []),
+        ]);
+        setAllStudents(studRes.data as unknown as Student[]);
+        setAllStaff(staffRes as unknown as Staff[]);
+        setFeeHeadings(headingsRes as unknown as FeeHeading[]);
+      } catch {
+        /* use empty arrays */
+      } finally {
+        setDataLoading(false);
+      }
+    }
+    void loadData();
+  }, []);
 
   const isSuperAdmin = currentUser?.role === "superadmin";
 
@@ -340,13 +355,14 @@ export default function PromoteStudents() {
         isActive: false,
         createdAt: new Date().toISOString(),
       };
-      await saveData(
-        "sessions",
-        newSession as unknown as Record<string, unknown>,
-      );
+      await phpApiService.createSession({
+        label: newSession.label,
+        startYear: newSession.startYear,
+        endYear: newSession.endYear,
+      });
       return { session: newSession, wasAutoCreated: true };
     } catch {
-      // Fallback: create locally
+      // Fallback: create session via API
       const [startStr] = nextLabel.split("-");
       const startYear = Number.parseInt(startStr, 10);
       const newSession: Session = {
@@ -358,10 +374,9 @@ export default function PromoteStudents() {
         isActive: false,
         createdAt: new Date().toISOString(),
       };
-      await saveData(
-        "sessions",
-        newSession as unknown as Record<string, unknown>,
-      );
+      await phpApiService
+        .createSession({ label: nextLabel, startYear, endYear: startYear + 1 })
+        .catch(() => {});
       return { session: newSession, wasAutoCreated: true };
     }
   }
@@ -418,26 +433,16 @@ export default function PromoteStudents() {
       }
 
       if (!serverPromoted) {
-        // Local fallback
+        // Server failed — update students via individual API calls
         for (const update of studentUpdates) {
           if (!update) continue;
           const { id, ...changes } = update;
-          await updateData(
-            "students",
-            id as string,
-            changes as Record<string, unknown>,
-          );
-        }
-      } else {
-        // Still update local state for instant UI
-        for (const update of studentUpdates) {
-          if (!update) continue;
-          const { id, ...changes } = update;
-          await updateData(
-            "students",
-            id as string,
-            changes as Record<string, unknown>,
-          );
+          await phpApiService
+            .updateStudent({
+              id: id as string,
+              ...(changes as Record<string, unknown>),
+            })
+            .catch(() => {});
         }
       }
 
@@ -460,29 +465,28 @@ export default function PromoteStudents() {
         copiedHeadings = copyResult.fee_headings_copied ?? 0;
         staffCarried = copyResult.staff_copied ?? 0;
       } catch {
-        // Local fallback: copy fee headings with amounts reset
+        // API fallback: copy fee headings and staff
         const currentSessionId = currentSession?.id ?? "";
         const relevantHeadings = feeHeadings.filter(
           (h) => !h.sessionId || h.sessionId === currentSessionId,
         );
         for (const heading of relevantHeadings) {
-          const newHeading: FeeHeading = {
-            ...heading,
-            id: generateId(),
-            amount: 0,
-            sessionId: newSession.id,
-          };
-          await saveData(
-            "fee_headings",
-            newHeading as unknown as Record<string, unknown>,
-          );
+          await phpApiService
+            .addFeeHeading({
+              name: heading.name,
+              amount: 0,
+              sessionId: newSession.id,
+            })
+            .catch(() => {});
           copiedHeadings++;
         }
 
-        // Copy active staff
+        // Carry forward active staff via API
         const activeStaff = allStaff.filter((s) => s.status !== "inactive");
         for (const staff of activeStaff) {
-          await updateData("staff", staff.id, { sessionId: newSession.id });
+          await phpApiService
+            .updateStaff({ id: staff.id, sessionId: newSession.id })
+            .catch(() => {});
           staffCarried++;
         }
       }

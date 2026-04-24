@@ -1,3 +1,10 @@
+/**
+ * Students.tsx — Direct PHP/MySQL (no canister, no IndexedDB)
+ *
+ * All reads/writes go through phpApiService directly.
+ * Data is fetched from server on mount and after every mutation.
+ * No localFirstSync, no syncEngine, no pending queues.
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,13 +45,13 @@ import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
-import type { ClassSection, Student } from "../types";
+import type { Student } from "../types";
 import { ls } from "../utils/localStorage";
+import phpApiService, { type StudentRecord } from "../utils/phpApiService";
 
 const ITEMS_PER_PAGE = 50;
 
-// Hardcoded class order — always shown even if no classes configured yet
-const HARDCODED_CLASS_ORDER = [
+const CLASS_ORDER = [
   "Nursery",
   "LKG",
   "UKG",
@@ -62,36 +69,14 @@ const HARDCODED_CLASS_ORDER = [
   "Class 12",
 ];
 
-// Legacy class names without "Class " prefix (used in stored data)
-const CLASS_RAW_ORDER = [
-  "Nursery",
-  "LKG",
-  "UKG",
-  "1",
-  "2",
-  "3",
-  "4",
-  "5",
-  "6",
-  "7",
-  "8",
-  "9",
-  "10",
-  "11",
-  "12",
-];
-
 function classOrder(name: string): number {
-  // Try exact match first
-  let idx = CLASS_RAW_ORDER.indexOf(name);
+  let idx = CLASS_ORDER.indexOf(name);
   if (idx !== -1) return idx;
-  // Try stripping "Class " prefix
-  idx = CLASS_RAW_ORDER.indexOf(name.replace(/^Class\s+/i, ""));
+  idx = CLASS_ORDER.indexOf(`Class ${name}`);
   if (idx !== -1) return idx;
   return 99;
 }
 
-// ── Column definitions ────────────────────────────────────────────────────────
 interface ColDef {
   key: string;
   label: string;
@@ -200,6 +185,45 @@ const PRINT_COLS = [
   { key: "status", label: "Status" },
 ];
 
+/** Map a raw StudentRecord to the Student shape used by the rest of the app */
+function toStudent(r: StudentRecord): Student {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    admNo: r.admNo ?? (s.adm_no as string) ?? "",
+    fullName: r.fullName ?? (s.full_name as string) ?? "",
+    fatherName: (s.fatherName as string) ?? (s.father_name as string) ?? "",
+    motherName: (s.motherName as string) ?? (s.mother_name as string) ?? "",
+    fatherMobile: r.fatherMobile ?? (s.father_mobile as string) ?? "",
+    motherMobile:
+      (s.motherMobile as string) ?? (s.mother_mobile as string) ?? "",
+    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
+    mobile: r.mobile ?? "",
+    dob: r.dob ?? "",
+    gender: (r.gender as Student["gender"]) ?? "Male",
+    class: r.class ?? "",
+    section: r.section ?? "",
+    category: (s.category as string) ?? "",
+    address: r.address ?? "",
+    village: (s.village as string) ?? "",
+    aadhaarNo: (s.aadhaarNo as string) ?? (s.aadhaar_no as string) ?? "",
+    srNo: (s.srNo as string) ?? (s.sr_no as string) ?? "",
+    penNo: (s.penNo as string) ?? (s.pen_no as string) ?? "",
+    apaarNo: (s.apaarNo as string) ?? (s.apaar_no as string) ?? "",
+    previousSchool:
+      (s.previousSchool as string) ?? (s.previous_school as string) ?? "",
+    admissionDate:
+      (s.admissionDate as string) ?? (s.admission_date as string) ?? "",
+    photo: (s.photo as string) ?? (s.photo_url as string) ?? "",
+    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
+    sessionId: r.sessionId ?? "",
+    transportRoute: (s.transportRoute as string) ?? "",
+    transportBusNo: (s.transportBusNo as string) ?? "",
+    transportPickup: (s.transportPickup as string) ?? "",
+    createdAt: r.createdAt ?? "",
+  } as Student;
+}
+
 function getCellValue(student: Student, key: string): string {
   const s = student as unknown as Record<string, string | undefined>;
   return s[key] ?? "";
@@ -214,48 +238,26 @@ export default function Students({ onNavigate }: StudentsProps) {
     currentSession,
     canWrite,
     currentUser,
-    getData,
     saveData,
     updateData,
     deleteData,
-    refreshCollection,
     addNotification,
   } = useApp();
 
-  // ── Students from context (canister-native) ───────────────────────────────
-  const rawStudents = getData("students") as Student[];
-  const students = useMemo(
-    () => (Array.isArray(rawStudents) ? rawStudents : []).filter(Boolean),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rawStudents],
-  );
+  // ── Server data ────────────────────────────────────────────────────────────
+  const [students, setStudents] = useState<Student[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  void totalCount;
+  const [classes, setClasses] = useState<
+    Array<{ className: string; sections: string[] }>
+  >([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // ── Classes from context ───────────────────────────────────────────────────
-  const rawClasses = getData("classes") as ClassSection[];
-  const contextClasses = useMemo(
-    () => (Array.isArray(rawClasses) ? rawClasses : []).filter(Boolean),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [rawClasses],
-  );
-
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setIsRefreshing(true);
-    try {
-      await refreshCollection("students");
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [refreshCollection]);
-
-  const refreshRef = useRef(refresh);
-  refreshRef.current = refresh;
-
-  // Refresh once on mount to load canister data
-  useEffect(() => {
-    void refreshRef.current();
-  }, []);
+  const canManage =
+    currentUser?.role === "superadmin" ||
+    currentUser?.role === "admin" ||
+    currentUser?.role === "receptionist";
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -265,14 +267,11 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [filterGender, setFilterGender] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterRoute, setFilterRoute] = useState("all");
-
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
-
   const [visibleCols, setVisibleCols] = useState<string[]>(() =>
     ls.get<string[]>(LS_COL_KEY, DEFAULT_VISIBLE),
   );
-
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showForm, setShowForm] = useState(false);
   const [editStudent, setEditStudent] = useState<Student | null>(null);
@@ -293,61 +292,89 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
-  const canManage =
-    currentUser?.role === "superadmin" ||
-    currentUser?.role === "admin" ||
-    currentUser?.role === "receptionist";
+  // ── Fetch from server ──────────────────────────────────────────────────────
+  const fetchStudents = useCallback(
+    async (resetPage = false) => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const params: Record<string, string> = {
+          page: String(resetPage ? 1 : currentPage),
+          limit: "500", // load all for client-side filter+sort
+        };
+        if (filterClass !== "all") params.class = filterClass;
+        if (filterSection !== "all") params.section = filterSection;
+        if (filterStatus !== "all") params.status = filterStatus;
+        if (search.trim()) params.search = search.trim();
+        const result = await phpApiService.getStudents(params);
+        const mapped = (result.data ?? []).map(toStudent);
+        setStudents(mapped);
+        setTotalCount(result.total ?? mapped.length);
+        if (resetPage) setCurrentPage(1);
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : "Failed to load students",
+        );
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [currentPage, filterClass, filterSection, filterStatus, search],
+  );
+
+  // Fetch classes once on mount
+  useEffect(() => {
+    phpApiService
+      .getClasses()
+      .then((cls) => {
+        const sorted = [...cls].sort(
+          (a, b) => classOrder(a.className) - classOrder(b.className),
+        );
+        setClasses(
+          sorted.map((c) => ({
+            className: c.className,
+            sections: c.sections ?? [],
+          })),
+        );
+      })
+      .catch(() => {
+        /* fail silently */
+      });
+  }, []);
+
+  const fetchStudentsRef = useRef(fetchStudents);
+  fetchStudentsRef.current = fetchStudents;
+
+  // Fetch students when filters change
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — we only trigger on filter changes
+  useEffect(() => {
+    void fetchStudentsRef.current(true);
+  }, [filterClass, filterSection, filterStatus]); // eslint-disable-line
+
+  // Initial load
+  useEffect(() => {
+    void fetchStudentsRef.current();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     ls.set(LS_COL_KEY, visibleCols);
   }, [visibleCols]);
 
   // ── Derived data ───────────────────────────────────────────────────────────
-  const uniqueRoutes = useMemo(() => {
-    const routes = new Set<string>();
-    for (const s of students) {
-      if (s.transportRoute) routes.add(s.transportRoute);
-    }
-    return Array.from(routes).sort();
-  }, [students]);
-
-  // Class names for filter — prefer context classes sorted correctly,
-  // fallback to hardcoded list if no classes configured yet
   const classNames = useMemo(() => {
-    if (contextClasses.length > 0) {
-      return [...contextClasses]
-        .sort((a, b) => {
-          const an =
-            a.className ?? (a as unknown as { name?: string }).name ?? "";
-          const bn =
-            b.className ?? (b as unknown as { name?: string }).name ?? "";
-          return classOrder(an) - classOrder(bn);
-        })
-        .map(
-          (c) => c.className ?? (c as unknown as { name?: string }).name ?? "",
-        );
-    }
-    // Fallback: unique class values from student data, sorted
+    if (classes.length > 0) return classes.map((c) => c.className);
     const seen = new Set<string>();
-    const fromStudents = students
+    return students
       .map((s) => s.class)
-      .filter((c): c is string => !!c && !seen.has(c) && !!seen.add(c));
-    if (fromStudents.length > 0) {
-      return fromStudents.sort((a, b) => classOrder(a) - classOrder(b));
-    }
-    // Last resort: hardcoded list
-    return HARDCODED_CLASS_ORDER;
-  }, [contextClasses, students]);
+      .filter((c): c is string => !!c && !seen.has(c) && !!seen.add(c))
+      .sort((a, b) => classOrder(a) - classOrder(b));
+  }, [classes, students]);
 
-  // Sections for selected class filter
   const sectionsForFilter = useMemo(() => {
     if (filterClass === "all") return [];
-    const cls = contextClasses.find(
-      (c) =>
-        (c.className ?? (c as unknown as { name?: string }).name ?? "") ===
-        filterClass,
-    );
-    if (cls?.sections) return cls.sections;
+    const cls = classes.find((c) => c.className === filterClass);
+    if (cls?.sections?.length) return cls.sections;
     const seen = new Set<string>();
     return students
       .filter((s) => s.class === filterClass)
@@ -355,7 +382,14 @@ export default function Students({ onNavigate }: StudentsProps) {
       .filter(
         (sec): sec is string => !!sec && !seen.has(sec) && !!seen.add(sec),
       );
-  }, [filterClass, contextClasses, students]);
+  }, [filterClass, classes, students]);
+
+  const uniqueRoutes = useMemo(() => {
+    const routes = new Set<string>();
+    for (const s of students)
+      if (s.transportRoute) routes.add(s.transportRoute);
+    return Array.from(routes).sort();
+  }, [students]);
 
   const stats = useMemo(() => {
     const active = students.filter((s) => s.status === "active");
@@ -371,7 +405,7 @@ export default function Students({ onNavigate }: StudentsProps) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
     let list = students.filter((s) => {
-      if (!s || !s.id) return false;
+      if (!s?.id) return false;
       if (filterClass !== "all" && s.class !== filterClass) return false;
       if (filterSection !== "all" && s.section !== filterSection) return false;
       if (filterStatus !== "all" && s.status !== filterStatus) return false;
@@ -381,31 +415,27 @@ export default function Students({ onNavigate }: StudentsProps) {
       if (filterRoute !== "all" && (s.transportRoute ?? "") !== filterRoute)
         return false;
       if (q) {
-        const haystack = [
-          s.fullName ?? "",
-          s.admNo ?? "",
-          s.fatherName ?? "",
+        const hay = [
+          s.fullName,
+          s.admNo,
+          s.fatherName,
           s.motherName ?? "",
           s.mobile ?? "",
           s.fatherMobile ?? "",
-          s.address ?? "",
-          s.village ?? "",
-          `${s.class ?? ""}${s.section ?? ""}`,
-          s.class ?? "",
-          s.section ?? "",
         ]
           .join(" ")
           .toLowerCase();
-        if (!haystack.includes(q)) return false;
+        if (!hay.includes(q)) return false;
       }
       return true;
     });
-
     if (sortKey) {
       list = [...list].sort((a, b) => {
-        const av = getCellValue(a, sortKey);
-        const bv = getCellValue(b, sortKey);
-        const cmp = av.localeCompare(bv, "en-IN", { numeric: true });
+        const cmp = getCellValue(a, sortKey).localeCompare(
+          getCellValue(b, sortKey),
+          "en-IN",
+          { numeric: true },
+        );
         return sortDir === "asc" ? cmp : -cmp;
       });
     }
@@ -428,7 +458,6 @@ export default function Students({ onNavigate }: StudentsProps) {
     [visibleCols],
   );
 
-  // ── Pagination ─────────────────────────────────────────────────────────────
   const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
   const safePage = Math.min(currentPage, totalPages);
   const paginatedStudents = useMemo(() => {
@@ -447,7 +476,6 @@ export default function Students({ onNavigate }: StudentsProps) {
     return parts && parts.length >= 2 && parts[1] === currentMonthStr;
   });
 
-  // ── Sort handler ───────────────────────────────────────────────────────────
   function handleSort(key: string) {
     if (!ALL_COLUMNS.find((c) => c.key === key)?.sortable) return;
     if (sortKey === key) {
@@ -462,15 +490,12 @@ export default function Students({ onNavigate }: StudentsProps) {
     }
   }
 
-  // ── Selection ──────────────────────────────────────────────────────────────
   const allVisibleSelected =
     filtered.length > 0 && filtered.every((s) => selectedIds.has(s.id));
-
   function toggleAll() {
     if (allVisibleSelected) setSelectedIds(new Set());
     else setSelectedIds(new Set(filtered.map((s) => s.id)));
   }
-
   function toggleRow(id: string) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -480,24 +505,26 @@ export default function Students({ onNavigate }: StudentsProps) {
     });
   }
 
-  // ── Handlers ───────────────────────────────────────────────────────────────
-  function handleSaved(_student?: Student) {
+  function handleSaved() {
     setShowForm(false);
     setEditStudent(null);
     setSelectedStudent(null);
-    // Do NOT refresh here — that races against background push and causes records to vanish
+    void fetchStudents();
   }
 
   async function handleDelete(student: Student) {
     try {
-      await deleteData("students", student.id);
+      await phpApiService.deleteStudent(student.id);
       addNotification(
         `Student ${student.fullName ?? student.admNo} deleted`,
         "success",
       );
-      void refresh();
-    } catch {
-      addNotification("Failed to delete student", "error");
+      void fetchStudents();
+    } catch (err) {
+      addNotification(
+        `Delete failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
     }
     setDeleteConfirm(null);
   }
@@ -507,7 +534,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     let deleted = 0;
     for (const id of ids) {
       try {
-        await deleteData("students", id);
+        await phpApiService.deleteStudent(id);
         deleted++;
       } catch {
         /* continue */
@@ -516,7 +543,7 @@ export default function Students({ onNavigate }: StudentsProps) {
     addNotification(`Deleted ${deleted} students`, "success");
     setSelectedIds(new Set());
     setBulkDeleteConfirm(false);
-    void refresh();
+    void fetchStudents();
   }
 
   function clearFilters() {
@@ -544,35 +571,21 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
     const printWin = window.open("", "_blank");
     if (!printWin) return;
-    printWin.document.write(`
-      <html><head><title>Student List</title>
-      <style>
-        body{font-family:Arial,sans-serif;font-size:10px;margin:8mm}
-        table{width:100%;border-collapse:collapse}
-        th{background:#f0f0f0;border:1px solid #999;padding:3px 5px;text-align:left;white-space:nowrap}
-        td{border:1px solid #ddd;padding:3px 5px;white-space:nowrap}
-        h2{text-align:center;margin-bottom:2px;font-size:14px}
-        p{text-align:center;margin:0 0 6px;font-size:9px;color:#666}
-      </style></head><body>
-      <h2>${schoolProfile.name}</h2>
-      <p>Student List – ${filterClass !== "all" ? `Class ${filterClass}` : "All Classes"}${filterSection !== "all" ? ` ${filterSection}` : ""} | ${new Date().toLocaleDateString("en-IN")} | ${filtered.length} students</p>
-      <table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead>
-      <tbody>${rows.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#f9f9f9" : ""}">${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody>
-      </table></body></html>`);
+    printWin.document.write(
+      `<html><head><title>Student List</title><style>body{font-family:Arial,sans-serif;font-size:10px;margin:8mm}table{width:100%;border-collapse:collapse}th{background:#f0f0f0;border:1px solid #999;padding:3px 5px;text-align:left;white-space:nowrap}td{border:1px solid #ddd;padding:3px 5px;white-space:nowrap}h2{text-align:center;margin-bottom:2px;font-size:14px}p{text-align:center;margin:0 0 6px;font-size:9px;color:#666}</style></head><body><h2>${schoolProfile.name}</h2><p>Student List — ${new Date().toLocaleDateString("en-IN")} | ${filtered.length} students</p><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#f9f9f9" : ""}">${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`,
+    );
     printWin.document.close();
     printWin.print();
   }
 
   function handleExportCSV() {
-    const cols = PRINT_COLS;
-    const header = cols.map((c) => c.label).join(",");
+    const header = PRINT_COLS.map((c) => c.label).join(",");
     const rows = filtered.map((s) =>
-      cols
-        .map((c) => `"${getCellValue(s, c.key).replace(/"/g, '""')}"`)
-        .join(","),
+      PRINT_COLS.map(
+        (c) => `"${getCellValue(s, c.key).replace(/"/g, '""')}"`,
+      ).join(","),
     );
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -584,11 +597,11 @@ export default function Students({ onNavigate }: StudentsProps) {
   async function handleExportExcel() {
     try {
       const { utils, writeFile } = await import("xlsx");
-      const cols = PRINT_COLS;
-      const header = cols.map((c) => c.label);
-      const rows = filtered.map((s) => cols.map((c) => getCellValue(s, c.key)));
+      const header = PRINT_COLS.map((c) => c.label);
+      const rows = filtered.map((s) =>
+        PRINT_COLS.map((c) => getCellValue(s, c.key)),
+      );
       const ws = utils.aoa_to_sheet([header, ...rows]);
-      // Auto-fit column widths
       ws["!cols"] = header.map((h, i) => ({
         wch: Math.max(
           h.length + 2,
@@ -599,7 +612,6 @@ export default function Students({ onNavigate }: StudentsProps) {
       utils.book_append_sheet(wb, ws, "Students");
       writeFile(wb, `Students_${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch {
-      // fallback to CSV if xlsx fails
       handleExportCSV();
     }
   }
@@ -610,14 +622,10 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
   }
 
-  const tableRef = useRef<HTMLDivElement>(null);
-
   function renderCell(student: Student, colKey: string) {
     const isDiscontinued = student.status === "discontinued";
     const safeName = student.fullName ?? student.admNo ?? "–";
-    const safeAdmNo = student.admNo ?? "–";
-
-    if (colKey === "photo") {
+    if (colKey === "photo")
       return (
         <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
           {student.photo ? (
@@ -633,17 +641,15 @@ export default function Students({ onNavigate }: StudentsProps) {
           )}
         </div>
       );
-    }
-    if (colKey === "admNo") {
+    if (colKey === "admNo")
       return (
         <span
           className={`text-xs font-mono font-semibold ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
         >
-          {safeAdmNo}
+          {student.admNo || "–"}
         </span>
       );
-    }
-    if (colKey === "fullName") {
+    if (colKey === "fullName")
       return (
         <span
           className={`font-medium text-xs ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
@@ -651,22 +657,19 @@ export default function Students({ onNavigate }: StudentsProps) {
           {safeName}
         </span>
       );
-    }
-    if (colKey === "class") {
+    if (colKey === "class")
       return (
         <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded font-medium">
           {student.class ?? "–"}
         </span>
       );
-    }
-    if (colKey === "section") {
+    if (colKey === "section")
       return (
         <span className="text-xs text-foreground">
           {student.section ?? "–"}
         </span>
       );
-    }
-    if (colKey === "status") {
+    if (colKey === "status")
       return (
         <Badge
           variant={student.status === "active" ? "default" : "destructive"}
@@ -675,14 +678,12 @@ export default function Students({ onNavigate }: StudentsProps) {
           {student.status === "active" ? "Active" : "Discontinued"}
         </Badge>
       );
-    }
-    if (colKey === "category" && student.category) {
+    if (colKey === "category" && student.category)
       return (
         <Badge variant="outline" className="text-[9px] px-1 py-0">
           {student.category}
         </Badge>
       );
-    }
     return (
       <span className="text-xs text-muted-foreground truncate max-w-[140px] block">
         {getCellValue(student, colKey) || "—"}
@@ -701,13 +702,12 @@ export default function Students({ onNavigate }: StudentsProps) {
     );
   }
 
-  // Safe double-click handler — never throws even if student data has nulls
   function handleRowDoubleClick(student: Student) {
     try {
-      if (!student || !student.id) return;
+      if (!student?.id) return;
       setSelectedStudent(student);
     } catch {
-      // Guard against any unexpected errors — never crash the whole page
+      /* guard */
     }
   }
 
@@ -724,15 +724,17 @@ export default function Students({ onNavigate }: StudentsProps) {
             <p className="text-xs text-muted-foreground mt-0.5">
               {currentSession && `Session ${currentSession.label} · `}
               {filtered.length < students.length
-                ? `${filtered.length} of ${students.length} students`
-                : `${students.length} students`}
+                ? `${filtered.length} of ${students.length}`
+                : `${students.length}`}{" "}
+              students
               {filtered.length > ITEMS_PER_PAGE &&
                 ` · Page ${safePage} of ${totalPages}`}
-              {isRefreshing && (
+              {isLoading && (
                 <span className="ml-2 text-primary animate-pulse">
-                  Syncing…
+                  Loading…
                 </span>
               )}
+              {error && <span className="ml-2 text-destructive">{error}</span>}
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
@@ -763,10 +765,10 @@ export default function Students({ onNavigate }: StudentsProps) {
               variant="outline"
               onClick={() => setShowPrintDialog(true)}
             >
-              <List className="w-3.5 h-3.5 mr-1" /> Print List
+              <List className="w-3.5 h-3.5 mr-1" /> Print
             </Button>
             <Button size="sm" variant="outline" onClick={handleExportCSV}>
-              <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
+              <Download className="w-3.5 h-3.5 mr-1" /> CSV
             </Button>
             <Button
               size="sm"
@@ -774,7 +776,7 @@ export default function Students({ onNavigate }: StudentsProps) {
               onClick={() => void handleExportExcel()}
               data-ocid="students.excel_export_button"
             >
-              <Download className="w-3.5 h-3.5 mr-1" /> Export Excel
+              <Download className="w-3.5 h-3.5 mr-1" /> Excel
             </Button>
             <Button
               size="sm"
@@ -792,7 +794,7 @@ export default function Students({ onNavigate }: StudentsProps) {
           </div>
         </div>
 
-        {/* Stats Bar */}
+        {/* Stats */}
         <div className="flex gap-3 flex-wrap text-xs mb-3">
           {[
             { label: "Total", value: stats.total, color: "text-foreground" },
@@ -815,22 +817,24 @@ export default function Students({ onNavigate }: StudentsProps) {
           ))}
         </div>
 
-        {/* Filter Bar */}
+        {/* Filters */}
         <div className="flex gap-2 flex-wrap items-center">
           <div className="relative flex-1 min-w-[180px] max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input
               className="pl-8 h-8 text-xs"
-              placeholder="Search name, Adm.No, father, mother, mobile…"
+              placeholder="Search name, Adm.No…"
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
                 setCurrentPage(1);
               }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void fetchStudents(true);
+              }}
               data-ocid="students-search"
             />
           </div>
-
           <Select
             value={filterClass}
             onValueChange={(v) => {
@@ -854,7 +858,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               ))}
             </SelectContent>
           </Select>
-
           <Select
             value={filterSection}
             onValueChange={(v) => {
@@ -878,7 +881,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               ))}
             </SelectContent>
           </Select>
-
           <Select
             value={filterStatus}
             onValueChange={(v) => {
@@ -895,7 +897,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               <SelectItem value="discontinued">Discontinued</SelectItem>
             </SelectContent>
           </Select>
-
           <Select
             value={filterGender}
             onValueChange={(v) => {
@@ -913,7 +914,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               <SelectItem value="Other">Other</SelectItem>
             </SelectContent>
           </Select>
-
           <Select
             value={filterCategory}
             onValueChange={(v) => {
@@ -933,7 +933,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               ))}
             </SelectContent>
           </Select>
-
           {uniqueRoutes.length > 0 && (
             <Select value={filterRoute} onValueChange={setFilterRoute}>
               <SelectTrigger className="w-28 h-8 text-xs">
@@ -949,7 +948,6 @@ export default function Students({ onNavigate }: StudentsProps) {
               </SelectContent>
             </Select>
           )}
-
           <Button
             variant="ghost"
             size="sm"
@@ -958,7 +956,6 @@ export default function Students({ onNavigate }: StudentsProps) {
           >
             <X className="w-3 h-3 mr-1" /> Clear
           </Button>
-
           <Popover>
             <PopoverTrigger asChild>
               <Button
@@ -1014,11 +1011,11 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       </div>
 
-      {/* Bulk Actions Bar */}
+      {/* Bulk Actions */}
       {selectedIds.size > 0 && (
         <div className="flex-shrink-0 bg-primary/5 border-b border-primary/20 px-4 py-2 flex items-center gap-3 flex-wrap">
           <span className="text-xs font-semibold text-primary">
-            {selectedIds.size} student{selectedIds.size > 1 ? "s" : ""} selected
+            {selectedIds.size} selected
           </span>
           <Button
             size="sm"
@@ -1026,7 +1023,7 @@ export default function Students({ onNavigate }: StudentsProps) {
             className="h-7 text-xs"
             onClick={() => setShowPrintDialog(true)}
           >
-            <List className="w-3 h-3 mr-1" /> Print List
+            <List className="w-3 h-3 mr-1" /> Print
           </Button>
           <Button
             size="sm"
@@ -1060,7 +1057,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* Birthdays Panel */}
+      {/* Birthdays */}
       {showBirthdays && birthdayStudents.length > 0 && (
         <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-3">
           <h3 className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1">
@@ -1086,7 +1083,7 @@ export default function Students({ onNavigate }: StudentsProps) {
       )}
 
       {/* Grid */}
-      <div ref={tableRef} className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto">
         <table
           className="w-full text-xs border-collapse"
           style={{ minWidth: "600px" }}
@@ -1127,13 +1124,11 @@ export default function Students({ onNavigate }: StudentsProps) {
               )}
             </tr>
           </thead>
-
           <tbody>
-            {isRefreshing && students.length === 0 && (
+            {isLoading && students.length === 0 && (
               <SkeletonTableRows rows={10} cols={activeVisibleCols.length} />
             )}
-
-            {!isRefreshing && filtered.length === 0 && (
+            {!isLoading && filtered.length === 0 && (
               <tr>
                 <td
                   colSpan={activeVisibleCols.length + 2}
@@ -1143,7 +1138,7 @@ export default function Students({ onNavigate }: StudentsProps) {
                   <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
                   <p className="font-medium text-sm">No students found</p>
                   <p className="text-xs mt-1 opacity-60">
-                    Adjust your filters or add students
+                    Adjust filters or add students
                   </p>
                   {canWrite && canManage && (
                     <Button
@@ -1160,9 +1155,8 @@ export default function Students({ onNavigate }: StudentsProps) {
                 </td>
               </tr>
             )}
-
             {paginatedStudents.map((student, idx) => {
-              if (!student || !student.id) return null;
+              if (!student?.id) return null;
               const isDiscontinued = student.status === "discontinued";
               const isChecked = selectedIds.has(student.id);
               const globalIdx = (safePage - 1) * ITEMS_PER_PAGE + idx;
@@ -1190,11 +1184,10 @@ export default function Students({ onNavigate }: StudentsProps) {
                       checked={isChecked}
                       onCheckedChange={() => toggleRow(student.id)}
                       onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${student.fullName ?? student.admNo}`}
+                      aria-label={`Select ${student.fullName}`}
                       className="w-3.5 h-3.5"
                     />
                   </td>
-
                   {activeVisibleCols.map((col) => (
                     <td
                       key={col.key}
@@ -1204,7 +1197,6 @@ export default function Students({ onNavigate }: StudentsProps) {
                       {renderCell(student, col.key)}
                     </td>
                   ))}
-
                   {canWrite && canManage && (
                     <td className="px-1 py-1">
                       <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1273,38 +1265,22 @@ export default function Students({ onNavigate }: StudentsProps) {
             >
               <ChevronLeft className="w-3.5 h-3.5 mr-1" /> Prev
             </Button>
-            {(() => {
-              const items = Array.from({ length: totalPages }, (_, i) => i + 1)
-                .filter(
-                  (p) =>
-                    p === 1 ||
-                    p === totalPages ||
-                    (p >= safePage - 1 && p <= safePage + 1),
-                )
-                .reduce<Array<number | string>>((acc, p, i, arr) => {
-                  if (i > 0 && (arr[i - 1] as number) < p - 1)
-                    acc.push(`ellipsis-${p}`);
-                  acc.push(p);
-                  return acc;
-                }, []);
-              return items.map((p) =>
-                typeof p === "string" ? (
-                  <span key={p} className="text-xs text-muted-foreground px-1">
-                    …
-                  </span>
-                ) : (
-                  <Button
-                    key={`page-${p}`}
-                    variant={p === safePage ? "default" : "outline"}
-                    size="sm"
-                    className="h-7 w-7 p-0 text-xs"
-                    onClick={() => setCurrentPage(p)}
-                  >
-                    {p}
-                  </Button>
-                ),
-              );
-            })()}
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const start = Math.max(1, safePage - 2);
+              return start + i;
+            })
+              .filter((p) => p <= totalPages)
+              .map((p) => (
+                <Button
+                  key={p}
+                  variant={p === safePage ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 w-7 p-0 text-xs"
+                  onClick={() => setCurrentPage(p)}
+                >
+                  {p}
+                </Button>
+              ))}
             <Button
               variant="outline"
               size="sm"
@@ -1340,9 +1316,6 @@ export default function Students({ onNavigate }: StudentsProps) {
                 <X className="w-4 h-4" />
               </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              Select columns to include in the printed list:
-            </p>
             <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
               {PRINT_COLS.map((col) => (
                 <label
@@ -1354,11 +1327,8 @@ export default function Students({ onNavigate }: StudentsProps) {
                     checked={printCols.includes(col.key)}
                     onChange={(e) => {
                       if (e.target.checked)
-                        setPrintCols((prev) => [...prev, col.key]);
-                      else
-                        setPrintCols((prev) =>
-                          prev.filter((k) => k !== col.key),
-                        );
+                        setPrintCols((p) => [...p, col.key]);
+                      else setPrintCols((p) => p.filter((k) => k !== col.key));
                     }}
                     className="rounded w-3.5 h-3.5"
                   />
@@ -1409,8 +1379,8 @@ export default function Students({ onNavigate }: StudentsProps) {
                   Delete{" "}
                   <strong>
                     {deleteConfirm.fullName ?? deleteConfirm.admNo}
-                  </strong>{" "}
-                  ({deleteConfirm.admNo})? This cannot be undone.
+                  </strong>
+                  ? This cannot be undone.
                 </p>
               </div>
             </div>
@@ -1449,8 +1419,8 @@ export default function Students({ onNavigate }: StudentsProps) {
                   Delete {selectedIds.size} Students?
                 </h3>
                 <p className="text-xs text-muted-foreground mt-1">
-                  This will permanently delete {selectedIds.size} selected
-                  students and cannot be undone.
+                  This will permanently delete all selected students. This
+                  cannot be undone.
                 </p>
               </div>
             </div>
@@ -1475,7 +1445,7 @@ export default function Students({ onNavigate }: StudentsProps) {
         </div>
       )}
 
-      {/* Student Form Modal */}
+      {/* Student Form */}
       {showForm && (
         <StudentForm
           student={editStudent ?? undefined}
@@ -1489,15 +1459,12 @@ export default function Students({ onNavigate }: StudentsProps) {
         />
       )}
 
-      {/* Student Detail Modal (double-click) */}
+      {/* Student Detail Modal */}
       {selectedStudent && (
         <StudentDetailModal
           student={selectedStudent}
           onClose={() => setSelectedStudent(null)}
-          onUpdate={(updated) => {
-            // Update the selected student reference so modal stays in sync
-            setSelectedStudent(updated);
-          }}
+          onUpdate={(updated) => setSelectedStudent(updated)}
           onNavigate={onNavigate}
           updateData={updateData}
           deleteData={deleteData}
@@ -1511,7 +1478,7 @@ export default function Students({ onNavigate }: StudentsProps) {
           onClose={() => setShowImportExport(false)}
           onImported={() => {
             setShowImportExport(false);
-            void refresh();
+            void fetchStudents();
           }}
         />
       )}

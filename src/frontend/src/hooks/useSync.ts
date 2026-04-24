@@ -1,24 +1,23 @@
 /**
- * SHUBH SCHOOL ERP — Canister Sync Status Hook
+ * SHUBH SCHOOL ERP — Token Health Check Hook (Online-Only)
  *
- * - Reads sync state from syncEngine (canister-native)
- * - Fetches getCounts() from canister every 30 s
- * - Exposes triggerSync() to manually reload all collections
- *
- * No JWT, no PHP, no server URL configuration needed.
+ * Replaces the old canister sync hook.
+ * - Checks token validity every 4 minutes ONLY after login
+ * - Silently refreshes if token is near expiry
+ * - Fires 'auth:token-expired' DOM event if refresh fails (AppContext listens)
+ * - NEVER shows anything on the login screen (no user = no check)
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { canisterService } from "../utils/canisterService";
-import { dataService } from "../utils/dataService";
-import { syncEngine } from "../utils/syncEngine";
+import { useCallback, useEffect, useRef } from "react";
+import phpApiService from "../utils/phpApiService";
 
+// Keep these exported types for backward compatibility with any pages that import them
 export type SyncMode =
-  | "local" // canister not yet ready (initialising)
-  | "connected" // canister reachable, data loaded
-  | "syncing" // in-flight canister fetch
-  | "offline" // no network or canister unreachable
-  | "auth_error"; // kept for backward compat
+  | "connected"
+  | "syncing"
+  | "offline"
+  | "local"
+  | "auth_error";
 
 export interface SyncState {
   mode: SyncMode;
@@ -39,101 +38,81 @@ export interface SyncState {
   triggerSync: () => Promise<void>;
 }
 
-const POLL_INTERVAL_MS = 30_000;
+/** Token validity check interval — 4 minutes */
+const CHECK_INTERVAL_MS = 4 * 60 * 1000;
 
-export function useSync(): SyncState {
-  const [mode, setMode] = useState<SyncMode>("local");
-  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
-  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
-  const [serverCounts, setServerCounts] = useState<Record<string, number>>({});
-  const [queueStats, setQueueStats] = useState(() =>
-    syncEngine.getQueueStats(),
-  );
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const activeRef = useRef(true);
+/**
+ * useTokenHealth — runs inside AppProvider after login.
+ * Pass `isLoggedIn` and `loginTimestamp` to prevent false-positive expiry events.
+ */
+export function useTokenHealth(
+  isLoggedIn: boolean,
+  loginTimestamp: number | null,
+): void {
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Subscribe to syncEngine for live pending count + status
-  useEffect(() => {
-    const unsub = syncEngine.subscribe(() => {
-      setQueueStats(syncEngine.getQueueStats());
-      const status = syncEngine.getSyncStatus();
-      if (status.state === "synced") {
-        setMode("connected");
-        setLastSyncTime(status.lastSyncTime ?? new Date());
-        setLastSyncError(null);
-        if (Object.keys(status.serverCounts).length > 0) {
-          setServerCounts(status.serverCounts);
-        }
-      } else if (status.state === "loading") {
-        setMode("syncing");
-      } else if (status.state === "offline") {
-        setMode("offline");
-        setLastSyncError(status.lastError);
-      } else if (status.state === "error") {
-        setMode("offline");
-        setLastSyncError(status.lastError);
-      }
-    });
-    return unsub;
-  }, []);
-
-  // Poll canister getCounts() every 30 s
-  const fetchCounts = useCallback(async () => {
-    if (!activeRef.current) return;
-    try {
-      const counts = await canisterService.getCounts();
-      if (!activeRef.current) return;
-      if (Object.keys(counts).length > 0) {
-        setServerCounts(counts);
-        setMode("connected");
-        setLastSyncTime(new Date());
-        setLastSyncError(null);
-      }
-    } catch {
-      if (!activeRef.current) return;
-      setMode("offline");
-      setLastSyncError("Could not reach canister");
+  const checkToken = useCallback(async () => {
+    if (!isLoggedIn) return;
+    // Never check within 5 minutes of login — token was just issued
+    if (
+      loginTimestamp !== null &&
+      Date.now() - loginTimestamp < 5 * 60 * 1000
+    ) {
+      return;
     }
-  }, []);
+
+    if (phpApiService.isTokenExpired()) {
+      const refreshed = await phpApiService.silentRefresh();
+      if (!refreshed) {
+        // silentRefresh already emits 'auth:token-expired'
+        // AppContext listens to that event and shows the re-login modal
+      }
+    }
+  }, [isLoggedIn, loginTimestamp]);
 
   useEffect(() => {
-    activeRef.current = true;
-    void fetchCounts();
-    intervalRef.current = setInterval(() => {
-      void fetchCounts();
-    }, POLL_INTERVAL_MS);
+    if (!isLoggedIn) {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
+    // Start periodic check
+    timerRef.current = setInterval(() => {
+      void checkToken();
+    }, CHECK_INTERVAL_MS);
+
     return () => {
-      activeRef.current = false;
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
       }
     };
-  }, [fetchCounts]);
+  }, [isLoggedIn, checkToken]);
+}
 
-  const triggerSync = useCallback(async () => {
-    setMode("syncing");
-    await syncEngine.loadAllFromCanister();
-    const counts = await canisterService.getCounts();
-    setServerCounts(counts);
-    setMode("connected");
-    setLastSyncTime(new Date());
-  }, []);
-
-  const syncedCounts = dataService.getCounts();
+/**
+ * useSync — backward-compatible stub.
+ * Returns a static "connected" state — actual data is fetched directly
+ * by each page via phpApiService. No polling, no pending queue.
+ */
+export function useSync(): SyncState {
+  const noop = useCallback(async () => {}, []);
 
   return {
-    mode,
-    lastSyncTime,
-    lastSyncError,
-    isSynced: mode === "connected",
-    isPolling: mode === "syncing",
+    mode: navigator.onLine ? "connected" : "offline",
+    lastSyncTime: null,
+    lastSyncError: null,
+    isSynced: navigator.onLine,
+    isPolling: false,
     needsAuth: false,
     serverInfo: null,
-    serverCounts,
-    syncedCounts,
-    pendingSyncCount: queueStats.pending,
-    failedSyncCount: queueStats.failed,
-    triggerSync,
+    serverCounts: {},
+    syncedCounts: {},
+    pendingSyncCount: 0,
+    failedSyncCount: 0,
+    triggerSync: noop,
   };
 }

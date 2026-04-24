@@ -1,9 +1,15 @@
-import { useState } from "react";
+/**
+ * DueFees.tsx — Direct phpApiService (no getData)
+ *
+ * Loads students and receipts from server, calculates dues.
+ */
+import { useCallback, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { useApp } from "../../context/AppContext";
 import type { FeeReceipt, FeesPlan, Student } from "../../types";
-import { CLASSES, MONTHS, formatCurrency, ls } from "../../utils/localStorage";
+import { MONTHS, formatCurrency, ls } from "../../utils/localStorage";
+import phpApiService, { type StudentRecord } from "../../utils/phpApiService";
 import { buildFeesDueMessage, sendWhatsApp } from "../../utils/whatsapp";
 
 interface DueRow {
@@ -12,62 +18,108 @@ interface DueRow {
   dueAmount: number;
 }
 
-// Current academic month index (April=0, March=11)
 function getCurrentAcademicMonthIdx(): number {
-  const jsMonth = new Date().getMonth(); // 0=Jan
+  const jsMonth = new Date().getMonth();
   return jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
 }
 
+function toStudent(r: StudentRecord): Student {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    admNo: r.admNo ?? "",
+    fullName: r.fullName ?? "",
+    fatherName: (s.fatherName as string) ?? "",
+    motherName: (s.motherName as string) ?? "",
+    fatherMobile: r.fatherMobile ?? "",
+    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
+    mobile: r.mobile ?? "",
+    dob: r.dob ?? "",
+    gender: (r.gender as Student["gender"]) ?? "Male",
+    class: r.class ?? "",
+    section: r.section ?? "",
+    category: (s.category as string) ?? "",
+    address: r.address ?? "",
+    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
+    sessionId: r.sessionId ?? "",
+  } as Student;
+}
+
 export default function DueFees() {
-  const { getData, currentSession } = useApp();
+  const { currentSession } = useApp();
   const [classFilter, setClassFilter] = useState("");
   const [dueRows, setDueRows] = useState<DueRow[]>([]);
   const [generated, setGenerated] = useState(false);
+  const [generating, setGenerating] = useState(false);
   const [waSending, setWaSending] = useState(false);
   const [waStatus, setWaStatus] = useState<string | null>(null);
 
   const currentAcademicIdx = getCurrentAcademicMonthIdx();
-  // Only months up to and including the current month
   const dueTillMonths = MONTHS.slice(0, currentAcademicIdx + 1);
 
-  function generate() {
+  const generate = useCallback(async () => {
     if (!currentSession) return;
+    setGenerating(true);
+    try {
+      // Fetch students from server
+      const params: Record<string, string> = { limit: "500" };
+      if (classFilter) params.class = classFilter;
+      const studentResult = await phpApiService.getStudents(params);
+      const students = (studentResult.data ?? [])
+        .map(toStudent)
+        .filter((s) => s.status === "active");
 
-    const students = (getData("students") as Student[]).filter(
-      (s) => s.status === "active" && (!classFilter || s.class === classFilter),
-    );
-    const receipts = (getData("fee_receipts") as FeeReceipt[]).filter(
-      (r) => r.sessionId === currentSession.id && !r.isDeleted,
-    );
-    const plans = getData("fees_plan") as FeesPlan[];
-
-    const rows: DueRow[] = [];
-    for (const student of students) {
-      const paidMonths: string[] = [];
-      for (const r of receipts.filter((r) => r.studentId === student.id)) {
-        for (const item of r.items) {
-          if (!paidMonths.includes(item.month)) paidMonths.push(item.month);
-        }
-      }
-
-      const studentPlans = plans.filter(
-        (p) => p.classId === student.class && p.sectionId === student.section,
+      // Fetch receipts from server for this session
+      const receipts = await phpApiService.get<FeeReceipt[]>(
+        "fees/receipts/all",
+        { sessionId: currentSession.id },
       );
-      const dueMonths = dueTillMonths.filter((m) => !paidMonths.includes(m));
-      if (dueMonths.length === 0) continue;
 
-      let dueAmount = 0;
-      for (const plan of studentPlans) {
-        if (plan.amount > 0) dueAmount += plan.amount * dueMonths.length;
+      // Fetch fee plans from server
+      const allPlans: FeesPlan[] = [];
+      const uniqueClasses = [...new Set(students.map((s) => s.class))];
+      for (const cls of uniqueClasses) {
+        const plans = await phpApiService.getFeePlan(cls, "");
+        allPlans.push(...(plans as unknown as FeesPlan[]));
       }
-      if (dueAmount === 0) continue;
 
-      rows.push({ student, dueMonths, dueAmount });
+      const rows: DueRow[] = [];
+      for (const student of students) {
+        const paidMonths: string[] = [];
+        for (const r of (receipts ?? []).filter(
+          (x) => x.studentId === student.id && !x.isDeleted,
+        )) {
+          for (const item of r.items) {
+            if (!paidMonths.includes(item.month)) paidMonths.push(item.month);
+          }
+        }
+        const studentPlans = allPlans.filter(
+          (p) =>
+            (p.classId ??
+              (p as unknown as Record<string, string>).class ??
+              "") === student.class &&
+            (p.sectionId ??
+              (p as unknown as Record<string, string>).section ??
+              "") === student.section,
+        );
+        const dueMonths = dueTillMonths.filter((m) => !paidMonths.includes(m));
+        if (dueMonths.length === 0) continue;
+        let dueAmount = 0;
+        for (const plan of studentPlans) {
+          if (plan.amount > 0) dueAmount += plan.amount * dueMonths.length;
+        }
+        if (dueAmount === 0) continue;
+        rows.push({ student, dueMonths, dueAmount });
+      }
+      setDueRows(rows);
+      setGenerated(true);
+    } catch {
+      setDueRows([]);
+      setGenerated(true);
+    } finally {
+      setGenerating(false);
     }
-
-    setDueRows(rows);
-    setGenerated(true);
-  }
+  }, [currentSession, classFilter, dueTillMonths]);
 
   function handleExport() {
     const header = [
@@ -100,14 +152,7 @@ export default function DueFees() {
       name: "SHUBH SCHOOL ERP",
       address: "",
     });
-    const html = `<!DOCTYPE html><html><head><title>Dues Report</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px}h2{text-align:center}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:6px 10px}th{background:#f5f5f5;font-weight:bold}.total{font-weight:bold;background:#f0f0f0}</style></head><body>
-    <h2>${school.name}</h2>
-    <p style="text-align:center;color:#555">Dues Report till ${MONTHS[currentAcademicIdx]} | Class: ${classFilter || "All"}</p>
-    <table><thead><tr><th>#</th><th>Student Name</th><th>Adm No</th><th>Class</th><th>Months Due</th><th>Amount Due</th></tr></thead><tbody>
-    ${dueRows.map((r, i) => `<tr><td>${i + 1}</td><td>${r.student.fullName}</td><td>${r.student.admNo}</td><td>${r.student.class}-${r.student.section}</td><td>${r.dueMonths.join(", ")}</td><td>₹${r.dueAmount}</td></tr>`).join("")}
-    <tr class="total"><td colspan="5">Grand Total</td><td>₹${dueRows.reduce((s, r) => s + r.dueAmount, 0)}</td></tr>
-    </tbody></table></body></html>`;
-
+    const html = `<!DOCTYPE html><html><head><title>Dues Report</title><style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px}h2{text-align:center}table{width:100%;border-collapse:collapse}th,td{border:1px solid #ccc;padding:6px 10px}th{background:#f5f5f5;font-weight:bold}.total{font-weight:bold;background:#f0f0f0}</style></head><body><h2>${school.name}</h2><p style="text-align:center;color:#555">Dues Report till ${MONTHS[currentAcademicIdx]} | Class: ${classFilter || "All"}</p><table><thead><tr><th>#</th><th>Student Name</th><th>Adm No</th><th>Class</th><th>Months Due</th><th>Amount Due</th></tr></thead><tbody>${dueRows.map((r, i) => `<tr><td>${i + 1}</td><td>${r.student.fullName}</td><td>${r.student.admNo}</td><td>${r.student.class}-${r.student.section}</td><td>${r.dueMonths.join(", ")}</td><td>₹${r.dueAmount}</td></tr>`).join("")}<tr class="total"><td colspan="5">Grand Total</td><td>₹${dueRows.reduce((s, r) => s + r.dueAmount, 0)}</td></tr></tbody></table></body></html>`;
     const existing = document.getElementById(
       "shubh-print-frame",
     ) as HTMLIFrameElement | null;
@@ -174,9 +219,6 @@ export default function DueFees() {
     setWaStatus(`Sent: ${sent}, Failed: ${failed}`);
   }
 
-  const uniqueClasses = [
-    ...new Set((getData("students") as Student[]).map((s) => s.class)),
-  ].sort();
   const grandTotal = dueRows.reduce((s, r) => s + r.dueAmount, 0);
 
   return (
@@ -192,7 +234,6 @@ export default function DueFees() {
         </p>
       </div>
 
-      {/* Filters + Generate */}
       <div className="bg-card border border-border rounded-xl p-4 flex flex-wrap gap-3 items-end">
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-1">
@@ -205,9 +246,25 @@ export default function DueFees() {
             data-ocid="due-fees-class-filter"
           >
             <option value="">All Classes</option>
-            {uniqueClasses.map((c) => (
+            {[
+              "Nursery",
+              "LKG",
+              "UKG",
+              "Class 1",
+              "Class 2",
+              "Class 3",
+              "Class 4",
+              "Class 5",
+              "Class 6",
+              "Class 7",
+              "Class 8",
+              "Class 9",
+              "Class 10",
+              "Class 11",
+              "Class 12",
+            ].map((c) => (
               <option key={c} value={c}>
-                Class {c}
+                {c}
               </option>
             ))}
           </select>
@@ -225,15 +282,15 @@ export default function DueFees() {
           </div>
         </div>
         <Button
-          onClick={generate}
+          onClick={() => void generate()}
           data-ocid="generate-dues-btn"
           className="ml-auto"
+          disabled={generating}
         >
-          Generate Report
+          {generating ? "Generating…" : "Generate Report"}
         </Button>
       </div>
 
-      {/* Results */}
       {generated && (
         <div className="bg-card border border-border rounded-xl overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between flex-wrap gap-2">
@@ -268,7 +325,7 @@ export default function DueFees() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={handleWhatsAppReminder}
+                onClick={() => void handleWhatsAppReminder()}
                 disabled={waSending}
                 data-ocid="dues-whatsapp-btn"
               >

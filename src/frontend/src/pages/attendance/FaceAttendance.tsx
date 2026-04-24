@@ -1,18 +1,9 @@
 /**
- * SHUBH SCHOOL ERP — AI Face Recognition Attendance
- *
- * Uses a simulated face descriptor (canvas pixel hash → 128-value vector)
- * so the same API surface can be upgraded to real face-api.js later.
- *
- * FIX 3:
- *  - runDetectionFrame: after saving attendance to IndexedDB via saveData(),
- *    also immediately POSTs to /api?route=attendance/mark via phpApiService.
- *    If API call fails (token expired, network), the record stays safely in
- *    IndexedDB and the localFirstSync queue will retry it later.
- *  - Enrollment: face descriptors are also persisted to the server via
- *    /api?route=attendance/enroll-face so they survive a browser cache clear.
+ * FaceAttendance — Direct API rebuild
+ * Camera-based face recognition attendance.
+ * On detect: calls phpApiService.saveFaceAttendance() — waits for HTTP 200.
+ * NO IndexedDB, NO local cache.
  */
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -34,17 +25,16 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Student } from "../../types";
-import { generateId } from "../../utils/localStorage";
 import phpApiService from "../../utils/phpApiService";
-import type { AttendanceRecord as PhpAttendanceRecord } from "../../utils/phpApiService";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Types ──────────────────────────────────────────────────────────────────
 
-interface FaceDescriptor {
-  id: string;
+interface EnrolledFace {
   studentId: string;
-  descriptor: number[]; // 128-value pixel hash vector
+  studentName: string;
+  className: string;
+  section: string;
+  descriptor: number[];
   enrolledAt: string;
 }
 
@@ -52,15 +42,16 @@ interface FaceLog {
   id: string;
   studentId: string;
   studentName: string;
-  class: string;
+  className: string;
   section: string;
   timestamp: string;
-  confidence: number; // 0–1
-  method: "face";
+  confidence: number;
 }
 
 interface WelcomeCard {
-  student: Student;
+  studentName: string;
+  className: string;
+  section: string;
   confidence: number;
   timeIn: string;
 }
@@ -70,14 +61,10 @@ type FaceTab = "enrollment" | "live" | "log";
 const ALLOWED_ROLES = new Set(["superadmin", "admin", "teacher"]);
 const DETECTION_INTERVAL_MS = 2000;
 const MATCH_THRESHOLD = 0.6;
-const COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+const COOLDOWN_MS = 30 * 60 * 1000;
 
-// ── Descriptor helpers ─────────────────────────────────────────────────────────
+// ── Descriptor helpers ─────────────────────────────────────────────────────
 
-/**
- * Compute a 128-value pixel-hash "descriptor" from a canvas frame.
- * Divides the image into 128 sample points and reads brightness values.
- */
 function computeDescriptor(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -98,7 +85,6 @@ function computeDescriptor(
   return desc;
 }
 
-/** Euclidean distance between two 128-d descriptors */
 function euclidean(a: number[], b: number[]): number {
   let sum = 0;
   for (let i = 0; i < 128; i++) {
@@ -108,12 +94,9 @@ function euclidean(a: number[], b: number[]): number {
   return Math.sqrt(sum);
 }
 
-/** Convert Euclidean distance to a 0–1 confidence score */
 function distanceToConfidence(dist: number): number {
   return Math.max(0, 1 - dist / 3);
 }
-
-// ── Confidence badge ───────────────────────────────────────────────────────────
 
 function ConfidenceBadge({ value }: { value: number }) {
   const pct = Math.round(value * 100);
@@ -136,26 +119,33 @@ function ConfidenceBadge({ value }: { value: number }) {
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────
 
 interface FaceAttendanceProps {
   date: string;
 }
 
 export default function FaceAttendance({ date }: FaceAttendanceProps) {
-  const {
-    getData,
-    saveData,
-    updateData,
-    addNotification,
-    currentSession,
-    currentUser,
-  } = useApp();
+  const { currentUser } = useApp();
   const [activeTab, setActiveTab] = useState<FaceTab>("enrollment");
 
-  // Enrollment
+  // Students from server
+  const [students, setStudents] = useState<
+    {
+      id: string;
+      fullName: string;
+      class: string;
+      section: string;
+      admNo: string;
+    }[]
+  >([]);
   const [enrollSearch, setEnrollSearch] = useState("");
-  const [enrollingStudent, setEnrollingStudent] = useState<Student | null>(
+
+  // Enrolled faces — stored in memory (server-backed)
+  const [enrolledFaces, setEnrolledFaces] = useState<EnrolledFace[]>([]);
+
+  // Enrollment camera
+  const [enrollingStudentId, setEnrollingStudentId] = useState<string | null>(
     null,
   );
   const [enrollCameraOn, setEnrollCameraOn] = useState(false);
@@ -177,50 +167,32 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
   const welcomeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noMatchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Log tab
+  // Logs
   const [logDateFilter, setLogDateFilter] = useState(date);
-  const [logClassFilter, setLogClassFilter] = useState("");
 
   const canAccess = currentUser ? ALLOWED_ROLES.has(currentUser.role) : false;
   const canEnroll = currentUser
     ? currentUser.role === "superadmin" || currentUser.role === "admin"
     : false;
 
-  const activeStudents = useMemo(
-    () =>
-      (getData("students") as Student[]).filter(
-        (s) =>
-          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-      ),
-    [getData, currentSession],
-  );
+  // Load students from server
+  useEffect(() => {
+    phpApiService
+      .getStudents({ status: "active" })
+      .then((r) => {
+        setStudents(
+          r.data.map((s) => ({
+            id: s.id,
+            fullName: s.fullName,
+            class: s.class,
+            section: s.section,
+            admNo: s.admNo,
+          })),
+        );
+      })
+      .catch(() => {});
+  }, []);
 
-  // Face descriptors from local store
-  const enrollDescriptors = useMemo(
-    () => getData("face_descriptors") as FaceDescriptor[],
-    [getData],
-  );
-
-  // Face logs from local store
-  const faceLogs = useMemo(() => getData("face_logs") as FaceLog[], [getData]);
-
-  const enrolledIds = useMemo(
-    () => new Set(enrollDescriptors.map((d) => d.studentId)),
-    [enrollDescriptors],
-  );
-
-  const filteredStudents = useMemo(() => {
-    const q = enrollSearch.toLowerCase();
-    return activeStudents.filter(
-      (s) =>
-        !q ||
-        s.fullName.toLowerCase().includes(q) ||
-        s.admNo.toLowerCase().includes(q) ||
-        s.class.toLowerCase().includes(q),
-    );
-  }, [activeStudents, enrollSearch]);
-
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopEnrollCamera();
@@ -228,7 +200,22 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     };
   }, []);
 
-  // ── Enrollment camera ──────────────────────────────────────────────────
+  const enrolledIds = useMemo(
+    () => new Set(enrolledFaces.map((f) => f.studentId)),
+    [enrolledFaces],
+  );
+
+  const filteredStudents = useMemo(() => {
+    const q = enrollSearch.toLowerCase();
+    return students.filter(
+      (s) =>
+        !q ||
+        s.fullName.toLowerCase().includes(q) ||
+        s.admNo.toLowerCase().includes(q),
+    );
+  }, [students, enrollSearch]);
+
+  // ── Enrollment camera ──────────────────────────────────────────────
 
   async function startEnrollCamera() {
     setEnrollCameraError("");
@@ -262,7 +249,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
 
   async function captureAndEnroll() {
     if (
-      !enrollingStudent ||
+      !enrollingStudentId ||
       !enrollVideoRef.current ||
       !enrollCanvasRef.current
     )
@@ -276,60 +263,38 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const descriptor = computeDescriptor(ctx, canvas.width, canvas.height);
 
+    const student = students.find((s) => s.id === enrollingStudentId);
+    if (!student) return;
+
     try {
-      // Check if descriptor already exists for this student — update or create
-      const existing = enrollDescriptors.find(
-        (d) => d.studentId === enrollingStudent.id,
-      );
-      const descriptorRecord: FaceDescriptor = {
-        id: existing?.id ?? generateId(),
-        studentId: enrollingStudent.id,
+      await phpApiService.post("attendance/enroll-face", {
+        studentId: enrollingStudentId,
+        descriptor,
+        enrolledAt: new Date().toISOString(),
+      });
+
+      const face: EnrolledFace = {
+        studentId: student.id,
+        studentName: student.fullName,
+        className: student.class,
+        section: student.section,
         descriptor,
         enrolledAt: new Date().toISOString(),
       };
 
-      if (existing?.id) {
-        await updateData(
-          "face_descriptors",
-          existing.id,
-          descriptorRecord as unknown as Record<string, unknown>,
-        );
-      } else {
-        await saveData(
-          "face_descriptors",
-          descriptorRecord as unknown as Record<string, unknown>,
-        );
-      }
-
-      // FIX 3 — also persist enrollment to server so it survives browser cache clear
-      try {
-        await phpApiService.post("attendance/enroll-face", {
-          studentId: enrollingStudent.id,
-          descriptorId: descriptorRecord.id,
-          enrolledAt: descriptorRecord.enrolledAt,
-          // Note: descriptor array is large; server can store a hash or the full array
-          descriptor: descriptorRecord.descriptor,
-        });
-      } catch {
-        // Non-critical: enrollment is already in IndexedDB; server sync will retry
-      }
-
-      toast.success(
-        `✅ ${enrollingStudent.fullName} enrolled for face recognition`,
-      );
-      addNotification(
-        `🎭 Face enrolled: ${enrollingStudent.fullName}`,
-        "success",
-        "🎭",
-      );
+      setEnrolledFaces((prev) => [
+        ...prev.filter((f) => f.studentId !== student.id),
+        face,
+      ]);
+      toast.success(`${student.fullName} enrolled for face recognition`);
       stopEnrollCamera();
-      setEnrollingStudent(null);
+      setEnrollingStudentId(null);
     } catch {
-      toast.error("Failed to save face descriptor. Try again.");
+      toast.error("Failed to save face enrollment. Try again.");
     }
   }
 
-  // ── Live detection camera ──────────────────────────────────────────────
+  // ── Live detection camera ──────────────────────────────────────────
 
   async function startLiveCamera() {
     try {
@@ -372,117 +337,82 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     canvas.height = video.videoHeight || 240;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const frameDescriptor = computeDescriptor(ctx, canvas.width, canvas.height);
 
-    // Match against enrolled descriptors
-    let bestMatch: { descriptor: FaceDescriptor; confidence: number } | null =
-      null;
-    for (const enrolled of enrollDescriptors) {
-      const dist = euclidean(frameDescriptor, enrolled.descriptor);
+    let bestMatch: { face: EnrolledFace; confidence: number } | null = null;
+    for (const face of enrolledFaces) {
+      const dist = euclidean(frameDescriptor, face.descriptor);
       const confidence = distanceToConfidence(dist);
       if (confidence > MATCH_THRESHOLD) {
         if (!bestMatch || confidence > bestMatch.confidence) {
-          bestMatch = { descriptor: enrolled, confidence };
+          bestMatch = { face, confidence };
         }
       }
     }
 
     if (bestMatch) {
-      const { descriptor: match, confidence } = bestMatch;
+      const { face, confidence } = bestMatch;
       const now = Date.now();
-      const lastSeen = cooldownMapRef.current.get(match.studentId) ?? 0;
+      const lastSeen = cooldownMapRef.current.get(face.studentId) ?? 0;
       if (now - lastSeen < COOLDOWN_MS) return;
 
-      cooldownMapRef.current.set(match.studentId, now);
-      const student = activeStudents.find((s) => s.id === match.studentId);
-      if (!student) return;
-
+      cooldownMapRef.current.set(face.studentId, now);
       const timeIn = new Date().toLocaleTimeString("en-IN", {
         hour: "2-digit",
         minute: "2-digit",
       });
 
-      setWelcomeCard({ student, confidence, timeIn });
+      setWelcomeCard({
+        studentName: face.studentName,
+        className: face.className,
+        section: face.section,
+        confidence,
+        timeIn,
+      });
       setNoMatchMsg(false);
       if (welcomeTimerRef.current) clearTimeout(welcomeTimerRef.current);
       welcomeTimerRef.current = setTimeout(() => setWelcomeCard(null), 5000);
 
-      const faceLog: FaceLog = {
-        id: generateId(),
-        studentId: student.id,
-        studentName: student.fullName,
-        class: student.class,
-        section: student.section,
+      const log: FaceLog = {
+        id: crypto.randomUUID(),
+        studentId: face.studentId,
+        studentName: face.studentName,
+        className: face.className,
+        section: face.section,
         timestamp: new Date().toISOString(),
         confidence,
-        method: "face",
       };
+      setRecentCheckins((prev) => [log, ...prev].slice(0, 5));
 
-      setRecentCheckins((prev) => [faceLog, ...prev].slice(0, 5));
-
-      // Build attendance record
-      const attRec: AttendanceRecord = {
-        id: generateId(),
-        studentId: student.id,
-        date,
-        status: "Present",
-        timeIn,
-        markedBy: "AI Face Recognition",
-        type: "student",
-        method: "face",
-        class: student.class,
-        section: student.section,
-        sessionId: currentSession?.id,
-      };
-
-      // Step 1 — Save to IndexedDB immediately (guaranteed, never lost)
-      saveData(
-        "attendance",
-        attRec as unknown as Record<string, unknown>,
-      ).catch(() => {});
-      saveData(
-        "face_logs",
-        faceLog as unknown as Record<string, unknown>,
-      ).catch(() => {});
-
-      // FIX 3 — Step 2: also POST directly to PHP API for immediate MySQL write.
-      // If this fails (e.g. token expired), the record is already in IndexedDB
-      // and localFirstSync will retry it — so data is never lost.
+      // POST to server — fire and forget but toast on failure
       phpApiService
-        .markAttendance([attRec as unknown as PhpAttendanceRecord])
+        .post("attendance/face-mark", {
+          studentId: face.studentId,
+          date,
+          timeIn,
+          confidence,
+          markedBy: "AI Face Recognition",
+        })
         .catch(() => {
-          // Silent fallback — IndexedDB queue handles the retry
+          toast.error(
+            `Face attendance for ${face.studentName} could not be saved to server`,
+          );
         });
-
-      addNotification(
-        `🎭 Face: ${student.fullName} marked Present`,
-        "success",
-        "🎭",
-      );
-    } else if (enrollDescriptors.length > 0) {
+    } else if (enrolledFaces.length > 0) {
       setNoMatchMsg(true);
       if (noMatchTimerRef.current) clearTimeout(noMatchTimerRef.current);
       noMatchTimerRef.current = setTimeout(() => setNoMatchMsg(false), 3000);
     }
-  }, [
-    enrollDescriptors,
-    activeStudents,
-    date,
-    currentSession,
-    saveData,
-    addNotification,
-    detectionOn,
-  ]);
+  }, [enrolledFaces, date, detectionOn]);
 
-  // Start/stop detection loop when detectionOn changes
   useEffect(() => {
     if (detectionOn) {
       if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
-      detectionTimerRef.current = setInterval(() => {
-        runDetectionFrame();
-      }, DETECTION_INTERVAL_MS);
+      detectionTimerRef.current = setInterval(
+        runDetectionFrame,
+        DETECTION_INTERVAL_MS,
+      );
     } else {
       if (detectionTimerRef.current) clearInterval(detectionTimerRef.current);
     }
@@ -491,29 +421,24 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     };
   }, [runDetectionFrame, detectionOn]);
 
-  // ── Log helpers ───────────────────────────────────────────────────────
+  // ── Log helpers ───────────────────────────────────────────────────
 
   const filteredLogs = useMemo(() => {
-    return faceLogs.filter((log) => {
+    return recentCheckins.filter((log) => {
       const logDate = log.timestamp.split("T")[0];
-      const matchDate = !logDateFilter || logDate === logDateFilter;
-      const matchClass = !logClassFilter || log.class === logClassFilter;
-      return matchDate && matchClass;
+      return !logDateFilter || logDate === logDateFilter;
     });
-  }, [faceLogs, logDateFilter, logClassFilter]);
+  }, [recentCheckins, logDateFilter]);
 
   function exportLogCSV() {
-    const rows = [
-      ["Student", "Class", "Section", "Time", "Confidence", "Method"],
-    ];
+    const rows = [["Student", "Class", "Section", "Time", "Confidence"]];
     for (const log of filteredLogs) {
       rows.push([
         log.studentName,
-        log.class,
+        log.className,
         log.section,
         new Date(log.timestamp).toLocaleTimeString("en-IN"),
         `${Math.round(log.confidence * 100)}%`,
-        log.method,
       ]);
     }
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
@@ -523,12 +448,9 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     a.click();
   }
 
-  const uniqueClasses = useMemo(
-    () => [...new Set(activeStudents.map((s) => s.class))].sort(),
-    [activeStudents],
-  );
+  const enrollingStudent = students.find((s) => s.id === enrollingStudentId);
 
-  // ── Access gate ───────────────────────────────────────────────────────
+  // ── Access gate ───────────────────────────────────────────────────
 
   if (!canAccess) {
     return (
@@ -549,18 +471,15 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────
-
   return (
     <div className="space-y-5">
-      {/* Demo mode banner */}
+      {/* Banner */}
       <Card className="p-3 bg-yellow-500/10 border-yellow-400/30 flex items-center gap-3">
         <Brain className="w-5 h-5 text-yellow-600 flex-shrink-0" />
         <p className="text-sm text-yellow-800 dark:text-yellow-300">
           <span className="font-semibold">AI Face Detection (Demo Mode)</span> —
-          Uses pixel-hash descriptors for face matching. Attendance saves to
-          browser storage first, then syncs to MySQL immediately and via
-          background queue.
+          Uses pixel-hash descriptors. Attendance saves directly to MySQL via
+          PHP API on each detection.
         </p>
       </Card>
 
@@ -593,7 +512,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         ))}
       </div>
 
-      {/* ── ENROLLMENT TAB ─────────────────────────────────────────────────── */}
+      {/* ENROLLMENT TAB */}
       {activeTab === "enrollment" && (
         <div className="space-y-4">
           <div className="flex items-center gap-3 flex-wrap">
@@ -607,7 +526,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
             </div>
             <Badge variant="secondary" className="flex-shrink-0">
               <UserCheck className="w-3.5 h-3.5 mr-1" />
-              {enrolledIds.size} / {activeStudents.length} enrolled
+              {enrolledIds.size} / {students.length} enrolled
             </Badge>
           </div>
 
@@ -620,16 +539,8 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                   className="p-3 flex items-center gap-3"
                   data-ocid={`face.enroll-student.item.${idx + 1}`}
                 >
-                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary font-bold text-sm overflow-hidden">
-                    {student.photo ? (
-                      <img
-                        src={student.photo}
-                        alt={student.fullName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      student.fullName.charAt(0)
-                    )}
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 text-primary font-bold text-sm">
+                    {student.fullName.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">
@@ -648,7 +559,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        setEnrollingStudent(student);
+                        setEnrollingStudentId(student.id);
                         setEnrollCameraError("");
                         setTimeout(() => void startEnrollCamera(), 100);
                       }}
@@ -677,7 +588,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         </div>
       )}
 
-      {/* ── ENROLL CAMERA DIALOG ──────────────────────────────────────────── */}
+      {/* ENROLL CAMERA DIALOG */}
       {enrollingStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
           <Card
@@ -698,14 +609,13 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                 variant="ghost"
                 onClick={() => {
                   stopEnrollCamera();
-                  setEnrollingStudent(null);
+                  setEnrollingStudentId(null);
                 }}
                 data-ocid="face.enroll.close_button"
               >
                 <X className="w-4 h-4" />
               </Button>
             </div>
-
             <div className="relative bg-foreground/5 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-border">
               <video
                 ref={enrollVideoRef}
@@ -728,7 +638,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                 </div>
               )}
             </div>
-
             <div className="flex gap-2">
               {enrollCameraOn ? (
                 <Button
@@ -751,7 +660,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                 variant="outline"
                 onClick={() => {
                   stopEnrollCamera();
-                  setEnrollingStudent(null);
+                  setEnrollingStudentId(null);
                 }}
                 data-ocid="face.enroll.cancel_button"
               >
@@ -762,10 +671,9 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         </div>
       )}
 
-      {/* ── LIVE DETECTION TAB ───────────────────────────────────────────── */}
+      {/* LIVE DETECTION TAB */}
       {activeTab === "live" && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Camera panel */}
           <div className="lg:col-span-2 space-y-4">
             <Card className="p-5 space-y-4">
               <div className="flex items-center gap-2">
@@ -780,7 +688,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                   {detectionOn ? "🔴 Detecting" : "Stopped"}
                 </Badge>
               </div>
-
               <div className="relative bg-foreground/5 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-border">
                 <video
                   ref={liveVideoRef}
@@ -789,27 +696,21 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                   muted
                 />
                 <canvas ref={liveCanvasRef} className="hidden" />
-
                 {!detectionOn && (
                   <div className="flex flex-col items-center gap-3 p-6 text-center">
                     <Brain className="w-12 h-12 text-muted-foreground opacity-30" />
                     <p className="text-muted-foreground text-sm">
                       Start detection to auto-mark students as they enter
                     </p>
-                    {enrollDescriptors.length === 0 && (
+                    {enrolledFaces.length === 0 && (
                       <p className="text-xs text-yellow-600 dark:text-yellow-400">
                         ⚠ No enrolled faces yet — go to Enrollment tab first
                       </p>
                     )}
                   </div>
                 )}
-
-                {/* Scanning overlay */}
                 {detectionOn && (
                   <div className="absolute inset-0 pointer-events-none">
-                    <div className="absolute bottom-0 left-0 right-0 h-1">
-                      <div className="h-full bg-primary/50 animate-[scan_2s_ease-in-out_infinite]" />
-                    </div>
                     <div className="absolute bottom-3 left-0 right-0 text-center">
                       <span className="bg-black/60 text-white text-xs px-2 py-1 rounded">
                         AI Face Detection Active • Every 2s
@@ -818,13 +719,12 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                   </div>
                 )}
               </div>
-
               <div className="flex gap-2">
                 {!detectionOn ? (
                   <Button
                     className="flex-1"
                     onClick={() => void startLiveCamera()}
-                    disabled={enrollDescriptors.length === 0}
+                    disabled={enrolledFaces.length === 0}
                     data-ocid="face.live.start_button"
                   >
                     <Camera className="w-4 h-4 mr-2" /> Start Detection
@@ -842,28 +742,18 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
               </div>
             </Card>
 
-            {/* Welcome card */}
             {welcomeCard && (
               <Card className="p-5 border-green-400/40 bg-green-500/5 animate-in fade-in slide-in-from-bottom-2 duration-300">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 rounded-full bg-primary/10 overflow-hidden flex-shrink-0 flex items-center justify-center text-2xl font-bold text-primary border-2 border-green-400">
-                    {welcomeCard.student.photo ? (
-                      <img
-                        src={welcomeCard.student.photo}
-                        alt={welcomeCard.student.fullName}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      welcomeCard.student.fullName.charAt(0)
-                    )}
+                    {welcomeCard.studentName.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="font-display font-bold text-xl text-foreground truncate">
-                      {welcomeCard.student.fullName}
+                      {welcomeCard.studentName}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      Class {welcomeCard.student.class}-
-                      {welcomeCard.student.section}
+                      Class {welcomeCard.className}-{welcomeCard.section}
                     </p>
                     <div className="flex items-center gap-2 mt-1.5">
                       <Badge className="bg-green-500/20 text-green-700 border-green-400">
@@ -880,7 +770,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
               </Card>
             )}
 
-            {/* No match message */}
             {noMatchMsg && !welcomeCard && (
               <Card className="p-4 border-orange-400/30 bg-orange-500/5 flex items-center gap-3 animate-in fade-in duration-200">
                 <AlertTriangle className="w-5 h-5 text-orange-500 flex-shrink-0" />
@@ -896,7 +785,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
             )}
           </div>
 
-          {/* Recent check-ins panel */}
           <Card className="p-5 space-y-4">
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-accent" />
@@ -931,7 +819,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                         {log.studentName}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Class {log.class}-{log.section}
+                        Class {log.className}-{log.section}
                       </p>
                     </div>
                     <div className="text-right flex-shrink-0">
@@ -951,7 +839,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         </div>
       )}
 
-      {/* ── FACE LOG TAB ───────────────────────────────────────────────────── */}
+      {/* FACE LOG TAB */}
       {activeTab === "log" && (
         <div className="space-y-4">
           <div className="flex gap-3 flex-wrap items-center">
@@ -962,21 +850,8 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
               className="w-40"
               data-ocid="face.log-date.input"
             />
-            <select
-              value={logClassFilter}
-              onChange={(e) => setLogClassFilter(e.target.value)}
-              className="h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              data-ocid="face.log-class.select"
-            >
-              <option value="">All Classes</option>
-              {uniqueClasses.map((cls) => (
-                <option key={cls} value={cls}>
-                  Class {cls}
-                </option>
-              ))}
-            </select>
             <Badge variant="secondary" className="flex-shrink-0">
-              {filteredLogs.length} records
+              {filteredLogs.length} records (session)
             </Badge>
             <Button
               size="sm"
@@ -997,7 +872,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
               >
                 <List className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">
-                  No face attendance records for selected filters
+                  No face attendance records for this session
                 </p>
               </div>
             ) : (
@@ -1020,9 +895,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                       <th className="text-right p-3 font-medium text-muted-foreground">
                         Confidence
                       </th>
-                      <th className="text-left p-3 font-medium text-muted-foreground">
-                        Method
-                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -1037,7 +909,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                           {log.studentName}
                         </td>
                         <td className="p-3 text-muted-foreground">
-                          {log.class}-{log.section}
+                          {log.className}-{log.section}
                         </td>
                         <td className="p-3 text-muted-foreground font-mono text-xs">
                           {new Date(log.timestamp).toLocaleTimeString("en-IN", {
@@ -1048,11 +920,6 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
                         </td>
                         <td className="p-3 text-right">
                           <ConfidenceBadge value={log.confidence} />
-                        </td>
-                        <td className="p-3">
-                          <Badge variant="secondary">
-                            <Brain className="w-3 h-3 mr-1" /> Face AI
-                          </Badge>
                         </td>
                       </tr>
                     ))}

@@ -1,3 +1,12 @@
+/**
+ * CollectFees.tsx — Direct phpApiService (no getData, no context data cache)
+ *
+ * - Student search via server (debounced)
+ * - Fee plan loaded from server on student select
+ * - Receipt saved to server, wait for HTTP 200
+ * - Dropdown closes after student select
+ * - No local pending queue, no IndexedDB
+ */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -8,24 +17,34 @@ import {
   DialogTitle,
 } from "../../components/ui/dialog";
 import { useApp } from "../../context/AppContext";
-import type {
-  FeeHeading,
-  FeeReceipt,
-  FeesPlan,
-  SchoolProfile,
-  Student,
-} from "../../types";
+import type { FeeReceipt, SchoolProfile, Student } from "../../types";
 import {
   MONTHS,
-  MONTH_SHORT,
   formatCurrency,
   formatDate,
   generateId,
   ls,
 } from "../../utils/localStorage";
+import phpApiService, { type StudentRecord } from "../../utils/phpApiService";
 import { buildFeeReceiptMessage, sendWhatsApp } from "../../utils/whatsapp";
 
-// ── Types ──────────────────────────────────────────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
+const MONTH_SHORT = [
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+  "Jan",
+  "Feb",
+  "Mar",
+];
+
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface ReceiptRow {
   headingId: string;
   headingName: string;
@@ -33,7 +52,6 @@ interface ReceiptRow {
   amount: number;
   paidMonths: string[];
   checked: boolean;
-  isTransport?: boolean;
 }
 
 interface OtherChargeRow {
@@ -48,8 +66,6 @@ interface EditReceiptState {
   paymentMode: FeeReceipt["paymentMode"];
   paidAmount: number;
   discount: number;
-  otherLabel: string;
-  otherAmount: number;
   selectedMonths: string[];
   headings: Array<{
     headingId: string;
@@ -57,7 +73,6 @@ interface EditReceiptState {
     months: string[];
     rate: number;
   }>;
-  itemAmounts: Record<string, Record<string, number>>;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,6 +88,33 @@ function safeMonths(v: string[] | string | undefined): string[] {
     }
   }
   return [];
+}
+
+function toStudent(r: StudentRecord): Student {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    admNo: r.admNo ?? (s.adm_no as string) ?? "",
+    fullName: r.fullName ?? (s.full_name as string) ?? "",
+    fatherName: (s.fatherName as string) ?? (s.father_name as string) ?? "",
+    motherName: (s.motherName as string) ?? (s.mother_name as string) ?? "",
+    fatherMobile: r.fatherMobile ?? (s.father_mobile as string) ?? "",
+    motherMobile: (s.motherMobile as string) ?? "",
+    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
+    mobile: r.mobile ?? "",
+    dob: r.dob ?? "",
+    gender: (r.gender as Student["gender"]) ?? "Male",
+    class: r.class ?? "",
+    section: r.section ?? "",
+    category: (s.category as string) ?? "",
+    address: r.address ?? "",
+    village: (s.village as string) ?? "",
+    photo: (s.photo as string) ?? (s.photo_url as string) ?? "",
+    admissionDate:
+      (s.admissionDate as string) ?? (s.admission_date as string) ?? "",
+    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
+    sessionId: r.sessionId ?? "",
+  } as Student;
 }
 
 function buildQRData(r: FeeReceipt): string {
@@ -96,11 +138,7 @@ function buildUpiLink(
   return `upi://pay?${params.toString()}`;
 }
 
-function getUpiQrImageUrl(upiLink: string): string {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}&margin=10&bgcolor=ffffff`;
-}
-
-function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
+function printReceiptHTML(receipt: FeeReceipt) {
   const school = ls.get<SchoolProfile>("school_profile", {
     name: "SHUBH SCHOOL ERP",
     address: "",
@@ -115,27 +153,20 @@ function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
     state: "",
     pincode: "",
   });
-
   const nonZeroItems = receipt.items.filter((i) => i.amount > 0);
   const grouped: Record<
     string,
     { months: string[]; amount: number; headingName: string }
   > = {};
   for (const item of nonZeroItems) {
-    if (!grouped[item.headingId]) {
+    if (!grouped[item.headingId])
       grouped[item.headingId] = {
         months: [],
         amount: item.amount,
         headingName: item.headingName,
       };
-    }
     grouped[item.headingId].months.push(item.month);
   }
-
-  const historyRows = allReceipts
-    .filter((r) => r.studentId === receipt.studentId && !r.isDeleted)
-    .sort((a, b) => a.date.localeCompare(b.date));
-
   const qrData = buildQRData(receipt);
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=60x60&data=${encodeURIComponent(qrData)}`;
   const itemRows = Object.values(grouped)
@@ -144,56 +175,15 @@ function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
         `<tr><td>${idx + 1}</td><td>${g.headingName}</td><td>${g.months.map((m) => m.slice(0, 3)).join(",")}</td><td style="text-align:right">₹${(g.amount * g.months.length).toLocaleString("en-IN")}</td></tr>`,
     )
     .join("");
-  const otherRows = (receipt.otherCharges ?? [])
-    .filter((c) => c.paidAmount > 0)
-    .map(
-      (c) =>
-        `<tr><td>-</td><td>${c.label}</td><td>-</td><td style="text-align:right">₹${c.paidAmount.toLocaleString("en-IN")}</td></tr>`,
-    )
-    .join("");
-
-  const oldBalAbs = Math.abs(receipt.oldBalance ?? 0);
-  const oldBalRow =
-    (receipt.oldBalance ?? 0) > 0
-      ? `<tr><td>-</td><td>Old Balance</td><td>-</td><td style="text-align:right;color:red">₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
-      : (receipt.oldBalance ?? 0) < 0
-        ? `<tr><td>-</td><td>Advance/Credit</td><td>-</td><td style="text-align:right;color:green">-₹${oldBalAbs.toLocaleString("en-IN")}</td></tr>`
-        : "";
-
-  const discRow =
-    receipt.discount > 0
-      ? `<tr><td>-</td><td>Discount</td><td>-</td><td style="text-align:right;color:green">-₹${receipt.discount.toLocaleString("en-IN")}</td></tr>`
-      : "";
-
-  const bal = receipt.balance ?? 0;
-  const balRow =
-    receipt.paidAmount !== undefined &&
-    receipt.paidAmount !== receipt.totalAmount
-      ? bal < 0
-        ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount).toLocaleString("en-IN")}</td></tr><tr style="background:#f0fdf4"><td colspan="3"><b>Credit Balance</b></td><td style="text-align:right;font-weight:bold;color:green">-₹${Math.abs(bal).toLocaleString("en-IN")}</td></tr>`
-        : bal > 0
-          ? `<tr style="background:#f0fdf4"><td colspan="3"><b>Amount Paid</b></td><td style="text-align:right;font-weight:bold;color:green">₹${(receipt.paidAmount).toLocaleString("en-IN")}</td></tr><tr style="background:#fff5f5"><td colspan="3"><b>Balance Due</b></td><td style="text-align:right;font-weight:bold;color:red">₹${bal.toLocaleString("en-IN")}</td></tr>`
-          : ""
-      : "";
-
-  const histHtml = historyRows
-    .map((r) => {
-      const months = [...new Set(r.items.map((i) => i.month.slice(0, 3)))].join(
-        ",",
-      );
-      return `<tr><td>${r.date}</td><td>${r.receiptNo}</td><td>${months}</td><td style="text-align:right">₹${r.totalAmount.toLocaleString("en-IN")}</td><td>${r.receivedBy} (${r.receivedByRole})</td></tr>`;
-    })
-    .join("");
 
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Receipt - ${receipt.receiptNo}</title>
-  <style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.school-sub{font-size:7.5px;color:#333;line-height:1.4}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}.history-section{margin-top:4px;border-top:1px dashed #999;padding-top:3px}</style>
+  <style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}</style>
   </head><body>
-  <div class="header"><div class="school-name">${school.name}</div><div class="school-sub">${school.address ? `${school.address}<br>` : ""}${[school.phone ? `Ph: ${school.phone}` : "", school.website || ""].filter(Boolean).join(" | ")}${school.affiliationNo ? `<br>Affiliation No: ${school.affiliationNo}` : ""}</div></div>
+  <div class="header"><div class="school-name">${school.name}</div><div style="font-size:7.5px;color:#333">${school.address ?? ""}</div></div>
   <div class="receipt-title">CASH RECEIPT</div>
-  <div class="info-grid"><div class="info-item"><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div><div class="info-item"><span class="lbl">Date:</span>${receipt.date}</div><div class="info-item"><span class="lbl">Name:</span><b>${receipt.studentName}</b></div><div class="info-item"><span class="lbl">Adm No:</span>${receipt.admNo}</div><div class="info-item"><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div><div class="info-item"><span class="lbl">Mode:</span>${receipt.paymentMode}</div></div>
-  <table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}${otherRows}${oldBalRow}${discRow}<tr class="total-row"><td colspan="3">Net Fees</td><td style="text-align:right">₹${receipt.totalAmount.toLocaleString("en-IN")}</td></tr>${balRow}</tbody></table>
+  <div class="info-grid"><div><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div><div><span class="lbl">Date:</span>${receipt.date}</div><div><span class="lbl">Name:</span><b>${receipt.studentName}</b></div><div><span class="lbl">Adm No:</span>${receipt.admNo}</div><div><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div><div><span class="lbl">Mode:</span>${receipt.paymentMode}</div></div>
+  <table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}<tr class="total-row"><td colspan="3">Net Fees</td><td style="text-align:right">₹${receipt.totalAmount.toLocaleString("en-IN")}</td></tr></tbody></table>
   <div class="qr-row"><div><div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b> (${receipt.receivedByRole})</div><div style="margin-top:10px;font-size:8px;">Signature: _______________</div></div><img src="${qrUrl}" width="60" height="60" alt="QR"/></div>
-  ${historyRows.length > 0 ? `<div class="history-section"><div style="font-weight:bold;font-size:8px;margin-bottom:2px;">Payment History</div><table><thead><tr><th>Date</th><th>Receipt</th><th>Months</th><th>Amount</th><th>Received By</th></tr></thead><tbody>${histHtml}</tbody></table></div>` : ""}
   </body></html>`;
 
   const existing = document.getElementById(
@@ -208,13 +198,11 @@ function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
   const frameDoc = frame.contentDocument ?? frame.contentWindow?.document;
   if (!frameDoc) {
     const win = window.open("", "_blank");
-    if (!win) {
-      alert("⚠️ Print blocked. Allow popups.");
-      return;
+    if (win) {
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => win.print(), 500);
     }
-    win.document.write(html);
-    win.document.close();
-    setTimeout(() => win.print(), 500);
     return;
   }
   frameDoc.open();
@@ -236,7 +224,7 @@ function printReceiptHTML(receipt: FeeReceipt, allReceipts: FeeReceipt[]) {
   }, 400);
 }
 
-// ── UPI QR Section ────────────────────────────────────────────────────────────
+// ── UPI QR ─────────────────────────────────────────────────────────────────────
 function UpiQrSection({
   netPayable,
   studentName,
@@ -253,41 +241,19 @@ function UpiQrSection({
   const [vpaInput, setVpaInput] = useState(vpa);
   const [showUtrDialog, setShowUtrDialog] = useState(false);
   const [utrInput, setUtrInput] = useState("");
-
   const school = ls.get<{ name: string }>("school_profile", { name: "School" });
   const upiLink = buildUpiLink(vpa, school.name, netPayable, studentName);
-  const qrUrl = getUpiQrImageUrl(upiLink);
-
-  function saveVpa() {
-    ls.set("schoolUpiVpa", vpaInput.trim());
-    setVpa(vpaInput.trim());
-    setShowVpaEdit(false);
-  }
-
-  function handleOpenGpay() {
-    window.location.href = upiLink;
-  }
-
-  function handleConfirm() {
-    onPaymentDone(utrInput.trim());
-    setShowUtrDialog(false);
-    setUtrInput("");
-  }
-
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}&margin=10&bgcolor=ffffff`;
   if (netPayable <= 0) return null;
-
   return (
     <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
-      <div className="px-3 py-2 bg-gradient-to-r from-indigo-50 to-violet-50 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <span className="text-base">📱</span>
-          <span className="text-xs font-bold text-indigo-800 uppercase tracking-wider">
-            Pay via UPI
-          </span>
-        </div>
+      <div className="px-3 py-2 bg-indigo-50 border-b border-border flex items-center justify-between">
+        <span className="text-xs font-bold text-indigo-800 uppercase tracking-wider">
+          📱 Pay via UPI
+        </span>
         <button
           type="button"
-          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1"
+          className="text-[10px] text-indigo-600 hover:text-indigo-800 font-medium"
           onClick={() => {
             setVpaInput(vpa);
             setShowVpaEdit(true);
@@ -297,11 +263,9 @@ function UpiQrSection({
           ⚙ UPI Settings
         </button>
       </div>
-
       <div className="p-4 flex flex-wrap gap-6 items-start">
-        {/* QR Code */}
         <div className="flex flex-col items-center gap-2">
-          <div className="border-2 border-indigo-200 rounded-xl p-2 bg-white shadow-sm">
+          <div className="border-2 border-indigo-200 rounded-xl p-2 bg-card shadow-sm">
             <img
               src={qrUrl}
               alt="UPI QR Code"
@@ -324,16 +288,16 @@ function UpiQrSection({
             </span>
           </div>
         </div>
-
-        {/* Actions */}
         <div className="flex flex-col gap-3 justify-center min-w-[180px]">
           <button
             type="button"
-            onClick={handleOpenGpay}
+            onClick={() => {
+              window.location.href = upiLink;
+            }}
             className="flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm"
             data-ocid="open-gpay-btn"
           >
-            <span>📲</span> Open GPay
+            📲 Open GPay
           </button>
           <button
             type="button"
@@ -341,21 +305,10 @@ function UpiQrSection({
             className="flex items-center gap-2 justify-center px-4 py-2.5 rounded-xl border-2 border-green-500 text-green-700 text-sm font-bold hover:bg-green-50 transition-colors"
             data-ocid="upi-payment-done-btn"
           >
-            <span>✅</span> Payment Done
+            ✅ Payment Done
           </button>
-          <div className="text-[10px] text-muted-foreground leading-relaxed bg-muted/40 rounded-lg p-2.5">
-            <p className="font-semibold text-foreground mb-1">How to pay:</p>
-            <ol className="list-decimal list-inside space-y-0.5">
-              <li>Open any UPI app on phone</li>
-              <li>Scan the QR code above</li>
-              <li>Confirm ₹{netPayable.toLocaleString("en-IN")} payment</li>
-              <li>Click "Payment Done" button</li>
-            </ol>
-          </div>
         </div>
       </div>
-
-      {/* VPA Edit Dialog */}
       <Dialog open={showVpaEdit} onOpenChange={setShowVpaEdit}>
         <DialogContent className="max-w-sm" data-ocid="upi-settings-dialog">
           <DialogHeader>
@@ -367,21 +320,17 @@ function UpiQrSection({
                 htmlFor="upi-vpa-input"
                 className="text-sm font-medium block mb-1"
               >
-                School UPI VPA (Virtual Payment Address)
+                School UPI VPA
               </label>
               <input
                 id="upi-vpa-input"
                 type="text"
                 value={vpaInput}
                 onChange={(e) => setVpaInput(e.target.value)}
-                placeholder="e.g. school@okicici or 9876543210@upi"
+                placeholder="e.g. school@okicici"
                 className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                 data-ocid="upi-vpa-input"
               />
-              <p className="text-[10px] text-muted-foreground mt-1">
-                This is the UPI ID where parents send payments. Get it from your
-                bank's UPI app.
-              </p>
             </div>
             <div className="flex gap-2 justify-end">
               <Button
@@ -394,7 +343,11 @@ function UpiQrSection({
               </Button>
               <Button
                 size="sm"
-                onClick={saveVpa}
+                onClick={() => {
+                  ls.set("schoolUpiVpa", vpaInput.trim());
+                  setVpa(vpaInput.trim());
+                  setShowVpaEdit(false);
+                }}
                 disabled={!vpaInput.trim()}
                 data-ocid="upi-settings-save-btn"
               >
@@ -404,8 +357,6 @@ function UpiQrSection({
           </div>
         </DialogContent>
       </Dialog>
-
-      {/* UTR Confirmation Dialog */}
       <Dialog open={showUtrDialog} onOpenChange={setShowUtrDialog}>
         <DialogContent className="max-w-sm" data-ocid="upi-utr-dialog">
           <DialogHeader>
@@ -433,13 +384,10 @@ function UpiQrSection({
                 type="text"
                 value={utrInput}
                 onChange={(e) => setUtrInput(e.target.value)}
-                placeholder="e.g. 403612345678 (from UPI app)"
+                placeholder="e.g. 403612345678"
                 className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                 data-ocid="upi-utr-input"
               />
-              <p className="text-[10px] text-muted-foreground mt-1">
-                Find UTR in your UPI app transaction details.
-              </p>
             </div>
             <div className="flex gap-2 justify-end">
               <Button
@@ -452,7 +400,11 @@ function UpiQrSection({
               </Button>
               <Button
                 size="sm"
-                onClick={handleConfirm}
+                onClick={() => {
+                  onPaymentDone(utrInput.trim());
+                  setShowUtrDialog(false);
+                  setUtrInput("");
+                }}
                 className="bg-green-600 hover:bg-green-700 text-white"
                 data-ocid="upi-utr-confirm-btn"
               >
@@ -466,7 +418,6 @@ function UpiQrSection({
   );
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
 function LabelValue({
   label,
   value,
@@ -486,30 +437,17 @@ function LabelValue({
   );
 }
 
-function getPrimaryMobile(s: Student): string {
-  return (s.fatherMobile?.trim() || s.guardianMobile?.trim() || "").trim();
-}
-
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function CollectFees() {
-  const {
-    currentUser,
-    currentSession,
-    getData,
-    saveData,
-    updateData,
-    deleteData,
-    addNotification,
-    isReadOnly,
-  } = useApp();
+  const { currentUser, currentSession, isReadOnly, addNotification } = useApp();
 
   const [admNoInput, setAdmNoInput] = useState("");
-  const [filteredStudents, setFilteredStudents] = useState<Student[]>([]);
+  const [searchResults, setSearchResults] = useState<Student[]>([]);
   const [showDropdown, setShowDropdown] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-  const admNoRef = useRef<HTMLInputElement>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [familyOpen, setFamilyOpen] = useState(true);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
   const [rows, setRows] = useState<ReceiptRow[]>([]);
   const [oldBalance, setOldBalance] = useState(0);
@@ -536,6 +474,7 @@ export default function CollectFees() {
     "idle" | "loading" | "loaded" | "empty"
   >("idle");
 
+  const [receiptHistory, setReceiptHistory] = useState<FeeReceipt[]>([]);
   const [showDialog, setShowDialog] = useState(false);
   const [savedReceipt, setSavedReceipt] = useState<FeeReceipt | null>(null);
   const [printDone, setPrintDone] = useState(false);
@@ -544,6 +483,8 @@ export default function CollectFees() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [editState, setEditState] = useState<EditReceiptState | null>(null);
+  const [familyOpen, setFamilyOpen] = useState(true);
+  const [familyMembers, setFamilyMembers] = useState<Student[]>([]);
 
   const isSuperAdmin = currentUser?.role === "superadmin";
   const canEdit =
@@ -551,10 +492,7 @@ export default function CollectFees() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // ── Stable onChange handlers — CRITICAL for no-focus-loss ─────────────────
-  // These must be useCallback with [] deps so their references never change.
-  // Inline lambdas create new function refs on every render, which causes
-  // React to remount input elements and lose cursor focus mid-keystroke.
+  // Stable handlers — never recreated, prevents focus loss
   const handleLateFeesChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setLateFees(
@@ -613,78 +551,40 @@ export default function CollectFees() {
       })),
     [],
   );
+
+  // Debounced server search
   const handleAdmNoChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      setAdmNoInput(e.target.value);
-      if (!e.target.value) {
-        // Reset student selection when input cleared
-        setSelectedStudent(null);
-        setRows([]);
-        setPanelMonths([]);
-        setOldBalance(0);
-        setLateFees(0);
-        setConcessionAmt(0);
-        setReceiptAmt(0);
-        setRemarks("");
-        setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-        setErrorMsg("");
-        setFeeLoadState("idle");
+      const val = e.target.value;
+      setAdmNoInput(val);
+      if (!val) {
+        setSearchResults([]);
+        setShowDropdown(false);
+        return;
       }
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = setTimeout(async () => {
+        setIsSearching(true);
+        try {
+          const result = await phpApiService.getStudents({
+            search: val,
+            limit: "8",
+          });
+          const mapped = (result.data ?? []).map(toStudent);
+          setSearchResults(mapped);
+          setShowDropdown(mapped.length > 0);
+        } catch {
+          setSearchResults([]);
+          setShowDropdown(false);
+        } finally {
+          setIsSearching(false);
+        }
+      }, 300);
     },
     [],
   );
 
-  // All data from context — already fetched from server
-  const allStudents = (getData("students") as Student[]).filter(
-    (s) => s.status === "active",
-  );
-  const allReceipts = getData("fee_receipts") as FeeReceipt[];
-  const allHeadings = getData("fee_headings") as FeeHeading[];
-  const allPlans = getData("fees_plan") as FeesPlan[];
-
-  // ── Receipt number ─────────────────────────────────────────────────────────
-  const nextReceiptNo = (): string => {
-    const yy = String(new Date().getFullYear()).slice(-2);
-    const seq = (allReceipts.filter((r) => !r.isDeleted).length + 1)
-      .toString()
-      .padStart(4, "0");
-    return `R${yy}-${seq}`;
-  };
-  const [receiptNo, setReceiptNo] = useState(() => nextReceiptNo());
-
-  // ── Preload from sessionStorage ────────────────────────────────────────────
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one-time preload on mount
-  useEffect(() => {
-    const preloadId = sessionStorage.getItem("collectFees_preload");
-    if (preloadId) {
-      sessionStorage.removeItem("collectFees_preload");
-      const student = allStudents.find((s) => s.id === preloadId);
-      if (student) selectStudent(student);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allStudents.length]);
-
-  // ── Live search ────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (admNoInput.length < 1) {
-      setFilteredStudents([]);
-      setShowDropdown(false);
-      return;
-    }
-    const q = admNoInput.toLowerCase();
-    const res = allStudents
-      .filter(
-        (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          s.admNo.toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-    setFilteredStudents(res);
-    setShowDropdown(res.length > 0);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [admNoInput, allStudents]);
-
-  // ── Close dropdown on outside click ───────────────────────────────────────
+  // Close dropdown on outside click
   useEffect(() => {
     function handleClick(e: MouseEvent) {
       if (
@@ -697,47 +597,11 @@ export default function CollectFees() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // ── Transport fare helper ──────────────────────────────────────────────────
-  function getTransportFare(student: Student): {
-    fare: number;
-    pickupName: string;
-  } {
-    const assignment = ls
-      .get<
-        Array<{
-          studentId: string;
-          routeId: string;
-          pickupPointId: string;
-          pickupPointName: string;
-        }>
-      >("student_transport_v2", [])
-      .find((t) => t.studentId === student.id);
-    if (!assignment) return { fare: 0, pickupName: "" };
-    const route = ls
-      .get<
-        Array<{
-          id: string;
-          pickupPoints: Array<{ id: string; stopName: string; fare?: number }>;
-        }>
-      >("transport_routes_v2", [])
-      .find((r) => r.id === assignment.routeId);
-    if (!route) return { fare: 0, pickupName: assignment.pickupPointName };
-    const pp = route.pickupPoints.find(
-      (p) => p.id === assignment.pickupPointId,
-    );
-    return { fare: pp?.fare ?? 0, pickupName: assignment.pickupPointName };
-  }
-
-  // ── Paid months ────────────────────────────────────────────────────────────
-  function getPaidMonths(studentId: string, headingId: string): string[] {
+  function getPaidMonths(receipts: FeeReceipt[], headingId: string): string[] {
     const sessionId = currentSession?.id ?? "";
     const paid: string[] = [];
-    for (const r of allReceipts) {
-      if (
-        r.studentId === studentId &&
-        r.sessionId === sessionId &&
-        !r.isDeleted
-      ) {
+    for (const r of receipts) {
+      if (r.sessionId === sessionId && !r.isDeleted) {
         for (const item of r.items) {
           if (item.headingId === headingId && !paid.includes(item.month))
             paid.push(item.month);
@@ -747,127 +611,121 @@ export default function CollectFees() {
     return paid;
   }
 
-  // ── Old balance ────────────────────────────────────────────────────────────
-  function calcOldBalance(studentId: string): number {
+  function calcOldBalance(receipts: FeeReceipt[]): number {
     const sessionId = currentSession?.id ?? "";
-    const remaining = allReceipts
-      .filter(
-        (r) =>
-          r.studentId === studentId &&
-          r.sessionId === sessionId &&
-          !r.isDeleted,
-      )
+    const remaining = receipts
+      .filter((r) => r.sessionId === sessionId && !r.isDeleted)
       .sort((a, b) => a.date.localeCompare(b.date));
     if (remaining.length === 0) return 0;
-    const last = remaining[remaining.length - 1];
-    return last.balance ?? 0;
+    return remaining[remaining.length - 1].balance ?? 0;
   }
 
-  // ── Load fees for selected student ────────────────────────────────────────
-  function loadStudentFees(student: Student) {
+  async function loadStudentFees(student: Student) {
     if (!currentSession) return;
     setFeeLoadState("loading");
-
-    const headings = allHeadings
-      .map((h) => ({
-        ...h,
-        months: safeMonths(h.months as unknown as string[]),
-      }))
-      .filter(
-        (h) => h.id && h.name && h.name.trim() !== "" && h.months.length > 0,
+    try {
+      // Load receipts from server
+      const rawReceipts = await phpApiService.getReceipts(student.id);
+      const receipts = rawReceipts as unknown as FeeReceipt[];
+      setReceiptHistory(
+        receipts
+          .filter((r) => !r.isDeleted)
+          .sort((a, b) => b.date.localeCompare(a.date)),
       );
 
-    const applicablePlans = allPlans.filter(
-      (p) => p.classId === student.class && p.sectionId === student.section,
-    );
-
-    const newRows: ReceiptRow[] = [];
-    for (const plan of applicablePlans) {
-      const heading = headings.find((h) => h.id === plan.headingId);
-      if (!heading) continue;
-      if (
-        heading.applicableClasses &&
-        heading.applicableClasses.length > 0 &&
-        !heading.applicableClasses.includes(student.class)
-      )
-        continue;
-      if (!plan.amount || plan.amount === 0) continue;
-
-      const paidMonths = getPaidMonths(student.id, heading.id);
-      newRows.push({
-        headingId: heading.id,
-        headingName: heading.name,
-        applicableMonths: heading.months,
-        amount: plan.amount,
-        paidMonths,
-        checked: true,
-      });
-    }
-
-    // Transport fee row
-    const { fare: transportFare, pickupName } = getTransportFare(student);
-    const TRANSPORT_HEADING_ID = `transport_${student.id}`;
-    const studentTransportMonths =
-      ls.get<Record<string, string[]>>("student_transport_months", {})[
-        student.id
-      ] ?? MONTHS;
-    if (transportFare > 0) {
-      const paidTransportMonths = getPaidMonths(
-        student.id,
-        TRANSPORT_HEADING_ID,
+      // Load fee plan from server
+      const planItems = await phpApiService.getFeePlan(
+        student.class,
+        student.section,
       );
-      newRows.push({
-        headingId: TRANSPORT_HEADING_ID,
-        headingName: `Transport Fee (${pickupName})`,
-        applicableMonths: studentTransportMonths,
-        amount: transportFare,
-        paidMonths: paidTransportMonths,
-        checked: true,
-        isTransport: true,
-      });
+      // Load fee headings
+      const headings = await phpApiService.getFeeHeadings();
+
+      const newRows: ReceiptRow[] = [];
+      for (const plan of planItems) {
+        const heading = headings.find((h) => h.id === plan.headingId);
+        if (!heading) continue;
+        if (!plan.amount || plan.amount === 0) continue;
+        const months = safeMonths(
+          heading.months as string[] | string | undefined,
+        );
+        const paidMonths = getPaidMonths(receipts, heading.id);
+        newRows.push({
+          headingId: heading.id,
+          headingName: heading.name,
+          applicableMonths: months,
+          amount: plan.amount,
+          paidMonths,
+          checked: true,
+        });
+      }
+
+      setRows(newRows);
+
+      // Auto-select April through current month (not already paid)
+      const jsMonth = new Date().getMonth();
+      const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
+      const applicableSet = new Set(newRows.flatMap((r) => r.applicableMonths));
+      const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
+        applicableSet.has(m),
+      );
+      setPanelMonths(
+        autoSelected.length > 0
+          ? autoSelected
+          : MONTHS.filter((m) => applicableSet.has(m)),
+      );
+      setCellAmounts({});
+
+      const bal = calcOldBalance(receipts);
+      setOldBalance(bal);
+      setLateFees(0);
+      setConcessionAmt(0);
+      setRemarks("");
+
+      setFeeLoadState(newRows.length === 0 ? "empty" : "loaded");
+    } catch {
+      setFeeLoadState("empty");
     }
-
-    setRows(newRows);
-
-    // Auto-select months: April through current month
-    const jsMonth = new Date().getMonth();
-    const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
-    const applicableSet = new Set(
-      newRows.flatMap((row) => row.applicableMonths),
-    );
-    const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
-      applicableSet.has(m),
-    );
-    const monthsToSelect =
-      autoSelected.length > 0
-        ? autoSelected
-        : MONTHS.filter((m) => applicableSet.has(m));
-    setPanelMonths(monthsToSelect);
-    setCellAmounts({});
-
-    const bal = calcOldBalance(student.id);
-    setOldBalance(bal);
-    setLateFees(0);
-    setConcessionAmt(0);
-    setRemarks("");
-
-    setFeeLoadState(newRows.length === 0 ? "empty" : "loaded");
   }
 
   function selectStudent(student: Student) {
+    // IMPORTANT: close dropdown before anything else — prevents stale UI
     setShowDropdown(false);
     setAdmNoInput("");
-    setFilteredStudents([]);
+    setSearchResults([]);
     setSelectedStudent(student);
     setErrorMsg("");
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-    setReceiptNo(nextReceiptNo());
-    loadStudentFees(student);
+    setFamilyMembers([]);
+    void loadStudentFees(student);
+    // Load family (same guardian mobile)
+    const pm =
+      student.fatherMobile?.trim() || student.guardianMobile?.trim() || "";
+    if (pm) {
+      phpApiService
+        .getStudents({ search: pm, limit: "10" })
+        .then((r) => {
+          const others = r.data
+            .map(toStudent)
+            .filter(
+              (s) =>
+                s.id !== student.id &&
+                s.status === "active" &&
+                (s.fatherMobile?.trim() === pm ||
+                  s.guardianMobile?.trim() === pm),
+            );
+          setFamilyMembers(others);
+        })
+        .catch(() => {
+          /* silent */
+        });
+    }
   }
 
   function clearStudent() {
     setSelectedStudent(null);
     setAdmNoInput("");
+    setSearchResults([]);
     setRows([]);
     setPanelMonths([]);
     setOldBalance(0);
@@ -878,26 +736,27 @@ export default function CollectFees() {
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
     setErrorMsg("");
     setFeeLoadState("idle");
+    setReceiptHistory([]);
+    setFamilyMembers([]);
   }
 
-  // ── Month panel helpers ────────────────────────────────────────────────────
+  // ── Totals ────────────────────────────────────────────────────────────────
   const applicableMonths = MONTHS.filter((m) =>
-    rows.some((row) => row.applicableMonths.includes(m)),
+    rows.some((r) => r.applicableMonths.includes(m)),
   );
-
   function isMonthFullyPaid(month: string): boolean {
     const applicable = rows.filter((r) => r.applicableMonths.includes(month));
-    if (applicable.length === 0) return false;
-    return applicable.every((r) => r.paidMonths.includes(month));
+    return (
+      applicable.length > 0 &&
+      applicable.every((r) => r.paidMonths.includes(month))
+    );
   }
-
   function togglePanelMonth(month: string) {
     if (isMonthFullyPaid(month)) return;
     setPanelMonths((prev) =>
       prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month],
     );
   }
-
   const unpaidApplicable = applicableMonths.filter((m) => !isMonthFullyPaid(m));
   const allSelected =
     unpaidApplicable.length > 0 &&
@@ -909,7 +768,6 @@ export default function CollectFees() {
     );
   }
 
-  // ── Compute totals ─────────────────────────────────────────────────────────
   const feesSubtotal = rows
     .filter((r) => r.checked)
     .flatMap((row) =>
@@ -931,12 +789,17 @@ export default function CollectFees() {
     setReceiptAmt(netFees);
   }, [netFees]);
 
-  // ── Save receipt ───────────────────────────────────────────────────────────
+  // Receipt number
+  function nextReceiptNo(): string {
+    const yy = String(new Date().getFullYear()).slice(-2);
+    const seq = (receiptHistory.length + 1).toString().padStart(4, "0");
+    return `R${yy}-${seq}`;
+  }
+
+  // ── Save receipt ──────────────────────────────────────────────────────────
   async function handleSave(upiUtr?: string) {
     if (!selectedStudent || !currentSession || isReadOnly) return;
     setErrorMsg("");
-
-    const checkedRows = rows.filter((r) => r.checked);
     if (
       panelMonths.length === 0 &&
       otherCharge.paidAmount === 0 &&
@@ -945,21 +808,13 @@ export default function CollectFees() {
       setErrorMsg("Please select at least one month.");
       return;
     }
-    if (
-      checkedRows.length === 0 &&
-      otherCharge.paidAmount === 0 &&
-      oldBalance === 0
-    ) {
-      setErrorMsg("Please select at least one fee head.");
-      return;
-    }
     if (receiptAmt <= 0) {
       setErrorMsg("Cannot save receipt with ₹0 amount.");
       return;
     }
 
     const receiptItems: FeeReceipt["items"] = [];
-    for (const row of checkedRows) {
+    for (const row of rows.filter((r) => r.checked)) {
       for (const month of getRowSelectedMonths(row)) {
         const amt = cellAmounts[row.headingId]?.[month] ?? row.amount;
         if (amt > 0)
@@ -971,18 +826,12 @@ export default function CollectFees() {
           });
       }
     }
-
     const otherCharges =
       otherCharge.label && otherCharge.paidAmount > 0 ? [otherCharge] : [];
-    const newBalance = balanceAmt;
-
-    // If coming from UPI, override payment mode
     const finalMode: FeeReceipt["paymentMode"] = upiUtr ? "UPI" : paymentMode;
-    const finalRemarks = upiUtr ? `UTR: ${upiUtr}` : remarks;
-
     const receipt: FeeReceipt = {
       id: generateId(),
-      receiptNo,
+      receiptNo: nextReceiptNo(),
       studentId: selectedStudent.id,
       studentName: selectedStudent.fullName,
       admNo: selectedStudent.admNo,
@@ -995,31 +844,37 @@ export default function CollectFees() {
       oldBalance,
       totalAmount: netFees,
       paidAmount: receiptAmt,
-      balance: newBalance,
+      balance: balanceAmt,
       paymentMode: finalMode,
       receivedBy: currentUser?.fullName ?? currentUser?.name ?? "Staff",
-      receivedByRole: currentUser?.position ?? currentUser?.role ?? "admin",
+      receivedByRole: currentUser?.role ?? "admin",
       sessionId: currentSession.id,
       template: 4,
-      ...(finalRemarks ? { notes: finalRemarks } : {}),
     };
 
-    await saveData(
-      "fee_receipts",
-      receipt as unknown as Record<string, unknown>,
-    );
-    addNotification(
-      `💰 Fee receipt saved: ${formatCurrency(receiptAmt)} for ${selectedStudent.fullName}`,
-      "success",
-    );
-
-    setSavedReceipt(receipt);
-    setPrintDone(false);
-    setWaDone(false);
-    setShowDialog(true);
-    loadStudentFees(selectedStudent);
-    setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-    setReceiptNo(nextReceiptNo());
+    try {
+      const result = await phpApiService.collectFees(
+        receipt as unknown as Record<string, unknown>,
+      );
+      const savedNo =
+        (result as { receiptNo?: string }).receiptNo ?? receipt.receiptNo;
+      const savedR = { ...receipt, receiptNo: savedNo };
+      setSavedReceipt(savedR);
+      addNotification(
+        `💰 Fee receipt saved: ${formatCurrency(receiptAmt)} for ${selectedStudent.fullName}`,
+        "success",
+      );
+      setPrintDone(false);
+      setWaDone(false);
+      setShowDialog(true);
+      setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
+      // Reload fees to reflect new payment
+      void loadStudentFees(selectedStudent);
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error ? err.message : "Save failed. Please try again.",
+      );
+    }
   }
 
   async function handleWhatsApp() {
@@ -1045,20 +900,21 @@ export default function CollectFees() {
     setWaDone(true);
   }
 
-  function handlePrint(r: FeeReceipt) {
-    printReceiptHTML(r, allReceipts);
-    setPrintDone(true);
-  }
-
   async function handleDeleteReceipt(receiptId: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-    await deleteData("fee_receipts", receiptId);
-    if (selectedStudent) loadStudentFees(selectedStudent);
-    addNotification("Receipt deleted", "info");
+    try {
+      await phpApiService.post("fees/receipts/delete", { id: receiptId });
+      addNotification("Receipt deleted", "info");
+      if (selectedStudent) void loadStudentFees(selectedStudent);
+    } catch (err) {
+      addNotification(
+        `Delete failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
   }
 
-  // ── Open Full Edit Dialog ──────────────────────────────────────────────────
   function openEditReceipt(r: FeeReceipt) {
     const headingMap: Record<
       string,
@@ -1074,122 +930,63 @@ export default function CollectFees() {
         };
       headingMap[item.headingId].months.push(item.month);
     }
-    const headings = Object.values(headingMap);
-    const selectedMonths = [...new Set(r.items.map((i) => i.month))];
-    const itemAmounts: Record<string, Record<string, number>> = {};
-    for (const item of r.items) {
-      if (!itemAmounts[item.headingId]) itemAmounts[item.headingId] = {};
-      itemAmounts[item.headingId][item.month] = item.amount;
-    }
-    const otherC = r.otherCharges?.[0];
     setEditState({
       receiptId: r.id,
       date: r.date,
       paymentMode: r.paymentMode,
       paidAmount: r.paidAmount ?? r.totalAmount,
       discount: r.discount ?? 0,
-      otherLabel: otherC?.label ?? "",
-      otherAmount: otherC?.paidAmount ?? 0,
-      selectedMonths,
-      headings,
-      itemAmounts,
+      selectedMonths: [...new Set(r.items.map((i) => i.month))],
+      headings: Object.values(headingMap),
     });
     setEditOpen(true);
   }
 
-  function computeEditTotal(state: EditReceiptState): number {
-    let total = 0;
-    for (const h of state.headings) {
-      for (const m of state.selectedMonths) {
-        total += state.itemAmounts[h.headingId]?.[m] ?? h.rate;
-      }
-    }
-    total += state.otherAmount - state.discount;
-    return Math.max(0, total);
-  }
-
   async function saveEditReceipt() {
     if (!editState || !selectedStudent) return;
-    const newTotal = computeEditTotal(editState);
     const newItems: FeeReceipt["items"] = [];
     for (const h of editState.headings) {
       for (const m of editState.selectedMonths) {
-        const amt = editState.itemAmounts[h.headingId]?.[m] ?? h.rate;
-        if (amt > 0)
-          newItems.push({
-            headingId: h.headingId,
-            headingName: h.headingName,
-            month: m,
-            amount: amt,
-          });
+        newItems.push({
+          headingId: h.headingId,
+          headingName: h.headingName,
+          month: m,
+          amount: h.rate,
+        });
       }
     }
-    const newOtherCharges =
-      editState.otherLabel && editState.otherAmount > 0
-        ? [
-            {
-              label: editState.otherLabel,
-              paidAmount: editState.otherAmount,
-              dueAmount: 0,
-            },
-          ]
-        : [];
-    const newBalance = editState.paidAmount - newTotal;
-
-    await updateData("fee_receipts", editState.receiptId, {
-      date: editState.date,
-      paymentMode: editState.paymentMode,
-      items: newItems,
-      otherCharges: newOtherCharges,
-      discount: editState.discount,
-      totalAmount: newTotal,
-      paidAmount: editState.paidAmount,
-      balance: newBalance,
-    });
-
-    setEditOpen(false);
-    setEditState(null);
-    addNotification("✅ Receipt updated", "success");
-    loadStudentFees(selectedStudent);
+    const newTotal =
+      newItems.reduce((s, i) => s + i.amount, 0) - editState.discount;
+    try {
+      await phpApiService.put("fees/receipts/update", {
+        id: editState.receiptId,
+        date: editState.date,
+        paymentMode: editState.paymentMode,
+        items: newItems,
+        discount: editState.discount,
+        totalAmount: newTotal,
+        paidAmount: editState.paidAmount,
+      });
+      setEditOpen(false);
+      setEditState(null);
+      addNotification("✅ Receipt updated", "success");
+      void loadStudentFees(selectedStudent);
+    } catch (err) {
+      addNotification(
+        `Update failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
   }
 
-  // ── Display months ─────────────────────────────────────────────────────────
   const displayMonths =
     panelMonths.length > 0
       ? panelMonths
       : MONTHS.filter((m) => applicableMonths.includes(m));
-
-  // ── Balance display ────────────────────────────────────────────────────────
   const isCredit = balanceAmt < 0;
   const isDue = balanceAmt > 0;
-  const balanceDisplay = isCredit
-    ? `-₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`
-    : `₹${balanceAmt.toLocaleString("en-IN")}`;
   const isOldCredit = oldBalance < 0;
   const isOldDue = oldBalance > 0;
-
-  // Receipt history
-  const receiptHistory = allReceipts
-    .filter(
-      (r) =>
-        r.studentId === selectedStudent?.id &&
-        r.sessionId === (currentSession?.id ?? "") &&
-        !r.isDeleted,
-    )
-    .sort((a, b) => b.date.localeCompare(a.date));
-
-  // Family members
-  const familyMembers = selectedStudent
-    ? allStudents.filter((s) => {
-        const pm = getPrimaryMobile(selectedStudent);
-        return (
-          s.id !== selectedStudent.id &&
-          s.status === "active" &&
-          pm &&
-          getPrimaryMobile(s) === pm
-        );
-      })
-    : [];
 
   return (
     <div className="space-y-0 flex flex-col gap-0">
@@ -1199,10 +996,9 @@ export default function CollectFees() {
         </div>
       )}
 
-      {/* ── TOP ACTION BAR ── */}
+      {/* TOP ACTION BAR */}
       <div className="bg-card border border-border rounded-t-xl border-b-0 shadow-sm">
         <div className="px-3 py-2 flex flex-wrap items-end gap-2">
-          {/* Date */}
           <div className="flex flex-col gap-0.5">
             <label
               htmlFor="receipt-date"
@@ -1219,16 +1015,16 @@ export default function CollectFees() {
               data-ocid="collect-fees-date"
             />
           </div>
-          {/* Receipt No */}
           <div className="flex flex-col gap-0.5">
             <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
               Receipt No.
             </span>
             <div className="h-7 px-2 flex items-center text-xs font-mono font-bold bg-muted/40 border border-border rounded text-primary w-28">
-              {receiptNo}
+              {nextReceiptNo()}
             </div>
           </div>
-          {/* Search — hidden once a student is selected */}
+
+          {/* Search — hidden once student selected */}
           {!selectedStudent && (
             <div
               ref={dropdownRef}
@@ -1238,37 +1034,29 @@ export default function CollectFees() {
                 htmlFor="adm-no-search"
                 className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
               >
-                Admission No.{" "}
-                <span className="text-[8px] text-muted-foreground/60 normal-case">
-                  (F4-Search)
-                </span>
+                Admission No. / Name
               </label>
               <div className="relative">
                 <input
                   id="adm-no-search"
-                  ref={admNoRef}
                   type="text"
                   placeholder="Search by Adm No or Name..."
                   value={admNoInput}
                   onChange={handleAdmNoChange}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && filteredStudents.length > 0)
-                      selectStudent(filteredStudents[0]);
-                    if (e.key === "F4") {
-                      e.preventDefault();
-                      admNoRef.current?.select();
-                    }
+                    if (e.key === "Enter" && searchResults.length > 0)
+                      selectStudent(searchResults[0]);
                   }}
                   className="h-7 w-full px-2 pr-7 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
                   data-ocid="collect-fees-search"
                 />
                 <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground text-[11px]">
-                  🔍
+                  {isSearching ? "⏳" : "🔍"}
                 </span>
               </div>
               {showDropdown && (
                 <div className="absolute z-40 top-full left-0 right-0 bg-card border border-border rounded-lg shadow-elevated mt-0.5 max-h-52 overflow-y-auto">
-                  {filteredStudents.map((s) => (
+                  {searchResults.map((s) => (
                     <button
                       key={s.id}
                       type="button"
@@ -1300,10 +1088,11 @@ export default function CollectFees() {
               )}
             </div>
           )}
-          {/* Selected student chip — shown instead of search bar */}
+
+          {/* Selected student chip */}
           {selectedStudent && (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <div className="flex items-center gap-2 bg-primary/8 border border-primary/25 rounded-lg px-2.5 py-1 min-w-0">
+              <div className="flex items-center gap-2 bg-primary/10 border border-primary/25 rounded-lg px-2.5 py-1 min-w-0">
                 <span className="text-[10px] font-bold text-primary truncate">
                   {selectedStudent.fullName}
                 </span>
@@ -1323,7 +1112,6 @@ export default function CollectFees() {
             </div>
           )}
 
-          {/* Action Buttons */}
           <div className="flex items-end gap-1.5 flex-wrap ml-auto">
             {canEdit && (
               <button
@@ -1339,7 +1127,7 @@ export default function CollectFees() {
             {savedReceipt && (
               <button
                 type="button"
-                onClick={() => savedReceipt && handlePrint(savedReceipt)}
+                onClick={() => savedReceipt && printReceiptHTML(savedReceipt)}
                 className="h-7 px-3 text-xs font-bold rounded bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                 data-ocid="collect-fees-print"
               >
@@ -1349,25 +1137,24 @@ export default function CollectFees() {
             <button
               type="button"
               onClick={clearStudent}
-              className="h-7 px-3 text-xs font-bold rounded border border-border hover:bg-muted/50 transition-colors"
+              className="h-7 px-3 text-xs font-bold rounded border border-border hover:bg-muted/50 transition-colors text-muted-foreground"
               data-ocid="collect-fees-close"
             >
-              ✕ Close
+              ✕ Clear
             </button>
           </div>
         </div>
       </div>
 
-      {/* ── STUDENT INFO + MONTHS PANEL ── */}
+      {/* STUDENT INFO + MONTHS PANEL */}
       {selectedStudent ? (
         <div className="flex border border-border border-t-0 bg-card shadow-sm">
-          {/* LEFT: Student Info */}
           <div
             className="flex flex-col"
-            style={{ minWidth: 420, maxWidth: 520 }}
+            style={{ minWidth: 360, maxWidth: 480 }}
           >
             <div className="flex gap-3 p-3 border-b border-border bg-muted/20">
-              <div className="w-[72px] h-[80px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
+              <div className="w-[64px] h-[72px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
                 {selectedStudent.photo ? (
                   <img
                     src={selectedStudent.photo}
@@ -1375,10 +1162,7 @@ export default function CollectFees() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="flex flex-col items-center text-muted-foreground">
-                    <span className="text-3xl">👤</span>
-                    <span className="text-[8px] mt-0.5">No Photo</span>
-                  </div>
+                  <span className="text-3xl">👤</span>
                 )}
               </div>
               <div className="flex flex-col justify-center gap-0.5 min-w-0">
@@ -1398,7 +1182,6 @@ export default function CollectFees() {
                   </span>
                 </div>
               </div>
-
               {isOldDue && (
                 <div className="ml-auto flex-shrink-0 flex flex-col items-center justify-center bg-red-50 border border-red-200 rounded-lg px-3 py-1.5 text-center">
                   <span className="text-[9px] font-bold text-red-500 uppercase tracking-wider">
@@ -1407,7 +1190,6 @@ export default function CollectFees() {
                   <span className="text-base font-extrabold text-red-600 leading-tight">
                     ₹{oldBalance.toLocaleString("en-IN")}
                   </span>
-                  <span className="text-[8px] text-red-400">Auto-added</span>
                 </div>
               )}
               {isOldCredit && (
@@ -1418,18 +1200,10 @@ export default function CollectFees() {
                   <span className="text-base font-extrabold text-green-700 leading-tight">
                     -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
                   </span>
-                  <span className="text-[8px] text-green-500">
-                    Adjusts next payment
-                  </span>
                 </div>
               )}
             </div>
-
             <div className="p-3 grid grid-cols-2 gap-x-4 gap-y-2">
-              <LabelValue
-                label="Student Name"
-                value={selectedStudent.fullName}
-              />
               <LabelValue
                 label="Father's Name"
                 value={selectedStudent.fatherName}
@@ -1443,10 +1217,6 @@ export default function CollectFees() {
                 value={selectedStudent.category || "General"}
               />
               <LabelValue
-                label="Class / Section"
-                value={`Class ${selectedStudent.class} - ${selectedStudent.section}`}
-              />
-              <LabelValue
                 label="Contact No."
                 value={
                   selectedStudent.guardianMobile ||
@@ -1455,20 +1225,10 @@ export default function CollectFees() {
                   "—"
                 }
               />
-              <LabelValue
-                label="Village / City"
-                value={selectedStudent.address || "—"}
-              />
-              <LabelValue
-                label="Adm. Date"
-                value={selectedStudent.admissionDate || "—"}
-              />
             </div>
           </div>
-
           <div className="w-px bg-border flex-shrink-0" />
-
-          {/* RIGHT: Month Selector */}
+          {/* Month Selector */}
           <div className="flex flex-col flex-shrink-0 w-[148px] bg-muted/20">
             <div className="px-2.5 py-2 bg-primary/10 border-b border-border">
               <p className="text-[10px] font-bold text-primary uppercase tracking-wider">
@@ -1547,20 +1307,6 @@ export default function CollectFees() {
                 );
               })}
             </div>
-            <div className="p-2 border-t border-border">
-              <button
-                type="button"
-                className="w-full py-1.5 rounded text-[11px] font-bold bg-teal-600 text-white hover:bg-teal-700 transition-colors"
-                data-ocid="month-ok-btn"
-                onClick={() =>
-                  document
-                    .getElementById("fee-grid-section")
-                    ?.scrollIntoView({ behavior: "smooth" })
-                }
-              >
-                OK ✓
-              </button>
-            </div>
           </div>
         </div>
       ) : (
@@ -1570,12 +1316,12 @@ export default function CollectFees() {
             Search for a Student
           </p>
           <p className="text-sm text-muted-foreground">
-            Enter student name or admission number in the search field above.
+            Enter student name or admission number above.
           </p>
         </div>
       )}
 
-      {/* ── FAMILY MEMBERS PANEL ── */}
+      {/* FAMILY MEMBERS */}
       {selectedStudent && familyMembers.length > 0 && (
         <div className="bg-card border border-border border-t-0 shadow-sm">
           <button
@@ -1597,58 +1343,35 @@ export default function CollectFees() {
           </button>
           {familyOpen && (
             <div className="p-3 flex flex-wrap gap-3">
-              {familyMembers.map((member) => {
-                const memberBal = calcOldBalance(member.id);
-                return (
-                  <button
-                    key={member.id}
-                    type="button"
-                    data-ocid="family-member-card"
-                    onClick={() => selectStudent(member)}
-                    className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
-                  >
-                    {member.photo ? (
-                      <img
-                        src={member.photo}
-                        alt={member.fullName}
-                        className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0">
-                        {member.fullName[0]}
-                      </div>
-                    )}
-                    <div className="flex-1 min-w-0 text-left">
-                      <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
-                        {member.fullName}
-                      </div>
-                      <div className="text-[11px] text-muted-foreground">
-                        Class {member.class}-{member.section} · #{member.admNo}
-                      </div>
-                      <div
-                        className={`text-[11px] font-bold mt-0.5 ${memberBal > 0 ? "text-red-600" : memberBal < 0 ? "text-green-600" : "text-muted-foreground"}`}
-                      >
-                        {memberBal > 0
-                          ? `Due: ₹${memberBal.toLocaleString("en-IN")}`
-                          : memberBal < 0
-                            ? `Credit: -₹${Math.abs(memberBal).toLocaleString("en-IN")}`
-                            : "No dues"}
-                      </div>
+              {familyMembers.map((member) => (
+                <button
+                  key={member.id}
+                  type="button"
+                  data-ocid="family-member-card"
+                  onClick={() => selectStudent(member)}
+                  className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
+                >
+                  <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0">
+                    {member.fullName[0]}
+                  </div>
+                  <div className="flex-1 min-w-0 text-left">
+                    <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
+                      {member.fullName}
                     </div>
-                  </button>
-                );
-              })}
+                    <div className="text-[11px] text-muted-foreground">
+                      Class {member.class}-{member.section} · #{member.admNo}
+                    </div>
+                  </div>
+                </button>
+              ))}
             </div>
           )}
         </div>
       )}
 
-      {/* ── FEE GRID ── */}
+      {/* FEE GRID */}
       {selectedStudent && (
-        <div
-          id="fee-grid-section"
-          className="bg-card border border-border border-t-0 shadow-sm overflow-hidden"
-        >
+        <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
           {feeLoadState === "loading" && (
             <div
               className="p-8 flex flex-col items-center justify-center gap-3 text-muted-foreground"
@@ -1665,32 +1388,14 @@ export default function CollectFees() {
             >
               <div className="text-3xl mb-2">📋</div>
               <p className="text-sm font-medium mb-1">
-                No fee headings configured for Class {selectedStudent.class}-
+                No fee plan configured for Class {selectedStudent.class}-
                 {selectedStudent.section}
               </p>
-              <p className="text-xs text-muted-foreground/70 mb-3">
-                Go to <strong>Fees → Fees Plan</strong> and add fee plans for
-                this class/section first.
-              </p>
-              <button
-                type="button"
-                onClick={() => loadStudentFees(selectedStudent)}
-                className="px-3 py-1 text-xs font-semibold rounded border border-border hover:bg-muted/50 transition-colors"
-                data-ocid="fee-grid-refresh-btn"
-              >
-                🔄 Refresh
-              </button>
-            </div>
-          )}
-          {feeLoadState === "idle" && rows.length === 0 && (
-            <div className="p-8 text-center text-muted-foreground">
-              <p className="text-sm">
-                Set up Fee Headings and Fees Plan for Class{" "}
-                {selectedStudent.class}-{selectedStudent.section} first.
+              <p className="text-xs opacity-70">
+                Go to Fees → Fees Plan and set up a plan for this class first.
               </p>
             </div>
           )}
-
           {feeLoadState === "loaded" && rows.length > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs border-collapse">
@@ -1702,7 +1407,7 @@ export default function CollectFees() {
                     <th className="border border-border px-3 py-1.5 text-left font-bold sticky left-8 bg-muted/70 min-w-[140px]">
                       Fees Head
                     </th>
-                    <th className="border border-border px-2 py-1.5 font-bold text-center bg-muted/70 whitespace-nowrap w-16">
+                    <th className="border border-border px-2 py-1.5 font-bold text-center bg-muted/70 w-16">
                       Rate/Mo
                     </th>
                     {displayMonths.map((m) => (
@@ -1734,7 +1439,7 @@ export default function CollectFees() {
                     return (
                       <tr
                         key={row.headingId}
-                        className={`hover:bg-muted/10 ${!row.checked ? "opacity-50" : ""} ${row.isTransport ? "bg-blue-50/40" : ""}`}
+                        className={`hover:bg-muted/10 ${!row.checked ? "opacity-50" : ""}`}
                       >
                         <td className="border border-border px-2 py-1 text-center sticky left-0 bg-card">
                           <input
@@ -1753,8 +1458,7 @@ export default function CollectFees() {
                           />
                         </td>
                         <td className="border border-border px-3 py-1 font-medium sticky left-8 bg-card text-[11px]">
-                          {row.isTransport ? "🚌 " : `${rowIdx + 1}. `}
-                          {row.headingName}
+                          {rowIdx + 1}. {row.headingName}
                         </td>
                         <td className="border border-border px-2 py-1 text-center text-muted-foreground text-[11px]">
                           ₹{row.amount}
@@ -1809,10 +1513,14 @@ export default function CollectFees() {
                                 pattern="[0-9]*"
                                 value={amt}
                                 onChange={(e) => {
-                                  const raw = e.target.value
-                                    .replace(/[^0-9.]/g, "")
-                                    .replace(/(\..*)\./g, "$1");
-                                  const val = Math.max(0, Number(raw) || 0);
+                                  const val = Math.max(
+                                    0,
+                                    Number(
+                                      e.target.value
+                                        .replace(/[^0-9.]/g, "")
+                                        .replace(/(\..*)\./g, "$1"),
+                                    ) || 0,
+                                  );
                                   setCellAmounts((prev) => ({
                                     ...prev,
                                     [row.headingId]: {
@@ -1835,8 +1543,7 @@ export default function CollectFees() {
                       </tr>
                     );
                   })}
-
-                  {/* Other Charges row */}
+                  {/* Other Charges */}
                   <tr className="bg-amber-50/40">
                     <td className="border border-border px-2 py-1 text-center sticky left-0 bg-amber-50/40">
                       <span className="text-amber-600 text-xs">+</span>
@@ -1847,7 +1554,7 @@ export default function CollectFees() {
                         placeholder="Other fee label..."
                         value={otherCharge.label}
                         onChange={handleOtherLabelChange}
-                        className="w-full h-5 px-2 text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 italic"
+                        className="w-full h-5 px-2 text-[11px] border border-input rounded bg-background focus:outline-none italic"
                         data-ocid="other-charge-label"
                       />
                     </td>
@@ -1859,7 +1566,7 @@ export default function CollectFees() {
                         placeholder="0"
                         value={otherCharge.paidAmount || ""}
                         onChange={handleOtherAmountChange}
-                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none"
                         data-ocid="other-charge-paid"
                       />
                     </td>
@@ -1875,45 +1582,6 @@ export default function CollectFees() {
                         : "—"}
                     </td>
                   </tr>
-
-                  {isOldDue && (
-                    <tr className="bg-red-50">
-                      <td
-                        colSpan={3}
-                        className="border border-border px-3 py-1 font-medium text-red-700 text-[11px] sticky left-0 bg-red-50"
-                      >
-                        Previous Balance (Carried Forward)
-                      </td>
-                      <td
-                        colSpan={displayMonths.length}
-                        className="border border-border px-2 py-1 text-red-500 text-[10px] italic"
-                      >
-                        from previous unpaid amount
-                      </td>
-                      <td className="border border-border px-2 py-1 text-right font-bold text-red-700 sticky right-0 bg-red-50 text-[11px]">
-                        ₹{oldBalance.toLocaleString("en-IN")}
-                      </td>
-                    </tr>
-                  )}
-                  {isOldCredit && (
-                    <tr className="bg-green-50">
-                      <td
-                        colSpan={3}
-                        className="border border-border px-3 py-1 font-medium text-green-700 text-[11px] sticky left-0 bg-green-50"
-                      >
-                        Credit Balance (Advance)
-                      </td>
-                      <td
-                        colSpan={displayMonths.length}
-                        className="border border-border px-2 py-1 text-green-600 text-[10px] italic"
-                      >
-                        advance auto-adjusting
-                      </td>
-                      <td className="border border-border px-2 py-1 text-right font-bold text-green-700 sticky right-0 bg-green-50 text-[11px]">
-                        -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
@@ -1921,11 +1589,10 @@ export default function CollectFees() {
         </div>
       )}
 
-      {/* ── TOTALS + PAYMENT ── */}
+      {/* TOTALS + PAYMENT */}
       {selectedStudent && rows.length > 0 && (
         <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
           <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
-            {/* Fee Summary */}
             <div className="p-3 flex flex-col gap-1 min-w-[170px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Fee Summary
@@ -1939,7 +1606,7 @@ export default function CollectFees() {
               {otherTotal > 0 && (
                 <div className="flex justify-between text-[11px]">
                   <span className="text-muted-foreground">
-                    {otherCharge.label || "Other Charges"}
+                    {otherCharge.label || "Other"}
                   </span>
                   <span className="font-semibold">
                     ₹{otherTotal.toLocaleString("en-IN")}
@@ -1967,8 +1634,6 @@ export default function CollectFees() {
                 <span>₹{(totalFees + oldBalance).toLocaleString("en-IN")}</span>
               </div>
             </div>
-
-            {/* Adjustments */}
             <div className="p-3 flex flex-col gap-1.5 min-w-[180px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Adjustments
@@ -1984,11 +1649,10 @@ export default function CollectFees() {
                   id="late-fees-input"
                   type="text"
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   value={lateFees || ""}
                   placeholder="0"
                   onChange={handleLateFeesChange}
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none"
                   data-ocid="late-fees-input"
                 />
               </div>
@@ -2003,17 +1667,14 @@ export default function CollectFees() {
                   id="concession-amt-input"
                   type="text"
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   value={concessionAmt || ""}
                   placeholder="0"
                   onChange={handleConcessionChange}
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none"
                   data-ocid="concession-amt-input"
                 />
               </div>
             </div>
-
-            {/* Net + Receipt + Balance */}
             <div className="p-3 flex flex-col gap-1.5 min-w-[200px]">
               <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
                 Net Fees
@@ -2037,7 +1698,6 @@ export default function CollectFees() {
                   id="receipt-amt-input"
                   type="text"
                   inputMode="numeric"
-                  pattern="[0-9]*"
                   value={receiptAmt || ""}
                   placeholder="0"
                   onChange={handleReceiptAmtChange}
@@ -2054,24 +1714,12 @@ export default function CollectFees() {
                 <span
                   className={`text-sm font-extrabold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
                 >
-                  {balanceDisplay}
+                  {isCredit
+                    ? `-₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`
+                    : `₹${balanceAmt.toLocaleString("en-IN")}`}
                 </span>
               </div>
-              {isDue && (
-                <div className="text-[9px] text-red-400">
-                  ↑ ₹{balanceAmt.toLocaleString("en-IN")} will carry forward as
-                  Old Balance
-                </div>
-              )}
-              {isCredit && (
-                <div className="text-[9px] text-green-500">
-                  ✦ -₹{Math.abs(balanceAmt).toLocaleString("en-IN")} credit will
-                  adjust next payment
-                </div>
-              )}
             </div>
-
-            {/* Remarks + Mode + Save */}
             <div className="p-3 flex flex-col gap-2 min-w-[220px]">
               <div>
                 <label
@@ -2086,7 +1734,7 @@ export default function CollectFees() {
                   value={remarks}
                   onChange={handleRemarksChange}
                   placeholder="Any notes..."
-                  className="w-full h-6 px-2 text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-full h-6 px-2 text-[11px] border border-input rounded bg-background focus:outline-none"
                   data-ocid="remarks-input"
                 />
               </div>
@@ -2134,7 +1782,7 @@ export default function CollectFees() {
         </div>
       )}
 
-      {/* ── UPI QR PAYMENT ── */}
+      {/* UPI QR */}
       {selectedStudent && !isReadOnly && canEdit && (
         <UpiQrSection
           netPayable={netFees}
@@ -2143,7 +1791,7 @@ export default function CollectFees() {
         />
       )}
 
-      {/* ── PAYMENT HISTORY ── */}
+      {/* PAYMENT HISTORY */}
       {selectedStudent && (
         <div className="bg-card border border-border border-t-0 rounded-b-xl shadow-sm overflow-hidden">
           <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
@@ -2156,7 +1804,6 @@ export default function CollectFees() {
               </Badge>
             )}
           </div>
-
           {receiptHistory.length === 0 ? (
             <div
               className="p-6 text-center text-muted-foreground"
@@ -2187,111 +1834,86 @@ export default function CollectFees() {
                     <th className="px-2.5 py-1.5 text-left font-semibold">
                       Mode
                     </th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">
-                      Balance
-                    </th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Received By
-                    </th>
                     <th className="px-2.5 py-1.5 text-center font-semibold">
                       Actions
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {receiptHistory.map((r, idx) => {
-                    const bal = r.balance ?? 0;
-                    return (
-                      <tr
-                        key={r.id}
-                        className="border-t border-border hover:bg-muted/20"
-                        data-ocid={`receipt-history-row.item.${idx + 1}`}
-                      >
-                        <td className="px-2.5 py-1.5 text-muted-foreground">
-                          {idx + 1}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">
-                          {r.date}
-                        </td>
-                        <td className="px-2.5 py-1.5 font-mono font-bold text-primary whitespace-nowrap">
-                          <button
-                            type="button"
-                            className="hover:underline"
-                            onClick={() => handlePrint(r)}
-                          >
-                            {r.receiptNo}
-                          </button>
-                        </td>
-                        <td className="px-2.5 py-1.5">
-                          {[
-                            ...new Set(r.items.map((i) => i.month.slice(0, 3))),
-                          ].join(", ")}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-right font-bold text-green-600 whitespace-nowrap">
-                          {formatCurrency(r.paidAmount ?? r.totalAmount)}
-                        </td>
-                        <td className="px-2.5 py-1.5">
-                          <Badge
-                            variant="outline"
-                            className="text-[9px] h-4 px-1"
-                          >
-                            {r.paymentMode}
-                          </Badge>
-                        </td>
-                        <td
-                          className={`px-2.5 py-1.5 text-right font-semibold whitespace-nowrap ${bal < 0 ? "text-green-600" : bal > 0 ? "text-red-600" : "text-muted-foreground"}`}
+                  {receiptHistory.map((r, idx) => (
+                    <tr
+                      key={r.id}
+                      className="border-t border-border hover:bg-muted/20"
+                      data-ocid={`receipt-history-row.item.${idx + 1}`}
+                    >
+                      <td className="px-2.5 py-1.5 text-muted-foreground">
+                        {idx + 1}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">
+                        {r.date}
+                      </td>
+                      <td className="px-2.5 py-1.5 font-mono font-bold text-primary whitespace-nowrap">
+                        <button
+                          type="button"
+                          className="hover:underline"
+                          onClick={() => printReceiptHTML(r)}
                         >
-                          {bal < 0
-                            ? `-₹${Math.abs(bal).toLocaleString("en-IN")}`
-                            : bal > 0
-                              ? `₹${bal.toLocaleString("en-IN")}`
-                              : "—"}
-                        </td>
-                        <td className="px-2.5 py-1.5 whitespace-nowrap">
-                          <span className="font-medium">{r.receivedBy}</span>{" "}
-                          <span className="text-muted-foreground text-[10px]">
-                            ({r.receivedByRole})
-                          </span>
-                        </td>
-                        <td className="px-2.5 py-1.5">
-                          <div className="flex gap-1 justify-center flex-wrap">
+                          {r.receiptNo}
+                        </button>
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        {[
+                          ...new Set(r.items.map((i) => i.month.slice(0, 3))),
+                        ].join(", ")}
+                      </td>
+                      <td className="px-2.5 py-1.5 text-right font-bold text-green-600 whitespace-nowrap">
+                        {formatCurrency(r.paidAmount ?? r.totalAmount)}
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] h-4 px-1"
+                        >
+                          {r.paymentMode}
+                        </Badge>
+                      </td>
+                      <td className="px-2.5 py-1.5">
+                        <div className="flex gap-1 justify-center flex-wrap">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-5 text-[9px] px-1.5"
+                            onClick={() => printReceiptHTML(r)}
+                            data-ocid={`reprint-receipt-btn.${idx + 1}`}
+                          >
+                            🖨️ Reprint
+                          </Button>
+                          {(isSuperAdmin || currentUser?.role === "admin") && (
                             <Button
                               size="sm"
                               variant="outline"
-                              className="h-5 text-[9px] px-1.5"
-                              onClick={() => handlePrint(r)}
-                              data-ocid={`reprint-receipt-btn.${idx + 1}`}
+                              className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
+                              onClick={() => openEditReceipt(r)}
+                              data-ocid={`edit-receipt-btn.${idx + 1}`}
                             >
-                              🖨️ Reprint
+                              ✏️ Edit
                             </Button>
-                            {(isSuperAdmin ||
-                              currentUser?.role === "admin") && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
-                                onClick={() => openEditReceipt(r)}
-                                data-ocid={`edit-receipt-btn.${idx + 1}`}
-                              >
-                                ✏️ Edit
-                              </Button>
-                            )}
-                            {isSuperAdmin && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
-                                onClick={() => void handleDeleteReceipt(r.id)}
-                                data-ocid={`delete-receipt-btn.${idx + 1}`}
-                              >
-                                🗑️ Del
-                              </Button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          )}
+                          {isSuperAdmin && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
+                              onClick={() => void handleDeleteReceipt(r.id)}
+                              data-ocid={`delete-receipt-btn.${idx + 1}`}
+                            >
+                              🗑️ Del
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -2299,7 +1921,7 @@ export default function CollectFees() {
         </div>
       )}
 
-      {/* ── Post-save Dialog ── */}
+      {/* Post-save Dialog */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-w-sm" data-ocid="receipt-saved-dialog">
           <DialogHeader>
@@ -2321,7 +1943,7 @@ export default function CollectFees() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => savedReceipt && handlePrint(savedReceipt)}
+                onClick={() => savedReceipt && printReceiptHTML(savedReceipt)}
                 data-ocid="receipt-print-btn"
               >
                 {printDone ? "✓ Printed" : "🖨️ Print Receipt"}
@@ -2347,12 +1969,9 @@ export default function CollectFees() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Edit Receipt Dialog ── */}
+      {/* Edit Receipt Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent
-          className="max-w-lg max-h-[90vh] overflow-y-auto"
-          data-ocid="edit-receipt-dialog"
-        >
+        <DialogContent className="max-w-md" data-ocid="edit-receipt-dialog">
           <DialogHeader>
             <DialogTitle>Edit Receipt</DialogTitle>
           </DialogHeader>
@@ -2375,11 +1994,11 @@ export default function CollectFees() {
                         s ? { ...s, date: e.target.value } : s,
                       )
                     }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none"
                   />
                 </div>
                 <div>
-                  <p className="text-sm font-medium mb-1">Payment Mode</p>
+                  <p className="text-sm font-medium mb-1">Mode</p>
                   <div className="flex flex-wrap gap-1">
                     {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
                       (mode) => (
@@ -2400,137 +2019,44 @@ export default function CollectFees() {
                   </div>
                 </div>
               </div>
-
               <div>
-                <p className="text-sm font-medium mb-2">Months</p>
-                <div className="flex flex-wrap gap-1">
-                  {MONTHS.map((m) => {
-                    const inState = editState.selectedMonths.includes(m);
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() =>
-                          setEditState((s) =>
-                            s
-                              ? {
-                                  ...s,
-                                  selectedMonths: inState
-                                    ? s.selectedMonths.filter((x) => x !== m)
-                                    : [...s.selectedMonths, m],
-                                }
-                              : s,
-                          )
-                        }
-                        className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${inState ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
-                      >
-                        {m.slice(0, 3)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label
-                    htmlFor="edit-paid-amt"
-                    className="text-sm font-medium block mb-1"
-                  >
-                    Amount Paid (₹)
-                  </label>
-                  <input
-                    id="edit-paid-amt"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={editState.paidAmount}
-                    onChange={(e) =>
-                      setEditState((s) =>
-                        s
-                          ? {
-                              ...s,
-                              paidAmount:
-                                Number(
-                                  e.target.value
-                                    .replace(/[^0-9.]/g, "")
-                                    .replace(/(\..*)\./g, "$1"),
-                                ) || 0,
-                            }
-                          : s,
-                      )
-                    }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                </div>
-                <div>
-                  <label
-                    htmlFor="edit-discount"
-                    className="text-sm font-medium block mb-1"
-                  >
-                    Discount (₹)
-                  </label>
-                  <input
-                    id="edit-discount"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={editState.discount}
-                    onChange={(e) =>
-                      setEditState((s) =>
-                        s
-                          ? {
-                              ...s,
-                              discount:
-                                Number(
-                                  e.target.value
-                                    .replace(/[^0-9.]/g, "")
-                                    .replace(/(\..*)\./g, "$1"),
-                                ) || 0,
-                            }
-                          : s,
-                      )
-                    }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-muted/30 rounded-lg p-3 text-sm">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Computed Total</span>
-                  <span className="font-bold">
-                    ₹{computeEditTotal(editState).toLocaleString("en-IN")}
-                  </span>
-                </div>
-                <div
-                  className={`flex justify-between mt-1 font-semibold ${(editState.paidAmount - computeEditTotal(editState)) < 0 ? "text-red-600" : "text-green-600"}`}
+                <label
+                  htmlFor="edit-paid-amt"
+                  className="text-sm font-medium block mb-1"
                 >
-                  <span>Balance</span>
-                  <span>
-                    ₹
-                    {(
-                      editState.paidAmount - computeEditTotal(editState)
-                    ).toLocaleString("en-IN")}
-                  </span>
-                </div>
+                  Amount Paid (₹)
+                </label>
+                <input
+                  id="edit-paid-amt"
+                  type="text"
+                  inputMode="numeric"
+                  value={editState.paidAmount}
+                  onChange={(e) =>
+                    setEditState((s) =>
+                      s
+                        ? {
+                            ...s,
+                            paidAmount:
+                              Number(e.target.value.replace(/[^0-9.]/g, "")) ||
+                              0,
+                          }
+                        : s,
+                    )
+                  }
+                  className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none"
+                />
               </div>
-
-              <div className="flex gap-2 justify-end pt-2">
+              <div className="flex gap-2 justify-end pt-1">
                 <Button
                   variant="outline"
                   onClick={() => {
                     setEditOpen(false);
                     setEditState(null);
                   }}
-                  data-ocid="edit-receipt-cancel-btn"
                 >
                   Cancel
                 </Button>
-                <Button
-                  onClick={() => void saveEditReceipt()}
-                  data-ocid="edit-receipt-save-btn"
-                >
+                <Button onClick={() => void saveEditReceipt()}>
                   Save Changes
                 </Button>
               </div>

@@ -1,4 +1,9 @@
-import { useEffect, useState } from "react";
+/**
+ * FeeRegister.tsx — Direct phpApiService (no getData)
+ *
+ * Loads receipts from server on mount. All edits/deletes wait for HTTP 200.
+ */
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -9,9 +14,9 @@ import {
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
-import type { FeeReceipt } from "../../types";
-import type { SchoolProfile } from "../../types";
+import type { FeeReceipt, SchoolProfile } from "../../types";
 import { formatCurrency, ls } from "../../utils/localStorage";
+import phpApiService from "../../utils/phpApiService";
 
 function printReceipt(receipt: FeeReceipt) {
   const school = ls.get<SchoolProfile>("school_profile", {
@@ -28,24 +33,21 @@ function printReceipt(receipt: FeeReceipt) {
     state: "",
     pincode: "",
   });
-
   const nonZeroItems = receipt.items.filter((i) => i.amount > 0);
   const grouped: Record<
     string,
     { months: string[]; amount: number; headingName: string }
   > = {};
   for (const item of nonZeroItems) {
-    if (!grouped[item.headingId]) {
+    if (!grouped[item.headingId])
       grouped[item.headingId] = {
         months: [],
         amount: item.amount,
         headingName: item.headingName,
       };
-    }
     grouped[item.headingId].months.push(item.month);
   }
-
-  const qrData = `Receipt:${receipt.receiptNo}|Student:${receipt.studentName}|Adm:${receipt.admNo}|Class:${receipt.class}-${receipt.section}|Amount:${receipt.totalAmount}|Date:${receipt.date}|Mode:${receipt.paymentMode}`;
+  const qrData = `Receipt:${receipt.receiptNo}|Student:${receipt.studentName}|Adm:${receipt.admNo}|Amount:${receipt.totalAmount}|Date:${receipt.date}`;
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=60x60&data=${encodeURIComponent(qrData)}`;
   const itemRows = Object.values(grouped)
     .map(
@@ -53,16 +55,7 @@ function printReceipt(receipt: FeeReceipt) {
         `<tr><td>${idx + 1}</td><td>${g.headingName}</td><td>${g.months.map((m) => m.slice(0, 3)).join(",")}</td><td style="text-align:right">₹${g.amount * g.months.length}</td></tr>`,
     )
     .join("");
-
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Receipt - ${receipt.receiptNo}</title>
-    <style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}</style>
-    </head><body><div class="header"><div class="school-name">${school.name}</div><div style="font-size:7.5px;color:#333">${school.address || ""}</div></div>
-    <div class="receipt-title">CASH RECEIPT</div>
-    <div class="info-grid"><div><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div><div><span class="lbl">Date:</span>${receipt.date}</div><div><span class="lbl">Name:</span><b>${receipt.studentName}</b></div><div><span class="lbl">Adm No:</span>${receipt.admNo}</div><div><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div><div><span class="lbl">Mode:</span>${receipt.paymentMode}</div></div>
-    <table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}<tr class="total-row"><td colspan="3">TOTAL PAID</td><td style="text-align:right">₹${receipt.totalAmount}</td></tr></tbody></table>
-    <div class="qr-row"><div><div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b></div><div style="margin-top:10px;font-size:8px;">Signature: _______________</div></div><img src="${qrUrl}" width="60" height="60" alt="QR"/></div>
-    </body></html>`;
-
+  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Receipt - ${receipt.receiptNo}</title><style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}</style></head><body><div class="header"><div class="school-name">${school.name}</div><div style="font-size:7.5px;color:#333">${school.address || ""}</div></div><div class="receipt-title">CASH RECEIPT</div><div class="info-grid"><div><span class="lbl">Receipt No:</span><b>${receipt.receiptNo}</b></div><div><span class="lbl">Date:</span>${receipt.date}</div><div><span class="lbl">Name:</span><b>${receipt.studentName}</b></div><div><span class="lbl">Adm No:</span>${receipt.admNo}</div><div><span class="lbl">Class:</span>${receipt.class}-${receipt.section}</div><div><span class="lbl">Mode:</span>${receipt.paymentMode}</div></div><table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}<tr class="total-row"><td colspan="3">TOTAL PAID</td><td style="text-align:right">₹${receipt.totalAmount}</td></tr></tbody></table><div class="qr-row"><div><div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b></div><div style="margin-top:10px;font-size:8px;">Signature: _______________</div></div><img src="${qrUrl}" width="60" height="60" alt="QR"/></div></body></html>`;
   const existing = document.getElementById(
     "shubh-print-frame",
   ) as HTMLIFrameElement | null;
@@ -102,15 +95,10 @@ function printReceipt(receipt: FeeReceipt) {
 }
 
 export default function FeeRegister() {
-  const {
-    getData,
-    updateData,
-    deleteData,
-    currentUser,
-    currentSession,
-    addNotification,
-  } = useApp();
+  const { currentUser, currentSession, addNotification } = useApp();
 
+  const [allReceipts, setAllReceipts] = useState<FeeReceipt[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [classFilter, setClassFilter] = useState("");
   const [modeFilter, setModeFilter] = useState("");
@@ -130,13 +118,30 @@ export default function FeeRegister() {
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
   const currentSessionId = currentSession?.id ?? null;
 
-  // Read from context — collection key "fee_receipts" matches server MySQL table
-  const allReceipts = (getData("fee_receipts") as FeeReceipt[])
-    .filter(
-      (r) =>
-        !r.isDeleted && (!currentSessionId || r.sessionId === currentSessionId),
-    )
-    .sort((a, b) => b.date.localeCompare(a.date));
+  const fetchReceipts = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const params: Record<string, string> = {};
+      if (currentSessionId) params.sessionId = currentSessionId;
+      const raw = await phpApiService.get<FeeReceipt[]>(
+        "fees/receipts/all",
+        params,
+      );
+      setAllReceipts(
+        (raw ?? [])
+          .filter((r) => !r.isDeleted)
+          .sort((a, b) => b.date.localeCompare(a.date)),
+      );
+    } catch {
+      setAllReceipts([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    void fetchReceipts();
+  }, [fetchReceipts]);
 
   const filtered = allReceipts.filter((r) => {
     if (searchQuery) {
@@ -155,36 +160,51 @@ export default function FeeRegister() {
     return true;
   });
 
-  const [uniqueClasses, setUniqueClasses] = useState<string[]>([]);
-  const [uniqueModes, setUniqueModes] = useState<string[]>([]);
-
-  useEffect(() => {
-    setUniqueClasses([...new Set(allReceipts.map((r) => r.class))].sort());
-    setUniqueModes([...new Set(allReceipts.map((r) => r.paymentMode))]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [allReceipts]);
+  const uniqueClasses = [...new Set(allReceipts.map((r) => r.class))].sort();
+  const uniqueModes = [...new Set(allReceipts.map((r) => r.paymentMode))];
+  const totalCollected = filtered.reduce((s, r) => s + r.totalAmount, 0);
+  const studentReceipts = selectedReceipt
+    ? allReceipts.filter((r) => r.studentId === selectedReceipt.studentId)
+    : [];
 
   async function handleDelete(id: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
-    await deleteData("fee_receipts", id);
-    setDetailOpen(false);
-    addNotification("Receipt deleted", "info");
+    try {
+      await phpApiService.post("fees/receipts/delete", { id });
+      setDetailOpen(false);
+      addNotification("Receipt deleted", "info");
+      void fetchReceipts();
+    } catch (err) {
+      addNotification(
+        `Delete failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
   }
 
   async function saveEdit() {
     if (!editTarget) return;
     const newAmount = Number(editAmount);
     if (Number.isNaN(newAmount) || newAmount <= 0) return;
-    await updateData("fee_receipts", editTarget.id, {
-      paymentMode: editMode,
-      totalAmount: newAmount,
-      paidAmount: newAmount,
-    });
-    setEditOpen(false);
-    setEditTarget(null);
-    setDetailOpen(false);
-    addNotification("Receipt updated", "success");
+    try {
+      await phpApiService.put("fees/receipts/update", {
+        id: editTarget.id,
+        paymentMode: editMode,
+        totalAmount: newAmount,
+        paidAmount: newAmount,
+      });
+      setEditOpen(false);
+      setEditTarget(null);
+      setDetailOpen(false);
+      addNotification("Receipt updated", "success");
+      void fetchReceipts();
+    } catch (err) {
+      addNotification(
+        `Update failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
   }
 
   function exportCSV() {
@@ -219,11 +239,6 @@ export default function FeeRegister() {
     a.click();
   }
 
-  const totalCollected = filtered.reduce((s, r) => s + r.totalAmount, 0);
-  const studentReceipts = selectedReceipt
-    ? allReceipts.filter((r) => r.studentId === selectedReceipt.studentId)
-    : [];
-
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
@@ -233,19 +248,16 @@ export default function FeeRegister() {
             Full ledger of all fee transactions
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={exportCSV}
-            data-ocid="fee-register-export"
-          >
-            📊 Export CSV
-          </Button>
-        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={exportCSV}
+          data-ocid="fee-register-export"
+        >
+          📊 Export CSV
+        </Button>
       </div>
 
-      {/* Filters */}
       <div className="bg-card border border-border rounded-xl p-4 flex flex-wrap gap-3">
         <Input
           placeholder="Search by name, adm no, receipt..."
@@ -294,19 +306,30 @@ export default function FeeRegister() {
         />
       </div>
 
-      {/* Summary */}
       <div className="bg-green-50 border border-green-200 rounded-xl px-4 py-3 flex items-center justify-between">
         <span className="text-sm text-green-700 font-medium">
-          {filtered.length} receipt(s) shown
+          {isLoading ? "Loading…" : `${filtered.length} receipt(s) shown`}
         </span>
         <span className="font-bold text-green-700">
           Total: {formatCurrency(totalCollected)}
         </span>
       </div>
 
-      {/* Table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden">
-        {filtered.length === 0 ? (
+        {isLoading ? (
+          <div className="p-12 text-center text-muted-foreground">
+            <div className="flex items-center gap-1.5 justify-center">
+              {[0, 1, 2].map((i) => (
+                <div
+                  key={i}
+                  className="w-2 h-2 rounded-full bg-primary animate-pulse"
+                  style={{ animationDelay: `${i * 200}ms` }}
+                />
+              ))}
+            </div>
+            <p className="mt-3 text-sm">Loading receipts…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="p-12 text-center text-muted-foreground">
             <p className="text-lg mb-1">No receipts found</p>
             <p className="text-sm">Collect fees to see records here.</p>
@@ -438,7 +461,6 @@ export default function FeeRegister() {
                   </span>
                 </div>
               </div>
-
               <div>
                 <p className="font-semibold text-sm mb-2">Fee Items</p>
                 <table className="w-full text-sm border-collapse">
@@ -474,24 +496,6 @@ export default function FeeRegister() {
                           </td>
                         </tr>
                       ))}
-                    {(selectedReceipt.otherCharges ?? [])
-                      .filter((c) => c.paidAmount > 0)
-                      .map((c) => (
-                        <tr
-                          key={`oc-${c.label}`}
-                          className="border-t border-border"
-                        >
-                          <td className="border border-border px-3 py-1.5">
-                            {c.label}
-                          </td>
-                          <td className="border border-border px-3 py-1.5">
-                            Other
-                          </td>
-                          <td className="border border-border px-3 py-1.5 text-right">
-                            {formatCurrency(c.paidAmount)}
-                          </td>
-                        </tr>
-                      ))}
                     <tr className="border-t-2 border-border font-bold bg-muted/30">
                       <td
                         colSpan={2}
@@ -506,7 +510,6 @@ export default function FeeRegister() {
                   </tbody>
                 </table>
               </div>
-
               {studentReceipts.length > 1 && (
                 <div>
                   <p className="font-semibold text-sm mb-2">
@@ -537,7 +540,6 @@ export default function FeeRegister() {
                   </div>
                 </div>
               )}
-
               <div className="flex gap-2 pt-2 flex-wrap">
                 <Button
                   variant="outline"

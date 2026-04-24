@@ -1,17 +1,18 @@
 /**
- * Transport Module — Tab container
- * Tabs: Routes & Buses | Student Assignment | GPS Tracking
+ * Transport Module — Direct API rebuild
+ * All data via phpApiService; no local sync, no getData().
  */
 
-import { Bus, Navigation, Users } from "lucide-react";
+import { Bus, MapPin, Navigation, Users } from "lucide-react";
 import { useState } from "react";
 import GPSTracking from "./transport/GPSTracking";
-import Routes from "./transport/Routes";
-import StudentTransport from "./transport/StudentTransport";
+import RoutesAPI from "./transport/RoutesAPI";
+import StudentTransportAPI from "./transport/StudentTransportAPI";
 
 const TABS = [
   { id: "routes", label: "Routes & Buses", icon: Bus },
   { id: "students", label: "Student Assignment", icon: Users },
+  { id: "pickup", label: "Pickup Points", icon: MapPin },
   { id: "gps", label: "GPS Tracking", icon: Navigation },
 ] as const;
 
@@ -61,8 +62,9 @@ export default function Transport() {
       </div>
 
       <div>
-        {activeTab === "routes" && <Routes />}
-        {activeTab === "students" && <StudentTransport />}
+        {activeTab === "routes" && <RoutesAPI />}
+        {activeTab === "students" && <StudentTransportAPI />}
+        {activeTab === "pickup" && <RoutesAPI showPickupOnly />}
         {activeTab === "gps" && <GPSTracking />}
       </div>
     </div>

@@ -1,3 +1,8 @@
+/**
+ * SHUBH SCHOOL ERP — User Management
+ * Direct API: all reads/writes go through phpApiService
+ */
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -16,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Eye,
   EyeOff,
@@ -29,11 +35,23 @@ import {
   UserCog,
   Users,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { AppUser, UserRole } from "../../types";
-import { generateId, ls } from "../../utils/localStorage";
+import type { UserRole } from "../../types";
+import phpApiSvc from "../../utils/phpApiService";
+
+interface UserRecord {
+  id: string;
+  username: string;
+  fullName?: string;
+  name?: string;
+  role: UserRole;
+  mobile?: string;
+  email?: string;
+  isActive?: boolean;
+  lastLogin?: string;
+}
 
 interface UserFormData {
   fullName: string;
@@ -85,29 +103,41 @@ function getRoleColor(role: UserRole): string {
   );
 }
 
-interface StoredUser extends AppUser {
-  password?: string;
-  isActive?: boolean;
-  lastLogin?: string;
-}
-
 export default function UserManagement() {
-  const { currentUser, changePassword, saveData, updateData, deleteData } =
-    useApp();
-
-  const [users, setUsers] = useState<StoredUser[]>(() =>
-    ls.get<StoredUser[]>("custom_users", []),
-  );
+  const { currentUser } = useApp();
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [editUser, setEditUser] = useState<StoredUser | null>(null);
+  const [editUser, setEditUser] = useState<UserRecord | null>(null);
   const [form, setForm] = useState<UserFormData>({ ...EMPTY_FORM });
   const [showPw, setShowPw] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<StoredUser | null>(null);
-  const [resetUser, setResetUser] = useState<StoredUser | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<UserRecord | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [resetUser, setResetUser] = useState<UserRecord | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [resetting, setResetting] = useState(false);
+
+  const isSuperAdmin = currentUser?.role === "superadmin";
+
+  // ── Load users ────────────────────────────────────────────────────────────
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await phpApiSvc.getUsers();
+      setUsers(data as unknown as UserRecord[]);
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
 
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
@@ -119,10 +149,7 @@ export default function UserManagement() {
     );
   }, [users, search]);
 
-  function persistUsers(updated: StoredUser[]) {
-    ls.set("custom_users", updated);
-    setUsers(updated);
-  }
+  // ── Open forms ────────────────────────────────────────────────────────────
 
   function openAdd() {
     setEditUser(null);
@@ -131,7 +158,7 @@ export default function UserManagement() {
     setShowForm(true);
   }
 
-  function openEdit(user: StoredUser) {
+  function openEdit(user: UserRecord) {
     setEditUser(user);
     setForm({
       fullName: user.fullName ?? user.name ?? "",
@@ -145,6 +172,8 @@ export default function UserManagement() {
     setShowPw(false);
     setShowForm(true);
   }
+
+  // ── Save user ─────────────────────────────────────────────────────────────
 
   async function handleSave() {
     const {
@@ -176,75 +205,50 @@ export default function UserManagement() {
       toast.error("Passwords do not match.");
       return;
     }
-    if (!editUser && users.some((u) => u.username === username)) {
-      toast.error("Username already exists.");
-      return;
-    }
 
     setSaving(true);
     try {
       if (editUser) {
-        const updated: StoredUser = {
-          ...editUser,
+        const payload: Record<string, unknown> = {
+          id: editUser.id,
           fullName,
-          name: fullName,
           username,
           role,
           mobile,
           email,
         };
-        const updatedList = users.map((u) =>
-          u.id === editUser.id ? updated : u,
-        );
-        persistUsers(updatedList);
-
-        // Persist to canister via updateData
-        await updateData("userAccounts", editUser.id, {
-          fullName,
-          username,
-          role,
-          mobile,
-          email,
-        } as Record<string, unknown>).catch(() => {});
-
-        if (password) {
-          changePassword(editUser.id, password);
-          const passwords = ls.get<Record<string, string>>(
-            "user_passwords",
-            {},
-          );
-          passwords[username] = password;
-          ls.set("user_passwords", passwords);
-        }
+        if (password) payload.password = password;
+        await phpApiSvc.updateUser(payload);
         toast.success("User updated.");
+        setUsers((prev) =>
+          prev.map((u) =>
+            u.id === editUser.id
+              ? { ...u, fullName, username, role, mobile, email }
+              : u,
+          ),
+        );
       } else {
-        const id = generateId();
-        const newUser: StoredUser = {
-          id,
-          username,
-          role,
-          fullName,
-          name: fullName,
-          mobile,
-          email,
-          isActive: true,
-        };
-        persistUsers([...users, newUser]);
-        const passwords = ls.get<Record<string, string>>("user_passwords", {});
-        passwords[username] = password;
-        ls.set("user_passwords", passwords);
-
-        // Persist to canister
-        await saveData("userAccounts", {
-          id,
+        const result = (await phpApiSvc.createUser({
           fullName,
           username,
           role,
           mobile,
           email,
-        } as Record<string, unknown>).catch(() => {});
-
+          password,
+        })) as unknown as UserRecord;
         toast.success("User created.");
+        setUsers((prev) => [
+          ...prev,
+          {
+            ...result,
+            fullName,
+            username,
+            role,
+            mobile,
+            email,
+            isActive: true,
+          },
+        ]);
       }
       setShowForm(false);
     } catch (err) {
@@ -254,23 +258,26 @@ export default function UserManagement() {
     }
   }
 
+  // ── Delete user ───────────────────────────────────────────────────────────
+
   async function handleDelete() {
     if (!deleteTarget) return;
+    setDeleting(true);
     try {
-      const updated = users.filter((u) => u.id !== deleteTarget.id);
-      persistUsers(updated);
-      const passwords = ls.get<Record<string, string>>("user_passwords", {});
-      delete passwords[deleteTarget.username];
-      ls.set("user_passwords", passwords);
-      await deleteData("userAccounts", deleteTarget.id).catch(() => {});
+      await phpApiSvc.deleteUser(deleteTarget.id);
       toast.success("User deleted.");
+      setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
       setDeleteTarget(null);
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "Failed to delete user.",
       );
+    } finally {
+      setDeleting(false);
     }
   }
+
+  // ── Reset password ────────────────────────────────────────────────────────
 
   async function handleResetPassword() {
     if (!resetUser || !newPassword.trim()) {
@@ -279,13 +286,7 @@ export default function UserManagement() {
     }
     setResetting(true);
     try {
-      changePassword(resetUser.id, newPassword);
-      const passwords = ls.get<Record<string, string>>("user_passwords", {});
-      passwords[resetUser.username] = newPassword;
-      ls.set("user_passwords", passwords);
-      await updateData("userAccounts", resetUser.id, {
-        password: newPassword,
-      } as Record<string, unknown>).catch(() => {});
+      await phpApiSvc.resetPassword(resetUser.id, newPassword);
       toast.success(
         `Password reset for ${resetUser.fullName ?? resetUser.username}.`,
       );
@@ -300,20 +301,8 @@ export default function UserManagement() {
     }
   }
 
-  function handleToggleActive(user: StoredUser) {
-    const updated = users.map((u) =>
-      u.id === user.id ? { ...u, isActive: !u.isActive } : u,
-    );
-    persistUsers(updated);
-    toast.success(
-      `${user.fullName ?? user.username} ${user.isActive ? "deactivated" : "activated"}.`,
-    );
-  }
-
-  const isSuperAdmin = currentUser?.role === "superadmin";
-
   return (
-    <div className="p-4 lg:p-6 max-w-5xl space-y-6 animate-fade-in">
+    <div className="p-4 lg:p-6 max-w-5xl space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -321,8 +310,10 @@ export default function UserManagement() {
             <Users className="w-5 h-5 text-primary" /> User Management
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {users.length} user{users.length !== 1 ? "s" : ""} — Super Admin
-            manages all roles
+            {loading
+              ? "Loading…"
+              : `${users.length} user${users.length !== 1 ? "s" : ""}`}{" "}
+            — Super Admin manages all roles
           </p>
         </div>
         {isSuperAdmin && (
@@ -356,15 +347,13 @@ export default function UserManagement() {
                   id: "su1",
                   username: "superadmin",
                   role: "superadmin",
-                  name: "Super Admin",
                   fullName: "Super Admin",
                 });
                 setNewPassword("");
               }}
               data-ocid="users.superadmin.reset_button"
             >
-              <KeyRound className="w-3.5 h-3.5 mr-1" />
-              Reset Password
+              <KeyRound className="w-3.5 h-3.5 mr-1" /> Reset Password
             </Button>
           )}
         </div>
@@ -382,8 +371,17 @@ export default function UserManagement() {
         />
       </div>
 
-      {/* Users Table */}
-      {filteredUsers.length === 0 && users.length === 0 ? (
+      {/* Loading */}
+      {loading && (
+        <div className="space-y-2" data-ocid="users.loading_state">
+          {[1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-16 rounded-xl" />
+          ))}
+        </div>
+      )}
+
+      {/* Users list */}
+      {!loading && filteredUsers.length === 0 && users.length === 0 ? (
         <Card className="p-10 text-center" data-ocid="users.empty_state">
           <UserCog className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
           <p className="font-medium text-muted-foreground">
@@ -400,82 +398,76 @@ export default function UserManagement() {
           )}
         </Card>
       ) : (
-        <div className="space-y-2">
-          {filteredUsers.map((user, idx) => (
-            <Card
-              key={user.id}
-              className={`p-4 transition-smooth ${user.isActive === false ? "opacity-60" : ""}`}
-              data-ocid={`users.item.${idx + 1}`}
-            >
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
-                  <span className="text-sm font-bold text-muted-foreground">
-                    {(user.fullName ?? user.username)[0]?.toUpperCase()}
-                  </span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-foreground truncate">
-                    {user.fullName ?? user.name ?? user.username}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    @{user.username}
-                    {user.mobile ? ` · ${user.mobile}` : ""}
-                  </p>
-                </div>
-                <Badge className={`text-[10px] ${getRoleColor(user.role)}`}>
-                  {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ??
-                    user.role}
-                </Badge>
-                <Badge
-                  variant={user.isActive !== false ? "outline" : "secondary"}
-                  className="text-[10px]"
-                >
-                  {user.isActive !== false ? "Active" : "Inactive"}
-                </Badge>
-                {isSuperAdmin && (
-                  <div className="flex gap-1.5 shrink-0">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openEdit(user)}
-                      data-ocid={`users.edit_button.${idx + 1}`}
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setResetUser(user);
-                        setNewPassword("");
-                      }}
-                      data-ocid={`users.reset_button.${idx + 1}`}
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleToggleActive(user)}
-                      data-ocid={`users.toggle_button.${idx + 1}`}
-                    >
-                      {user.isActive !== false ? "Deactivate" : "Activate"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                      onClick={() => setDeleteTarget(user)}
-                      data-ocid={`users.delete_button.${idx + 1}`}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+        !loading && (
+          <div className="space-y-2">
+            {filteredUsers.map((user, idx) => (
+              <Card
+                key={user.id}
+                className={`p-4 transition-smooth ${user.isActive === false ? "opacity-60" : ""}`}
+                data-ocid={`users.item.${idx + 1}`}
+              >
+                <div className="flex items-center gap-3 flex-wrap">
+                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
+                    <span className="text-sm font-bold text-muted-foreground">
+                      {(user.fullName ?? user.username)[0]?.toUpperCase()}
+                    </span>
                   </div>
-                )}
-              </div>
-            </Card>
-          ))}
-        </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-foreground truncate">
+                      {user.fullName ?? user.name ?? user.username}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      @{user.username}
+                      {user.mobile ? ` · ${user.mobile}` : ""}
+                    </p>
+                  </div>
+                  <Badge className={`text-[10px] ${getRoleColor(user.role)}`}>
+                    {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ??
+                      user.role}
+                  </Badge>
+                  <Badge
+                    variant={user.isActive !== false ? "outline" : "secondary"}
+                    className="text-[10px]"
+                  >
+                    {user.isActive !== false ? "Active" : "Inactive"}
+                  </Badge>
+                  {isSuperAdmin && (
+                    <div className="flex gap-1.5 shrink-0">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openEdit(user)}
+                        data-ocid={`users.edit_button.${idx + 1}`}
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setResetUser(user);
+                          setNewPassword("");
+                        }}
+                        data-ocid={`users.reset_button.${idx + 1}`}
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-destructive border-destructive/30 hover:bg-destructive/10"
+                        onClick={() => setDeleteTarget(user)}
+                        data-ocid={`users.delete_button.${idx + 1}`}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </Card>
+            ))}
+          </div>
+        )
       )}
 
       {/* Add/Edit Dialog */}
@@ -511,15 +503,10 @@ export default function UserManagement() {
                   onChange={(e) =>
                     setForm((f) => ({ ...f, username: e.target.value }))
                   }
-                  placeholder="login username (not mobile no.)"
+                  placeholder="login username"
                   data-ocid="users.username.input"
                   disabled={!!editUser}
                 />
-                {!editUser && (
-                  <p className="text-[10px] text-muted-foreground">
-                    Must not be a mobile number
-                  </p>
-                )}
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="u-role">Role *</Label>
@@ -731,9 +718,14 @@ export default function UserManagement() {
             <Button
               variant="destructive"
               onClick={() => void handleDelete()}
+              disabled={deleting}
               data-ocid="users.delete.confirm_button"
             >
-              Delete
+              {deleting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Delete"
+              )}
             </Button>
           </div>
         </DialogContent>

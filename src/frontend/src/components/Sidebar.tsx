@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Package,
   Phone,
+  Route,
   Settings,
   TrendingUp,
   UserCheck,
@@ -35,131 +36,110 @@ interface NavItem {
   roles?: UserRole[];
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  {
-    id: "students",
-    label: "Students",
-    icon: Users,
-    roles: ["superadmin", "admin", "teacher", "receptionist"],
-  },
-  {
-    id: "fees",
-    label: "Fees",
-    icon: IndianRupee,
-    roles: ["superadmin", "admin", "accountant", "receptionist"],
-  },
-  {
-    id: "attendance",
-    label: "Attendance",
-    icon: CalendarCheck,
-    roles: ["superadmin", "admin", "teacher", "driver"],
-  },
-  {
-    id: "hr",
-    label: "HR / Staff",
-    icon: UserCog,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "academics",
-    label: "Academics",
-    icon: BookOpen,
-    roles: ["superadmin", "admin", "teacher"],
-  },
-  {
-    id: "transport",
-    label: "Transport",
-    icon: Bus,
-    roles: ["superadmin", "admin", "driver"],
-  },
-  {
-    id: "library",
-    label: "Library",
-    icon: Library,
-    roles: ["superadmin", "admin", "librarian", "teacher"],
-  },
-  {
-    id: "inventory",
-    label: "Inventory",
-    icon: Package,
-    roles: ["superadmin", "admin", "librarian"],
-  },
-  {
-    id: "examinations",
-    label: "Examinations",
-    icon: FileText,
-    roles: ["superadmin", "admin", "teacher"],
-  },
-  {
-    id: "certificates",
-    label: "Certificates",
-    icon: Award,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "communication",
-    label: "Communication",
-    icon: MessageSquare,
-    roles: ["superadmin", "admin"],
-  },
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  {
-    id: "calling",
-    label: "Calling",
-    icon: Phone,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "virtualclasses",
-    label: "Virtual Classes",
-    icon: Video,
-    roles: ["superadmin", "admin", "teacher"],
-  },
-  {
-    id: "expenses",
-    label: "Expenses",
-    icon: TrendingUp,
-    roles: ["superadmin", "admin", "accountant"],
-  },
-  {
-    id: "homework",
-    label: "Homework",
-    icon: ClipboardList,
-    roles: ["superadmin", "admin", "teacher"],
-  },
-  {
-    id: "alumni",
-    label: "Alumni",
-    icon: UserCheck,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "promote",
-    label: "Promote Students",
-    icon: BookText,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "reports",
-    label: "Reports",
-    icon: BarChart3,
-    roles: ["superadmin", "admin"],
-  },
-  {
-    id: "analytics",
-    label: "Performance Analytics",
-    icon: LineChart,
-    roles: ["superadmin", "admin", "teacher", "parent", "student"],
-  },
-  {
-    id: "settings",
-    label: "Settings",
-    icon: Settings,
-    roles: ["superadmin", "admin"],
-  },
-  { id: "documentation", label: "Documentation", icon: HelpCircle },
-];
+/** Role-specific menu order maps */
+const ROLE_NAV: Record<UserRole | "default", NavItem[]> = {
+  superadmin: [
+    { id: "dashboard/superadmin", label: "Dashboard", icon: LayoutDashboard },
+    { id: "students", label: "Students", icon: Users },
+    { id: "fees", label: "Fees", icon: IndianRupee },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "hr", label: "HR / Payroll", icon: UserCog },
+    { id: "academics", label: "Academics", icon: BookOpen },
+    { id: "examinations", label: "Examinations", icon: FileText },
+    { id: "transport", label: "Transport", icon: Bus },
+    { id: "library", label: "Library", icon: Library },
+    { id: "inventory", label: "Inventory", icon: Package },
+    { id: "communication", label: "Communication", icon: MessageSquare },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "virtualclasses", label: "Virtual Classes", icon: Video },
+    { id: "expenses", label: "Expenses", icon: TrendingUp },
+    { id: "homework", label: "Homework", icon: ClipboardList },
+    { id: "alumni", label: "Alumni", icon: UserCheck },
+    { id: "promote", label: "Promote Students", icon: BookText },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+    { id: "analytics", label: "Analytics", icon: LineChart },
+    { id: "certificates", label: "Certificates", icon: Award },
+    { id: "calling", label: "Calling", icon: Phone },
+    { id: "settings", label: "Settings", icon: Settings },
+    { id: "settings/usermgmt", label: "User Management", icon: UserCog },
+    { id: "documentation", label: "Documentation", icon: HelpCircle },
+  ],
+  admin: [
+    { id: "dashboard/admin", label: "Dashboard", icon: LayoutDashboard },
+    { id: "students", label: "Students", icon: Users },
+    { id: "fees", label: "Fees", icon: IndianRupee },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "academics", label: "Academics", icon: BookOpen },
+    { id: "examinations", label: "Examinations", icon: FileText },
+    { id: "transport", label: "Transport", icon: Bus },
+    { id: "library", label: "Library", icon: Library },
+    { id: "inventory", label: "Inventory", icon: Package },
+    { id: "communication", label: "Communication", icon: MessageSquare },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+    { id: "certificates", label: "Certificates", icon: Award },
+    { id: "documentation", label: "Documentation", icon: HelpCircle },
+  ],
+  teacher: [
+    { id: "dashboard/teacher", label: "Dashboard", icon: LayoutDashboard },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "homework", label: "Homework", icon: ClipboardList },
+    { id: "examinations", label: "Examinations", icon: FileText },
+    { id: "academics", label: "Timetable", icon: BookOpen },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "virtualclasses", label: "Virtual Classes", icon: Video },
+    { id: "analytics", label: "Analytics", icon: LineChart },
+  ],
+  accountant: [
+    { id: "dashboard/accountant", label: "Dashboard", icon: LayoutDashboard },
+    { id: "fees", label: "Fees", icon: IndianRupee },
+    { id: "expenses", label: "Expenses", icon: TrendingUp },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+  ],
+  parent: [
+    { id: "dashboard/parent", label: "Dashboard", icon: LayoutDashboard },
+    { id: "fees", label: "Fees", icon: IndianRupee },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "examinations", label: "Results", icon: FileText },
+    { id: "academics", label: "Timetable", icon: BookOpen },
+    { id: "communication", label: "Notices", icon: MessageSquare },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+  ],
+  student: [
+    { id: "dashboard/student", label: "Dashboard", icon: LayoutDashboard },
+    { id: "examinations", label: "My Results", icon: FileText },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "homework", label: "Homework", icon: ClipboardList },
+    { id: "academics", label: "Timetable", icon: BookOpen },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "analytics", label: "Analytics", icon: LineChart },
+  ],
+  driver: [
+    { id: "dashboard/driver", label: "Dashboard", icon: LayoutDashboard },
+    { id: "transport", label: "My Route", icon: Route },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+  ],
+  receptionist: [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "students", label: "Students", icon: Users },
+    { id: "fees", label: "Fees", icon: IndianRupee },
+    { id: "attendance", label: "Attendance", icon: CalendarCheck },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+  ],
+  librarian: [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "library", label: "Library", icon: Library },
+    { id: "inventory", label: "Inventory", icon: Package },
+    { id: "reports", label: "Reports", icon: BarChart3 },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+  ],
+  default: [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "chat", label: "Chat", icon: MessageCircle },
+    { id: "documentation", label: "Documentation", icon: HelpCircle },
+  ],
+};
 
 interface SidebarProps {
   activePage: string;
@@ -188,16 +168,16 @@ export default function Sidebar({
     return () => clearInterval(interval);
   }, []);
 
-  const canAccess = (item: NavItem): boolean => {
-    if (!item.roles) return true;
-    if (!currentUser) return false;
-    return item.roles.includes(currentUser.role);
-  };
+  const navItems: NavItem[] =
+    (currentUser?.role
+      ? ROLE_NAV[currentUser.role as UserRole]
+      : ROLE_NAV.default) ?? ROLE_NAV.default;
 
   const isActive = (id: string) =>
-    activePage === id || activePage.startsWith(`${id}/`);
-
-  const accessibleItems = NAV_ITEMS.filter(canAccess);
+    activePage === id ||
+    activePage.startsWith(`${id}/`) ||
+    // Dashboard sub-routes: "dashboard/superadmin" should match when activePage has it
+    (id.startsWith("dashboard") && activePage === id);
 
   return (
     <aside
@@ -232,21 +212,21 @@ export default function Sidebar({
               SHUBH SCHOOL ERP
             </span>
             <span
-              className="text-[10px] font-medium leading-none opacity-60 block mt-0.5"
+              className="text-[10px] font-medium leading-none opacity-60 block mt-0.5 capitalize"
               style={{ color: "oklch(var(--sidebar-foreground))" }}
             >
-              School B
+              {currentUser?.role ?? "Portal"}
             </span>
           </div>
         )}
       </div>
 
-      {/* Flat navigation — no submenus */}
+      {/* Role-based navigation */}
       <nav
         className="flex-1 overflow-y-auto p-2 space-y-0.5 scrollbar-thin"
         aria-label="Main navigation"
       >
-        {accessibleItems.map((item) => {
+        {navItems.map((item) => {
           const Icon = item.icon;
           const active = isActive(item.id);
           const showUnread = item.id === "chat" && chatUnread > 0;

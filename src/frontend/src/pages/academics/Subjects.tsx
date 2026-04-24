@@ -1,19 +1,30 @@
 /**
- * Subjects — rebuild using useApp() context
- * All CRUD via saveData / updateData / deleteData
+ * Subjects — Direct API rebuild
+ * All CRUD via phpApiService.getSubjects/saveSubject/put/del.
+ * Waits for HTTP 200 before success.
+ * Marks fields are plain text inputs — no spinners.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { BookOpen, Edit2, Loader2, Plus, Trash2, X } from "lucide-react";
-import { useState } from "react";
+import { Label } from "@/components/ui/label";
+import {
+  BookOpen,
+  Edit2,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Search,
+  Trash2,
+  X,
+} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { ClassSection, Subject } from "../../types";
-import { CLASSES, generateId } from "../../utils/localStorage";
+import type { ClassRecord } from "../../utils/phpApiService";
+import phpApiService from "../../utils/phpApiService";
 
-// Stable sort order for classes
 const CLASS_ORDER = [
   "Nursery",
   "LKG",
@@ -32,6 +43,35 @@ const CLASS_ORDER = [
   "12",
 ];
 
+interface SubjectRecord {
+  id: string;
+  name: string;
+  code?: string;
+  classes: string[];
+  maxMarks?: string;
+  minMarks?: string;
+}
+
+interface FormState {
+  open: boolean;
+  editing: SubjectRecord | null;
+  name: string;
+  code: string;
+  classes: string[];
+  maxMarks: string;
+  minMarks: string;
+}
+
+const EMPTY_FORM: FormState = {
+  open: false,
+  editing: null,
+  name: "",
+  code: "",
+  classes: [],
+  maxMarks: "",
+  minMarks: "",
+};
+
 function sortClassList(list: string[]): string[] {
   return [...list].sort((a, b) => {
     const ai = CLASS_ORDER.indexOf(a);
@@ -43,58 +83,64 @@ function sortClassList(list: string[]): string[] {
   });
 }
 
-interface FormState {
-  open: boolean;
-  editing: Subject | null;
-  name: string;
-  code: string;
-  classes: string[];
+function displayClass(name: string) {
+  return ["Nursery", "LKG", "UKG"].includes(name) ? name : `Class ${name}`;
 }
 
 export default function Subjects() {
-  const { getData, saveData, updateData, deleteData, currentUser } = useApp();
-  const [saving, setSaving] = useState(false);
-  const [search, setSearch] = useState("");
-  const [form, setForm] = useState<FormState>({
-    open: false,
-    editing: null,
-    name: "",
-    code: "",
-    classes: [],
-  });
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const { currentUser } = useApp();
 
-  const subjects = getData("subjects") as Subject[];
-  // Get available classes from the classes collection
-  const classesData = getData("classes") as ClassSection[];
-  const availableClasses =
-    classesData.length > 0
-      ? classesData.map((c) => c.name ?? c.className ?? "").filter(Boolean)
-      : CLASSES;
+  const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
 
   const canWrite =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  const filtered = subjects.filter((s) =>
-    s.name.toLowerCase().includes(search.toLowerCase()),
-  );
+  const loadSubjects = useCallback(() => {
+    setLoading(true);
+    Promise.all([phpApiService.getSubjects(""), phpApiService.getClasses()])
+      .then(([subs, cls]) => {
+        setSubjects(subs as unknown as SubjectRecord[]);
+        setClasses(cls);
+      })
+      .catch(() => toast.error("Failed to load subjects"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    loadSubjects();
+  }, [loadSubjects]);
+
+  const allClassNames = sortClassList(classes.map((c) => c.className));
+
+  const filtered = subjects.filter((s) => {
+    const q = search.toLowerCase();
+    return (
+      !q ||
+      s.name.toLowerCase().includes(q) ||
+      (s.code ?? "").toLowerCase().includes(q)
+    );
+  });
 
   function openAdd() {
-    setForm({ open: true, editing: null, name: "", code: "", classes: [] });
+    setForm({ ...EMPTY_FORM, open: true });
   }
 
-  function openEdit(sub: Subject) {
+  function openEdit(s: SubjectRecord) {
     setForm({
       open: true,
-      editing: sub,
-      name: sub.name,
-      code: sub.code ?? "",
-      classes: [...sub.classes],
+      editing: s,
+      name: s.name,
+      code: s.code ?? "",
+      classes: [...s.classes],
+      maxMarks: String(s.maxMarks ?? ""),
+      minMarks: String(s.minMarks ?? ""),
     });
-  }
-
-  function closeForm() {
-    setForm({ open: false, editing: null, name: "", code: "", classes: [] });
   }
 
   function toggleClass(cls: string) {
@@ -107,333 +153,356 @@ export default function Subjects() {
   }
 
   async function handleSave() {
-    const trimName = form.name.trim();
-    if (!trimName) {
+    if (!form.name.trim()) {
       toast.error("Subject name is required");
-      return;
-    }
-    if (form.classes.length === 0) {
-      toast.error("Select at least one class");
       return;
     }
     setSaving(true);
     try {
+      const payload = {
+        name: form.name.trim(),
+        code: form.code.trim(),
+        classes: form.classes,
+        maxMarks: form.maxMarks ? Number(form.maxMarks) : null,
+        minMarks: form.minMarks ? Number(form.minMarks) : null,
+      };
       if (form.editing) {
-        await updateData("subjects", form.editing.id, {
-          name: trimName,
-          code: form.code.trim() || undefined,
-          classes: form.classes,
+        await phpApiService.put("subjects/update", {
+          id: form.editing.id,
+          ...payload,
         });
-        toast.success(`Subject "${trimName}" updated`);
+        toast.success("Subject updated");
       } else {
-        const newSub: Record<string, unknown> = {
-          id: generateId(),
-          name: trimName,
-          code: form.code.trim() || undefined,
-          classes: form.classes,
-        };
-        await saveData("subjects", newSub);
-        toast.success(`Subject "${trimName}" added`);
+        await phpApiService.post("subjects/add", payload);
+        toast.success("Subject added");
       }
-      closeForm();
+      setForm(EMPTY_FORM);
+      loadSubjects();
     } catch {
-      toast.error("Failed to save subject. Please try again.");
+      toast.error("Failed to save subject. Please retry.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, name: string) {
+    if (!confirm(`Delete subject "${name}"?`)) return;
+    setDeletingId(id);
     try {
-      await deleteData("subjects", id);
+      await phpApiService.del("subjects/delete", { id });
       toast.success("Subject deleted");
+      loadSubjects();
     } catch {
       toast.error("Failed to delete subject.");
     } finally {
-      setDeleteId(null);
+      setDeletingId(null);
     }
   }
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
+    <div className="space-y-4 p-4 lg:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-primary" />
-            Subjects
-          </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Define subjects and assign them to classes
-          </p>
+      <div className="flex flex-wrap gap-3 items-center">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-2.5 top-2.5 w-4 h-4 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder="Search subjects…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            data-ocid="subjects.search.input"
+          />
         </div>
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={loadSubjects}
+          aria-label="Refresh"
+          data-ocid="subjects.refresh.button"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+        </Button>
         {canWrite && (
-          <Button size="sm" onClick={openAdd} data-ocid="subjects.add_button">
-            <Plus className="w-4 h-4 mr-1" />
-            Add Subject
+          <Button size="sm" onClick={openAdd} data-ocid="subjects.add.button">
+            <Plus className="w-4 h-4 mr-1.5" /> Add Subject
           </Button>
         )}
       </div>
 
-      {/* Search */}
-      <Input
-        placeholder="Search subjects…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="max-w-xs"
-        data-ocid="subjects.search_input"
-      />
+      <div className="flex gap-2 flex-wrap">
+        <Badge variant="secondary">{filtered.length} subjects</Badge>
+      </div>
 
-      {/* Empty state */}
-      {filtered.length === 0 && (
-        <Card className="p-10 text-center" data-ocid="subjects.empty_state">
-          <BookOpen className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground">
-            {search
-              ? "No subjects match your search."
-              : "No subjects added yet."}
+      {/* List */}
+      {loading ? (
+        <div
+          className="flex items-center justify-center py-20"
+          data-ocid="subjects.loading_state"
+        >
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : filtered.length === 0 ? (
+        <Card
+          className="p-12 text-center border-dashed"
+          data-ocid="subjects.empty_state"
+        >
+          <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p className="font-semibold text-foreground">No subjects found</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            {subjects.length === 0
+              ? "Add your first subject to get started"
+              : "Try adjusting the search"}
           </p>
+          {subjects.length === 0 && canWrite && (
+            <Button
+              size="sm"
+              className="mt-4"
+              onClick={openAdd}
+              data-ocid="subjects.add-first.button"
+            >
+              <Plus className="w-4 h-4 mr-1.5" /> Add First Subject
+            </Button>
+          )}
         </Card>
-      )}
-
-      {/* Table */}
-      {filtered.length > 0 && (
-        <div className="overflow-x-auto rounded-xl border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                  Subject Name
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground hidden sm:table-cell">
-                  Code
-                </th>
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">
-                  Classes
-                </th>
-                {canWrite && (
-                  <th className="text-right px-4 py-3 font-semibold text-muted-foreground">
-                    Actions
+      ) : (
+        <Card className="overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60">
+                <tr>
+                  <th className="text-left p-3 font-semibold text-muted-foreground">
+                    #
                   </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((sub, idx) => (
-                <tr
-                  key={sub.id}
-                  className={idx % 2 === 0 ? "bg-card" : "bg-muted/20"}
-                  data-ocid={`subjects.item.${idx + 1}`}
-                >
-                  <td className="px-4 py-3 font-medium text-foreground">
-                    {sub.name}
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell font-mono text-xs">
-                    {sub.code ?? "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {sortClassList(sub.classes).map((cls) => (
-                        <Badge
-                          key={cls}
-                          variant="secondary"
-                          className="text-xs"
-                        >
-                          {cls === "Nursery" || cls === "LKG" || cls === "UKG"
-                            ? cls
-                            : `Cl. ${cls}`}
-                        </Badge>
-                      ))}
-                    </div>
-                  </td>
+                  <th className="text-left p-3 font-semibold text-muted-foreground">
+                    Subject
+                  </th>
+                  <th className="text-left p-3 font-semibold text-muted-foreground hidden sm:table-cell">
+                    Code
+                  </th>
+                  <th className="text-left p-3 font-semibold text-muted-foreground">
+                    Classes
+                  </th>
+                  <th className="text-right p-3 font-semibold text-muted-foreground hidden md:table-cell">
+                    Max Marks
+                  </th>
+                  <th className="text-right p-3 font-semibold text-muted-foreground hidden md:table-cell">
+                    Min Marks
+                  </th>
                   {canWrite && (
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1 justify-end">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => openEdit(sub)}
-                          data-ocid={`subjects.edit_button.${idx + 1}`}
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => setDeleteId(sub.id)}
-                          data-ocid={`subjects.delete_button.${idx + 1}`}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </td>
+                    <th className="text-center p-3 font-semibold text-muted-foreground">
+                      Actions
+                    </th>
                   )}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {filtered.map((s, idx) => (
+                  <tr
+                    key={s.id}
+                    className="border-t border-border hover:bg-muted/30 transition-colors"
+                    data-ocid={`subjects.item.${idx + 1}`}
+                  >
+                    <td className="p-3 text-muted-foreground">{idx + 1}</td>
+                    <td className="p-3 font-medium text-foreground">
+                      {s.name}
+                    </td>
+                    <td className="p-3 text-muted-foreground font-mono text-xs hidden sm:table-cell">
+                      {s.code || "—"}
+                    </td>
+                    <td className="p-3">
+                      <div className="flex flex-wrap gap-1">
+                        {s.classes.length > 0 ? (
+                          sortClassList(s.classes).map((c) => (
+                            <Badge
+                              key={c}
+                              variant="outline"
+                              className="text-xs"
+                            >
+                              {displayClass(c)}
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            All classes
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="p-3 text-right text-muted-foreground hidden md:table-cell">
+                      {s.maxMarks || "—"}
+                    </td>
+                    <td className="p-3 text-right text-muted-foreground hidden md:table-cell">
+                      {s.minMarks || "—"}
+                    </td>
+                    {canWrite && (
+                      <td className="p-3 text-center">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7"
+                            onClick={() => openEdit(s)}
+                            data-ocid={`subjects.edit.${idx + 1}`}
+                            aria-label="Edit"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-destructive hover:text-destructive"
+                            disabled={deletingId === s.id}
+                            onClick={() => void handleDelete(s.id, s.name)}
+                            data-ocid={`subjects.delete.${idx + 1}`}
+                            aria-label="Delete"
+                          >
+                            {deletingId === s.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       )}
 
       {/* Add/Edit Modal */}
       {form.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div
-            className="bg-card rounded-xl shadow-lg w-full max-w-lg p-6 space-y-5"
-            data-ocid="subjects.dialog"
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-lg font-display text-foreground">
-                {form.editing ? "Edit Subject" : "New Subject"}
-              </h3>
-              <button
-                type="button"
-                onClick={closeForm}
-                className="text-muted-foreground hover:text-foreground"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          data-ocid="subjects.dialog"
+        >
+          <div className="bg-card rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="font-display font-semibold text-foreground">
+                {form.editing ? "Edit Subject" : "Add Subject"}
+              </h2>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setForm(EMPTY_FORM)}
                 data-ocid="subjects.close_button"
               >
-                <X className="w-5 h-5" />
-              </button>
+                <X className="w-4 h-4" />
+              </Button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5 col-span-2 sm:col-span-1">
-                <label htmlFor="subject-name" className="text-sm font-medium">
-                  Subject Name <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  id="subject-name"
-                  value={form.name}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  placeholder="e.g. Hindi, Mathematics"
-                  data-ocid="subjects.name_input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <label htmlFor="subject-code" className="text-sm font-medium">
-                  Code (optional)
-                </label>
-                <Input
-                  id="subject-code"
-                  value={form.code}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, code: e.target.value }))
-                  }
-                  placeholder="e.g. HIN, MAT"
-                  data-ocid="subjects.code_input"
-                />
-              </div>
-            </div>
-
-            {/* Class multi-select */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">
-                  Taught in Classes <span className="text-destructive">*</span>
-                </span>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((prev) => ({
-                        ...prev,
-                        classes: [...availableClasses],
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1 col-span-2 sm:col-span-1">
+                  <Label className="text-xs">Subject Name *</Label>
+                  <Input
+                    value={form.name}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, name: e.target.value }))
+                    }
+                    placeholder="e.g. Mathematics"
+                    data-ocid="subjects.name.input"
+                  />
+                </div>
+                <div className="space-y-1 col-span-2 sm:col-span-1">
+                  <Label className="text-xs">Subject Code</Label>
+                  <Input
+                    value={form.code}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, code: e.target.value }))
+                    }
+                    placeholder="e.g. MATH"
+                    data-ocid="subjects.code.input"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Max Marks</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.maxMarks}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        maxMarks: e.target.value.replace(/[^0-9]/g, ""),
                       }))
                     }
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setForm((prev) => ({ ...prev, classes: [] }))
+                    placeholder="e.g. 100"
+                    data-ocid="subjects.max-marks.input"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Min (Pass) Marks</Label>
+                  <Input
+                    type="text"
+                    inputMode="numeric"
+                    value={form.minMarks}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        minMarks: e.target.value.replace(/[^0-9]/g, ""),
+                      }))
                     }
-                    className="text-xs text-muted-foreground hover:underline"
-                  >
-                    Clear
-                  </button>
+                    placeholder="e.g. 33"
+                    data-ocid="subjects.min-marks.input"
+                  />
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {availableClasses.map((cls) => (
-                  <label
-                    key={cls}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer border transition-colors ${
-                      form.classes.includes(cls)
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card border-border text-muted-foreground hover:border-primary"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={form.classes.includes(cls)}
-                      onChange={() => toggleClass(cls)}
-                    />
-                    {cls === "Nursery" || cls === "LKG" || cls === "UKG"
-                      ? cls
-                      : `Class ${cls}`}
-                  </label>
-                ))}
+
+              <div className="space-y-2">
+                <Label className="text-xs">
+                  Applicable Classes (leave empty for all)
+                </Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {allClassNames.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => toggleClass(c)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                        form.classes.includes(c)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-transparent border-border text-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      {displayClass(c)}
+                    </button>
+                  ))}
+                </div>
+                {form.classes.length > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {form.classes.length} class
+                    {form.classes.length !== 1 ? "es" : ""} selected
+                  </p>
+                )}
               </div>
-              {form.classes.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Selected: {sortClassList(form.classes).join(", ")}
-                </p>
-              )}
             </div>
 
-            <div className="flex gap-2 pt-1">
+            <div className="flex justify-end gap-3 p-5 border-t border-border">
               <Button
-                onClick={handleSave}
-                disabled={
-                  saving || !form.name.trim() || form.classes.length === 0
-                }
-                data-ocid="subjects.save_button"
+                variant="outline"
+                onClick={() => setForm(EMPTY_FORM)}
+                data-ocid="subjects.cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSave()}
+                disabled={saving}
+                data-ocid="subjects.submit_button"
               >
                 {saving ? (
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                ) : null}
-                {form.editing ? "Update Subject" : "Save Subject"}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={closeForm}
-                data-ocid="subjects.cancel_button"
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Delete Confirm */}
-      {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div className="bg-card rounded-xl shadow-lg w-full max-w-sm p-6 space-y-4">
-            <h3 className="font-bold text-foreground">Delete Subject?</h3>
-            <p className="text-sm text-muted-foreground">
-              This will permanently remove the subject. This cannot be undone.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                variant="destructive"
-                onClick={() => handleDelete(deleteId)}
-                data-ocid="subjects.confirm_button"
-              >
-                Delete
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setDeleteId(null)}
-                data-ocid="subjects.cancel_button"
-              >
-                Cancel
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving…
+                  </>
+                ) : form.editing ? (
+                  "Update Subject"
+                ) : (
+                  "Add Subject"
+                )}
               </Button>
             </div>
           </div>

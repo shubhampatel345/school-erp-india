@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  CheckCircle2,
   Eye,
   EyeOff,
   GraduationCap,
@@ -9,9 +10,21 @@ import {
   Lock,
   User,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
 import phpApiService from "../utils/phpApiService";
+
+const ROLE_LABELS: Record<string, string> = {
+  superadmin: "Super Admin",
+  admin: "Admin",
+  teacher: "Teacher",
+  accountant: "Accountant",
+  parent: "Parent",
+  student: "Student",
+  driver: "Driver",
+  receptionist: "Receptionist",
+  librarian: "Librarian",
+};
 
 export default function Login() {
   const { login } = useApp();
@@ -21,6 +34,17 @@ export default function Login() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
+  const [welcomeBadge, setWelcomeBadge] = useState<{
+    name: string;
+    role: string;
+  } | null>(null);
+
+  // Clear welcome badge after 2.5s
+  useEffect(() => {
+    if (!welcomeBadge) return;
+    const t = setTimeout(() => setWelcomeBadge(null), 2500);
+    return () => clearTimeout(t);
+  }, [welcomeBadge]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,10 +55,26 @@ export default function Login() {
       const trimmedPass = password.trim();
       const ok = await login(trimmedUser, trimmedPass);
       if (ok) {
-        // Store credentials for silent token re-auth (non-superadmin only)
         if (trimmedUser !== "superadmin") {
           phpApiService.storeCredentials(trimmedUser, trimmedPass);
-          // erp_login_timestamp is already stamped inside AppContext.login() before dispatch
+        }
+        // Welcome badge — read role from sessionStorage written by AppContext.login()
+        try {
+          const stored = sessionStorage.getItem("shubh_current_user");
+          if (stored) {
+            const u = JSON.parse(stored) as {
+              name?: string;
+              fullName?: string;
+              role?: string;
+            };
+            const displayName = (u.fullName ?? u.name ?? trimmedUser).split(
+              " ",
+            )[0];
+            const roleName = ROLE_LABELS[u.role ?? ""] ?? u.role ?? "User";
+            setWelcomeBadge({ name: displayName, role: roleName });
+          }
+        } catch {
+          /* ignore */
         }
       } else {
         setError(
@@ -81,15 +121,39 @@ export default function Login() {
             className="mt-1 text-base font-semibold"
             style={{ color: "oklch(0.82 0.14 200)" }}
           >
-            School B
-          </p>
-          <p
-            style={{ color: "oklch(1 0 0 / 0.50)" }}
-            className="mt-0.5 text-sm"
-          >
             Complete School Management System
           </p>
         </div>
+
+        {/* Welcome badge — shows briefly after successful login */}
+        {welcomeBadge && (
+          <div
+            className="mb-4 flex items-center gap-3 rounded-xl px-4 py-3 animate-slide-up"
+            style={{
+              background: "oklch(0.7 0.16 142 / 0.18)",
+              border: "1px solid oklch(0.7 0.16 142 / 0.40)",
+            }}
+          >
+            <CheckCircle2
+              className="w-5 h-5 flex-shrink-0"
+              style={{ color: "oklch(0.7 0.16 142)" }}
+            />
+            <div>
+              <p
+                className="font-semibold text-sm"
+                style={{ color: "oklch(0.9 0.1 142)" }}
+              >
+                Welcome, {welcomeBadge.name}!
+              </p>
+              <p
+                className="text-xs"
+                style={{ color: "oklch(0.9 0.1 142 / 0.75)" }}
+              >
+                Signed in as {welcomeBadge.role} — redirecting…
+              </p>
+            </div>
+          </div>
+        )}
 
         {/* Login Card */}
         <div
@@ -261,10 +325,6 @@ export default function Login() {
                   to reset your password. They can do this from{" "}
                   <em>Settings → User Management → Reset Password</em>.
                 </p>
-                <p className="mt-2">
-                  For Super Admin access issues, use the factory reset option in
-                  Settings → Data Management.
-                </p>
               </div>
             )}
           </form>
@@ -314,7 +374,7 @@ export default function Login() {
           className="text-center text-xs mt-5"
           style={{ color: "oklch(1 0 0 / 0.25)" }}
         >
-          © {new Date().getFullYear()} SHUBH SCHOOL ERP — School B. Built with{" "}
+          © {new Date().getFullYear()} SHUBH SCHOOL ERP. Built with{" "}
           <a
             href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
             target="_blank"

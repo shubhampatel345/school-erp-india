@@ -1,27 +1,29 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive school management system for Indian schools, covering Students, Fees, Attendance, HR/Payroll, Academics, Examinations, Transport, Library, Inventory, Communication, Chat, Certificates, Reports, and more. Runs on cPanel/PHP/MySQL — no Internet Computer deployment required. All data saves reliably to MySQL with local-first sync so records never disappear.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive school management system for Indian schools. Fully cPanel/MySQL powered — every add, edit, and delete goes directly to your MySQL database with instant confirmation. All 7 roles (Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver) have individual login panels with smart dashboards showing only what's relevant to each user. 25+ modules: Students, Fees, Attendance, HR/Payroll, Academics, Examinations, Transport, Library, Inventory, Chat, Communication, Certificates, Reports, Virtual Classes, and more.",
   "features": [
-    "cPanel/PHP/MySQL backend — no deployment errors",
-    "25+ modules: Students, Fees, Attendance, HR, Academics, Exams, Transport, Library, Inventory, Chat, Reports",
-    "Local-first sync: saves to browser instantly, syncs to MySQL in background",
-    "Role-based access: Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver",
-    "Indian class ordering: Nursery → LKG → UKG → Class 1–12",
-    "10 color themes, dark navy sidebar, all menu names visible",
-    "PWA installable on Android and iOS",
-    "Changelog: every add/edit/delete logged with user and timestamp",
-    "Auto-migration: visit /api/?route=migrate/run once to create all MySQL tables",
-    "No spinner arrows on any amount fields — all plain text inputs"
+    "Role-based login panels — Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver each get their own smart dashboard",
+    "Ultra-fast online-only architecture — all data saves directly to MySQL via PHP API, no local sync overhead",
+    "Students module with Excel-style grid, bulk import, Indian class ordering (Nursery to Class 12)",
+    "Fees collection with typeable amount fields, QR receipts, auto month selection, UPI QR payment",
+    "Attendance with daily marking, QR scanner, AI face recognition",
+    "HR/Payroll with staff directory, payslips, payroll register",
+    "Academics, Examinations with online MCQ tests and auto-grading",
+    "Transport with GPS tracking, Library with barcode scanning",
+    "Communication with WhatsApp broadcast, Certificate Studio, Reports export to Excel",
+    "Dark navy sidebar, 10 color themes, PWA installable on phone",
+    "Session management with auto-promote students to next academic year",
+    "Token auto-refresh — no Session Expired popups"
   ],
-  "category": "productivity",
+  "category": "education",
   "tags": [
     "school-erp",
     "education",
     "india",
     "cpanel",
     "mysql",
-    "pwa",
+    "attendance",
     "fees",
-    "attendance"
+    "role-based"
   ],
-  "last_updated": "2026-04-23T17:57:26.954Z"
+  "last_updated": "2026-04-24T15:42:12.117Z"
 }

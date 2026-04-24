@@ -1,27 +1,22 @@
 /**
- * FeesPlan.tsx — Class-wise, section-wise fee plans
+ * FeesPlan.tsx — Class/section fee plan via phpApiService
  *
- * CRITICAL TYPING FIX (root cause of persistent cursor-jump bug):
- * - Each cell is now a fully self-contained component (AmountCell) that owns
- *   its own local state via useState. It does NOT report to the parent on every
- *   keystroke — only on blur.
- * - The parent never stores per-cell amounts in its own state at all.
- *   The parent holds an "initialValues" map that is passed down once when the
- *   class/section selection changes. React.memo + stable props means AmountCell
- *   will NOT re-render unless the initial value prop changes.
- * - On blur, each cell calls onBlur(headingId, monthShort, value) which
- *   immediately persists to IndexedDB/canister — no parent re-render needed.
- * - A savedCells Set is tracked in the parent ref (not state) so the ✓ badge
- *   doesn't cause a re-render either.
+ * CRITICAL: Amount inputs use self-contained AmountCell (memo) that owns local
+ * state and only reports to parent on blur. NO parent re-render on keystroke.
+ * type="text" (NOT type="number") to prevent cursor-jump bugs.
+ *
+ * All reads/writes go through phpApiService directly.
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { useApp } from "../../context/AppContext";
-import type { ClassSection, FeeHeading, FeesPlan } from "../../types";
-import { CLASS_ORDER } from "../../types";
-import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
+import phpApiService, {
+  type ClassRecord,
+  type FeeHeadingRecord,
+  type FeePlanRecord,
+} from "../../utils/phpApiService";
 
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function safeStringArray(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);
@@ -41,22 +36,34 @@ function safeStringArray(v: unknown): string[] {
 
 function parseAmounts(amounts: unknown): Record<string, number> {
   if (!amounts && amounts !== 0) return {};
-  if (typeof amounts === "number") return {};
-  if (typeof amounts === "object" && !Array.isArray(amounts)) {
+  if (typeof amounts === "object" && !Array.isArray(amounts))
     return amounts as Record<string, number>;
-  }
   if (typeof amounts === "string" && amounts.trim()) {
     try {
       const p = JSON.parse(amounts) as unknown;
-      if (typeof p === "object" && !Array.isArray(p) && p !== null) {
+      if (typeof p === "object" && !Array.isArray(p) && p !== null)
         return p as Record<string, number>;
-      }
     } catch {
-      // not parseable JSON
+      /* not json */
     }
   }
   return {};
 }
+
+const MONTHS = [
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+  "January",
+  "February",
+  "March",
+];
 
 const MONTH_SHORT_MAP: Record<string, string> = {
   April: "Apr",
@@ -73,10 +80,32 @@ const MONTH_SHORT_MAP: Record<string, string> = {
   March: "Mar",
 };
 
-// ─── AmountCell — fully self-contained ────────────────────────────────────────
-// CRITICAL: This component owns its own local state.
-// It does NOT call onChange on every keystroke — only onBlur.
-// React.memo ensures it only re-renders when initialValue or disabled changes.
+const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
+function classOrderIdx(name: string): number {
+  let idx = CLASS_ORDER.indexOf(name);
+  if (idx !== -1) return idx;
+  idx = CLASS_ORDER.indexOf(`Class ${name}`);
+  return idx !== -1 ? idx : 99;
+}
+
+// ── AmountCell — self-contained to prevent cursor-jump ────────────────────────
 
 interface AmountCellProps {
   headingId: string;
@@ -93,12 +122,10 @@ const AmountCell = memo(function AmountCell({
   disabled,
   onBlurSave,
 }: AmountCellProps) {
-  // Local state — only this component re-renders on keystroke
   const [localValue, setLocalValue] = useState(initialValue);
   const [saved, setSaved] = useState(false);
-
-  // Sync when initialValue changes (class/section switched)
   const prevInitRef = useRef(initialValue);
+
   useEffect(() => {
     if (prevInitRef.current !== initialValue) {
       prevInitRef.current = initialValue;
@@ -120,7 +147,6 @@ const AmountCell = memo(function AmountCell({
     if (disabled) return;
     onBlurSave(headingId, monthShort, localValue);
     setSaved(true);
-    // Clear saved indicator after 3s
     setTimeout(() => setSaved(false), 3000);
   }
 
@@ -162,30 +188,23 @@ const AmountCell = memo(function AmountCell({
   );
 });
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function FeesPlanPage() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    refreshCollection,
-    currentUser,
-    isReadOnly,
-    currentSession,
-    addNotification,
-  } = useApp();
+  const { currentUser, isReadOnly, currentSession, addNotification } = useApp();
 
-  const [selectedClass, setSelectedClass] = useState<string>("");
-  const [selectedSection, setSelectedSection] = useState<string>("");
+  const [headings, setHeadings] = useState<FeeHeadingRecord[]>([]);
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
+  const [plans, setPlans] = useState<FeePlanRecord[]>([]);
+  const [selectedClass, setSelectedClass] = useState("");
+  const [selectedSection, setSelectedSection] = useState("");
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Accumulator for per-cell blur saves — keyed by headingId+month
-  // Using a ref so we don't re-render the whole page on each cell blur
+  // Accumulator for cell values — keyed by headingId+month, no parent re-render
   const pendingAmountsRef = useRef<Record<string, Record<string, string>>>({});
 
-  // ── Stable permission flags ─────────────────────────────────────────────────
   const canEdit = useMemo(
     () =>
       currentUser?.role === "superadmin" ||
@@ -194,120 +213,118 @@ export default function FeesPlanPage() {
     [currentUser?.role],
   );
 
-  // ── Raw collections ─────────────────────────────────────────────────────────
-  const rawHeadings = getData("fee_headings") as FeeHeading[];
-  const headings = useMemo(
-    () =>
-      rawHeadings
-        .map((h) => ({
-          ...h,
-          months: safeStringArray(h.months),
-        }))
-        .filter((h) => h.isActive !== false)
-        .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0)),
-    [rawHeadings],
-  );
+  // Fetch headings and classes once on mount
+  useEffect(() => {
+    setIsLoading(true);
+    Promise.all([phpApiService.getFeeHeadings(), phpApiService.getClasses()])
+      .then(([h, c]) => {
+        const activeHeadings = h.filter((x) => x.isActive !== false);
+        setHeadings(activeHeadings);
+        const sorted = [...c].sort(
+          (a, b) => classOrderIdx(a.className) - classOrderIdx(b.className),
+        );
+        setClasses(sorted);
+      })
+      .catch(() => {
+        /* silently fail */
+      })
+      .finally(() => setIsLoading(false));
+  }, []);
 
-  const rawPlans = getData("fees_plan") as FeesPlan[];
-  const plans = useMemo(() => rawPlans, [rawPlans]);
-
-  // ── Classes ─────────────────────────────────────────────────────────────────
-  const rawClasses = getData("classes") as ClassSection[];
-  const classSections: ClassSection[] = useMemo(() => {
-    if (rawClasses.length > 0) {
-      return [...rawClasses].sort((a, b) => {
-        const an =
-          a.className ?? (a as unknown as { name?: string }).name ?? "";
-        const bn =
-          b.className ?? (b as unknown as { name?: string }).name ?? "";
-        const ai = CLASS_ORDER.indexOf(an);
-        const bi = CLASS_ORDER.indexOf(bn);
-        return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      });
+  // Fetch fee plan whenever class+section changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: headings is stable after mount
+  useEffect(() => {
+    if (!selectedClass || !selectedSection) {
+      setPlans([]);
+      return;
     }
-    return CLASSES.map((c) => ({
-      id: c,
-      className: c,
-      sections: ["A", "B", "C"],
-    }));
-  }, [rawClasses]);
-
-  const classNames = useMemo(
-    () =>
-      classSections
-        .map(
-          (c) => c.className ?? (c as unknown as { name?: string }).name ?? "",
-        )
-        .filter(Boolean),
-    [classSections],
-  );
-
-  const activeSections: string[] = useMemo(() => {
-    const cs = classSections.find(
-      (c) =>
-        (c.className ?? (c as unknown as { name?: string }).name ?? "") ===
-        selectedClass,
-    );
-    if (!cs) return [];
-    return safeStringArray(cs.sections);
-  }, [classSections, selectedClass]);
-
-  // Headings applicable to selected class
-  const activeHeadings = useMemo(() => {
-    if (!selectedClass) return headings;
-    return headings.filter((h) => {
-      const ac = safeStringArray(h.applicableClasses);
-      return ac.length === 0 || ac.includes(selectedClass);
-    });
-  }, [headings, selectedClass]);
+    phpApiService
+      .getFeePlan(selectedClass, selectedSection)
+      .then((p) => {
+        setPlans(p);
+        // Seed pending amounts from loaded plan
+        const vals: Record<string, Record<string, string>> = {};
+        for (const heading of headings) {
+          vals[heading.id] = {};
+          const plan = p.find((x) => x.headingId === heading.id);
+          for (const month of MONTHS) {
+            const months = safeStringArray(
+              heading.months as string[] | string | undefined,
+            );
+            if (!months.includes(month)) continue;
+            const short = MONTH_SHORT_MAP[month] ?? month.slice(0, 3);
+            let val = "";
+            if (plan) {
+              const amts = parseAmounts(plan.amounts);
+              if (amts[short] !== undefined) val = String(amts[short]);
+              else if (plan.amount) val = String(plan.amount);
+            }
+            vals[heading.id][short] = val;
+          }
+        }
+        pendingAmountsRef.current = vals;
+        // Force AmountCell re-init via key change (see initialValuesRef below)
+        initialValuesRef.current = {
+          key: `${selectedClass}|${selectedSection}`,
+          values: vals,
+        };
+      })
+      .catch(() => setPlans([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClass, selectedSection]);
 
   // Auto-select first section when class changes
+  const activeSections = useMemo(() => {
+    const cls = classes.find((c) => c.className === selectedClass);
+    if (!cls) return [];
+    return safeStringArray(cls.sections as string[] | string | undefined);
+  }, [classes, selectedClass]);
+
   useEffect(() => {
     if (activeSections.length > 0) {
       setSelectedSection(activeSections[0]);
     } else {
       setSelectedSection("");
     }
-    // Reset pending amounts when class changes
     pendingAmountsRef.current = {};
   }, [activeSections]);
 
-  // Pending amounts are reset inside the initialValuesKey block below
+  const classNames = useMemo(() => classes.map((c) => c.className), [classes]);
 
-  // Plans scoped to current class+section
-  const relevantPlans = useMemo(
-    () =>
-      plans.filter((p) => {
-        const pc =
-          p.classId ||
-          (p as unknown as Record<string, string>).className ||
-          (p as unknown as Record<string, string>).class ||
-          "";
-        const ps =
-          p.sectionId ||
-          (p as unknown as Record<string, string>).sectionName ||
-          (p as unknown as Record<string, string>).section ||
-          "";
-        return pc === selectedClass && ps === selectedSection;
-      }),
-    [plans, selectedClass, selectedSection],
-  );
+  const activeHeadings = useMemo(() => {
+    if (!selectedClass) return headings;
+    return headings.filter((h) => {
+      const ac = safeStringArray(
+        (h as unknown as Record<string, unknown>).applicableClasses as
+          | string[]
+          | string
+          | undefined,
+      );
+      return ac.length === 0 || ac.includes(selectedClass);
+    });
+  }, [headings, selectedClass]);
 
-  // Derive initial values for cells — memoized so AmountCell only re-initializes
-  // when the selection actually changes (not on every SyncEngine poll)
+  // initialValuesRef — tracks which class+section's values are loaded
   const initialValuesKey = `${selectedClass}|${selectedSection}`;
   const initialValuesRef = useRef<{
     key: string;
     values: Record<string, Record<string, string>>;
-  }>({ key: "", values: {} });
+  }>({
+    key: "",
+    values: {},
+  });
 
   if (initialValuesRef.current.key !== initialValuesKey) {
+    // Seed from plans on first render for this class+section
     const vals: Record<string, Record<string, string>> = {};
     for (const heading of activeHeadings) {
       vals[heading.id] = {};
-      const plan = relevantPlans.find((p) => p.headingId === heading.id);
+      const plan = plans.find((p) => p.headingId === heading.id);
       for (const month of MONTHS) {
-        if (!heading.months.includes(month)) continue;
+        const months = safeStringArray(
+          heading.months as string[] | string | undefined,
+        );
+        if (!months.includes(month)) continue;
         const short = MONTH_SHORT_MAP[month] ?? month.slice(0, 3);
         let val = "";
         if (plan) {
@@ -319,81 +336,59 @@ export default function FeesPlanPage() {
       }
     }
     initialValuesRef.current = { key: initialValuesKey, values: vals };
-    // Seed pendingAmounts with the initial values so Save All works even without blur
     pendingAmountsRef.current = JSON.parse(JSON.stringify(vals)) as Record<
       string,
       Record<string, string>
     >;
   }
 
-  // ── On-blur cell save handler ────────────────────────────────────────────────
-  // CRITICAL: empty deps → stable reference → AmountCell never remounts
+  // Stable blur handler — empty deps = stable ref = AmountCell never remounts
   const handleCellBlur = useCallback(
     (headingId: string, monthShort: string, value: string) => {
-      // Update the accumulator — no state update, no re-render
-      if (!pendingAmountsRef.current[headingId]) {
+      if (!pendingAmountsRef.current[headingId])
         pendingAmountsRef.current[headingId] = {};
-      }
       pendingAmountsRef.current[headingId][monthShort] = value;
     },
     [],
   );
 
-  // ── Save All ─────────────────────────────────────────────────────────────────
   async function handleSave() {
     if (!selectedClass || !selectedSection || !canEdit) return;
     setSaving(true);
-    const saves: Promise<unknown>[] = [];
+    const items: Array<{ headingId: string; amounts: Record<string, number> }> =
+      [];
 
     for (const heading of activeHeadings) {
       const amounts: Record<string, number> = {};
-      let hasAny = false;
-
       for (const month of MONTHS) {
-        if (!heading.months.includes(month)) continue;
-        const short = MONTH_SHORT_MAP[month] ?? month.slice(0, 3);
-        const raw = pendingAmountsRef.current[heading.id]?.[short] ?? "";
-        const val = Number(raw) || 0;
-        if (val > 0) {
-          amounts[short] = val;
-          hasAny = true;
-        }
-      }
-
-      const existing = relevantPlans.find((p) => p.headingId === heading.id);
-      const planData = {
-        classId: selectedClass,
-        sectionId: selectedSection,
-        className: selectedClass,
-        sectionName: selectedSection,
-        class: selectedClass,
-        section: selectedSection,
-        headingId: heading.id,
-        headingName: heading.name,
-        amounts: JSON.stringify(amounts),
-        amount: hasAny ? (Object.values(amounts)[0] ?? 0) : 0,
-        sessionId: currentSession?.id ?? "",
-        session: currentSession?.id ?? "",
-      };
-
-      if (existing) {
-        saves.push(updateData("fees_plan", existing.id, planData));
-      } else {
-        saves.push(
-          saveData("fees_plan", {
-            id: generateId(),
-            ...planData,
-          } as unknown as Record<string, unknown>),
+        const months = safeStringArray(
+          heading.months as string[] | string | undefined,
         );
+        if (!months.includes(month)) continue;
+        const short = MONTH_SHORT_MAP[month] ?? month.slice(0, 3);
+        const val =
+          Number(pendingAmountsRef.current[heading.id]?.[short] ?? 0) || 0;
+        if (val > 0) amounts[short] = val;
       }
+      items.push({ headingId: heading.id, amounts });
     }
 
     try {
-      await Promise.allSettled(saves);
-      await refreshCollection("fees_plan");
+      await phpApiService.saveFeePlan({
+        classId: selectedClass,
+        sectionId: selectedSection,
+        items,
+        sessionId: currentSession?.id,
+      });
+      // Reload plans from server to confirm save
+      const updated = await phpApiService.getFeePlan(
+        selectedClass,
+        selectedSection,
+      );
+      setPlans(updated);
       setSavedMsg(`✓ Saved — ${selectedClass} / ${selectedSection}`);
       addNotification(
-        `Fee plan saved for Class ${selectedClass} - Section ${selectedSection}`,
+        `Fee plan saved for ${selectedClass} - ${selectedSection}`,
         "success",
       );
     } catch (err) {
@@ -407,7 +402,6 @@ export default function FeesPlanPage() {
     }
   }
 
-  // ── Copy to all sections ─────────────────────────────────────────────────────
   async function copyToAllSections() {
     if (!selectedClass || !selectedSection || !canEdit) return;
     const otherSections = activeSections.filter((s) => s !== selectedSection);
@@ -422,63 +416,33 @@ export default function FeesPlanPage() {
     setSaving(true);
     try {
       for (const section of otherSections) {
+        const items: Array<{
+          headingId: string;
+          amounts: Record<string, number>;
+        }> = [];
         for (const heading of activeHeadings) {
           const amounts: Record<string, number> = {};
-          let hasAny = false;
           for (const month of MONTHS) {
-            if (!heading.months.includes(month)) continue;
+            const months = safeStringArray(
+              heading.months as string[] | string | undefined,
+            );
+            if (!months.includes(month)) continue;
             const short = MONTH_SHORT_MAP[month] ?? month.slice(0, 3);
             const val =
               Number(pendingAmountsRef.current[heading.id]?.[short] ?? 0) || 0;
-            if (val > 0) {
-              amounts[short] = val;
-              hasAny = true;
-            }
+            if (val > 0) amounts[short] = val;
           }
-          if (!hasAny) continue;
-
-          const existing = plans.find((p) => {
-            const pc =
-              p.classId ||
-              (p as unknown as Record<string, string>).className ||
-              "";
-            const ps =
-              p.sectionId ||
-              (p as unknown as Record<string, string>).sectionName ||
-              "";
-            return (
-              pc === selectedClass &&
-              ps === section &&
-              p.headingId === heading.id
-            );
-          });
-
-          const planData = {
-            classId: selectedClass,
-            sectionId: section,
-            className: selectedClass,
-            sectionName: section,
-            class: selectedClass,
-            section,
-            headingId: heading.id,
-            headingName: heading.name,
-            amounts: JSON.stringify(amounts),
-            amount: Object.values(amounts)[0] ?? 0,
-            sessionId: currentSession?.id ?? "",
-          };
-
-          if (existing) {
-            await updateData("fees_plan", existing.id, planData);
-          } else {
-            await saveData("fees_plan", {
-              id: generateId(),
-              ...planData,
-            } as unknown as Record<string, unknown>);
-          }
+          items.push({ headingId: heading.id, amounts });
         }
+        await phpApiService.saveFeePlan({
+          classId: selectedClass,
+          sectionId: section,
+          items,
+          sessionId: currentSession?.id,
+        });
       }
       addNotification(
-        `Amounts copied to all sections of Class ${selectedClass}`,
+        `Amounts copied to all sections of ${selectedClass}`,
         "success",
       );
     } catch (err) {
@@ -491,7 +455,19 @@ export default function FeesPlanPage() {
     }
   }
 
-  // ─── Render ───────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-1.5 justify-center py-12">
+        {[0, 1, 2].map((i) => (
+          <div
+            key={i}
+            className="w-2 h-2 rounded-full bg-primary animate-pulse"
+            style={{ animationDelay: `${i * 200}ms` }}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -528,11 +504,7 @@ export default function FeesPlanPage() {
                   key={cls}
                   type="button"
                   onClick={() => setSelectedClass(cls)}
-                  className={`px-3 py-1.5 text-sm rounded-lg border transition-colors font-medium ${
-                    selectedClass === cls
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "border-border bg-card hover:bg-muted/50"
-                  }`}
+                  className={`px-3 py-1.5 text-sm rounded-lg border transition-colors font-medium ${selectedClass === cls ? "bg-primary text-primary-foreground border-primary shadow-sm" : "border-border bg-card hover:bg-muted/50"}`}
                   data-ocid="fees-plan.class-btn"
                 >
                   {cls}
@@ -543,7 +515,6 @@ export default function FeesPlanPage() {
 
           {selectedClass && activeSections.length > 0 && (
             <>
-              {/* Section selector */}
               <div className="flex items-center gap-3 flex-wrap">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Section:
@@ -553,11 +524,7 @@ export default function FeesPlanPage() {
                     key={sec}
                     type="button"
                     onClick={() => setSelectedSection(sec)}
-                    className={`px-4 py-1.5 text-sm rounded-lg border transition-colors font-medium ${
-                      selectedSection === sec
-                        ? "bg-primary/10 text-primary border-primary/30"
-                        : "border-border bg-card hover:bg-muted/50"
-                    }`}
+                    className={`px-4 py-1.5 text-sm rounded-lg border transition-colors font-medium ${selectedSection === sec ? "bg-primary/10 text-primary border-primary/30" : "border-border bg-card hover:bg-muted/50"}`}
                     data-ocid="fees-plan.section-btn"
                   >
                     {selectedClass} - {sec}
@@ -567,7 +534,6 @@ export default function FeesPlanPage() {
 
               {selectedSection && activeHeadings.length > 0 ? (
                 <div className="bg-card border border-border rounded-xl overflow-hidden">
-                  {/* Header */}
                   <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
                     <div>
                       <h4 className="font-semibold text-foreground">
@@ -576,7 +542,7 @@ export default function FeesPlanPage() {
                       </h4>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Click any cell, type the amount, then press Tab/Enter or
-                        click away to save.
+                        click away.
                         {savedMsg && (
                           <span className="ml-2 text-green-600 font-semibold">
                             {savedMsg}
@@ -608,7 +574,6 @@ export default function FeesPlanPage() {
                     </div>
                   </div>
 
-                  {/* Month-wise grid */}
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs">
                       <thead className="bg-muted/50 sticky top-0 z-10">
@@ -636,10 +601,12 @@ export default function FeesPlanPage() {
                         {activeHeadings.map((heading) => {
                           const initVals =
                             initialValuesRef.current.values[heading.id] ?? {};
-                          // Year total is derived from initialValues (seeded from plans)
                           const yearTotal = Object.values(initVals).reduce(
                             (s, v) => s + (Number(v) || 0),
                             0,
+                          );
+                          const months = safeStringArray(
+                            heading.months as string[] | string | undefined,
                           );
                           return (
                             <tr
@@ -651,13 +618,13 @@ export default function FeesPlanPage() {
                                   {heading.name}
                                 </div>
                                 <div className="text-[10px] text-muted-foreground">
-                                  {heading.months.length} months
+                                  {months.length} months
                                 </div>
                               </td>
                               {MONTHS.map((m) => {
                                 const short =
                                   MONTH_SHORT_MAP[m] ?? m.slice(0, 3);
-                                const isApplicable = heading.months.includes(m);
+                                const isApplicable = months.includes(m);
                                 return (
                                   <td
                                     key={m}
@@ -696,7 +663,7 @@ export default function FeesPlanPage() {
                     </table>
                   </div>
 
-                  {!canEdit && !isReadOnly && (
+                  {!canEdit && (
                     <div className="p-3 bg-amber-50 border-t border-amber-200 text-amber-700 text-sm text-center">
                       Only Super Admin, Admin, or Accountant can edit fee
                       amounts.
@@ -711,8 +678,7 @@ export default function FeesPlanPage() {
                 </div>
               ) : selectedSection && activeHeadings.length === 0 ? (
                 <div className="bg-card border border-border rounded-xl p-8 text-center text-muted-foreground">
-                  No fee headings apply to Class {selectedClass}. Add headings
-                  in the "Fee Headings" tab.
+                  No fee headings apply to Class {selectedClass}.
                 </div>
               ) : null}
             </>

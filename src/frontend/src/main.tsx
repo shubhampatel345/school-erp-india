@@ -3,17 +3,6 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
 
-// Prevent BigInt JSON serialization errors from IC canister responses
-BigInt.prototype.toJSON = function () {
-  return this.toString();
-};
-
-declare global {
-  interface BigInt {
-    toJSON(): string;
-  }
-}
-
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

@@ -1,27 +1,29 @@
 /**
- * ClassesSections — rebuild using useApp() context
- * All CRUD via saveData / updateData / deleteData (server + context sync)
+ * ClassesSections — Direct API rebuild
+ * All CRUD via phpApiService.getClasses/saveClass/addSection/getSections.
+ * Waits for HTTP 200 before success. Indian class order (Nursery → Class 12).
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   CheckCircle2,
   Edit2,
   LayoutGrid,
   Loader2,
   Plus,
+  RefreshCw,
   Trash2,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { ClassSection } from "../../types";
-import { CLASSES, SECTIONS, generateId } from "../../utils/localStorage";
+import type { ClassRecord } from "../../utils/phpApiService";
+import phpApiService from "../../utils/phpApiService";
 
-// Canonical sort order for Indian school classes
 const CLASS_ORDER = [
   "Nursery",
   "LKG",
@@ -40,582 +42,592 @@ const CLASS_ORDER = [
   "12",
 ];
 
-function sortClasses(arr: ClassSection[]): ClassSection[] {
+function sortClasses(arr: ClassRecord[]): ClassRecord[] {
   return [...arr].sort((a, b) => {
-    const ai = CLASS_ORDER.indexOf(a.name ?? a.className ?? "");
-    const bi = CLASS_ORDER.indexOf(b.name ?? b.className ?? "");
-    if (ai === -1 && bi === -1)
-      return (a.name ?? "").localeCompare(b.name ?? "");
+    const ai = CLASS_ORDER.indexOf(a.className);
+    const bi = CLASS_ORDER.indexOf(b.className);
+    if (ai === -1 && bi === -1) return a.className.localeCompare(b.className);
     if (ai === -1) return 1;
     if (bi === -1) return -1;
     return ai - bi;
   });
 }
 
+function displayClassName(name: string) {
+  return ["Nursery", "LKG", "UKG"].includes(name) ? name : `Class ${name}`;
+}
+
+const PREDEFINED_CLASSES = CLASS_ORDER;
+const PREDEFINED_SECTIONS = ["A", "B", "C", "D", "E", "F"];
+
 interface ClassModalState {
   open: boolean;
-  editing: ClassSection | null;
+  editing: ClassRecord | null;
   name: string;
+  customName: string;
   sections: string[];
+  newSection: string;
+}
+
+interface SectionModalState {
+  open: boolean;
+  classId: string;
+  className: string;
+  name: string;
 }
 
 export default function ClassesSections() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    deleteData,
-    currentUser,
-    currentSession,
-  } = useApp();
+  const { currentUser } = useApp();
 
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [modal, setModal] = useState<ClassModalState>({
+
+  const [classModal, setClassModal] = useState<ClassModalState>({
     open: false,
     editing: null,
     name: "",
+    customName: "",
     sections: [],
+    newSection: "",
   });
-  const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  // Read classes from context (server-loaded)
-  const rawClasses = getData("classes") as ClassSection[];
-  const classes = sortClasses(rawClasses);
-
-  // Normalize a class record: support both `name` and `className` fields
-  function normalizeName(cls: ClassSection): string {
-    return cls.name ?? cls.className ?? "";
-  }
-  function normalizeSections(cls: ClassSection): string[] {
-    if (Array.isArray(cls.sections)) return cls.sections as string[];
-    return [];
-  }
+  const [sectionModal, setSectionModal] = useState<SectionModalState>({
+    open: false,
+    classId: "",
+    className: "",
+    name: "",
+  });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const canWrite =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  function openAdd() {
-    setModal({ open: true, editing: null, name: "", sections: [] });
-  }
+  const loadClasses = useCallback(() => {
+    setLoading(true);
+    phpApiService
+      .getClasses()
+      .then((data) => setClasses(sortClasses(data)))
+      .catch(() => toast.error("Failed to load classes"))
+      .finally(() => setLoading(false));
+  }, []);
 
-  function openEdit(cls: ClassSection) {
-    setModal({
+  useEffect(() => {
+    loadClasses();
+  }, [loadClasses]);
+
+  const sortedClasses = sortClasses(classes);
+  const usedClassNames = new Set(classes.map((c) => c.className));
+
+  // Class modal helpers
+  function openAddClass() {
+    setClassModal({
       open: true,
-      editing: cls,
-      name: normalizeName(cls),
-      sections: [...normalizeSections(cls)],
+      editing: null,
+      name: "",
+      customName: "",
+      sections: ["A"],
+      newSection: "",
     });
   }
 
-  function closeModal() {
-    setModal({ open: false, editing: null, name: "", sections: [] });
+  function openEditClass(cls: ClassRecord) {
+    setClassModal({
+      open: true,
+      editing: cls,
+      name: CLASS_ORDER.includes(cls.className) ? cls.className : "__custom__",
+      customName: CLASS_ORDER.includes(cls.className) ? "" : cls.className,
+      sections: [...(cls.sections as string[])],
+      newSection: "",
+    });
   }
 
-  function toggleSection(sec: string) {
-    setModal((prev) => ({
+  function toggleSection(s: string) {
+    setClassModal((prev) => ({
       ...prev,
-      sections: prev.sections.includes(sec)
-        ? prev.sections.filter((s) => s !== sec)
-        : [...prev.sections, sec],
+      sections: prev.sections.includes(s)
+        ? prev.sections.filter((x) => x !== s)
+        : [...prev.sections, s],
     }));
   }
 
-  async function handleSave() {
-    const trimmedName = modal.name.trim();
-    if (!trimmedName) {
+  function addCustomSection() {
+    const s = classModal.newSection.trim().toUpperCase();
+    if (!s) return;
+    if (classModal.sections.includes(s)) {
+      toast.error("Section already added");
+      return;
+    }
+    setClassModal((prev) => ({
+      ...prev,
+      sections: [...prev.sections, s],
+      newSection: "",
+    }));
+  }
+
+  async function handleSaveClass() {
+    const finalName =
+      classModal.name === "__custom__"
+        ? classModal.customName.trim()
+        : classModal.name;
+    if (!finalName) {
       toast.error("Class name is required");
       return;
     }
-    // Duplicate check (skip current record when editing)
-    const duplicate = classes.find(
-      (c) =>
-        normalizeName(c).toLowerCase() === trimmedName.toLowerCase() &&
-        c.id !== modal.editing?.id,
-    );
-    if (duplicate) {
-      toast.error("A class with this name already exists");
+    if (classModal.sections.length === 0) {
+      toast.error("At least one section is required");
       return;
     }
-
+    if (!classModal.editing && usedClassNames.has(finalName)) {
+      toast.error(`${displayClassName(finalName)} already exists`);
+      return;
+    }
     setSaving(true);
     try {
-      if (modal.editing) {
-        await updateData("classes", modal.editing.id, {
-          name: trimmedName,
-          className: trimmedName,
-          sections: modal.sections,
+      if (classModal.editing) {
+        await phpApiService.put("classes/update", {
+          id: classModal.editing.id,
+          className: finalName,
+          sections: classModal.sections,
         });
-        toast.success(`Class "${trimmedName}" updated`);
+        toast.success(`${displayClassName(finalName)} updated`);
       } else {
-        const newClass: Record<string, unknown> = {
-          id: generateId(),
-          name: trimmedName,
-          className: trimmedName,
-          sections: modal.sections,
-          session: currentSession?.label ?? "2025-26",
-        };
-        await saveData("classes", newClass);
-        toast.success(`Class "${trimmedName}" added`);
+        await phpApiService.addClass({
+          className: finalName,
+          sections: classModal.sections,
+        });
+        toast.success(`${displayClassName(finalName)} added`);
       }
-      closeModal();
+      setClassModal((prev) => ({ ...prev, open: false }));
+      loadClasses();
     } catch {
-      toast.error("Failed to save. Please try again.");
+      toast.error("Failed to save class. Please retry.");
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleDelete(id: string) {
-    // Check if students are enrolled
-    const students = getData("students") as Array<{ class: string }>;
-    const cls = classes.find((c) => c.id === id);
-    const clsName = cls ? normalizeName(cls) : "";
-    const enrolled = students.filter((s) => s.class === clsName).length;
-    if (enrolled > 0) {
-      toast.error(
-        `Cannot delete: ${enrolled} student(s) enrolled in ${clsName}. Discontinue or move them first.`,
-      );
-      setDeleteId(null);
-      return;
-    }
-    try {
-      await deleteData("classes", id);
-      toast.success("Class deleted");
-    } catch {
-      toast.error("Failed to delete. Please try again.");
-    } finally {
-      setDeleteId(null);
-    }
-  }
-
-  async function seedDefaults() {
+  async function handleDeleteClass(cls: ClassRecord) {
     if (
-      classes.length > 0 &&
       !confirm(
-        "Replace existing classes with defaults (Nursery–12, sections A B C)?",
+        `Delete ${displayClassName(cls.className)} and all its sections?`,
       )
     )
       return;
+    setDeletingId(cls.id);
+    try {
+      await phpApiService.del("classes/delete", { id: cls.id });
+      toast.success(`${displayClassName(cls.className)} deleted`);
+      loadClasses();
+    } catch {
+      toast.error("Failed to delete class. Please retry.");
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  // Section modal
+  function openAddSection(cls: ClassRecord) {
+    setSectionModal({
+      open: true,
+      classId: cls.id,
+      className: cls.className,
+      name: "",
+    });
+  }
+
+  async function handleSaveSection() {
+    if (!sectionModal.name.trim()) {
+      toast.error("Section name is required");
+      return;
+    }
     setSaving(true);
     try {
-      await Promise.allSettled(
-        CLASSES.map((cls) =>
-          saveData("classes", {
-            id: generateId(),
-            name: cls,
-            className: cls,
-            sections: ["A", "B", "C"],
-            session: currentSession?.label ?? "2025-26",
-          }),
-        ),
+      await phpApiService.addSection({
+        classId: sectionModal.classId,
+        name: sectionModal.name.trim().toUpperCase(),
+      });
+      toast.success(
+        `Section ${sectionModal.name.toUpperCase()} added to ${displayClassName(sectionModal.className)}`,
       );
-      toast.success("Default classes loaded");
+      setSectionModal((prev) => ({ ...prev, open: false }));
+      loadClasses();
     } catch {
-      toast.error("Some classes may not have saved. Please retry.");
+      toast.error("Failed to add section. Please retry.");
     } finally {
       setSaving(false);
     }
   }
 
-  // Allow adding/removing a section inline without opening the full edit modal
-  const [inlineSectionFor, setInlineSectionFor] = useState<string | null>(null);
-  const [inlineSection, setInlineSection] = useState("");
-
-  async function handleInlineAddSection(classId: string) {
-    if (!inlineSection.trim()) return;
-    const cls = classes.find((c) => c.id === classId);
-    if (!cls) return;
-    const existing = normalizeSections(cls);
-    const upper = inlineSection.trim().toUpperCase();
-    if (existing.includes(upper)) {
-      toast.error("Section already exists");
-      return;
-    }
-    const updated = [...existing, upper];
-    await updateData("classes", classId, { sections: updated });
-    setInlineSectionFor(null);
-    setInlineSection("");
-    toast.success(`Section ${upper} added`);
-  }
-
-  async function handleRemoveSection(classId: string, sec: string) {
-    const cls = classes.find((c) => c.id === classId);
-    if (!cls) return;
-    const updated = normalizeSections(cls).filter((s) => s !== sec);
-    await updateData("classes", classId, { sections: updated });
-    toast.success(`Section ${sec} removed`);
-  }
-
-  // Keep refreshing from context on every render (context is live)
-  useEffect(() => {
-    // context already has latest data from server via syncEngine subscription
-  }, []);
-
   return (
-    <div className="p-4 lg:p-6 space-y-5">
+    <div className="space-y-4 p-4 lg:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
-            <LayoutGrid className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-display font-bold text-foreground">
             Classes &amp; Sections
           </h2>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {classes.length} class{classes.length !== 1 ? "es" : ""} configured
+            {sortedClasses.length} classes configured
           </p>
         </div>
-        {canWrite && (
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={seedDefaults}
-              disabled={saving}
-              data-ocid="classes.load-defaults-btn"
-            >
-              {saving ? (
-                <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-              ) : null}
-              Add Standard Classes
-            </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={loadClasses}
+            aria-label="Refresh"
+            data-ocid="classes.refresh.button"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          </Button>
+          {canWrite && (
             <Button
               size="sm"
-              onClick={openAdd}
-              data-ocid="classes.add-class-btn"
+              onClick={openAddClass}
+              data-ocid="classes.add.button"
             >
-              <Plus className="w-4 h-4 mr-1" />
-              Add Class
+              <Plus className="w-4 h-4 mr-1.5" /> Add Class
             </Button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Empty State */}
-      {classes.length === 0 && (
-        <Card className="p-12 text-center" data-ocid="classes.empty_state">
-          <LayoutGrid className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-          <p className="font-semibold text-foreground">No classes yet</p>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-            Add classes here first — they'll appear in the Student form's class
-            dropdown.
+      {/* Classes Grid */}
+      {loading ? (
+        <div
+          className="flex items-center justify-center py-20"
+          data-ocid="classes.loading_state"
+        >
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : sortedClasses.length === 0 ? (
+        <Card
+          className="p-12 text-center border-dashed"
+          data-ocid="classes.empty_state"
+        >
+          <LayoutGrid className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p className="font-semibold text-foreground">No classes configured</p>
+          <p className="text-sm text-muted-foreground mt-1">
+            Add your first class to get started
           </p>
           {canWrite && (
-            <Button className="mt-4" size="sm" onClick={seedDefaults}>
-              Add Standard Classes (Nursery–12, A B C)
+            <Button
+              size="sm"
+              className="mt-4"
+              onClick={openAddClass}
+              data-ocid="classes.add-first.button"
+            >
+              <Plus className="w-4 h-4 mr-1.5" /> Add First Class
             </Button>
           )}
         </Card>
-      )}
-
-      {/* Class Cards */}
-      {classes.length > 0 && (
-        <div className="space-y-3">
-          {classes.map((cls, idx) => {
-            const name = normalizeName(cls);
-            const sections = normalizeSections(cls);
-            const displayName =
-              name === "Nursery" || name === "LKG" || name === "UKG"
-                ? name
-                : `Class ${name}`;
-            return (
-              <Card
-                key={cls.id}
-                className="p-4"
-                data-ocid={`classes.item.${idx + 1}`}
-              >
-                <div className="flex items-start gap-4 flex-wrap">
-                  {/* Class name + section count */}
-                  <div className="min-w-[120px]">
-                    <p className="font-semibold text-foreground">
-                      {displayName}
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {sections.length} section
-                      {sections.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-
-                  {/* Section badges */}
-                  <div className="flex-1 flex flex-wrap gap-2 items-center min-w-0">
-                    {sections.map((sec) => (
-                      <Badge
-                        key={sec}
-                        variant="secondary"
-                        className="flex items-center gap-1 font-medium"
-                      >
-                        {name}-{sec}
-                        {canWrite && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSection(cls.id, sec)}
-                            className="ml-0.5 hover:text-destructive transition-colors"
-                            aria-label={`Remove section ${sec}`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </Badge>
-                    ))}
-
-                    {/* Inline add section */}
-                    {canWrite &&
-                      (inlineSectionFor === cls.id ? (
-                        <div className="flex gap-1 items-center">
-                          <select
-                            className="border border-input rounded px-2 py-1 text-xs bg-card h-7"
-                            value={inlineSection}
-                            onChange={(e) => setInlineSection(e.target.value)}
-                            ref={(el) => {
-                              el?.focus();
-                            }}
-                          >
-                            <option value="">Section</option>
-                            {SECTIONS.filter((s) => !sections.includes(s)).map(
-                              (s) => (
-                                <option key={s} value={s}>
-                                  {s}
-                                </option>
-                              ),
-                            )}
-                          </select>
-                          <Button
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() => handleInlineAddSection(cls.id)}
-                            disabled={!inlineSection}
-                          >
-                            Add
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 text-xs"
-                            onClick={() => {
-                              setInlineSectionFor(null);
-                              setInlineSection("");
-                            }}
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setInlineSectionFor(cls.id);
-                            setInlineSection("");
-                          }}
-                          className="text-xs text-primary hover:underline flex items-center gap-1 transition-colors"
-                          data-ocid={`classes.add-section-btn.${idx + 1}`}
-                        >
-                          <Plus className="w-3 h-3" />
-                          Add Section
-                        </button>
-                      ))}
-                  </div>
-
-                  {/* Action buttons */}
-                  {canWrite && (
-                    <div className="flex gap-1 ml-auto shrink-0">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => openEdit(cls)}
-                        data-ocid={`classes.edit_button.${idx + 1}`}
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => setDeleteId(cls.id)}
-                        data-ocid={`classes.delete_button.${idx + 1}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  )}
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {sortedClasses.map((cls, idx) => (
+            <Card
+              key={cls.id}
+              className="p-4"
+              data-ocid={`classes.item.${idx + 1}`}
+            >
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <div>
+                  <h3 className="font-display font-semibold text-foreground">
+                    {displayClassName(cls.className)}
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    {(cls.sections as string[]).length} section
+                    {(cls.sections as string[]).length !== 1 ? "s" : ""}
+                  </p>
                 </div>
-              </Card>
-            );
-          })}
+                {canWrite && (
+                  <div className="flex gap-1">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={() => openEditClass(cls)}
+                      data-ocid={`classes.edit.${idx + 1}`}
+                      aria-label="Edit class"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-destructive hover:text-destructive"
+                      disabled={deletingId === cls.id}
+                      onClick={() => void handleDeleteClass(cls)}
+                      data-ocid={`classes.delete.${idx + 1}`}
+                      aria-label="Delete class"
+                    >
+                      {deletingId === cls.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3 h-3" />
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-1.5 mb-3">
+                {(cls.sections as string[]).map((s) => (
+                  <Badge key={s} variant="secondary" className="text-xs">
+                    {s}
+                  </Badge>
+                ))}
+              </div>
+
+              {canWrite && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="w-full h-7 text-xs"
+                  onClick={() => openAddSection(cls)}
+                  data-ocid={`classes.add-section.${idx + 1}`}
+                >
+                  <Plus className="w-3 h-3 mr-1" /> Add Section
+                </Button>
+              )}
+            </Card>
+          ))}
         </div>
       )}
 
-      {/* Add/Edit Modal */}
-      {modal.open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div
-            className="bg-card rounded-xl shadow-lg w-full max-w-md p-6 space-y-5"
-            data-ocid="classes.dialog"
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="font-bold text-lg font-display text-foreground">
-                {modal.editing ? "Edit Class" : "Add New Class"}
-              </h3>
-              <button
-                type="button"
-                onClick={closeModal}
-                className="text-muted-foreground hover:text-foreground"
+      {/* Add/Edit Class Modal */}
+      {classModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          data-ocid="classes.dialog"
+        >
+          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <h2 className="font-display font-semibold text-foreground">
+                {classModal.editing ? "Edit Class" : "Add Class"}
+              </h2>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setClassModal((p) => ({ ...p, open: false }))}
                 data-ocid="classes.close_button"
               >
-                <X className="w-5 h-5" />
-              </button>
+                <X className="w-4 h-4" />
+              </Button>
             </div>
 
-            {/* Class Name */}
-            <div className="space-y-1.5">
-              <label htmlFor="class-name" className="text-sm font-medium">
-                Class Name <span className="text-destructive">*</span>
-              </label>
-              {modal.editing ? (
-                <Input
-                  id="class-name"
-                  value={modal.name}
-                  onChange={(e) =>
-                    setModal((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  placeholder="e.g. 1, 6, Nursery, LKG"
-                  data-ocid="classes.name-input"
-                />
-              ) : (
-                <select
-                  id="class-name"
-                  className="w-full border border-input rounded-md px-3 py-2 text-sm bg-card"
-                  value={modal.name}
-                  onChange={(e) =>
-                    setModal((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  data-ocid="classes.name-select"
-                >
-                  <option value="">Select class…</option>
-                  {CLASSES.filter(
-                    (c) =>
-                      !classes.find(
-                        (x) =>
-                          normalizeName(x).toLowerCase() === c.toLowerCase(),
-                      ),
-                  ).map((c) => (
-                    <option key={c} value={c}>
-                      {c === "Nursery" || c === "LKG" || c === "UKG"
-                        ? c
-                        : `Class ${c}`}
-                    </option>
+            <div className="p-5 space-y-4">
+              <div className="space-y-1">
+                <Label className="text-xs">Class Name *</Label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {PREDEFINED_CLASSES.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() =>
+                        setClassModal((p) => ({
+                          ...p,
+                          name: c,
+                          customName: "",
+                        }))
+                      }
+                      disabled={!classModal.editing && usedClassNames.has(c)}
+                      className={`py-1.5 rounded-md text-xs font-medium border transition-colors ${
+                        classModal.name === c
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-transparent border-border text-foreground hover:bg-muted/50 disabled:opacity-30 disabled:cursor-not-allowed"
+                      }`}
+                    >
+                      {displayClassName(c)}
+                    </button>
                   ))}
-                </select>
-              )}
-            </div>
-
-            {/* Sections */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">Sections</span>
-                <div className="flex gap-3">
                   <button
                     type="button"
                     onClick={() =>
-                      setModal((prev) => ({ ...prev, sections: [...SECTIONS] }))
+                      setClassModal((p) => ({ ...p, name: "__custom__" }))
                     }
-                    className="text-xs text-primary hover:underline"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setModal((prev) => ({ ...prev, sections: [] }))
-                    }
-                    className="text-xs text-muted-foreground hover:underline"
-                  >
-                    Clear
-                  </button>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {SECTIONS.map((sec) => (
-                  <label
-                    key={sec}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer border transition-colors ${
-                      modal.sections.includes(sec)
+                    className={`py-1.5 rounded-md text-xs font-medium border transition-colors col-span-2 ${
+                      classModal.name === "__custom__"
                         ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card border-border text-muted-foreground hover:border-primary"
+                        : "bg-transparent border-border text-foreground hover:bg-muted/50"
                     }`}
                   >
-                    <input
-                      type="checkbox"
-                      className="sr-only"
-                      checked={modal.sections.includes(sec)}
-                      onChange={() => toggleSection(sec)}
-                    />
-                    Section {sec}
-                  </label>
-                ))}
+                    + Custom
+                  </button>
+                </div>
+                {classModal.name === "__custom__" && (
+                  <Input
+                    className="mt-2"
+                    placeholder="Enter class name"
+                    value={classModal.customName}
+                    onChange={(e) =>
+                      setClassModal((p) => ({
+                        ...p,
+                        customName: e.target.value,
+                      }))
+                    }
+                    data-ocid="classes.custom-name.input"
+                  />
+                )}
               </div>
-              {modal.sections.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Selected: {modal.sections.join(", ")}
-                </p>
-              )}
+
+              <div className="space-y-2">
+                <Label className="text-xs">Sections *</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PREDEFINED_SECTIONS.map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() => toggleSection(s)}
+                      className={`w-9 h-9 rounded-md text-sm font-semibold border transition-colors ${
+                        classModal.sections.includes(s)
+                          ? "bg-accent text-accent-foreground border-accent"
+                          : "bg-transparent border-border text-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 mt-2">
+                  <Input
+                    placeholder="Custom section (e.g. G)"
+                    value={classModal.newSection}
+                    onChange={(e) =>
+                      setClassModal((p) => ({
+                        ...p,
+                        newSection: e.target.value,
+                      }))
+                    }
+                    className="flex-1"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addCustomSection();
+                      }
+                    }}
+                    data-ocid="classes.new-section.input"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={addCustomSection}
+                    data-ocid="classes.add-custom-section.button"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </Button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {classModal.sections
+                    .filter((s) => !PREDEFINED_SECTIONS.includes(s))
+                    .map((s) => (
+                      <Badge
+                        key={s}
+                        variant="secondary"
+                        className="flex items-center gap-1"
+                      >
+                        {s}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setClassModal((p) => ({
+                              ...p,
+                              sections: p.sections.filter((x) => x !== s),
+                            }))
+                          }
+                          className="hover:text-destructive"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                </div>
+              </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex gap-2 pt-1">
+            <div className="flex justify-end gap-3 p-5 border-t border-border">
               <Button
-                onClick={handleSave}
-                disabled={saving || !modal.name}
-                data-ocid="classes.save_button"
-              >
-                {saving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving…
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    {modal.editing ? "Update Class" : "Save Class"}
-                  </>
-                )}
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={closeModal}
+                variant="outline"
+                onClick={() => setClassModal((p) => ({ ...p, open: false }))}
                 data-ocid="classes.cancel_button"
               >
                 Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSaveClass()}
+                disabled={saving}
+                data-ocid="classes.submit_button"
+              >
+                {saving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Saving…
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 mr-2" />{" "}
+                    {classModal.editing ? "Update" : "Add Class"}
+                  </>
+                )}
               </Button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Delete Confirm Dialog */}
-      {deleteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-          <div
-            className="bg-card rounded-xl shadow-lg w-full max-w-sm p-6 space-y-4"
-            data-ocid="classes.delete-confirm-dialog"
-          >
-            <h3 className="font-bold text-foreground">Delete Class?</h3>
-            <p className="text-sm text-muted-foreground">
-              This will permanently delete the class and all its sections. This
-              cannot be undone.
-            </p>
-            <div className="flex gap-2">
+      {/* Add Section Modal */}
+      {sectionModal.open && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          data-ocid="classes.section-dialog"
+        >
+          <div className="bg-card rounded-xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between p-4 border-b border-border">
+              <h3 className="font-semibold text-foreground">
+                Add Section — {displayClassName(sectionModal.className)}
+              </h3>
               <Button
-                variant="destructive"
-                onClick={() => handleDelete(deleteId)}
-                data-ocid="classes.confirm_button"
-              >
-                Delete
-              </Button>
-              <Button
+                size="icon"
                 variant="ghost"
-                onClick={() => setDeleteId(null)}
-                data-ocid="classes.cancel_button"
+                onClick={() => setSectionModal((p) => ({ ...p, open: false }))}
+                data-ocid="classes.section-close_button"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="p-4 space-y-3">
+              <Label className="text-xs">Section Name *</Label>
+              <Input
+                placeholder="e.g. D"
+                value={sectionModal.name}
+                onChange={(e) =>
+                  setSectionModal((p) => ({
+                    ...p,
+                    name: e.target.value.toUpperCase(),
+                  }))
+                }
+                data-ocid="classes.section-name.input"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void handleSaveSection();
+                }}
+              />
+            </div>
+            <div className="flex justify-end gap-3 p-4 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={() => setSectionModal((p) => ({ ...p, open: false }))}
+                data-ocid="classes.section-cancel_button"
               >
                 Cancel
+              </Button>
+              <Button
+                onClick={() => void handleSaveSection()}
+                disabled={saving}
+                data-ocid="classes.section-submit_button"
+              >
+                {saving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Add Section"
+                )}
               </Button>
             </div>
           </div>

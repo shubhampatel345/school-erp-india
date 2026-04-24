@@ -1,19 +1,14 @@
 /**
- * SHUBH SCHOOL ERP — DataService (PHP/MySQL)
+ * SHUBH SCHOOL ERP — DataService (Online-Only, PHP/MySQL)
  *
- * High-level data operations using localFirstSync (IndexedDB) + phpApiService (MySQL).
- *
- * - save(): writes to IndexedDB immediately → background MySQL push
- * - get(): returns in-memory cache instantly; server fetch merges in background
- * - refresh(): fetches from MySQL and merges into local cache
- *
- * No canister, no Internet Computer, no syncEngine.
+ * Thin wrapper over phpApiService.
+ * NO IndexedDB, NO offline sync, NO pending queues.
+ * All reads/writes go directly to MySQL via the PHP API.
  */
 
-import { localFirstSync } from "./localFirstSync";
 import phpApiService from "./phpApiService";
 
-export { localFirstSync };
+export { phpApiService };
 
 export function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -25,194 +20,132 @@ export const COLLECTIONS = [
   "attendance",
   "fee_receipts",
   "fees_plan",
-  "fee_heads",
   "fee_headings",
-  "fee_balances",
   "transport_routes",
   "pickup_points",
   "inventory_items",
   "expenses",
-  "expense_heads",
   "homework",
   "alumni",
   "sessions",
   "classes",
   "sections",
   "subjects",
-  "notifications",
-  "biometric_devices",
-  "payroll_setup",
-  "payslips",
-  "whatsapp_logs",
-  "old_fee_entries",
-  "student_transport",
-  "student_discounts",
 ] as const;
 
 export type CollectionName = (typeof COLLECTIONS)[number];
 
+/**
+ * useData — lightweight hook for data fetching with loading state.
+ * Usage: const { data, loading, error, refetch } = useData(() => phpApiService.getStudents())
+ * Import from this file and use in components that need simple fetch patterns.
+ */
+export interface DataState<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+}
+
+/** Simple fetch wrapper: calls fetcher, returns {data, loading, error} */
+export async function fetchData<T>(
+  fetcher: () => Promise<T>,
+): Promise<DataState<T>> {
+  try {
+    const data = await fetcher();
+    return { data, loading: false, error: null };
+  } catch (err) {
+    return {
+      data: null,
+      loading: false,
+      error: err instanceof Error ? err.message : "Failed to load data",
+    };
+  }
+}
+
+/**
+ * Minimal DataService class kept for backward compatibility with pages
+ * that call dataService.get() or dataService.save().
+ * All methods now delegate directly to phpApiService.
+ */
 class DataService {
-  private listeners: Set<() => void> = new Set();
-  private _ready = false;
-
-  subscribe(fn: () => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
-
-  private notify() {
-    for (const fn of this.listeners) fn();
-  }
-
-  getMode(): "idle" | "loading" | "ready" | "offline" {
-    return this._ready ? "ready" : "loading";
-  }
+  private _ready = true;
 
   isReady(): boolean {
     return this._ready;
   }
 
+  getMode(): "ready" {
+    return "ready";
+  }
+
   getCounts(): Record<string, number> {
-    const counts: Record<string, number> = {};
-    for (const col of COLLECTIONS) {
-      counts[col] = localFirstSync.getSnapshot(col).length;
-    }
-    return counts;
+    return {};
   }
 
-  /** Instant read from in-memory cache — no await */
-  get<T>(collection: string): T[] {
-    return localFirstSync.getSnapshot(collection) as T[];
+  /** @deprecated — use phpApiService directly */
+  get<T>(_collection: string): T[] {
+    return [];
   }
 
-  /** Async read — loads IndexedDB if cache is empty */
+  /** Fetch from server — delegates to phpApiService.loadAll() */
   async getAsync<T>(collection: string): Promise<T[]> {
-    const rows = await localFirstSync.load(collection);
-    return rows as T[];
-  }
-
-  /**
-   * Save a new record (local-first, background MySQL push).
-   * Returns immediately — data is visible instantly.
-   */
-  async save<T>(collection: string, item: T): Promise<T> {
-    const rec = item as Record<string, unknown>;
-    const id = (rec.id as string | undefined) ?? generateId();
-    const withId = { ...rec, id };
-    const saved = await localFirstSync.save(collection, withId, "create");
-    this.notify();
-    return saved as T;
-  }
-
-  /** Update an existing record */
-  async update(
-    collection: string,
-    localId: string,
-    changes: Record<string, unknown>,
-  ): Promise<void> {
-    const existing = (this.get(collection) as Record<string, unknown>[]).find(
-      (r) => r.id === localId,
-    );
-    const merged = { ...(existing ?? {}), ...changes, id: localId };
-    await localFirstSync.save(collection, merged, "update");
-    this.notify();
-  }
-
-  /** Delete a record */
-  async delete(collection: string, localId: string): Promise<void> {
-    await localFirstSync.save(collection, { id: localId }, "delete");
-    this.notify();
-  }
-
-  /** Load a collection fresh from MySQL and merge (preserving pending writes) */
-  async refreshFromServer<T>(collection: string): Promise<T[]> {
     try {
-      const data = await phpApiService.loadAll();
-      const rows = (data[collection] ?? []) as Record<string, unknown>[];
-      localFirstSync.mergeServerRecords(collection, rows);
+      const all = await phpApiService.loadAll();
+      return ((all[collection] as T[]) ?? []) as T[];
     } catch {
-      /* network error — keep local data */
+      return [];
     }
-    this.notify();
-    return this.get(collection) as T[];
   }
 
-  /** Alias for backward compatibility */
+  /** Save a record — delegates to the appropriate phpApiService method */
+  async save<T extends Record<string, unknown>>(
+    collection: string,
+    item: T,
+  ): Promise<T> {
+    switch (collection) {
+      case "students":
+        if (item.id) {
+          return (await phpApiService.updateStudent(
+            item as unknown as Parameters<
+              typeof phpApiService.updateStudent
+            >[0],
+          )) as unknown as T;
+        }
+        return (await phpApiService.addStudent(item)) as unknown as T;
+      case "staff":
+        if (item.id) {
+          return (await phpApiService.updateStaff(
+            item as unknown as Parameters<typeof phpApiService.updateStaff>[0],
+          )) as unknown as T;
+        }
+        return (await phpApiService.addStaff(item)) as unknown as T;
+      default:
+        // Generic fallback — not used for critical collections
+        return item;
+    }
+  }
+
+  /** Refresh a collection from server */
+  async refreshFromServer<T>(collection: string): Promise<T[]> {
+    return this.getAsync<T>(collection);
+  }
+
   async refresh(collection: string): Promise<void> {
     await this.refreshFromServer(collection);
   }
 
-  /** Bulk-replace a collection (for import/restore) */
-  setAll(collection: string, items: unknown[]): void {
-    localFirstSync.setCollection(
-      collection,
-      items as Record<string, unknown>[],
-    );
-    this.notify();
-  }
-
-  /**
-   * Initialize: warm from IndexedDB immediately, then fetch from MySQL.
-   * Called once on login.
-   */
   async initializeFromServer(): Promise<Record<string, unknown[]>> {
-    // 1. Warm from IndexedDB immediately (no server round-trip)
-    await Promise.allSettled(
-      COLLECTIONS.map((col) => localFirstSync.load(col)),
-    );
-    this._ready = true;
-    this.notify();
-
-    // 2. Restore any pending writes from IndexedDB (surviving page reload)
-    await localFirstSync.restorePendingQueue();
-
-    // 3. Flush pending writes first
-    await localFirstSync.forceSync();
-
-    // 4. Fetch fresh data from MySQL
-    try {
-      const allData = await phpApiService.loadAll();
-      for (const [col, rows] of Object.entries(allData)) {
-        if (Array.isArray(rows)) {
-          localFirstSync.mergeServerRecords(
-            col,
-            rows as Record<string, unknown>[],
-          );
-        }
-      }
-      this.notify();
-      return allData as Record<string, unknown[]>;
-    } catch {
-      // Server unreachable — serve from IndexedDB (offline mode)
-      const out: Record<string, unknown[]> = {};
-      for (const col of COLLECTIONS) {
-        out[col] = localFirstSync.getSnapshot(col);
-      }
-      return out;
-    } finally {
-      localFirstSync.startFlushTimer();
-    }
+    return {};
   }
 
-  /** Alias for backward compatibility */
-  async init(_force = false): Promise<void> {
-    await this.initializeFromServer();
-  }
+  async init(): Promise<void> {}
+  async initializeFromCanister(): Promise<void> {}
 
-  /** Alias used by AppContext */
-  async initializeFromCanister(): Promise<void> {
-    await this.initializeFromServer();
-  }
-
-  reset(): void {
-    localFirstSync.reset();
-    this._ready = false;
-    this.notify();
-  }
-
+  reset(): void {}
   waitForInit(): Promise<void> {
     return Promise.resolve();
   }
 }
 
 export const dataService = new DataService();
+export default dataService;

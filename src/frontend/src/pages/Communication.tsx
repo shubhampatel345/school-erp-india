@@ -1,12 +1,13 @@
 /**
  * SHUBH SCHOOL ERP — Communication Module
- * Tabs: WhatsApp | Bulk Broadcast | Notification Scheduler
+ * Direct API: sends via phpApiService, no local queue
  */
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -18,9 +19,10 @@ import {
   XCircle,
   Zap,
 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
-import { ls } from "../utils/localStorage";
+import phpApiService from "../utils/phpApiService";
 
 interface WhatsAppCreds {
   apiUrl: string;
@@ -29,12 +31,14 @@ interface WhatsAppCreds {
   enabled: boolean;
 }
 
-interface MessageLog {
+interface BroadcastRecord {
   id: string;
-  to: string;
+  recipientGroup: string;
   message: string;
-  status: "sent" | "failed";
-  timestamp: string;
+  channel: string;
+  sentCount: number;
+  failedCount: number;
+  sentAt: string;
 }
 
 interface NotifRule {
@@ -92,37 +96,13 @@ const SEED_RULES: NotifRule[] = [
   },
 ];
 
-const SEED_LOGS: MessageLog[] = [
-  {
-    id: "l1",
-    to: "Arjun Sharma (Class 5A)",
-    message: "Dear Parent, fees for October are due.",
-    status: "sent",
-    timestamp: "Oct 2, 2025 9:00 AM",
-  },
-  {
-    id: "l2",
-    to: "Pooja Patel (Class 3B)",
-    message: "Your ward was absent today.",
-    status: "sent",
-    timestamp: "Oct 3, 2025 10:15 AM",
-  },
-  {
-    id: "l3",
-    to: "Rahul Verma (Class 10A)",
-    message: "Results for Mid-Term are now available.",
-    status: "failed",
-    timestamp: "Oct 4, 2025 11:30 AM",
-  },
-];
-
 const RECIPIENT_GROUPS = [
   "All Students",
   "All Parents",
+  "Fee Defaulters",
   "Class 5 Parents",
   "Class 10 Parents",
   "Route 1 Parents",
-  "Custom Group",
 ];
 
 const MESSAGE_VARS = [
@@ -137,100 +117,168 @@ interface Props {
   initialTab?: string;
 }
 
+function loadCredsFromStorage(): WhatsAppCreds {
+  try {
+    const raw = localStorage.getItem("wa_creds");
+    if (raw) return JSON.parse(raw) as WhatsAppCreds;
+  } catch {
+    /* noop */
+  }
+  return DEFAULT_CREDS;
+}
+
 export default function Communication({ initialTab = "whatsapp" }: Props) {
-  const { getData, addNotification } = useApp();
+  const { addNotification } = useApp();
   const [tab, setTab] = useState<Tab>((initialTab as Tab) || "whatsapp");
 
   // WhatsApp tab
-  const [creds, setCreds] = useState<WhatsAppCreds>(() =>
-    ls.get<WhatsAppCreds>("wa_creds", DEFAULT_CREDS),
-  );
+  const [creds, setCreds] = useState<WhatsAppCreds>(loadCredsFromStorage);
   const [manualTo, setManualTo] = useState("");
   const [manualMsg, setManualMsg] = useState("");
   const [isTesting, setIsTesting] = useState(false);
   const [testResult, setTestResult] = useState<"ok" | "fail" | null>(null);
-  const [logs, setLogs] = useState<MessageLog[]>(SEED_LOGS);
 
   // Broadcast tab
   const [bcRecipient, setBcRecipient] = useState("All Parents");
   const [bcTemplate, setBcTemplate] = useState(
-    "Dear {student_name}, this is a reminder from School B.",
+    "Dear {student_name}, this is a reminder from the school.",
   );
   const [bcChannel, setBcChannel] = useState<"whatsapp" | "sms">("whatsapp");
   const [isSending, setIsSending] = useState(false);
-  const [sendProgress, setSendProgress] = useState(0);
   const [sendReport, setSendReport] = useState<{
     sent: number;
     failed: number;
   } | null>(null);
+  const [broadcastHistory, setBroadcastHistory] = useState<BroadcastRecord[]>(
+    [],
+  );
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   // Scheduler tab
   const [rules, setRules] = useState<NotifRule[]>(SEED_RULES);
+  const [savingRules, setSavingRules] = useState(false);
 
-  const saveCreds = useCallback(() => {
-    ls.set("wa_creds", creds);
-    addNotification("WhatsApp settings saved", "success");
-  }, [creds, addNotification]);
+  // ── Load broadcast history ───────────────────────────────────────────────
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const data = await phpApiService.get<BroadcastRecord[]>(
+        "communication/broadcast-history",
+      );
+      setBroadcastHistory(Array.isArray(data) ? data : []);
+    } catch {
+      setBroadcastHistory([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "broadcast") {
+      void loadHistory();
+    }
+  }, [tab, loadHistory]);
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
+
+  const saveCreds = useCallback(async () => {
+    try {
+      localStorage.setItem("wa_creds", JSON.stringify(creds));
+      await phpApiService.saveSettings({
+        whatsapp_api_url: creds.apiUrl,
+        whatsapp_api_key: creds.apiKey,
+        whatsapp_instance_id: creds.instanceId,
+        whatsapp_enabled: creds.enabled,
+      });
+      toast.success("WhatsApp settings saved");
+    } catch {
+      toast.error("Failed to save settings");
+    }
+  }, [creds]);
 
   const testConnection = useCallback(async () => {
     setIsTesting(true);
     setTestResult(null);
-    await new Promise((r) => setTimeout(r, 1500));
-    const ok = creds.apiKey.length > 5;
-    setTestResult(ok ? "ok" : "fail");
-    setIsTesting(false);
-    addNotification(
-      ok
-        ? "Connection test passed ✓"
-        : "Connection test failed — check API key",
-      ok ? "success" : "error",
-    );
-  }, [creds.apiKey, addNotification]);
+    try {
+      await phpApiService.post("communication/whatsapp-test", {
+        apiUrl: creds.apiUrl,
+        apiKey: creds.apiKey,
+        instanceId: creds.instanceId,
+      });
+      setTestResult("ok");
+      addNotification("Connection test passed ✓", "success");
+    } catch {
+      setTestResult("fail");
+      addNotification("Connection test failed — check API key", "error");
+    } finally {
+      setIsTesting(false);
+    }
+  }, [creds, addNotification]);
 
   const sendManual = useCallback(async () => {
     if (!manualTo.trim() || !manualMsg.trim()) return;
-    await new Promise((r) => setTimeout(r, 800));
-    const log: MessageLog = {
-      id: `l${Date.now()}`,
-      to: manualTo,
-      message: manualMsg,
-      status: creds.enabled ? "sent" : "failed",
-      timestamp: new Date().toLocaleString("en-IN"),
-    };
-    setLogs((p) => [log, ...p].slice(0, 20));
-    addNotification(
-      creds.enabled ? "Message sent" : "WhatsApp not enabled — message queued",
-      creds.enabled ? "success" : "warning",
-    );
-    setManualTo("");
-    setManualMsg("");
-  }, [manualTo, manualMsg, creds.enabled, addNotification]);
+    try {
+      await phpApiService.post("communication/send-whatsapp", {
+        to: manualTo.trim(),
+        message: manualMsg.trim(),
+        channel: "whatsapp",
+      });
+      toast.success("Message sent");
+      setManualTo("");
+      setManualMsg("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to send message",
+      );
+    }
+  }, [manualTo, manualMsg]);
 
   const sendBroadcast = useCallback(async () => {
-    const students = getData("students") as { name?: string }[];
-    const total = Math.max(students.length, 5);
+    if (!bcTemplate.trim()) return;
     setIsSending(true);
-    setSendProgress(0);
     setSendReport(null);
-    for (let i = 0; i <= total; i++) {
-      await new Promise((r) => setTimeout(r, 40));
-      setSendProgress(Math.round((i / total) * 100));
+    try {
+      const result = await phpApiService.post<{ sent: number; failed: number }>(
+        "communication/broadcast",
+        {
+          recipientGroup: bcRecipient,
+          message: bcTemplate,
+          channel: bcChannel,
+        },
+      );
+      setSendReport({ sent: result.sent ?? 0, failed: result.failed ?? 0 });
+      toast.success(`Broadcast sent to ${result.sent ?? 0} recipients`);
+      void loadHistory();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Broadcast failed");
+    } finally {
+      setIsSending(false);
     }
-    const failed = Math.floor(total * 0.05);
-    setSendReport({ sent: total - failed, failed });
-    setIsSending(false);
-    addNotification(
-      `Broadcast sent to ${total - failed} recipients`,
-      "success",
-    );
-  }, [getData, addNotification]);
+  }, [bcRecipient, bcTemplate, bcChannel, loadHistory]);
 
-  const triggerRule = useCallback(
-    (rule: NotifRule) => {
-      addNotification(`Triggered: "${rule.event}" — ${rule.recipient}`, "info");
-    },
-    [addNotification],
-  );
+  const saveSchedulerRules = useCallback(async () => {
+    setSavingRules(true);
+    try {
+      await phpApiService.post("communication/scheduler/save", { rules });
+      toast.success("Notification rules saved");
+    } catch {
+      toast.error("Failed to save rules");
+    } finally {
+      setSavingRules(false);
+    }
+  }, [rules]);
+
+  const triggerRule = useCallback(async (rule: NotifRule) => {
+    try {
+      await phpApiService.post("communication/scheduler/trigger", {
+        ruleId: rule.id,
+      });
+      toast.success(`Triggered: "${rule.event}"`);
+    } catch {
+      toast.error("Failed to trigger rule");
+    }
+  }, []);
 
   const toggleRule = useCallback((id: string) => {
     setRules((p) =>
@@ -238,7 +286,6 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
     );
   }, []);
 
-  // Preview: replace vars with sample values
   const previewMsg = bcTemplate
     .replace(/{student_name}/g, "Arjun Sharma")
     .replace(/{class}/g, "Class 5A")
@@ -366,7 +413,7 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={testConnection}
+                  onClick={() => void testConnection()}
                   disabled={isTesting}
                   data-ocid="communication.test_connection_button"
                 >
@@ -374,7 +421,7 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
                 </Button>
                 <Button
                   size="sm"
-                  onClick={saveCreds}
+                  onClick={() => void saveCreds()}
                   data-ocid="communication.save_creds_button"
                 >
                   Save Settings
@@ -410,60 +457,12 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
               />
             </div>
             <Button
-              onClick={sendManual}
+              onClick={() => void sendManual()}
               disabled={!manualTo.trim() || !manualMsg.trim()}
               data-ocid="communication.send_manual_button"
             >
               <Send className="w-4 h-4 mr-1.5" /> Send Message
             </Button>
-          </div>
-
-          {/* Message Log */}
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-base font-semibold text-foreground">
-                Message Log (Last 20)
-              </h2>
-              <Badge variant="secondary">{logs.length} messages</Badge>
-            </div>
-            {logs.length === 0 ? (
-              <div
-                className="py-10 text-center text-muted-foreground"
-                data-ocid="communication.logs_empty_state"
-              >
-                No messages sent yet
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {logs.map((log, idx) => (
-                  <div
-                    key={log.id}
-                    className="px-5 py-3 flex items-start justify-between gap-3"
-                    data-ocid={`communication.log.${idx + 1}`}
-                  >
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {log.to}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
-                        {log.message}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {log.timestamp}
-                      </p>
-                    </div>
-                    <Badge
-                      variant={
-                        log.status === "sent" ? "outline" : "destructive"
-                      }
-                      className={`shrink-0 text-xs ${log.status === "sent" ? "text-green-600 border-green-500/30" : ""}`}
-                    >
-                      {log.status === "sent" ? "✓ Sent" : "✗ Failed"}
-                    </Badge>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -540,40 +539,14 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
                   ))}
                 </div>
               </div>
-              <div className="flex gap-2 pt-1">
-                <Button
-                  onClick={sendBroadcast}
-                  disabled={isSending}
-                  data-ocid="communication.send_broadcast_button"
-                >
-                  <Send className="w-4 h-4 mr-1.5" />
-                  {isSending ? "Sending…" : "Send Broadcast"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  data-ocid="communication.attach_file_button"
-                >
-                  📎 Attach File
-                </Button>
-              </div>
-              {isSending && (
-                <div
-                  className="space-y-1"
-                  data-ocid="communication.send_progress"
-                >
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Sending…</span>
-                    <span>{sendProgress}%</span>
-                  </div>
-                  <div className="h-2 bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-primary transition-all duration-100 rounded-full"
-                      style={{ width: `${sendProgress}%` }}
-                    />
-                  </div>
-                </div>
-              )}
+              <Button
+                onClick={() => void sendBroadcast()}
+                disabled={isSending}
+                data-ocid="communication.send_broadcast_button"
+              >
+                <Send className="w-4 h-4 mr-1.5" />
+                {isSending ? "Sending…" : "Send Broadcast"}
+              </Button>
               {sendReport && (
                 <div
                   className="bg-muted/50 rounded-lg px-4 py-3 flex gap-4 text-sm"
@@ -600,7 +573,7 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
               {["Arjun Sharma", "Pooja Patel", "Rahul Verma"].map((name) => (
                 <div
                   key={name}
-                  className="bg-green-50 border border-green-200 rounded-xl p-3"
+                  className="bg-muted/30 border border-border rounded-xl p-3"
                 >
                   <p className="text-xs text-muted-foreground mb-1 font-medium">
                     📱 To: {name}
@@ -612,16 +585,91 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Broadcast History */}
+          <div className="bg-card border border-border rounded-xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+              <h2 className="text-base font-semibold text-foreground">
+                Broadcast History
+              </h2>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void loadHistory()}
+              >
+                Refresh
+              </Button>
+            </div>
+            {historyLoading ? (
+              <div
+                className="p-4 space-y-2"
+                data-ocid="communication.history.loading_state"
+              >
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-12 rounded-lg" />
+                ))}
+              </div>
+            ) : broadcastHistory.length === 0 ? (
+              <div
+                className="py-10 text-center text-muted-foreground"
+                data-ocid="communication.history.empty_state"
+              >
+                No broadcasts sent yet
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {broadcastHistory.map((bc, idx) => (
+                  <div
+                    key={bc.id}
+                    className="px-5 py-3 flex items-start justify-between gap-3"
+                    data-ocid={`communication.history.item.${idx + 1}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">
+                        {bc.recipientGroup} · {bc.channel}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                        {bc.message}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {bc.sentAt}
+                      </p>
+                    </div>
+                    <div className="text-xs text-right shrink-0">
+                      <span className="text-green-600 font-medium">
+                        ✓ {bc.sentCount}
+                      </span>
+                      {bc.failedCount > 0 && (
+                        <span className="text-destructive ml-2">
+                          ✗ {bc.failedCount}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
       {/* ── SCHEDULER TAB ── */}
       {tab === "scheduler" && (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Configure automatic notification rules. Toggle each rule on/off or
-            trigger manually.
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Configure automatic notification rules. Toggle each rule on/off or
+              trigger manually.
+            </p>
+            <Button
+              size="sm"
+              onClick={() => void saveSchedulerRules()}
+              disabled={savingRules}
+              data-ocid="communication.save_rules_button"
+            >
+              {savingRules ? "Saving…" : "Save Rules"}
+            </Button>
+          </div>
           {rules.map((rule, idx) => (
             <div
               key={rule.id}
@@ -665,7 +713,7 @@ export default function Communication({ initialTab = "whatsapp" }: Props) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => triggerRule(rule)}
+                onClick={() => void triggerRule(rule)}
                 disabled={!rule.enabled}
                 className="shrink-0"
                 data-ocid={`communication.trigger_rule.${idx + 1}`}

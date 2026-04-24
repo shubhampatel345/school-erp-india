@@ -1,3 +1,8 @@
+/**
+ * Examinations — Direct API rebuild
+ * All data via phpApiService; no local sync, no getData().
+ */
+
 import {
   BookOpen,
   CalendarDays,
@@ -43,7 +48,7 @@ export default function Examinations({ initialTab }: ExaminationsProps) {
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">
           Exam timetables, teacher schedules, results, admit cards, online tests
-          with auto-grading, and custom result card designer
+          and custom result card designer
         </p>
       </div>
 

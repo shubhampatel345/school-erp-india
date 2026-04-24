@@ -1,10 +1,11 @@
 /**
- * FeeHeading.tsx — Fee Headings CRUD
+ * FeeHeading.tsx — Fee Headings CRUD via phpApiService (direct server calls)
  *
- * Collection key: "fee_headings" (matches server MySQL table)
- * Fields: name, headType, accountName, displayOrder, isActive, months, applicableClasses
+ * All reads/writes go through phpApiService directly.
+ * Wait for HTTP 200 before showing success.
+ * No canister, no IndexedDB, no local cache.
  */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import {
@@ -16,8 +17,10 @@ import {
 import { Input } from "../../components/ui/input";
 import { useApp } from "../../context/AppContext";
 import type { FeeHeading } from "../../types";
-import { CLASS_ORDER } from "../../types";
-import { CLASSES, MONTHS, generateId } from "../../utils/localStorage";
+import { CLASS_ORDER, MONTHS } from "../../types";
+import phpApiService, {
+  type FeeHeadingRecord,
+} from "../../utils/phpApiService";
 
 function safeArray<T>(v: T[] | string | undefined): T[] {
   if (Array.isArray(v)) return v;
@@ -32,19 +35,49 @@ function safeArray<T>(v: T[] | string | undefined): T[] {
   return [];
 }
 
-const DEFAULT_FEE_HEADINGS: Array<{
-  name: string;
-  headType: "tuition" | "transport" | "other";
-  accountName: string;
-}> = [
-  { name: "Tuition Fee", headType: "tuition", accountName: "Main Account" },
+function toFeeHeading(r: FeeHeadingRecord): FeeHeading {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    name: r.name,
+    months: safeArray<string>(r.months as string[] | string | undefined),
+    amount: r.amount ?? 0,
+    isActive: r.isActive !== false,
+    headType:
+      (s.headType as "tuition" | "transport" | "other") ??
+      (s.head_type as "tuition" | "transport" | "other") ??
+      "other",
+    accountName:
+      (s.accountName as string) ?? (s.account_name as string) ?? "Main Account",
+    displayOrder:
+      (s.displayOrder as number) ?? (s.display_order as number) ?? 1,
+    applicableClasses: safeArray<string>(
+      (s.applicableClasses ?? s.applicable_classes) as
+        | string[]
+        | string
+        | undefined,
+    ),
+    sessionId: r.sessionId as string | undefined,
+  };
+}
+
+const DEFAULT_FEE_HEADINGS = [
+  {
+    name: "Tuition Fee",
+    headType: "tuition" as const,
+    accountName: "Main Account",
+  },
   {
     name: "Transport Fee",
-    headType: "transport",
+    headType: "transport" as const,
     accountName: "Transport Account",
   },
-  { name: "Development Fund", headType: "other", accountName: "Main Account" },
-  { name: "Exam Fee", headType: "other", accountName: "Main Account" },
+  {
+    name: "Development Fund",
+    headType: "other" as const,
+    accountName: "Main Account",
+  },
+  { name: "Exam Fee", headType: "other" as const, accountName: "Main Account" },
 ];
 
 const HEAD_TYPE_LABELS: Record<string, string> = {
@@ -52,7 +85,6 @@ const HEAD_TYPE_LABELS: Record<string, string> = {
   transport: "Transport",
   other: "Other",
 };
-
 const HEAD_TYPE_COLORS: Record<string, string> = {
   tuition: "bg-blue-100 text-blue-700 border-blue-200",
   transport: "bg-orange-100 text-orange-700 border-orange-200",
@@ -60,17 +92,11 @@ const HEAD_TYPE_COLORS: Record<string, string> = {
 };
 
 export default function FeeHeadingPage() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    deleteData,
-    isReadOnly,
-    currentUser,
-    currentSession,
-    addNotification,
-  } = useApp();
+  const { isReadOnly, currentUser, currentSession, addNotification } = useApp();
 
+  const [headings, setHeadings] = useState<FeeHeading[]>([]);
+  const [classes, setClasses] = useState<string[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [name, setName] = useState("");
@@ -89,52 +115,76 @@ export default function FeeHeadingPage() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // Collection key "fee_headings" matches the server MySQL table
-  const rawHeadings = getData("fee_headings") as FeeHeading[];
-  const headings = rawHeadings
-    .map((h) => ({
-      ...h,
-      months: safeArray<string>(h.months as unknown as string[]),
-      applicableClasses: h.applicableClasses
-        ? safeArray<string>(h.applicableClasses as unknown as string[])
-        : [],
-    }))
-    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+  const fetchHeadings = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const raw = await phpApiService.getFeeHeadings();
+      const mapped = raw
+        .map(toFeeHeading)
+        .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+      setHeadings(mapped);
+    } catch {
+      setHeadings([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchHeadings();
+    phpApiService
+      .getClasses()
+      .then((cls) => {
+        setClasses(
+          cls
+            .map((c) => c.className)
+            .sort((a, b) => CLASS_ORDER.indexOf(a) - CLASS_ORDER.indexOf(b)),
+        );
+      })
+      .catch(() => setClasses(CLASS_ORDER));
+  }, [fetchHeadings]);
 
   async function save() {
     if (!name.trim()) return;
     setSaving(true);
     try {
       const months = selectedMonths.length > 0 ? selectedMonths : [...MONTHS];
+      const payload = {
+        name: name.trim(),
+        headType,
+        head_type: headType,
+        accountName: accountName.trim() || "Main Account",
+        account_name: accountName.trim() || "Main Account",
+        displayOrder: Number(displayOrder) || headings.length + 1,
+        display_order: Number(displayOrder) || headings.length + 1,
+        isActive,
+        is_active: isActive ? 1 : 0,
+        months: months,
+        applicableClasses:
+          selectedClasses.length > 0 ? JSON.stringify(selectedClasses) : null,
+        applicable_classes:
+          selectedClasses.length > 0 ? JSON.stringify(selectedClasses) : null,
+        sessionId: currentSession?.id,
+        session_id: currentSession?.id,
+      };
+
       if (editId) {
-        await updateData("fee_headings", editId, {
-          name: name.trim(),
-          headType,
-          accountName: accountName.trim() || "Main Account",
-          displayOrder: Number(displayOrder) || 1,
-          isActive,
-          months,
-          applicableClasses: selectedClasses.length > 0 ? selectedClasses : [],
+        await phpApiService.post("fees/headings/update", {
+          id: editId,
+          ...payload,
         });
         addNotification(`Fee heading "${name.trim()}" updated`, "success");
       } else {
-        const h: FeeHeading = {
-          id: generateId(),
-          name: name.trim(),
-          headType,
-          accountName: accountName.trim() || "Main Account",
-          displayOrder: Number(displayOrder) || headings.length + 1,
-          isActive,
-          months,
-          applicableClasses:
-            selectedClasses.length > 0 ? selectedClasses : undefined,
-          amount: 0,
-          sessionId: currentSession?.id,
-        };
-        await saveData("fee_headings", h as unknown as Record<string, unknown>);
-        addNotification(`Fee heading "${h.name}" added`, "success");
+        await phpApiService.addFeeHeading(payload);
+        addNotification(`Fee heading "${name.trim()}" added`, "success");
       }
+      await fetchHeadings();
       resetForm();
+    } catch (err) {
+      addNotification(
+        `Save failed: ${err instanceof Error ? err.message : "Unknown error"}`,
+        "error",
+      );
     } finally {
       setSaving(false);
     }
@@ -146,34 +196,50 @@ export default function FeeHeadingPage() {
     try {
       for (let i = 0; i < DEFAULT_FEE_HEADINGS.length; i++) {
         const dh = DEFAULT_FEE_HEADINGS[i];
-        const h: FeeHeading = {
-          id: generateId(),
+        await phpApiService.addFeeHeading({
           name: dh.name,
           headType: dh.headType,
+          head_type: dh.headType,
           accountName: dh.accountName,
+          account_name: dh.accountName,
           displayOrder: i + 1,
+          display_order: i + 1,
           isActive: true,
+          is_active: 1,
           months: [...MONTHS],
-          amount: 0,
           sessionId: currentSession?.id,
-        };
-        await saveData("fee_headings", h as unknown as Record<string, unknown>);
+          session_id: currentSession?.id,
+        });
       }
       addNotification("Default fee headings added", "success");
+      await fetchHeadings();
+    } catch (err) {
+      addNotification(
+        `Failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
     } finally {
       setSaving(false);
     }
   }
 
-  async function deleteHeading(id: string) {
+  async function deleteHeading(h: FeeHeading) {
     if (
       !confirm(
-        "Delete this fee heading? This will also remove it from all fee plans.",
+        `Delete fee heading "${h.name}"? This will also remove it from all fee plans.`,
       )
     )
       return;
-    await deleteData("fee_headings", id);
-    addNotification("Fee heading deleted", "info");
+    try {
+      await phpApiService.post("fees/headings/delete", { id: h.id });
+      addNotification(`Fee heading "${h.name}" deleted`, "info");
+      await fetchHeadings();
+    } catch (err) {
+      addNotification(
+        `Delete failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
   }
 
   function openEdit(h: FeeHeading) {
@@ -183,10 +249,14 @@ export default function FeeHeadingPage() {
     setAccountName(h.accountName ?? "Main Account");
     setDisplayOrder(String(h.displayOrder ?? 1));
     setIsActive(h.isActive !== false);
-    setSelectedMonths(safeArray<string>(h.months as unknown as string[]));
+    setSelectedMonths(
+      safeArray<string>(h.months as string[] | string | undefined),
+    );
     setSelectedClasses(
       h.applicableClasses
-        ? safeArray<string>(h.applicableClasses as unknown as string[])
+        ? safeArray<string>(
+            h.applicableClasses as string[] | string | undefined,
+          )
         : [],
     );
     setOpen(true);
@@ -204,15 +274,7 @@ export default function FeeHeadingPage() {
     setOpen(false);
   }
 
-  // Build a class list — prefer context classes, fall back to CLASS_ORDER
-  const classSections = getData("classes") as Array<{
-    className?: string;
-    name?: string;
-  }>;
-  const classList =
-    classSections.length > 0
-      ? classSections.map((c) => c.className ?? c.name ?? "").filter(Boolean)
-      : CLASS_ORDER;
+  const classList = classes.length > 0 ? classes : CLASS_ORDER;
 
   return (
     <div className="space-y-4">
@@ -249,7 +311,20 @@ export default function FeeHeadingPage() {
         )}
       </div>
 
-      {headings.length === 0 ? (
+      {isLoading ? (
+        <div className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground">
+          <div className="flex items-center gap-1.5 justify-center">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="w-2 h-2 rounded-full bg-primary animate-pulse"
+                style={{ animationDelay: `${i * 200}ms` }}
+              />
+            ))}
+          </div>
+          <p className="mt-3 text-sm">Loading fee headings…</p>
+        </div>
+      ) : headings.length === 0 ? (
         <div
           className="bg-card border border-border rounded-xl p-12 text-center text-muted-foreground"
           data-ocid="fee-heading.empty_state"
@@ -257,8 +332,7 @@ export default function FeeHeadingPage() {
           <p className="text-4xl mb-3">📋</p>
           <p className="text-lg font-medium mb-1">No fee headings yet</p>
           <p className="text-sm mb-4">
-            Add headings like Tuition Fee, Transport Fee, Development Fund. Or
-            click "Add Defaults" to add the 4 most common headings at once.
+            Add headings like Tuition Fee, Transport Fee, Development Fund.
           </p>
           {canEdit && !isReadOnly && (
             <div className="flex gap-2 justify-center">
@@ -320,26 +394,40 @@ export default function FeeHeadingPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
-                      {h.months.length === 12 ? (
+                      {safeArray<string>(
+                        h.months as string[] | string | undefined,
+                      ).length === 12 ? (
                         <Badge variant="secondary" className="text-xs">
                           All 12 months
                         </Badge>
                       ) : (
-                        h.months.slice(0, 6).map((m) => (
-                          <Badge
-                            key={m}
-                            variant="secondary"
-                            className="text-xs"
-                          >
-                            {m.slice(0, 3)}
+                        safeArray<string>(
+                          h.months as string[] | string | undefined,
+                        )
+                          .slice(0, 6)
+                          .map((m) => (
+                            <Badge
+                              key={m}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {m.slice(0, 3)}
+                            </Badge>
+                          ))
+                      )}
+                      {safeArray<string>(
+                        h.months as string[] | string | undefined,
+                      ).length > 6 &&
+                        safeArray<string>(
+                          h.months as string[] | string | undefined,
+                        ).length < 12 && (
+                          <Badge variant="outline" className="text-xs">
+                            +
+                            {safeArray<string>(
+                              h.months as string[] | string | undefined,
+                            ).length - 6}
                           </Badge>
-                        ))
-                      )}
-                      {h.months.length > 6 && h.months.length < 12 && (
-                        <Badge variant="outline" className="text-xs">
-                          +{h.months.length - 6}
-                        </Badge>
-                      )}
+                        )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">
@@ -350,29 +438,27 @@ export default function FeeHeadingPage() {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <div className="flex gap-2 justify-center">
-                      {canEdit && !isReadOnly && (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openEdit(h)}
-                            data-ocid={`fee-heading.edit-btn.${idx + 1}`}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-red-600 border-red-200 hover:bg-red-50"
-                            onClick={() => void deleteHeading(h.id)}
-                            data-ocid={`fee-heading.delete-btn.${idx + 1}`}
-                          >
-                            Delete
-                          </Button>
-                        </>
-                      )}
-                    </div>
+                    {canEdit && !isReadOnly && (
+                      <div className="flex gap-2 justify-center">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openEdit(h)}
+                          data-ocid={`fee-heading.edit-btn.${idx + 1}`}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="text-red-600 border-red-200 hover:bg-red-50"
+                          onClick={() => void deleteHeading(h)}
+                          data-ocid={`fee-heading.delete-btn.${idx + 1}`}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -381,7 +467,6 @@ export default function FeeHeadingPage() {
         </div>
       )}
 
-      {/* Add/Edit Dialog */}
       <Dialog
         open={open}
         onOpenChange={(v) => {
@@ -393,7 +478,6 @@ export default function FeeHeadingPage() {
             <DialogTitle>{editId ? "Edit" : "Add"} Fee Heading</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-2">
-            {/* Name */}
             <div>
               <label
                 htmlFor="fee-heading-name"
@@ -409,8 +493,6 @@ export default function FeeHeadingPage() {
                 data-ocid="fee-heading.name-input"
               />
             </div>
-
-            {/* Head Type */}
             <div>
               <p className="text-sm font-medium mb-2">Head Type</p>
               <div className="flex gap-2">
@@ -419,11 +501,7 @@ export default function FeeHeadingPage() {
                     key={t}
                     type="button"
                     onClick={() => setHeadType(t)}
-                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                      headType === t
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border hover:bg-muted/50"
-                    }`}
+                    className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${headType === t ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
                     data-ocid={`fee-heading.type-btn.${t}`}
                   >
                     {HEAD_TYPE_LABELS[t]}
@@ -431,8 +509,6 @@ export default function FeeHeadingPage() {
                 ))}
               </div>
             </div>
-
-            {/* Account + Order + Active row */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label
@@ -469,8 +545,6 @@ export default function FeeHeadingPage() {
                 />
               </div>
             </div>
-
-            {/* Active toggle */}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -483,8 +557,6 @@ export default function FeeHeadingPage() {
                 Active (visible in fee collection)
               </span>
             </label>
-
-            {/* Month selection */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <span className="text-sm font-medium">Applicable Months</span>
@@ -528,8 +600,6 @@ export default function FeeHeadingPage() {
                 ))}
               </div>
             </div>
-
-            {/* Class selection */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <div>
@@ -585,7 +655,6 @@ export default function FeeHeadingPage() {
                 </p>
               )}
             </div>
-
             <div className="flex gap-2 justify-end pt-2">
               <Button
                 variant="outline"

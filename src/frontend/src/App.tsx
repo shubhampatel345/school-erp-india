@@ -26,77 +26,148 @@ import Students from "./pages/Students";
 import Transport from "./pages/Transport";
 import VirtualClasses from "./pages/VirtualClasses";
 import StudentAnalytics from "./pages/analytics/StudentAnalytics";
+import AccountantDashboard from "./pages/dashboards/AccountantDashboard";
+import AdminDashboard from "./pages/dashboards/AdminDashboard";
+import DriverDashboard from "./pages/dashboards/DriverDashboard";
+import ParentDashboard from "./pages/dashboards/ParentDashboard";
+import StudentDashboard from "./pages/dashboards/StudentDashboard";
+import SuperAdminDashboard from "./pages/dashboards/SuperAdminDashboard";
+import TeacherDashboard from "./pages/dashboards/TeacherDashboard";
+
+/** Return the role-specific landing page key for a given role */
+function getRoleDashboard(role: string): string {
+  switch (role) {
+    case "superadmin":
+      return "dashboard/superadmin";
+    case "admin":
+      return "dashboard/admin";
+    case "teacher":
+      return "dashboard/teacher";
+    case "accountant":
+      return "dashboard/accountant";
+    case "parent":
+      return "dashboard/parent";
+    case "student":
+      return "dashboard/student";
+    case "driver":
+      return "dashboard/driver";
+    default:
+      return "dashboard";
+  }
+}
 
 function AppRoutes() {
   const { currentUser } = useApp();
-  const [activePage, setActivePage] = useState("dashboard");
+
+  // After login, start on the role-specific dashboard
+  const [activePage, setActivePage] = useState(() => {
+    const stored = sessionStorage.getItem("shubh_current_user");
+    if (stored) {
+      try {
+        const u = JSON.parse(stored) as { role?: string };
+        if (u.role) return getRoleDashboard(u.role);
+      } catch {
+        /* ignore */
+      }
+    }
+    return "dashboard";
+  });
 
   if (!currentUser) return <Login />;
+
+  // When currentUser changes (after login), navigate to role dashboard
+  const effectivePage =
+    activePage === "dashboard"
+      ? getRoleDashboard(currentUser.role)
+      : activePage;
 
   const navigate = (page: string) => setActivePage(page);
 
   const renderPage = () => {
-    if (activePage === "dashboard") return <Dashboard onNavigate={navigate} />;
-    if (activePage === "students") return <Students onNavigate={navigate} />;
-    if (activePage === "attendance") return <Attendance />;
-    if (activePage === "calling") return <Calling />;
-    if (activePage === "virtualclasses") return <VirtualClasses />;
-    if (activePage === "chat") return <Chat />;
-    if (activePage === "promote") return <PromoteStudents />;
-    if (activePage === "transport") return <Transport />;
-    if (activePage === "inventory") return <Inventory />;
-    if (activePage === "library") return <Library />;
-    if (activePage === "expenses") return <Expenses />;
-    if (activePage === "homework") return <HomeworkPage />;
-    if (activePage === "certificates") return <Certificates />;
-    if (activePage === "alumni") return <AlumniPage />;
-    if (activePage === "reports") return <Reports />;
-    if (activePage === "documentation") return <Documentation />;
-    if (activePage === "analytics") return <StudentAnalytics />;
+    // Role-specific dashboards
+    if (effectivePage === "dashboard/superadmin")
+      return <SuperAdminDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/admin")
+      return <AdminDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/teacher")
+      return <TeacherDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/accountant")
+      return <AccountantDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/parent")
+      return <ParentDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/student")
+      return <StudentDashboard onNavigate={navigate} />;
+    if (effectivePage === "dashboard/driver")
+      return <DriverDashboard onNavigate={navigate} />;
 
-    if (activePage.startsWith("fees") || activePage === "fees") {
-      const tab = activePage.includes("/")
-        ? activePage.split("/")[1]
+    // Generic dashboard fallback (also used by receptionist/librarian)
+    if (effectivePage === "dashboard" || effectivePage.startsWith("dashboard"))
+      return <Dashboard onNavigate={navigate} />;
+
+    if (effectivePage === "students") return <Students onNavigate={navigate} />;
+    if (effectivePage === "attendance") return <Attendance />;
+    if (effectivePage === "calling") return <Calling />;
+    if (effectivePage === "virtualclasses") return <VirtualClasses />;
+    if (effectivePage === "chat") return <Chat />;
+    if (effectivePage === "promote") return <PromoteStudents />;
+    if (effectivePage === "transport") return <Transport />;
+    if (effectivePage === "inventory") return <Inventory />;
+    if (effectivePage === "library") return <Library />;
+    if (effectivePage === "expenses") return <Expenses />;
+    if (effectivePage === "homework") return <HomeworkPage />;
+    if (effectivePage === "certificates") return <Certificates />;
+    if (effectivePage === "alumni") return <AlumniPage />;
+    if (effectivePage === "reports") return <Reports />;
+    if (effectivePage === "documentation") return <Documentation />;
+    if (effectivePage === "analytics") return <StudentAnalytics />;
+
+    if (effectivePage.startsWith("fees") || effectivePage === "fees") {
+      const tab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
         : "collect";
       return <Fees initialTab={tab} />;
     }
     if (
-      activePage.startsWith("examinations") ||
-      activePage === "examinations"
+      effectivePage.startsWith("examinations") ||
+      effectivePage === "examinations"
     ) {
-      const tab = activePage.includes("/")
-        ? activePage.split("/")[1]
+      const tab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
         : "timetable";
       return <Examinations initialTab={tab} />;
     }
-    if (activePage.startsWith("hr") || activePage === "hr") {
-      const tab = activePage.includes("/") ? activePage.split("/")[1] : "staff";
+    if (effectivePage.startsWith("hr") || effectivePage === "hr") {
+      const tab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
+        : "staff";
       return <HR onNavigate={navigate} initialTab={tab} />;
     }
-    if (activePage.startsWith("academics") || activePage === "academics") {
-      const tab = activePage.includes("/")
-        ? activePage.split("/")[1]
+    if (
+      effectivePage.startsWith("academics") ||
+      effectivePage === "academics"
+    ) {
+      const tab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
         : "classes";
       return <Academics initialTab={tab} />;
     }
     if (
-      activePage.startsWith("communication") ||
-      activePage === "communication"
+      effectivePage.startsWith("communication") ||
+      effectivePage === "communication"
     ) {
-      const tab = activePage.includes("/")
-        ? activePage.split("/")[1]
+      const tab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
         : "whatsapp";
       return <Communication initialTab={tab} />;
     }
-    if (activePage.startsWith("settings") || activePage === "settings") {
-      // Support "settings:server" shorthand (from sync badge click)
-      const colonTab = activePage.includes(":")
-        ? activePage.split(":")[1]
+    if (effectivePage.startsWith("settings") || effectivePage === "settings") {
+      const colonTab = effectivePage.includes(":")
+        ? effectivePage.split(":")[1]
         : null;
       const tab = colonTab
         ? colonTab
-        : activePage.includes("/")
-          ? activePage.split("/")[1]
+        : effectivePage.includes("/")
+          ? effectivePage.split("/")[1]
           : "profile";
       return <Settings initialTab={tab} />;
     }
@@ -105,8 +176,8 @@ function AppRoutes() {
   };
 
   return (
-    <Layout activePage={activePage} onNavigate={navigate}>
-      <ErrorBoundary key={activePage}>{renderPage()}</ErrorBoundary>
+    <Layout activePage={effectivePage} onNavigate={navigate}>
+      <ErrorBoundary key={effectivePage}>{renderPage()}</ErrorBoundary>
     </Layout>
   );
 }

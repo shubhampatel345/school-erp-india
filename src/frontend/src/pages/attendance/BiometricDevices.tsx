@@ -1,3 +1,9 @@
+/**
+ * BiometricDevices — Direct API rebuild
+ * Device configuration stored in localStorage (device config only).
+ * Sync results write attendance directly via phpApiService.markAttendance().
+ * No getData/saveData context calls.
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -29,11 +35,9 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Staff, Student } from "../../types";
-import { generateId } from "../../utils/localStorage";
+import phpApiService from "../../utils/phpApiService";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 type DeviceStatus = "online" | "offline" | "unknown";
 type DeviceType = "ESSL eBioServer" | "ZKTeco/eSSL" | "FingerTec" | "Other";
@@ -57,20 +61,13 @@ interface BiometricMapping {
   personId: string;
   personType: "student" | "staff";
   biometricId: string;
+  personName: string;
 }
 
 interface SyncLog {
   time: string;
   message: string;
   type: "info" | "success" | "error";
-}
-
-interface SyncResult {
-  deviceId: string;
-  records: { biometricId: string; time: string; type: "in" | "out" }[];
-  synced: number;
-  unmatched: number;
-  logs: SyncLog[];
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -101,8 +98,6 @@ const EMPTY_DEVICE: Omit<BiometricDevice, "id"> = {
   status: "unknown",
 };
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
 function statusIcon(status: DeviceStatus) {
   if (status === "online") return <Wifi className="w-4 h-4 text-green-500" />;
   if (status === "offline")
@@ -122,113 +117,27 @@ function validateIP(ip: string) {
   return /^(\d{1,3}\.){3}\d{1,3}$/.test(ip);
 }
 
-function simulateSyncLogs(
-  device: BiometricDevice,
-  mappings: BiometricMapping[],
-): Promise<SyncResult> {
-  return new Promise((resolve) => {
-    const logs: SyncLog[] = [];
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
-
-    logs.push({
-      time: now.toLocaleTimeString(),
-      message: `Connecting to ${device.ipAddress}:${device.port}…`,
-      type: "info",
-    });
-
-    setTimeout(() => {
-      logs.push({
-        time: new Date().toLocaleTimeString(),
-        message: `Authentication as '${device.username}'…`,
-        type: "info",
-      });
-    }, 600);
-
-    setTimeout(() => {
-      const count =
-        mappings.length > 0
-          ? Math.min(mappings.length, 3 + Math.floor(Math.random() * 5))
-          : 0;
-      const picked = [...mappings]
-        .sort(() => Math.random() - 0.5)
-        .slice(0, count);
-      const rawRecords = picked.flatMap((m) => {
-        const inH = 7 + Math.floor(Math.random() * 2);
-        const inM = Math.floor(Math.random() * 60);
-        const outH = 14 + Math.floor(Math.random() * 3);
-        const outM = Math.floor(Math.random() * 60);
-        return [
-          {
-            biometricId: m.biometricId,
-            time: `${todayStr}T${String(inH).padStart(2, "0")}:${String(inM).padStart(2, "0")}:00`,
-            type: "in" as const,
-          },
-          {
-            biometricId: m.biometricId,
-            time: `${todayStr}T${String(outH).padStart(2, "0")}:${String(outM).padStart(2, "0")}:00`,
-            type: "out" as const,
-          },
-        ];
-      });
-
-      logs.push({
-        time: new Date().toLocaleTimeString(),
-        message: `Fetching punch logs… Found ${rawRecords.length} records for today.`,
-        type: "info",
-      });
-      logs.push({
-        time: new Date().toLocaleTimeString(),
-        message: `Matching ${rawRecords.length} punch logs to ERP…`,
-        type: "info",
-      });
-
-      const synced = rawRecords.filter((r) =>
-        mappings.some((m) => m.biometricId === r.biometricId),
-      ).length;
-      const unmatched = rawRecords.length - synced;
-
-      logs.push({
-        time: new Date().toLocaleTimeString(),
-        message: `Sync complete. ${synced} records matched, ${unmatched} unmatched.`,
-        type: synced > 0 ? "success" : "info",
-      });
-
-      resolve({
-        deviceId: device.id,
-        records: rawRecords,
-        synced,
-        unmatched,
-        logs,
-      });
-    }, 1800);
-  });
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function BiometricDevices() {
-  const { getData, saveData } = useApp();
-
   const [devices, setDevices] = useState<BiometricDevice[]>(() => {
     try {
-      const raw = localStorage.getItem("biometric_devices");
-      return raw ? (JSON.parse(raw) as BiometricDevice[]) : [];
+      return JSON.parse(
+        localStorage.getItem("biometric_devices") ?? "[]",
+      ) as BiometricDevice[];
     } catch {
       return [];
     }
   });
   const [mappings, setMappings] = useState<BiometricMapping[]>(() => {
     try {
-      const raw = localStorage.getItem("biometric_mappings");
-      return raw ? (JSON.parse(raw) as BiometricMapping[]) : [];
+      return JSON.parse(
+        localStorage.getItem("biometric_mappings") ?? "[]",
+      ) as BiometricMapping[];
     } catch {
       return [];
     }
   });
-
-  const students = useMemo(() => getData("students") as Student[], [getData]);
-  const staff = useMemo(() => getData("staff") as Staff[], [getData]);
 
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [editingDevice, setEditingDevice] = useState<BiometricDevice | null>(
@@ -238,16 +147,20 @@ export default function BiometricDevices() {
     useState<Omit<BiometricDevice, "id">>(EMPTY_DEVICE);
 
   const [syncingId, setSyncingId] = useState<string | null>(null);
-  const [syncResult, setSyncResult] = useState<SyncResult | null>(null);
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>([]);
-
-  const [mapSearch, setMapSearch] = useState("");
-  const [mapBiometricId, setMapBiometricId] = useState("");
-  const [mapSelectedPerson, setMapSelectedPerson] = useState<{
-    id: string;
-    type: "student" | "staff";
-    label: string;
+  const [syncDone, setSyncDone] = useState<{
+    synced: number;
+    unmatched: number;
   } | null>(null);
+
+  // mapSearch is kept for future typeahead enhancement
+  const [_mapSearch, setMapSearch] = useState("");
+  const [mapBiometricId, setMapBiometricId] = useState("");
+  const [mapPersonName, setMapPersonName] = useState("");
+  const [mapPersonId, setMapPersonId] = useState("");
+  const [mapPersonType, setMapPersonType] = useState<"student" | "staff">(
+    "student",
+  );
 
   const [expandedSection, setExpandedSection] = useState<
     "devices" | "mappings" | "help"
@@ -283,7 +196,7 @@ export default function BiometricDevices() {
       );
       toast.success("Device updated");
     } else {
-      saveDevices([...devices, { ...deviceForm, id: generateId() }]);
+      saveDevices([...devices, { ...deviceForm, id: crypto.randomUUID() }]);
       toast.success("Device added");
     }
     setShowDeviceModal(false);
@@ -295,15 +208,90 @@ export default function BiometricDevices() {
     toast.success("Device deleted");
   }
 
-  // ── Sync ─────
+  // ── Sync (simulation + direct API write) ──
 
   const handleSync = useCallback(
     async (device: BiometricDevice) => {
       setSyncingId(device.id);
       setSyncLogs([]);
-      setSyncResult(null);
+      setSyncDone(null);
 
-      const result = await simulateSyncLogs(device, mappings);
+      const logs: SyncLog[] = [];
+      const now = new Date();
+
+      logs.push({
+        time: now.toLocaleTimeString(),
+        message: `Connecting to ${device.ipAddress}:${device.port}…`,
+        type: "info",
+      });
+      setSyncLogs([...logs]);
+
+      await new Promise((r) => setTimeout(r, 800));
+
+      logs.push({
+        time: new Date().toLocaleTimeString(),
+        message: `Authentication as '${device.username}'…`,
+        type: "info",
+      });
+      setSyncLogs([...logs]);
+
+      await new Promise((r) => setTimeout(r, 600));
+
+      // Simulate punch records for mapped persons
+      const todayStr = new Date().toISOString().split("T")[0];
+      const count =
+        mappings.length > 0
+          ? Math.min(mappings.length, 3 + Math.floor(Math.random() * 5))
+          : 0;
+      const picked = [...mappings]
+        .sort(() => Math.random() - 0.5)
+        .slice(0, count);
+
+      const punchRecords = picked.map((m) => {
+        const inH = 7 + Math.floor(Math.random() * 2);
+        const inM = Math.floor(Math.random() * 60);
+        const timeIn = `${String(inH).padStart(2, "0")}:${String(inM).padStart(2, "0")}`;
+        return {
+          mapping: m,
+          time: `${todayStr}T${timeIn}:00`,
+          timeIn,
+        };
+      });
+
+      logs.push({
+        time: new Date().toLocaleTimeString(),
+        message: `Fetched ${punchRecords.length * 2} punch records for today.`,
+        type: "info",
+      });
+      setSyncLogs([...logs]);
+
+      let synced = 0;
+      let failed = 0;
+
+      for (const punch of punchRecords) {
+        try {
+          await phpApiService.markAttendance([
+            {
+              id: crypto.randomUUID(),
+              studentId:
+                punch.mapping.personType === "student"
+                  ? punch.mapping.personId
+                  : undefined,
+              staffId:
+                punch.mapping.personType === "staff"
+                  ? punch.mapping.personId
+                  : undefined,
+              date: todayStr,
+              status: "Present",
+              class: "",
+              section: "",
+            },
+          ]);
+          synced++;
+        } catch {
+          failed++;
+        }
+      }
 
       setDevices((prev) => {
         const updated = prev.map((d) =>
@@ -319,87 +307,20 @@ export default function BiometricDevices() {
         return updated;
       });
 
-      // Write attendance records to MySQL via saveData
-      const today = new Date().toISOString().split("T")[0];
-      const existing = getData("attendance") as AttendanceRecord[];
-
-      const savePromises: Promise<unknown>[] = [];
-      for (const punch of result.records) {
-        const mapping = mappings.find(
-          (m) => m.biometricId === punch.biometricId,
-        );
-        if (!mapping) continue;
-
-        const punchTime = new Date(punch.time).toLocaleTimeString("en-IN", {
-          hour: "2-digit",
-          minute: "2-digit",
-        });
-        const alreadyIn = existing.find(
-          (r) =>
-            r.date === today &&
-            (r.studentId === mapping.personId ||
-              r.staffId === mapping.personId),
-        );
-
-        if (punch.type === "in" && !alreadyIn) {
-          const rec: AttendanceRecord = {
-            id: generateId(),
-            ...(mapping.personType === "student"
-              ? { studentId: mapping.personId }
-              : { staffId: mapping.personId }),
-            date: today,
-            status: "Present",
-            timeIn: punchTime,
-            markedBy: `Biometric (${device.name})`,
-            type: mapping.personType,
-            method: "essl",
-          };
-          savePromises.push(
-            saveData("attendance", rec as unknown as Record<string, unknown>),
-          );
-        }
-      }
-
-      await Promise.allSettled(savePromises);
-      setSyncResult(result);
-      setSyncLogs(result.logs);
+      logs.push({
+        time: new Date().toLocaleTimeString(),
+        message: `Sync complete. ${synced} records saved to MySQL${failed > 0 ? `, ${failed} failed` : ""}.`,
+        type: synced > 0 ? "success" : "info",
+      });
+      setSyncLogs([...logs]);
+      setSyncDone({ synced, unmatched: failed });
       setSyncingId(null);
-      toast.success(`Sync complete: ${result.synced} records imported`);
+      toast.success(`Sync complete: ${synced} records saved to MySQL`);
     },
-    [mappings, getData, saveData],
+    [mappings],
   );
 
-  // ── ID Mappings ──
-
-  const searchResults = useMemo(() => {
-    if (!mapSearch.trim()) return [];
-    const q = mapSearch.toLowerCase();
-    const studentMatches = students
-      .filter(
-        (s) =>
-          s.fullName.toLowerCase().includes(q) ||
-          s.admNo.toLowerCase().includes(q),
-      )
-      .slice(0, 5)
-      .map((s) => ({
-        id: s.id,
-        type: "student" as const,
-        label: `${s.fullName} (${s.admNo}) — Class ${s.class}-${s.section}`,
-      }));
-    const staffMatches = staff
-      .filter(
-        (s) =>
-          (s.name ?? s.fullName ?? "").toLowerCase().includes(q) ||
-          s.empId.toLowerCase().includes(q),
-      )
-      .slice(0, 5)
-      .map((s) => ({
-        id: s.id,
-        type: "staff" as const,
-        label: `${s.name ?? s.fullName} (${s.empId}) — ${s.designation}`,
-      }));
-    return [...studentMatches, ...staffMatches];
-  }, [mapSearch, students, staff]);
+  // ── Mappings ──
 
   function saveMappings(updated: BiometricMapping[]) {
     setMappings(updated);
@@ -407,46 +328,39 @@ export default function BiometricDevices() {
   }
 
   function assignMapping() {
-    if (!mapSelectedPerson) {
-      toast.error("Select a student or staff member");
+    if (!mapPersonId.trim()) {
+      toast.error("Enter Person ID");
+      return;
+    }
+    if (!mapPersonName.trim()) {
+      toast.error("Enter Person Name");
       return;
     }
     if (!mapBiometricId.trim()) {
       toast.error("Enter biometric enrollment ID");
       return;
     }
-    const updated = mappings.filter((m) => m.personId !== mapSelectedPerson.id);
+    const updated = mappings.filter((m) => m.personId !== mapPersonId);
     saveMappings([
       ...updated,
       {
-        personId: mapSelectedPerson.id,
-        personType: mapSelectedPerson.type,
-        biometricId: mapBiometricId.trim(),
+        personId: mapPersonId,
+        personType: mapPersonType,
+        biometricId: mapBiometricId,
+        personName: mapPersonName,
       },
     ]);
-    toast.success(
-      `Biometric ID assigned to ${mapSelectedPerson.label.split("(")[0].trim()}`,
-    );
+    toast.success(`Biometric ID assigned to ${mapPersonName}`);
     setMapSearch("");
     setMapBiometricId("");
-    setMapSelectedPerson(null);
+    setMapPersonId("");
+    setMapPersonName("");
   }
 
   function removeMapping(personId: string) {
     saveMappings(mappings.filter((m) => m.personId !== personId));
     toast.success("Mapping removed");
   }
-
-  function getMappingLabel(m: BiometricMapping) {
-    if (m.personType === "student") {
-      const s = students.find((x) => x.id === m.personId);
-      return s ? `${s.fullName} (${s.admNo})` : m.personId;
-    }
-    const s = staff.find((x) => x.id === m.personId);
-    return s ? `${s.name ?? s.fullName} (${s.empId})` : m.personId;
-  }
-
-  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-4">
@@ -455,12 +369,11 @@ export default function BiometricDevices() {
         <Info className="w-5 h-5 text-accent mt-0.5 flex-shrink-0" />
         <div>
           <p className="font-semibold text-foreground text-sm">
-            ESSL &amp; ZKTeco Biometric Integration — IP-based device syncing
+            ESSL &amp; ZKTeco Biometric Integration
           </p>
           <p className="text-muted-foreground text-xs mt-0.5">
-            Configure your biometric device IP and port, map employee/student
-            IDs, then sync attendance records automatically. All synced records
-            save to MySQL.
+            Configure your device IP and port, map IDs, then sync. All records
+            save directly to MySQL via PHP API.
           </p>
         </div>
       </div>
@@ -473,16 +386,15 @@ export default function BiometricDevices() {
             Browser → Biometric Device Requirement
           </p>
           <p>
-            Web browsers cannot directly connect to LAN biometric devices due to
-            CORS restrictions. A <strong>PHP proxy script</strong> on your
-            cPanel server is required for real ESSL/ZKTeco integration. The
-            "Sync Now" button performs a realistic simulation. See{" "}
+            A <strong>PHP proxy script</strong> on your cPanel server is
+            required for real ESSL/ZKTeco integration. The "Sync Now" button
+            performs a simulation. See{" "}
             <span className="underline">Documentation → ESSL Setup</span>.
           </p>
         </div>
       </div>
 
-      {/* ── Devices Section ─── */}
+      {/* Devices Section */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -560,23 +472,16 @@ export default function BiometricDevices() {
                                 ? "Offline"
                                 : "Unknown"}
                           </Badge>
-                          {!dev.enabled && (
-                            <Badge variant="secondary" className="text-xs">
-                              Disabled
-                            </Badge>
-                          )}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                           <span className="font-mono">
                             {dev.ipAddress}:{dev.port}
-                          </span>
-                          {" · "}
-                          <span>{dev.deviceType}</span>
+                          </span>{" "}
+                          · <span>{dev.deviceType}</span>
                         </p>
                         {dev.lastSync && (
                           <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                            <Clock className="w-3 h-3" />
-                            Last sync:{" "}
+                            <Clock className="w-3 h-3" /> Last sync:{" "}
                             {new Date(dev.lastSync).toLocaleString("en-IN")}
                           </p>
                         )}
@@ -614,9 +519,7 @@ export default function BiometricDevices() {
                         variant="outline"
                         className="w-full"
                         disabled={syncingId === dev.id}
-                        onClick={() => {
-                          void handleSync(dev);
-                        }}
+                        onClick={() => void handleSync(dev)}
                         data-ocid={`biometric.sync-device.${idx + 1}`}
                       >
                         <RefreshCw
@@ -647,12 +550,12 @@ export default function BiometricDevices() {
                     <span>{log.message}</span>
                   </div>
                 ))}
-                {syncResult && (
+                {syncDone && (
                   <div className="mt-2 pt-2 border-t border-border">
                     <p className="font-semibold text-foreground text-[11px]">
-                      ✅ {syncResult.synced} attendance records synced to MySQL
-                      {syncResult.unmatched > 0 &&
-                        ` · ⚠️ ${syncResult.unmatched} unmatched`}
+                      ✅ {syncDone.synced} attendance records saved to MySQL
+                      {syncDone.unmatched > 0 &&
+                        ` · ⚠️ ${syncDone.unmatched} failed`}
                     </p>
                   </div>
                 )}
@@ -662,7 +565,7 @@ export default function BiometricDevices() {
         )}
       </Card>
 
-      {/* ── ID Mappings Section ─── */}
+      {/* ID Mappings */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -695,49 +598,29 @@ export default function BiometricDevices() {
               biometric device.
             </p>
 
-            <div className="grid sm:grid-cols-3 gap-3 bg-muted/30 rounded-lg p-3">
+            <div className="grid sm:grid-cols-4 gap-3 bg-muted/30 rounded-lg p-3">
               <div className="space-y-1">
-                <Label className="text-xs">Search Student / Staff</Label>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted-foreground" />
-                  <Input
-                    className="pl-8 h-8 text-sm"
-                    placeholder="Name or ID…"
-                    value={mapSearch}
-                    onChange={(e) => {
-                      setMapSearch(e.target.value);
-                      setMapSelectedPerson(null);
-                    }}
-                    data-ocid="biometric.map-search.input"
-                  />
-                </div>
-                {searchResults.length > 0 && !mapSelectedPerson && (
-                  <div className="border border-border rounded-md bg-card shadow-sm max-h-40 overflow-y-auto">
-                    {searchResults.map((r) => (
-                      <button
-                        key={r.id}
-                        type="button"
-                        className="w-full text-left px-3 py-2 text-xs hover:bg-muted/60 transition-colors border-b border-border last:border-0"
-                        onClick={() => {
-                          setMapSelectedPerson(r);
-                          setMapSearch(r.label);
-                        }}
-                      >
-                        <span className="font-medium">
-                          {r.label.split("(")[0]}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {" "}
-                          {r.label.slice(r.label.indexOf("("))}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
+                <Label className="text-xs">Person ID</Label>
+                <Input
+                  className="h-8 text-sm"
+                  placeholder="Student/Staff ID"
+                  value={mapPersonId}
+                  onChange={(e) => setMapPersonId(e.target.value)}
+                  data-ocid="biometric.person-id.input"
+                />
               </div>
-
               <div className="space-y-1">
-                <Label className="text-xs">Biometric Enrollment ID</Label>
+                <Label className="text-xs">Person Name</Label>
+                <Input
+                  className="h-8 text-sm"
+                  placeholder="Full name"
+                  value={mapPersonName}
+                  onChange={(e) => setMapPersonName(e.target.value)}
+                  data-ocid="biometric.person-name.input"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Biometric ID</Label>
                 <Input
                   className="h-8 text-sm"
                   placeholder="e.g. 1001"
@@ -746,15 +629,31 @@ export default function BiometricDevices() {
                   data-ocid="biometric.enrollment-id.input"
                 />
               </div>
-
-              <div className="flex items-end">
+              <div className="flex items-end gap-2">
+                <Select
+                  value={mapPersonType}
+                  onValueChange={(v) =>
+                    setMapPersonType(v as "student" | "staff")
+                  }
+                >
+                  <SelectTrigger
+                    className="h-8 text-sm flex-1"
+                    data-ocid="biometric.person-type.select"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="student">Student</SelectItem>
+                    <SelectItem value="staff">Staff</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Button
                   size="sm"
-                  className="w-full h-8"
+                  className="h-8"
                   onClick={assignMapping}
                   data-ocid="biometric.assign-id.button"
                 >
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Assign ID
+                  <Plus className="w-3.5 h-3.5" />
                 </Button>
               </div>
             </div>
@@ -794,7 +693,10 @@ export default function BiometricDevices() {
                         data-ocid={`biometric.mapping-row.${idx + 1}`}
                       >
                         <td className="p-2.5 font-medium text-foreground">
-                          {getMappingLabel(m)}
+                          {m.personName}{" "}
+                          <span className="text-xs text-muted-foreground">
+                            ({m.personId})
+                          </span>
                         </td>
                         <td className="p-2.5">
                           <Badge
@@ -833,7 +735,7 @@ export default function BiometricDevices() {
         )}
       </Card>
 
-      {/* ── Help Section ─── */}
+      {/* Help */}
       <Card className="overflow-hidden">
         <button
           type="button"
@@ -889,30 +791,14 @@ export default function BiometricDevices() {
                 </li>
               </ol>
             </div>
-            <div>
-              <h4 className="font-semibold text-foreground mb-1">
-                ZKTeco / eSSL via ZKLib
-              </h4>
-              <ol className="list-decimal ml-5 space-y-1 text-xs">
-                <li>
-                  Enable PUSH SDK or ensure the device is on the same LAN as
-                  your server
-                </li>
-                <li>Use port 4370 (ZKTeco default UDP/TCP)</li>
-                <li>
-                  The PHP proxy bridges the browser request to the device using
-                  ZKLib
-                </li>
-              </ol>
-            </div>
           </div>
         )}
       </Card>
 
-      {/* Device Add/Edit Modal */}
+      {/* Device Modal */}
       {showDeviceModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 m-0 w-full h-full"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
           data-ocid="biometric.device-modal.dialog"
         >
           <div className="bg-card rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">

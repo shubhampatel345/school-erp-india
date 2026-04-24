@@ -1,135 +1,43 @@
+/**
+ * SHUBH SCHOOL ERP — Chat Module
+ * Direct API: loads from phpApiService, polls every 5s for new messages
+ */
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useEffect, useRef, useState } from "react";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
-import type { ChatConversation, ChatMessage } from "../types";
-import { generateId } from "../utils/localStorage";
-import { ls } from "../utils/localStorage";
+import phpApiService from "../utils/phpApiService";
 
-// ── Seed data ────────────────────────────────────────────────────────────────
+// ── Types ────────────────────────────────────────────────────────────────────
 
-const SEED_CONVERSATIONS: ChatConversation[] = [
-  {
-    id: 1,
-    type: "direct",
-    name: "Anjali Sharma",
-    last_message: "Thanks for the schedule!",
-    last_message_at: "10:30",
-    unread_count: 2,
-    member_count: 2,
-    other_user_name: "Anjali Sharma",
-  },
-  {
-    id: 2,
-    type: "direct",
-    name: "Ramesh Gupta",
-    last_message: "See you in the staffroom.",
-    last_message_at: "09:15",
-    unread_count: 0,
-    member_count: 2,
-    other_user_name: "Ramesh Gupta",
-  },
-  {
-    id: 3,
-    type: "class_group",
-    name: "Class 10-A Group",
-    last_message: "Homework submitted.",
-    last_message_at: "Yesterday",
-    unread_count: 5,
-    member_count: 42,
-  },
-  {
-    id: 4,
-    type: "class_group",
-    name: "Class 9-B Group",
-    last_message: "Exam paper ready.",
-    last_message_at: "Yesterday",
-    unread_count: 0,
-    member_count: 38,
-  },
-  {
-    id: 5,
-    type: "route_group",
-    name: "Route 1 — Bus 12",
-    last_message: "Bus delayed 10 min today.",
-    last_message_at: "08:00",
-    unread_count: 1,
-    member_count: 25,
-  },
-];
+interface Room {
+  id: number;
+  type: "direct" | "class_group" | "route_group";
+  name: string;
+  last_message?: string;
+  last_message_at?: string;
+  unread_count: number;
+  member_count: number;
+  other_user_name?: string;
+}
 
-const SEED_MESSAGES: Record<number, ChatMessage[]> = {
-  1: [
-    {
-      id: 1,
-      conversation_id: 1,
-      sender_user_id: 2,
-      sender_name: "Anjali Sharma",
-      sender_role: "teacher",
-      content: "Good morning! Can you share the exam schedule?",
-      sent_at: "10:20",
-      is_mine: false,
-    },
-    {
-      id: 2,
-      conversation_id: 1,
-      sender_user_id: 1,
-      sender_name: "Admin",
-      sender_role: "superadmin",
-      content: "Sure, sending it now.",
-      sent_at: "10:25",
-      is_mine: true,
-    },
-    {
-      id: 3,
-      conversation_id: 1,
-      sender_user_id: 2,
-      sender_name: "Anjali Sharma",
-      sender_role: "teacher",
-      content: "Thanks for the schedule!",
-      sent_at: "10:30",
-      is_mine: false,
-    },
-  ],
-  3: [
-    {
-      id: 4,
-      conversation_id: 3,
-      sender_user_id: 5,
-      sender_name: "Rohit Kumar",
-      sender_role: "student",
-      content: "Maths homework submitted.",
-      sent_at: "Yesterday",
-      is_mine: false,
-    },
-    {
-      id: 5,
-      conversation_id: 3,
-      sender_user_id: 3,
-      sender_name: "Mrs. Anjali",
-      sender_role: "teacher",
-      content: "Good. Don't forget Science assignment too.",
-      sent_at: "Yesterday",
-      is_mine: false,
-    },
-  ],
-  5: [
-    {
-      id: 6,
-      conversation_id: 5,
-      sender_user_id: 7,
-      sender_name: "Suresh Driver",
-      sender_role: "driver",
-      content: "Bus delayed by 10 minutes. Sorry for inconvenience.",
-      sent_at: "08:00",
-      is_mine: false,
-    },
-  ],
-};
-
-for (const id of [2, 4]) SEED_MESSAGES[id] = [];
+interface Message {
+  id: number;
+  room_id: number;
+  sender_id: number;
+  sender_name: string;
+  sender_role: string;
+  content: string;
+  sent_at: string;
+  is_mine: boolean;
+  file_url?: string;
+  file_name?: string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -142,7 +50,7 @@ function initials(name: string) {
     .slice(0, 2);
 }
 
-function typeIcon(type: ChatConversation["type"]) {
+function typeIcon(type: Room["type"]) {
   if (type === "direct") return "👤";
   if (type === "class_group") return "🏫";
   return "🚌";
@@ -151,45 +59,45 @@ function typeIcon(type: ChatConversation["type"]) {
 // ── Sub-components ────────────────────────────────────────────────────────────
 
 function ConversationItem({
-  conv,
+  room,
   active,
   onClick,
-}: { conv: ChatConversation; active: boolean; onClick: () => void }) {
+}: { room: Room; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
-      data-ocid={`chat.conversation.item.${conv.id}`}
+      data-ocid={`chat.conversation.item.${room.id}`}
       onClick={onClick}
       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors ${
         active ? "bg-primary/10 border border-primary/30" : "hover:bg-muted/60"
       }`}
     >
       <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center text-sm shrink-0">
-        {typeIcon(conv.type)}
+        {typeIcon(room.type)}
       </div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-1">
           <span className="text-sm font-medium text-foreground truncate">
-            {conv.name}
+            {room.name}
           </span>
           <span className="text-[10px] text-muted-foreground shrink-0">
-            {conv.last_message_at}
+            {room.last_message_at}
           </span>
         </div>
         <p className="text-xs text-muted-foreground truncate">
-          {conv.last_message ?? "No messages yet"}
+          {room.last_message ?? "No messages yet"}
         </p>
       </div>
-      {conv.unread_count > 0 && (
+      {room.unread_count > 0 && (
         <Badge className="bg-primary text-primary-foreground text-[10px] min-w-[18px] h-[18px] px-1 rounded-full">
-          {conv.unread_count}
+          {room.unread_count}
         </Badge>
       )}
     </button>
   );
 }
 
-function MessageBubble({ msg, myName }: { msg: ChatMessage; myName: string }) {
+function MessageBubble({ msg, myName }: { msg: Message; myName: string }) {
   const isMine = msg.is_mine || msg.sender_name === myName;
   return (
     <div className={`flex ${isMine ? "justify-end" : "justify-start"} mb-2`}>
@@ -236,11 +144,12 @@ function MessageBubble({ msg, myName }: { msg: ChatMessage; myName: string }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function Chat() {
-  const { currentUser, saveData } = useApp();
-  const [conversations, setConversations] = useState<ChatConversation[]>([]);
-  const [messages, setMessages] =
-    useState<Record<number, ChatMessage[]>>(SEED_MESSAGES);
-  const [activeId, setActiveId] = useState<number | null>(1);
+  const { currentUser } = useApp();
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [roomsLoading, setRoomsLoading] = useState(true);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [msgsLoading, setMsgsLoading] = useState(false);
+  const [activeId, setActiveId] = useState<number | null>(null);
   const [inputText, setInputText] = useState("");
   const [fileAttach, setFileAttach] = useState<File | null>(null);
   const [search, setSearch] = useState("");
@@ -254,107 +163,195 @@ export default function Chat() {
   >("class_group");
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastMsgIdRef = useRef<number>(0);
 
-  useEffect(() => {
-    const stored = ls.get<ChatConversation[]>(
-      "chat_conversations",
-      SEED_CONVERSATIONS,
-    );
-    setConversations(stored.length ? stored : SEED_CONVERSATIONS);
+  // ── Load rooms on mount ───────────────────────────────────────────────────
+
+  const loadRooms = useCallback(async () => {
+    try {
+      const data = await phpApiService.get<Room[]>("chat/rooms");
+      setRooms(Array.isArray(data) ? data : []);
+    } catch {
+      setRooms([]);
+    } finally {
+      setRoomsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    const stored = ls.get<Record<number, ChatMessage[]>>("chat_messages", {});
-    setMessages({ ...SEED_MESSAGES, ...stored });
+    void loadRooms();
+  }, [loadRooms]);
+
+  // ── Load messages when room selected ─────────────────────────────────────
+
+  const loadMessages = useCallback(async (roomId: number) => {
+    setMsgsLoading(true);
+    try {
+      const data = await phpApiService.get<Message[]>("chat/messages", {
+        roomId: String(roomId),
+        page: "1",
+        limit: "50",
+      });
+      const msgs = Array.isArray(data) ? data : [];
+      setMessages(msgs);
+      if (msgs.length > 0) {
+        lastMsgIdRef.current = msgs[msgs.length - 1].id;
+      }
+    } catch {
+      setMessages([]);
+    } finally {
+      setMsgsLoading(false);
+    }
   }, []);
 
-  // Scroll to bottom when conversation changes or new message arrives
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on activeId only
+  // ── Poll for new messages every 5s ───────────────────────────────────────
+
+  const pollMessages = useCallback(async (roomId: number) => {
+    if (!roomId) return;
+    try {
+      const params: Record<string, string> = {
+        roomId: String(roomId),
+      };
+      if (lastMsgIdRef.current > 0) {
+        params.after = String(lastMsgIdRef.current);
+      }
+      const data = await phpApiService.get<Message[]>("chat/messages", params);
+      const newMsgs = Array.isArray(data) ? data : [];
+      if (newMsgs.length > 0) {
+        setMessages((prev) => {
+          const existingIds = new Set(prev.map((m) => m.id));
+          const fresh = newMsgs.filter((m) => !existingIds.has(m.id));
+          if (fresh.length === 0) return prev;
+          lastMsgIdRef.current = fresh[fresh.length - 1].id;
+          return [...prev, ...fresh];
+        });
+      }
+    } catch {
+      /* silent poll failure */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (activeId === null) return;
+
+    void loadMessages(activeId);
+
+    pollRef.current = setInterval(() => {
+      void pollMessages(activeId);
+    }, 5000);
+
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [activeId, loadMessages, pollMessages]);
+
+  // Scroll to bottom on new messages
+  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll on messages length change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [activeId]); // messages intentionally excluded — activeId change is enough
+  }, [messages.length]);
 
-  const activeConv = conversations.find((c) => c.id === activeId);
-  const activeMessages = activeId !== null ? (messages[activeId] ?? []) : [];
+  // ── Filtered rooms ────────────────────────────────────────────────────────
 
-  const filtered = conversations.filter((c) => {
-    if (filter !== "all" && c.type !== filter) return false;
-    return !search || c.name.toLowerCase().includes(search.toLowerCase());
+  const filteredRooms = rooms.filter((r) => {
+    if (filter !== "all" && r.type !== filter) return false;
+    return !search || r.name.toLowerCase().includes(search.toLowerCase());
   });
 
-  const selectConv = (id: number) => {
-    setActiveId(id);
-    setConversations((prev) => {
-      const next = prev.map((c) =>
-        c.id === id ? { ...c, unread_count: 0 } : c,
-      );
-      ls.set("chat_conversations", next);
-      return next;
-    });
-  };
+  const activeRoom = rooms.find((r) => r.id === activeId);
 
-  const sendMessage = () => {
+  // ── Select room ───────────────────────────────────────────────────────────
+
+  const selectRoom = useCallback((id: number) => {
+    setActiveId(id);
+    lastMsgIdRef.current = 0;
+    // Clear unread in UI
+    setRooms((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, unread_count: 0 } : r)),
+    );
+  }, []);
+
+  // ── Send message ──────────────────────────────────────────────────────────
+
+  const sendMessage = useCallback(async () => {
     if (!inputText.trim() && !fileAttach) return;
     if (activeId === null) return;
-    const msg: ChatMessage = {
-      id: Date.now(),
-      conversation_id: activeId,
-      sender_user_id: 1,
-      sender_name: currentUser?.fullName ?? "Admin",
-      sender_role: currentUser?.role ?? "superadmin",
-      content: inputText.trim(),
-      sent_at: new Date().toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      is_mine: true,
-      file_name: fileAttach?.name,
-    };
-    const updated = {
-      ...messages,
-      [activeId]: [...(messages[activeId] ?? []), msg],
-    };
-    setMessages(updated);
-    ls.set("chat_messages", updated);
-    setConversations((prev) => {
-      const next = prev.map((c) =>
-        c.id === activeId
-          ? {
-              ...c,
-              last_message: msg.content || msg.file_name,
-              last_message_at: msg.sent_at,
-            }
-          : c,
-      );
-      ls.set("chat_conversations", next);
-      return next;
-    });
+    const text = inputText.trim();
     setInputText("");
     setFileAttach(null);
-    void saveData("chat_messages", msg as unknown as Record<string, unknown>);
-  };
+    try {
+      const result = await phpApiService.post<Record<string, unknown>>(
+        "chat/send",
+        {
+          roomId: activeId,
+          message: text,
+        },
+      );
+      const msg: Message = {
+        id: (result.id as number) ?? Date.now(),
+        room_id: activeId,
+        sender_id: 1,
+        sender_name:
+          (result.sender_name as string) ?? currentUser?.fullName ?? "Me",
+        sender_role: currentUser?.role ?? "admin",
+        content: text,
+        sent_at:
+          (result.sent_at as string) ??
+          new Date().toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        is_mine: true,
+      };
+      setMessages((prev) => [...prev, msg]);
+      lastMsgIdRef.current = msg.id;
+      setRooms((prev) =>
+        prev.map((r) =>
+          r.id === activeId
+            ? { ...r, last_message: text, last_message_at: msg.sent_at }
+            : r,
+        ),
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to send message",
+      );
+      setInputText(text); // restore
+    }
+  }, [inputText, fileAttach, activeId, currentUser]);
 
-  const createGroup = () => {
+  // ── Create room ───────────────────────────────────────────────────────────
+
+  const createRoom = useCallback(async () => {
     if (!newGroupName.trim()) return;
-    const conv: ChatConversation = {
-      id: Date.now(),
-      type: newGroupType,
-      name: newGroupName,
-      last_message: undefined,
-      last_message_at: undefined,
-      unread_count: 0,
-      member_count: 1,
-    };
-    const next = [...conversations, conv];
-    setConversations(next);
-    ls.set("chat_conversations", next);
-    setNewGroupName("");
-    setShowNewGroup(false);
-    setActiveId(conv.id);
-  };
+    try {
+      const result = await phpApiService.post<Room>("chat/rooms/create", {
+        name: newGroupName.trim(),
+        type: newGroupType,
+      });
+      const room: Room = {
+        id: result.id ?? Date.now(),
+        type: newGroupType,
+        name: newGroupName.trim(),
+        unread_count: 0,
+        member_count: 1,
+      };
+      setRooms((prev) => [...prev, room]);
+      setNewGroupName("");
+      setShowNewGroup(false);
+      setActiveId(room.id);
+      toast.success("Group created");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to create group",
+      );
+    }
+  }, [newGroupName, newGroupType]);
 
   const isSuperAdmin = currentUser?.role === "superadmin";
-  const totalUnread = conversations.reduce((s, c) => s + c.unread_count, 0);
+  const totalUnread = rooms.reduce((s, r) => s + r.unread_count, 0);
 
   return (
     <div
@@ -448,7 +445,7 @@ export default function Chat() {
               <Button
                 size="sm"
                 data-ocid="chat.create_group_button"
-                onClick={createGroup}
+                onClick={() => void createRoom()}
                 className="h-6 text-xs flex-1"
               >
                 Create
@@ -469,39 +466,52 @@ export default function Chat() {
         {/* Conversation list */}
         <ScrollArea className="flex-1">
           <div className="p-2 space-y-0.5">
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">
-              Direct
-            </p>
-            {filtered
-              .filter((c) => c.type === "direct")
-              .map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  active={activeId === c.id}
-                  onClick={() => selectConv(c.id)}
-                />
-              ))}
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 mt-2">
-              Groups
-            </p>
-            {filtered
-              .filter((c) => c.type !== "direct")
-              .map((c) => (
-                <ConversationItem
-                  key={c.id}
-                  conv={c}
-                  active={activeId === c.id}
-                  onClick={() => selectConv(c.id)}
-                />
-              ))}
-            {filtered.length === 0 && (
+            {roomsLoading ? (
               <div
-                data-ocid="chat.empty_state"
-                className="text-center py-8 text-muted-foreground text-xs"
+                className="space-y-2 p-2"
+                data-ocid="chat.rooms.loading_state"
               >
-                No conversations found
+                {[1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-12 rounded-lg" />
+                ))}
               </div>
+            ) : (
+              <>
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1">
+                  Direct
+                </p>
+                {filteredRooms
+                  .filter((r) => r.type === "direct")
+                  .map((r) => (
+                    <ConversationItem
+                      key={r.id}
+                      room={r}
+                      active={activeId === r.id}
+                      onClick={() => selectRoom(r.id)}
+                    />
+                  ))}
+                <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider px-2 py-1 mt-2">
+                  Groups
+                </p>
+                {filteredRooms
+                  .filter((r) => r.type !== "direct")
+                  .map((r) => (
+                    <ConversationItem
+                      key={r.id}
+                      room={r}
+                      active={activeId === r.id}
+                      onClick={() => selectRoom(r.id)}
+                    />
+                  ))}
+                {filteredRooms.length === 0 && (
+                  <div
+                    data-ocid="chat.empty_state"
+                    className="text-center py-8 text-muted-foreground text-xs"
+                  >
+                    No conversations found
+                  </div>
+                )}
+              </>
             )}
           </div>
         </ScrollArea>
@@ -509,21 +519,21 @@ export default function Chat() {
 
       {/* ── Chat window ──────────────────────────────────────── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {activeConv ? (
+        {activeRoom ? (
           <>
             {/* Chat header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-full bg-primary/20 flex items-center justify-center text-sm">
-                  {typeIcon(activeConv.type)}
+                  {typeIcon(activeRoom.type)}
                 </div>
                 <div>
                   <p className="font-medium text-foreground text-sm">
-                    {activeConv.name}
+                    {activeRoom.name}
                   </p>
                   <p className="text-[11px] text-muted-foreground">
-                    {activeConv.member_count} member
-                    {activeConv.member_count !== 1 ? "s" : ""}
+                    {activeRoom.member_count} member
+                    {activeRoom.member_count !== 1 ? "s" : ""}
                   </p>
                 </div>
               </div>
@@ -536,7 +546,16 @@ export default function Chat() {
 
             {/* Messages */}
             <ScrollArea className="flex-1 px-4 py-3 bg-muted/20">
-              {activeMessages.length === 0 ? (
+              {msgsLoading ? (
+                <div
+                  className="space-y-3"
+                  data-ocid="chat.messages.loading_state"
+                >
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-10 rounded-2xl w-2/3" />
+                  ))}
+                </div>
+              ) : messages.length === 0 ? (
                 <div
                   className="flex items-center justify-center h-24 text-muted-foreground text-sm"
                   data-ocid="chat.messages_empty_state"
@@ -544,7 +563,7 @@ export default function Chat() {
                   No messages yet. Say hello! 👋
                 </div>
               ) : (
-                activeMessages.map((msg) => (
+                messages.map((msg) => (
                   <MessageBubble
                     key={msg.id}
                     msg={msg}
@@ -595,14 +614,14 @@ export default function Chat() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    sendMessage();
+                    void sendMessage();
                   }
                 }}
                 className="flex-1"
               />
               <Button
                 data-ocid="chat.send_button"
-                onClick={sendMessage}
+                onClick={() => void sendMessage()}
                 disabled={!inputText.trim() && !fileAttach}
                 className="h-9 px-4 shrink-0"
               >

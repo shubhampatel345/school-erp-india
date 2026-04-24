@@ -1,7 +1,7 @@
 /**
- * SHUBH SCHOOL ERP — Library Module
- * Tabs: Books Catalog | Issue/Return | Reports
- * All amount fields: type="text" inputMode="decimal" — NO spinners
+ * SHUBH SCHOOL ERP — Library Module (Direct API rebuild)
+ * All data via phpApiService directly. No getData(), no local sync.
+ * All amount/qty fields: type="text" inputMode="decimal" — NO spinners.
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -35,13 +35,57 @@ import {
   Settings,
   Trash2,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { useApp } from "../context/AppContext";
-import type { BookIssue, LibraryBook, Student } from "../types";
-import { generateId } from "../utils/localStorage";
+import phpApiService from "../utils/phpApiService";
 
-// ── Constants ──────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────
+
+interface Book {
+  id: string;
+  isbn?: string;
+  title: string;
+  author: string;
+  publisher?: string;
+  category: string;
+  totalQty: number;
+  availableQty: number;
+  location?: string;
+  addedAt?: string;
+}
+
+interface IssuedBook {
+  id: string;
+  bookId: string;
+  bookTitle?: string;
+  studentId: string;
+  studentName?: string;
+  issueDate: string;
+  dueDate: string;
+  returnDate?: string;
+  fine?: number;
+  status: "issued" | "returned";
+}
+
+interface OverdueBook {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  studentId: string;
+  studentName: string;
+  studentClass?: string;
+  dueDate: string;
+  daysOverdue: number;
+  fine: number;
+  issueId: string;
+}
+
+interface LibrarySettings {
+  finePerDay: number;
+  defaultLoanDays: number;
+}
+
+type TabId = "catalog" | "issue-return" | "reports";
 
 const BOOK_CATEGORIES = [
   "Textbook",
@@ -57,11 +101,22 @@ const BOOK_CATEGORIES = [
   "Other",
 ];
 
-const ALLOWED_WRITE_ROLES = new Set(["superadmin", "admin", "librarian"]);
+const DEFAULT_SETTINGS: LibrarySettings = {
+  finePerDay: 5,
+  defaultLoanDays: 14,
+};
 
-type TabId = "catalog" | "issue-return" | "reports";
+// ── Helpers ────────────────────────────────────────────────────
 
-// ── Helpers ─────────────────────────────────────────────────
+function todayStr() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function defaultDueDate(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split("T")[0];
+}
 
 function daysOverdue(dueDate: string): number {
   const due = new Date(dueDate);
@@ -70,16 +125,6 @@ function daysOverdue(dueDate: string): number {
   due.setHours(0, 0, 0, 0);
   const diff = Math.floor((now.getTime() - due.getTime()) / 86400000);
   return diff > 0 ? diff : 0;
-}
-
-function defaultDueDate(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split("T")[0];
-}
-
-function todayStr() {
-  return new Date().toISOString().split("T")[0];
 }
 
 function exportCSV(rows: string[][], filename: string) {
@@ -92,16 +137,7 @@ function exportCSV(rows: string[][], filename: string) {
   a.click();
 }
 
-// ── Settings ─────────────────────────────────────────────────
-
-interface LibrarySettings {
-  finePerDay: number;
-  defaultLoanDays: number;
-}
-const DEFAULT_LIB_SETTINGS: LibrarySettings = {
-  finePerDay: 5,
-  defaultLoanDays: 14,
-};
+// ── Settings Dialog ────────────────────────────────────────────
 
 function SettingsDialog({
   settings,
@@ -176,15 +212,15 @@ function SettingsDialog({
   );
 }
 
-// ── Book Form ─────────────────────────────────────────────────
+// ── Book Form Dialog ───────────────────────────────────────────
 
 function BookFormDialog({
   book,
   onSave,
   onClose,
 }: {
-  book?: LibraryBook;
-  onSave: (b: Omit<LibraryBook, "id" | "addedAt">) => Promise<void>;
+  book?: Book;
+  onSave: (b: Partial<Book>) => Promise<void>;
   onClose: () => void;
 }) {
   const [isbn, setIsbn] = useState(book?.isbn ?? "");
@@ -199,7 +235,7 @@ function BookFormDialog({
   const [location, setLocation] = useState(book?.location ?? "");
   const [saving, setSaving] = useState(false);
 
-  const handleSubmit = async () => {
+  async function handleSubmit() {
     if (!title.trim()) {
       toast.error("Title is required");
       return;
@@ -211,6 +247,7 @@ function BookFormDialog({
     setSaving(true);
     try {
       await onSave({
+        id: book?.id,
         isbn: isbn.trim(),
         title: title.trim(),
         author: author.trim(),
@@ -223,7 +260,7 @@ function BookFormDialog({
     } finally {
       setSaving(false);
     }
-  };
+  }
 
   return (
     <Dialog open onOpenChange={onClose}>
@@ -352,272 +389,198 @@ function BookFormDialog({
   );
 }
 
-// ── Main Library Page ─────────────────────────────────────────
+// ── Main Library Page ──────────────────────────────────────────
 
 export default function Library() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    deleteData,
-    addNotification,
-    currentUser,
-  } = useApp();
-
-  const books = getData("library") as LibraryBook[];
-  const issues = getData("library_issues") as BookIssue[];
-  const students = getData("students") as Student[];
-
+  const [books, setBooks] = useState<Book[]>([]);
+  const [issues, setIssues] = useState<IssuedBook[]>([]);
+  const [overdueList, setOverdueList] = useState<OverdueBook[]>([]);
+  const [totalBooks, setTotalBooks] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabId>("catalog");
   const [showBookForm, setShowBookForm] = useState(false);
-  const [editBook, setEditBook] = useState<LibraryBook | undefined>(undefined);
+  const [editBook, setEditBook] = useState<Book | undefined>(undefined);
   const [showSettings, setShowSettings] = useState(false);
   const [libSettings, setLibSettings] =
-    useState<LibrarySettings>(DEFAULT_LIB_SETTINGS);
+    useState<LibrarySettings>(DEFAULT_SETTINGS);
   const [catalogSearch, setCatalogSearch] = useState("");
   const [catalogCat, setCatalogCat] = useState("all");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
-  const canWrite = ALLOWED_WRITE_ROLES.has(currentUser?.role ?? "");
-
-  // ── Book CRUD ────────────────────────────────────────────────
-
-  const handleSaveBook = useCallback(
-    async (data: Omit<LibraryBook, "id" | "addedAt">) => {
-      if (editBook) {
-        await updateData("library", editBook.id, {
-          ...data,
-          id: editBook.id,
-          addedAt: editBook.addedAt,
-        });
-        addNotification(`Book updated: ${data.title}`, "success", "📚");
-      } else {
-        const id = generateId();
-        await saveData("library", {
-          ...data,
-          id,
-          addedAt: todayStr(),
-        } as unknown as Record<string, unknown>);
-        addNotification(`Book added: ${data.title}`, "success", "📚");
-      }
-      setShowBookForm(false);
-      setEditBook(undefined);
-    },
-    [editBook, updateData, saveData, addNotification],
-  );
-
-  const handleDeleteBook = useCallback(
-    async (id: string) => {
-      if (!confirm("Delete this book from the catalog?")) return;
-      await deleteData("library", id);
-      addNotification("Book removed from catalog", "info");
-    },
-    [deleteData, addNotification],
-  );
-
-  // ── Issue / Return ────────────────────────────────────────────
-
-  const handleIssue = useCallback(
-    async (bookId: string, studentId: string, dueDate: string) => {
-      const book = books.find((b) => b.id === bookId);
-      if (!book) return;
-      if (book.availableQty < 1) {
-        toast.error("No copies available");
-        return;
-      }
-
-      const issueId = generateId();
-      await saveData("library_issues", {
-        id: issueId,
-        bookId,
-        studentId,
-        issueDate: todayStr(),
-        dueDate,
-        fine: 0,
-        status: "issued",
-      } as unknown as Record<string, unknown>);
-      await updateData("library", bookId, {
-        ...book,
-        availableQty: book.availableQty - 1,
-      });
-
-      const student = students.find((s) => s.id === studentId);
-      addNotification(
-        `Book issued to ${student?.fullName ?? "student"}`,
-        "success",
-        "📗",
-      );
-      toast.success("Book issued successfully");
-    },
-    [books, students, saveData, updateData, addNotification],
-  );
-
-  const handleReturn = useCallback(
-    async (issueId: string, fine: number) => {
-      const issue = issues.find((i) => i.id === issueId);
-      if (!issue) return;
-      const book = books.find((b) => b.id === issue.bookId);
-
-      await updateData("library_issues", issueId, {
-        ...issue,
-        returnDate: todayStr(),
-        fine,
-        status: "returned",
-      });
-      if (book)
-        await updateData("library", book.id, {
-          ...book,
-          availableQty: book.availableQty + 1,
-        });
-
-      addNotification(
-        `Book returned${fine > 0 ? ` — Fine: ₹${fine}` : ""}`,
-        "success",
-        "📘",
-      );
-      toast.success(
-        fine > 0
-          ? `Book returned. Fine collected: ₹${fine}`
-          : "Book returned successfully",
-      );
-    },
-    [issues, books, updateData, addNotification],
-  );
-
-  const handleSendReminder = useCallback(
-    async (_issue: BookIssue, student: Student | null) => {
-      toast.success(
-        `Reminder sent to ${student?.fullName ?? "student"} (simulated)`,
-      );
-    },
-    [],
-  );
-
-  const handleBulkRemind = useCallback(
-    async (list: { issue: BookIssue; student: Student | null }[]) => {
-      toast.success(
-        `Bulk reminders sent to ${list.length} students (simulated)`,
-      );
-    },
-    [],
-  );
-
-  // ── Catalog stats ─────────────────────────────────────────────
-
-  const totalIssued = useMemo(
-    () => issues.filter((i) => i.status === "issued").length,
-    [issues],
-  );
-  const overdueCount = useMemo(
-    () =>
-      issues.filter((i) => i.status === "issued" && daysOverdue(i.dueDate) > 0)
-        .length,
-    [issues],
-  );
-  const totalAvailable = useMemo(
-    () => books.reduce((s, b) => s + b.availableQty, 0),
-    [books],
-  );
-
-  const filteredBooks = useMemo(() => {
-    const q = catalogSearch.toLowerCase();
-    return books.filter(
-      (b) =>
-        (catalogCat === "all" || b.category === catalogCat) &&
-        (!q ||
-          b.title.toLowerCase().includes(q) ||
-          b.author.toLowerCase().includes(q) ||
-          b.isbn.toLowerCase().includes(q)),
-    );
-  }, [books, catalogSearch, catalogCat]);
-
-  // ── Overdue list ──────────────────────────────────────────────
-
-  const overdueList = useMemo(
-    () =>
-      issues
-        .filter((i) => i.status === "issued" && daysOverdue(i.dueDate) > 0)
-        .map((i) => ({
-          issue: i,
-          student: students.find((s) => s.id === i.studentId) ?? null,
-          book: books.find((b) => b.id === i.bookId),
-          days: daysOverdue(i.dueDate),
-          fine: daysOverdue(i.dueDate) * libSettings.finePerDay,
-        }))
-        .sort((a, b) => b.days - a.days),
-    [issues, students, books, libSettings],
-  );
-
-  // ── Issue form state ──────────────────────────────────────────
-
+  // Issue form state
   const [issueStudentQ, setIssueStudentQ] = useState("");
   const [issueStudentId, setIssueStudentId] = useState("");
+  const [, setIssueStudentName] = useState("");
   const [issueBookQ, setIssueBookQ] = useState("");
   const [issueBookId, setIssueBookId] = useState("");
   const [issueDue, setIssueDue] = useState(() =>
-    defaultDueDate(libSettings.defaultLoanDays),
+    defaultDueDate(DEFAULT_SETTINGS.defaultLoanDays),
   );
   const [issueLoading, setIssueLoading] = useState(false);
+  const [studentResults, setStudentResults] = useState<
+    {
+      id: string;
+      fullName: string;
+      admNo: string;
+      class: string;
+      section: string;
+    }[]
+  >([]);
   const [showStudentDD, setShowStudentDD] = useState(false);
-  const [showIssueBookDD, setShowIssueBookDD] = useState(false);
-  const [returnBookQ, setReturnBookQ] = useState("");
-  const [returnBookId, setReturnBookId] = useState("");
-  const [showReturnDD, setShowReturnDD] = useState(false);
+  const [bookResults, setBookResults] = useState<Book[]>([]);
+  const [showBookDD, setShowBookDD] = useState(false);
+
+  // Return form state
+  const [returnQ, setReturnQ] = useState("");
+  const [returnIssue, setReturnIssue] = useState<IssuedBook | null>(null);
   const [returnLoading, setReturnLoading] = useState(false);
+  const [returnResults, setReturnResults] = useState<IssuedBook[]>([]);
+  const [showReturnDD, setShowReturnDD] = useState(false);
 
-  const studentMatches = useMemo(() => {
-    const q = issueStudentQ.toLowerCase();
-    if (!q) return [];
-    return students
-      .filter(
-        (s) =>
-          s.status === "active" &&
-          (s.fullName.toLowerCase().includes(q) ||
-            s.admNo.toLowerCase().includes(q)),
-      )
-      .slice(0, 8);
-  }, [issueStudentQ, students]);
+  // Load books
+  const loadBooks = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await phpApiService.get<{ data: Book[]; total: number }>(
+        `library/books&page=${page}&limit=${PAGE_SIZE}${catalogSearch ? `&search=${encodeURIComponent(catalogSearch)}` : ""}${catalogCat !== "all" ? `&category=${encodeURIComponent(catalogCat)}` : ""}`,
+      );
+      setBooks(res.data ?? []);
+      setTotalBooks(res.total ?? res.data?.length ?? 0);
+    } catch {
+      toast.error("Failed to load books");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, catalogSearch, catalogCat]);
 
-  const issueBookMatches = useMemo(() => {
-    const q = issueBookQ.toLowerCase();
-    if (!q) return [];
-    return books
-      .filter(
-        (b) =>
-          b.availableQty > 0 &&
-          (b.title.toLowerCase().includes(q) ||
-            b.isbn.toLowerCase().includes(q)),
-      )
-      .slice(0, 8);
-  }, [issueBookQ, books]);
+  // Load recent issues
+  const loadIssues = useCallback(async () => {
+    try {
+      const data = await phpApiService.get<IssuedBook[]>(
+        "library/issues&limit=50",
+      );
+      setIssues(data ?? []);
+    } catch {
+      /* non-critical */
+    }
+  }, []);
 
-  const returnBookMatches = useMemo(() => {
-    const q = returnBookQ.toLowerCase();
-    if (!q) return [];
-    return books
-      .filter(
-        (b) =>
-          b.title.toLowerCase().includes(q) || b.isbn.toLowerCase().includes(q),
-      )
-      .slice(0, 8);
-  }, [returnBookQ, books]);
+  // Load overdue
+  const loadOverdue = useCallback(async () => {
+    try {
+      const data = await phpApiService.get<OverdueBook[]>("library/overdue");
+      setOverdueList(data ?? []);
+    } catch {
+      /* non-critical */
+    }
+  }, []);
 
-  const currentIssue = useMemo(() => {
-    if (!returnBookId) return null;
-    return (
-      issues.find((i) => i.bookId === returnBookId && i.status === "issued") ??
-      null
-    );
-  }, [returnBookId, issues]);
+  useEffect(() => {
+    void loadBooks();
+  }, [loadBooks]);
 
-  const issueStudent = useMemo(() => {
-    if (!currentIssue) return null;
-    return students.find((s) => s.id === currentIssue.studentId) ?? null;
-  }, [currentIssue, students]);
+  useEffect(() => {
+    if (activeTab === "issue-return") void loadIssues();
+    if (activeTab === "reports") {
+      void loadIssues();
+      void loadOverdue();
+    }
+  }, [activeTab, loadIssues, loadOverdue]);
 
-  const daysOD = currentIssue ? daysOverdue(currentIssue.dueDate) : 0;
-  const calcFine = daysOD * libSettings.finePerDay;
+  // Save book (add or edit)
+  const handleSaveBook = useCallback(
+    async (data: Partial<Book>) => {
+      if (data.id) {
+        // Edit — use update endpoint
+        await phpApiService.post("library/books/update", data);
+        toast.success(`Book updated: ${data.title}`);
+      } else {
+        await phpApiService.addBook(data as Record<string, unknown>);
+        toast.success(`Book added: ${data.title}`);
+      }
+      setShowBookForm(false);
+      setEditBook(undefined);
+      await loadBooks();
+    },
+    [loadBooks],
+  );
 
-  const handleIssueSubmit = async () => {
+  // Delete book
+  const handleDeleteBook = useCallback(
+    async (id: string) => {
+      if (!confirm("Delete this book from the catalog?")) return;
+      try {
+        await phpApiService.del("library/books/delete", { id });
+        toast.success("Book removed from catalog");
+        await loadBooks();
+      } catch {
+        toast.error("Failed to delete book");
+      }
+    },
+    [loadBooks],
+  );
+
+  // Student search for issue
+  const searchStudents = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setStudentResults([]);
+      return;
+    }
+    try {
+      const res = await phpApiService.getStudents({
+        search: q,
+        limit: "8",
+        status: "active",
+      });
+      setStudentResults(
+        res.data.map((s) => ({
+          id: s.id,
+          fullName: s.fullName,
+          admNo: s.admNo,
+          class: s.class,
+          section: s.section,
+        })),
+      );
+    } catch {
+      setStudentResults([]);
+    }
+  }, []);
+
+  // Book search for issue
+  const searchBooksForIssue = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setBookResults([]);
+      return;
+    }
+    try {
+      const res = await phpApiService.get<{ data: Book[]; total: number }>(
+        `library/books&search=${encodeURIComponent(q)}&limit=8`,
+      );
+      setBookResults((res.data ?? []).filter((b) => b.availableQty > 0));
+    } catch {
+      setBookResults([]);
+    }
+  }, []);
+
+  // Book search for return
+  const searchBooksForReturn = useCallback(async (q: string) => {
+    if (!q.trim()) {
+      setReturnResults([]);
+      return;
+    }
+    try {
+      const data = await phpApiService.get<IssuedBook[]>(
+        `library/issues/search&q=${encodeURIComponent(q)}&status=issued`,
+      );
+      setReturnResults(data ?? []);
+    } catch {
+      setReturnResults([]);
+    }
+  }, []);
+
+  // Issue book
+  const handleIssue = useCallback(async () => {
     if (!issueStudentId) {
       toast.error("Select a student");
       return;
@@ -628,40 +591,87 @@ export default function Library() {
     }
     setIssueLoading(true);
     try {
-      await handleIssue(issueBookId, issueStudentId, issueDue);
+      await phpApiService.issueBook({
+        bookId: issueBookId,
+        studentId: issueStudentId,
+        dueDate: issueDue,
+        issueDate: todayStr(),
+      });
+      toast.success("Book issued successfully");
       setIssueStudentQ("");
       setIssueStudentId("");
+      setIssueStudentName("");
       setIssueBookQ("");
       setIssueBookId("");
       setIssueDue(defaultDueDate(libSettings.defaultLoanDays));
+      await loadBooks();
+      await loadIssues();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to issue book");
     } finally {
       setIssueLoading(false);
     }
-  };
+  }, [
+    issueStudentId,
+    issueBookId,
+    issueDue,
+    libSettings,
+    loadBooks,
+    loadIssues,
+  ]);
 
-  const handleReturnSubmit = async () => {
-    if (!currentIssue) {
-      toast.error("No open issue found for this book");
+  // Return book
+  const handleReturn = useCallback(async () => {
+    if (!returnIssue) {
+      toast.error("No open issue found");
       return;
     }
+    const od = daysOverdue(returnIssue.dueDate);
+    const fine = od * libSettings.finePerDay;
     setReturnLoading(true);
     try {
-      await handleReturn(currentIssue.id, calcFine);
-      setReturnBookQ("");
-      setReturnBookId("");
+      const res = await phpApiService.returnBook({
+        issueId: returnIssue.id,
+        returnDate: todayStr(),
+        fine,
+      });
+      const actualFine = (res as { fine?: number }).fine ?? fine;
+      toast.success(
+        actualFine > 0
+          ? `Book returned. Fine: ₹${actualFine}`
+          : "Book returned successfully",
+      );
+      setReturnQ("");
+      setReturnIssue(null);
+      setReturnResults([]);
+      await loadBooks();
+      await loadIssues();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to process return",
+      );
     } finally {
       setReturnLoading(false);
     }
-  };
+  }, [returnIssue, libSettings, loadBooks, loadIssues]);
 
-  const TABS: {
-    id: TabId;
-    label: string;
-    icon: React.ComponentType<{ className?: string }>;
-  }[] = [
-    { id: "catalog", label: "Books Catalog", icon: BookOpen },
-    { id: "issue-return", label: "Issue / Return", icon: History },
-    { id: "reports", label: "Reports", icon: Download },
+  // Stats
+  const totalIssued = useMemo(
+    () => issues.filter((i) => i.status === "issued").length,
+    [issues],
+  );
+  const totalAvailable = useMemo(
+    () => books.reduce((s, b) => s + b.availableQty, 0),
+    [books],
+  );
+
+  const currentIssueDaysOD = returnIssue ? daysOverdue(returnIssue.dueDate) : 0;
+  const calcFine = currentIssueDaysOD * libSettings.finePerDay;
+
+  const TABS = [
+    { id: "catalog" as TabId, label: "Books Catalog", icon: BookOpen },
+    { id: "issue-return" as TabId, label: "Issue / Return", icon: History },
+    { id: "reports" as TabId, label: "Reports", icon: Download },
   ];
 
   return (
@@ -673,7 +683,7 @@ export default function Library() {
             Library
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            {books.length} books in catalog · {totalIssued} issued
+            {totalBooks} books in catalog · {totalIssued} currently issued
           </p>
         </div>
         <Button
@@ -689,14 +699,18 @@ export default function Library() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: "Total Books", value: books.length, color: "text-primary" },
+          { label: "Total Books", value: totalBooks, color: "text-primary" },
           { label: "Issued", value: totalIssued, color: "text-warning" },
           {
             label: "Available",
             value: totalAvailable,
             color: "text-foreground",
           },
-          { label: "Overdue", value: overdueCount, color: "text-destructive" },
+          {
+            label: "Overdue",
+            value: overdueList.length,
+            color: "text-destructive",
+          },
         ].map((s) => (
           <Card key={s.label}>
             <CardContent className="pt-4 pb-3 text-center">
@@ -718,7 +732,11 @@ export default function Library() {
               key={t.id}
               type="button"
               onClick={() => setActiveTab(t.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${activeTab === t.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                activeTab === t.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
               data-ocid={`library.${t.id}_tab`}
             >
               <Icon className="w-4 h-4" />
@@ -738,11 +756,20 @@ export default function Library() {
                 className="pl-9"
                 placeholder="Search title, author, ISBN…"
                 value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
+                onChange={(e) => {
+                  setCatalogSearch(e.target.value);
+                  setPage(1);
+                }}
                 data-ocid="library.catalog.search_input"
               />
             </div>
-            <Select value={catalogCat} onValueChange={setCatalogCat}>
+            <Select
+              value={catalogCat}
+              onValueChange={(v) => {
+                setCatalogCat(v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger
                 className="w-36"
                 data-ocid="library.catalog.category_filter"
@@ -758,18 +785,16 @@ export default function Library() {
                 ))}
               </SelectContent>
             </Select>
-            {canWrite && (
-              <Button
-                onClick={() => {
-                  setEditBook(undefined);
-                  setShowBookForm(true);
-                }}
-                data-ocid="library.catalog.add_book_button"
-              >
-                <BookOpen className="w-4 h-4 mr-2" />
-                Add Book
-              </Button>
-            )}
+            <Button
+              onClick={() => {
+                setEditBook(undefined);
+                setShowBookForm(true);
+              }}
+              data-ocid="library.catalog.add_book_button"
+            >
+              <BookOpen className="w-4 h-4 mr-2" />
+              Add Book
+            </Button>
             <Button
               variant="outline"
               onClick={() =>
@@ -786,7 +811,7 @@ export default function Library() {
                       "Location",
                     ],
                     ...books.map((b) => [
-                      b.isbn,
+                      b.isbn ?? "",
                       b.title,
                       b.author,
                       b.publisher ?? "",
@@ -806,102 +831,91 @@ export default function Library() {
             </Button>
           </div>
 
-          {filteredBooks.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span className="ml-2 text-muted-foreground">Loading books…</span>
+            </div>
+          ) : books.length === 0 ? (
             <div
               className="flex flex-col items-center justify-center py-16 text-center"
               data-ocid="library.catalog.empty_state"
             >
               <BookOpen className="w-12 h-12 text-muted-foreground/30 mb-3" />
               <p className="text-muted-foreground font-medium">
-                {books.length === 0
-                  ? "No books yet. Add your first book."
-                  : "No books match your search."}
+                {catalogSearch
+                  ? "No books match your search."
+                  : "No books yet. Add your first book."}
               </p>
-              {books.length === 0 && canWrite && (
+              {!catalogSearch && (
                 <Button className="mt-4" onClick={() => setShowBookForm(true)}>
                   Add First Book
                 </Button>
               )}
             </div>
           ) : (
-            <div className="rounded-xl border border-border overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40 border-b border-border">
-                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
-                      Title
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell">
-                      Author
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
-                      ISBN
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
-                      Category
-                    </th>
-                    <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
-                      Total
-                    </th>
-                    <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
-                      Avail.
-                    </th>
-                    <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
-                      Location
-                    </th>
-                    {canWrite && (
+            <>
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/40 border-b border-border">
+                      <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
+                        Title
+                      </th>
+                      <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell">
+                        Author
+                      </th>
+                      <th className="text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell">
+                        ISBN
+                      </th>
+                      <th className="text-left px-3 py-2.5 text-muted-foreground font-medium">
+                        Category
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
+                        Total
+                      </th>
+                      <th className="text-right px-3 py-2.5 text-muted-foreground font-medium">
+                        Avail.
+                      </th>
                       <th className="text-center px-3 py-2.5 text-muted-foreground font-medium">
                         Actions
                       </th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredBooks.map((b, idx) => (
-                    <tr
-                      key={b.id}
-                      className={`border-b border-border last:border-0 hover:bg-muted/20 ${b.availableQty === 0 ? "bg-destructive/5" : ""}`}
-                      data-ocid={`library.catalog.item.${idx + 1}`}
-                    >
-                      <td className="px-3 py-2.5 font-medium text-foreground">
-                        <div className="flex items-center gap-1.5">
-                          {b.availableQty === 0 && (
-                            <span
-                              className="w-2 h-2 rounded-full bg-destructive flex-shrink-0"
-                              title="Out of stock"
-                            />
-                          )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {books.map((b, idx) => (
+                      <tr
+                        key={b.id}
+                        className={`border-b border-border last:border-0 hover:bg-muted/20 ${b.availableQty === 0 ? "bg-destructive/5" : ""}`}
+                        data-ocid={`library.catalog.item.${idx + 1}`}
+                      >
+                        <td className="px-3 py-2.5 font-medium text-foreground">
                           <span
-                            className="truncate max-w-[160px]"
+                            className="truncate max-w-[160px] block"
                             title={b.title}
                           >
                             {b.title}
                           </span>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-muted-foreground hidden md:table-cell">
-                        {b.author}
-                      </td>
-                      <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs hidden lg:table-cell">
-                        {b.isbn || "—"}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <Badge variant="secondary" className="text-xs">
-                          {b.category}
-                        </Badge>
-                      </td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">
-                        {b.totalQty}
-                      </td>
-                      <td
-                        className={`px-3 py-2.5 text-right tabular-nums font-medium ${b.availableQty === 0 ? "text-destructive" : "text-foreground"}`}
-                      >
-                        {b.availableQty}
-                      </td>
-                      <td className="px-3 py-2.5 text-muted-foreground text-xs hidden lg:table-cell">
-                        {b.location || "—"}
-                      </td>
-                      {canWrite && (
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground hidden md:table-cell">
+                          {b.author}
+                        </td>
+                        <td className="px-3 py-2.5 text-muted-foreground font-mono text-xs hidden lg:table-cell">
+                          {b.isbn || "—"}
+                        </td>
+                        <td className="px-3 py-2.5">
+                          <Badge variant="secondary" className="text-xs">
+                            {b.category}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2.5 text-right tabular-nums">
+                          {b.totalQty}
+                        </td>
+                        <td
+                          className={`px-3 py-2.5 text-right tabular-nums font-medium ${b.availableQty === 0 ? "text-destructive" : "text-foreground"}`}
+                        >
+                          {b.availableQty}
+                        </td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center justify-center gap-1">
                             <Button
@@ -920,19 +934,45 @@ export default function Library() {
                               variant="ghost"
                               size="icon"
                               className="h-7 w-7 text-destructive"
-                              onClick={() => handleDeleteBook(b.id)}
+                              onClick={() => void handleDeleteBook(b.id)}
                               data-ocid={`library.catalog.delete_button.${idx + 1}`}
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                             </Button>
                           </div>
                         </td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {/* Pagination */}
+              {totalBooks > PAGE_SIZE && (
+                <div className="flex justify-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page === 1}
+                    onClick={() => setPage((p) => p - 1)}
+                    data-ocid="library.catalog.pagination_prev"
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-muted-foreground px-3 py-1.5">
+                    Page {page} of {Math.ceil(totalBooks / PAGE_SIZE)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page * PAGE_SIZE >= totalBooks}
+                    onClick={() => setPage((p) => p + 1)}
+                    data-ocid="library.catalog.pagination_next"
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -964,21 +1004,22 @@ export default function Library() {
                       onChange={(e) => {
                         setIssueStudentQ(e.target.value);
                         setIssueStudentId("");
+                        setIssueStudentName("");
                         setShowStudentDD(true);
+                        void searchStudents(e.target.value);
                       }}
-                      onFocus={() => setShowStudentDD(true)}
                       data-ocid="library.issue.student_search_input"
                     />
                     {issueStudentId && (
                       <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
                     )}
                   </div>
-                  {showStudentDD && studentMatches.length > 0 && (
+                  {showStudentDD && studentResults.length > 0 && (
                     <div
                       className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto"
                       data-ocid="library.issue.student_dropdown"
                     >
-                      {studentMatches.map((s) => (
+                      {studentResults.map((s) => (
                         <button
                           key={s.id}
                           type="button"
@@ -986,7 +1027,9 @@ export default function Library() {
                           onClick={() => {
                             setIssueStudentQ(`${s.fullName} (${s.admNo})`);
                             setIssueStudentId(s.id);
+                            setIssueStudentName(s.fullName);
                             setShowStudentDD(false);
+                            setStudentResults([]);
                           }}
                         >
                           <span className="font-medium">{s.fullName}</span>
@@ -998,6 +1041,7 @@ export default function Library() {
                     </div>
                   )}
                 </div>
+
                 {/* Book search */}
                 <div className="relative">
                   <Label className="text-xs text-muted-foreground mb-1 block">
@@ -1012,18 +1056,18 @@ export default function Library() {
                       onChange={(e) => {
                         setIssueBookQ(e.target.value);
                         setIssueBookId("");
-                        setShowIssueBookDD(true);
+                        setShowBookDD(true);
+                        void searchBooksForIssue(e.target.value);
                       }}
-                      onFocus={() => setShowIssueBookDD(true)}
                       data-ocid="library.issue.book_search_input"
                     />
                     {issueBookId && (
                       <CheckCircle2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" />
                     )}
                   </div>
-                  {showIssueBookDD && issueBookMatches.length > 0 && (
+                  {showBookDD && bookResults.length > 0 && (
                     <div className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {issueBookMatches.map((b) => (
+                      {bookResults.map((b) => (
                         <button
                           key={b.id}
                           type="button"
@@ -1031,7 +1075,8 @@ export default function Library() {
                           onClick={() => {
                             setIssueBookQ(b.title);
                             setIssueBookId(b.id);
-                            setShowIssueBookDD(false);
+                            setShowBookDD(false);
+                            setBookResults([]);
                           }}
                         >
                           <span className="font-medium">{b.title}</span>
@@ -1043,6 +1088,7 @@ export default function Library() {
                     </div>
                   )}
                 </div>
+
                 <div>
                   <Label className="text-xs text-muted-foreground mb-1 block">
                     Due Date
@@ -1055,12 +1101,11 @@ export default function Library() {
                     data-ocid="library.issue.due_date_input"
                   />
                 </div>
+
                 <Button
                   className="w-full"
-                  onClick={handleIssueSubmit}
-                  disabled={
-                    !canWrite || issueLoading || !issueStudentId || !issueBookId
-                  }
+                  onClick={() => void handleIssue()}
+                  disabled={issueLoading || !issueStudentId || !issueBookId}
                   data-ocid="library.issue.submit_button"
                 >
                   {issueLoading ? (
@@ -1084,39 +1129,42 @@ export default function Library() {
               <CardContent className="space-y-3">
                 <div className="relative">
                   <Label className="text-xs text-muted-foreground mb-1 block">
-                    Book
+                    Search issued book to return
                   </Label>
                   <div className="relative">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                     <Input
                       className="pl-9"
-                      placeholder="Search book to return…"
-                      value={returnBookQ}
+                      placeholder="Student name or book title…"
+                      value={returnQ}
                       onChange={(e) => {
-                        setReturnBookQ(e.target.value);
-                        setReturnBookId("");
+                        setReturnQ(e.target.value);
+                        setReturnIssue(null);
                         setShowReturnDD(true);
+                        void searchBooksForReturn(e.target.value);
                       }}
-                      onFocus={() => setShowReturnDD(true)}
                       data-ocid="library.return.book_search_input"
                     />
                   </div>
-                  {showReturnDD && returnBookMatches.length > 0 && (
+                  {showReturnDD && returnResults.length > 0 && (
                     <div className="absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                      {returnBookMatches.map((b) => (
+                      {returnResults.map((issue) => (
                         <button
-                          key={b.id}
+                          key={issue.id}
                           type="button"
-                          className="w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex justify-between"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex flex-col gap-0.5"
                           onClick={() => {
-                            setReturnBookQ(b.title);
-                            setReturnBookId(b.id);
+                            setReturnQ(
+                              `${issue.bookTitle} — ${issue.studentName}`,
+                            );
+                            setReturnIssue(issue);
                             setShowReturnDD(false);
+                            setReturnResults([]);
                           }}
                         >
-                          <span className="font-medium">{b.title}</span>
+                          <span className="font-medium">{issue.bookTitle}</span>
                           <span className="text-xs text-muted-foreground">
-                            {b.isbn || "No ISBN"}
+                            {issue.studentName} · Due: {issue.dueDate}
                           </span>
                         </button>
                       ))}
@@ -1124,26 +1172,33 @@ export default function Library() {
                   )}
                 </div>
 
-                {currentIssue ? (
+                {returnIssue && (
                   <div className="bg-muted/40 rounded-lg p-3 space-y-1.5 text-sm border border-border">
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Student</span>
                       <span className="font-medium">
-                        {issueStudent?.fullName ?? "Unknown"}
+                        {returnIssue.studentName}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Issue Date</span>
-                      <span>{currentIssue.issueDate}</span>
+                      <span>{returnIssue.issueDate}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Due Date</span>
                       <span
                         className={
-                          daysOD > 0 ? "text-destructive font-medium" : ""
+                          currentIssueDaysOD > 0
+                            ? "text-destructive font-medium"
+                            : ""
                         }
                       >
-                        {currentIssue.dueDate}
+                        {returnIssue.dueDate}
+                        {currentIssueDaysOD > 0 && (
+                          <span className="text-xs ml-1">
+                            ({currentIssueDaysOD} days overdue)
+                          </span>
+                        )}
                       </span>
                     </div>
                     <div className="flex justify-between border-t border-border pt-1.5 font-bold">
@@ -1153,27 +1208,17 @@ export default function Library() {
                           calcFine > 0 ? "text-destructive" : "text-foreground"
                         }
                       >
-                        ₹{calcFine}{" "}
-                        {daysOD > 0
-                          ? `(${daysOD} days × ₹${libSettings.finePerDay})`
-                          : ""}
+                        ₹{calcFine}
                       </span>
                     </div>
                   </div>
-                ) : returnBookId ? (
-                  <div
-                    className="bg-muted/30 rounded-lg p-3 text-sm text-muted-foreground text-center border border-dashed border-border"
-                    data-ocid="library.return.no_issue_state"
-                  >
-                    No open issue found for this book.
-                  </div>
-                ) : null}
+                )}
 
                 <Button
                   className="w-full"
                   variant={calcFine > 0 ? "destructive" : "default"}
-                  onClick={handleReturnSubmit}
-                  disabled={!canWrite || returnLoading || !currentIssue}
+                  onClick={() => void handleReturn()}
+                  disabled={returnLoading || !returnIssue}
                   data-ocid="library.return.submit_button"
                 >
                   {returnLoading ? (
@@ -1207,52 +1252,45 @@ export default function Library() {
                 </div>
               ) : (
                 <div className="divide-y divide-border">
-                  {[...issues]
-                    .reverse()
-                    .slice(0, 12)
-                    .map((issue, idx) => {
-                      const book = books.find((b) => b.id === issue.bookId);
-                      const student = students.find(
-                        (s) => s.id === issue.studentId,
-                      );
-                      const od =
-                        issue.status === "issued"
-                          ? daysOverdue(issue.dueDate)
-                          : 0;
-                      return (
-                        <div
-                          key={issue.id}
-                          className="flex items-center gap-3 px-4 py-2.5 text-sm"
-                          data-ocid={`library.recent.item.${idx + 1}`}
-                        >
-                          <Badge
-                            variant={
-                              issue.status === "returned"
-                                ? "secondary"
-                                : od > 0
-                                  ? "destructive"
-                                  : "default"
-                            }
-                            className="text-xs flex-shrink-0"
-                          >
-                            {issue.status === "returned"
-                              ? "Returned"
+                  {issues.slice(0, 15).map((issue, idx) => {
+                    const od =
+                      issue.status === "issued"
+                        ? daysOverdue(issue.dueDate)
+                        : 0;
+                    return (
+                      <div
+                        key={issue.id}
+                        className="flex items-center gap-3 px-4 py-2.5 text-sm"
+                        data-ocid={`library.recent.item.${idx + 1}`}
+                      >
+                        <Badge
+                          variant={
+                            issue.status === "returned"
+                              ? "secondary"
                               : od > 0
-                                ? "Overdue"
-                                : "Issued"}
-                          </Badge>
-                          <span className="font-medium truncate flex-1">
-                            {book?.title ?? "Unknown Book"}
-                          </span>
-                          <span className="text-muted-foreground truncate hidden sm:block">
-                            {student?.fullName ?? "—"}
-                          </span>
-                          <span className="text-muted-foreground text-xs flex-shrink-0">
-                            {issue.issueDate}
-                          </span>
-                        </div>
-                      );
-                    })}
+                                ? "destructive"
+                                : "default"
+                          }
+                          className="text-xs flex-shrink-0"
+                        >
+                          {issue.status === "returned"
+                            ? "Returned"
+                            : od > 0
+                              ? "Overdue"
+                              : "Issued"}
+                        </Badge>
+                        <span className="font-medium truncate flex-1">
+                          {issue.bookTitle ?? "Unknown Book"}
+                        </span>
+                        <span className="text-muted-foreground truncate hidden sm:block">
+                          {issue.studentName ?? "—"}
+                        </span>
+                        <span className="text-muted-foreground text-xs flex-shrink-0">
+                          {issue.issueDate}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </CardContent>
@@ -1263,7 +1301,6 @@ export default function Library() {
       {/* ── Reports Tab ── */}
       {activeTab === "reports" && (
         <div className="space-y-6">
-          {/* Summary cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
               {
@@ -1278,14 +1315,12 @@ export default function Library() {
               },
               {
                 label: "Overdue",
-                value: overdueCount,
+                value: overdueList.length,
                 color: "text-destructive",
               },
               {
                 label: "Total Fines (₹)",
-                value: issues
-                  .filter((i) => i.fine > 0)
-                  .reduce((s, i) => s + i.fine, 0),
+                value: overdueList.reduce((s, o) => s + o.fine, 0),
                 color: "text-warning",
               },
             ].map((s) => (
@@ -1307,23 +1342,6 @@ export default function Library() {
                 <AlertTriangle className="w-4 h-4 text-destructive" />
                 Overdue Books ({overdueList.length})
               </h3>
-              {overdueList.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() =>
-                    handleBulkRemind(
-                      overdueList.map((e) => ({
-                        issue: e.issue,
-                        student: e.student,
-                      })),
-                    )
-                  }
-                  data-ocid="library.reports.bulk_remind_button"
-                >
-                  Bulk Remind All
-                </Button>
-              )}
             </div>
             {overdueList.length === 0 ? (
               <div
@@ -1339,252 +1357,48 @@ export default function Library() {
               <div className="space-y-2">
                 {overdueList.map((entry, idx) => (
                   <div
-                    key={entry.issue.id}
-                    className={`rounded-lg bg-card border border-border p-3 flex flex-wrap items-center gap-3 ${entry.days > 7 ? "border-l-4 border-l-destructive bg-destructive/5" : entry.days >= 3 ? "border-l-4 border-l-warning" : "border-l-4 border-l-yellow-500"}`}
+                    key={entry.id ?? idx}
+                    className={`rounded-lg bg-card border border-border p-3 flex flex-wrap items-center gap-3 ${entry.daysOverdue > 7 ? "border-l-4 border-l-destructive bg-destructive/5" : "border-l-4 border-l-warning"}`}
                     data-ocid={`library.reports.overdue.item.${idx + 1}`}
                   >
                     <div className="flex-1 min-w-0 space-y-0.5">
                       <p className="font-medium text-sm truncate">
-                        {entry.book?.title ?? "Unknown Book"}
+                        {entry.bookTitle}
                       </p>
                       <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                        <span>{entry.student?.fullName ?? "Unknown"}</span>
-                        {entry.student && (
-                          <span>
-                            {entry.student.class}-{entry.student.section}
-                          </span>
+                        <span>{entry.studentName}</span>
+                        {entry.studentClass && (
+                          <span>Class {entry.studentClass}</span>
                         )}
-                        <span>Due: {entry.issue.dueDate}</span>
+                        <span>Due: {entry.dueDate}</span>
                       </div>
                     </div>
                     <div className="text-right flex-shrink-0">
                       <p className="text-sm font-bold text-destructive">
-                        {entry.days} days overdue
+                        {entry.daysOverdue} days overdue
                       </p>
                       <p className="text-xs text-muted-foreground">
                         Fine: ₹{entry.fine}
                       </p>
                     </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="flex-shrink-0 h-7 text-xs"
-                      onClick={() =>
-                        handleSendReminder(entry.issue, entry.student)
-                      }
-                      data-ocid={`library.reports.overdue.remind_button.${idx + 1}`}
-                    >
-                      Send Reminder
-                    </Button>
                   </div>
                 ))}
               </div>
             )}
           </div>
-
-          {/* Popular books */}
-          <div>
-            <h3 className="font-semibold text-foreground mb-3">
-              Popular Books (Most Issued)
-            </h3>
-            {books.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No books yet.</p>
-            ) : (
-              <div className="rounded-xl border border-border overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/40 border-b border-border">
-                      {["Book Title", "Author", "Category", "Total Issues"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {books
-                      .map((b) => ({
-                        ...b,
-                        issueCount: issues.filter((i) => i.bookId === b.id)
-                          .length,
-                      }))
-                      .sort((a, b) => b.issueCount - a.issueCount)
-                      .slice(0, 10)
-                      .map((b, idx) => (
-                        <tr
-                          key={b.id}
-                          className="border-b border-border last:border-0 hover:bg-muted/20"
-                          data-ocid={`library.reports.popular.item.${idx + 1}`}
-                        >
-                          <td className="px-3 py-2.5 font-medium">{b.title}</td>
-                          <td className="px-3 py-2.5 text-muted-foreground">
-                            {b.author}
-                          </td>
-                          <td className="px-3 py-2.5">
-                            <Badge variant="secondary" className="text-xs">
-                              {b.category}
-                            </Badge>
-                          </td>
-                          <td className="px-3 py-2.5 text-right tabular-nums font-semibold">
-                            {b.issueCount}
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Fine collection summary */}
-          <div>
-            <h3 className="font-semibold text-foreground mb-3">
-              Fine Collection Summary
-            </h3>
-            {issues.filter((i) => i.fine > 0).length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No fines collected yet.
-              </p>
-            ) : (
-              <div className="rounded-xl border border-border overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/40 border-b border-border">
-                      {[
-                        "Student",
-                        "Book",
-                        "Issue Date",
-                        "Return Date",
-                        "Fine (₹)",
-                      ].map((h) => (
-                        <th
-                          key={h}
-                          className="text-left px-3 py-2.5 text-xs font-semibold text-muted-foreground"
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {issues
-                      .filter((i) => i.fine > 0)
-                      .map((issue, idx) => {
-                        const book = books.find((b) => b.id === issue.bookId);
-                        const student = students.find(
-                          (s) => s.id === issue.studentId,
-                        );
-                        return (
-                          <tr
-                            key={issue.id}
-                            className="border-b border-border last:border-0 hover:bg-muted/20"
-                            data-ocid={`library.reports.fine.item.${idx + 1}`}
-                          >
-                            <td className="px-3 py-2.5 font-medium">
-                              {student?.fullName ?? "—"}
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[160px]">
-                              {book?.title ?? "—"}
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground">
-                              {issue.issueDate}
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground">
-                              {issue.returnDate ?? "—"}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-semibold text-destructive tabular-nums">
-                              ₹{issue.fine}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Export buttons */}
-          <div className="flex flex-wrap gap-2" data-print-hide>
-            <Button
-              variant="outline"
-              onClick={() =>
-                exportCSV(
-                  [
-                    [
-                      "Student",
-                      "Adm No",
-                      "Class",
-                      "Book",
-                      "Issue Date",
-                      "Due Date",
-                      "Return Date",
-                      "Fine",
-                      "Status",
-                    ],
-                    ...issues.map((issue) => {
-                      const b = books.find((bk) => bk.id === issue.bookId);
-                      const s = students.find(
-                        (st) => st.id === issue.studentId,
-                      );
-                      return [
-                        s?.fullName ?? "",
-                        s?.admNo ?? "",
-                        s ? `${s.class}-${s.section}` : "",
-                        b?.title ?? "",
-                        issue.issueDate,
-                        issue.dueDate,
-                        issue.returnDate ?? "",
-                        String(issue.fine),
-                        issue.status,
-                      ];
-                    }),
-                  ],
-                  "library_issue_history.csv",
-                )
-              }
-              data-ocid="library.reports.export_issues_button"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export Issue History
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() =>
-                exportCSV(
-                  [
-                    ["Student", "Adm No", "Class", "Book", "Fine (₹)"],
-                    ...issues
-                      .filter((i) => i.fine > 0)
-                      .map((issue) => {
-                        const b = books.find((bk) => bk.id === issue.bookId);
-                        const s = students.find(
-                          (st) => st.id === issue.studentId,
-                        );
-                        return [
-                          s?.fullName ?? "",
-                          s?.admNo ?? "",
-                          s ? `${s.class}-${s.section}` : "",
-                          b?.title ?? "",
-                          String(issue.fine),
-                        ];
-                      }),
-                  ],
-                  "library_fines.csv",
-                )
-              }
-              data-ocid="library.reports.export_fines_button"
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Export Fines
-            </Button>
-          </div>
         </div>
+      )}
+
+      {/* Book Form */}
+      {showBookForm && (
+        <BookFormDialog
+          book={editBook}
+          onSave={handleSaveBook}
+          onClose={() => {
+            setShowBookForm(false);
+            setEditBook(undefined);
+          }}
+        />
       )}
 
       {/* Settings Dialog */}
@@ -1594,20 +1408,9 @@ export default function Library() {
           onSave={(s) => {
             setLibSettings(s);
             setShowSettings(false);
+            toast.success("Library settings saved");
           }}
           onClose={() => setShowSettings(false)}
-        />
-      )}
-
-      {/* Book Form Dialog */}
-      {showBookForm && (
-        <BookFormDialog
-          book={editBook}
-          onSave={handleSaveBook}
-          onClose={() => {
-            setShowBookForm(false);
-            setEditBook(undefined);
-          }}
         />
       )}
     </div>

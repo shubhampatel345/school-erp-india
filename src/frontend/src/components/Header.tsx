@@ -2,9 +2,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  AlertTriangle,
   Archive,
-  CheckCircle2,
   ChevronDown,
   GraduationCap,
   KeyRound,
@@ -14,6 +12,7 @@ import {
   Plus,
   Search,
   User,
+  Wifi,
   WifiOff,
   X,
 } from "lucide-react";
@@ -57,74 +56,34 @@ function sessionDateRange(session: Session): string {
   return `Apr ${session.startYear} – Mar ${session.endYear}`;
 }
 
-/** Sync status indicator dot */
-function SyncDot({ onNavigate }: { onNavigate?: (page: string) => void }) {
-  const { syncStatus, serverConnected } = useApp();
-  const [tooltip, setTooltip] = useState(false);
+/** Simple online/offline indicator — informational only, no sync functionality */
+function OnlineIndicator() {
+  const [online, setOnline] = useState(navigator.onLine);
 
-  const pendingCount = syncStatus.pendingCount ?? 0;
+  useEffect(() => {
+    const setOn = () => setOnline(true);
+    const setOff = () => setOnline(false);
+    window.addEventListener("online", setOn);
+    window.addEventListener("offline", setOff);
+    return () => {
+      window.removeEventListener("online", setOn);
+      window.removeEventListener("offline", setOff);
+    };
+  }, []);
 
-  type DotMode = "synced" | "pending" | "syncing" | "error" | "offline";
-  let mode: DotMode = "synced";
-  if (syncStatus.state === "loading") mode = "syncing";
-  else if (syncStatus.state === "error") mode = "error";
-  else if (!serverConnected) mode = "offline";
-  else if (pendingCount > 0) mode = "pending";
-
-  const config: Record<DotMode, { color: string; label: string }> = {
-    synced: { color: "bg-emerald-500", label: "All data synced to server" },
-    syncing: { color: "bg-amber-400 animate-pulse", label: "Syncing data…" },
-    pending: {
-      color: "bg-amber-400",
-      label: `${pendingCount} changes pending`,
-    },
-    error: { color: "bg-destructive", label: "Sync error — tap to view" },
-    offline: {
-      color: "bg-destructive",
-      label: "Server offline — data queued locally",
-    },
-  };
-
-  const cfg = config[mode];
-
-  const handleClick = () => {
-    if (onNavigate) onNavigate("settings:server");
-  };
+  if (online) return null; // no indicator when online — clean UI
 
   return (
-    <button
-      type="button"
-      className="relative flex items-center cursor-pointer bg-transparent border-0 p-0"
-      onMouseEnter={() => setTooltip(true)}
-      onMouseLeave={() => setTooltip(false)}
-      onClick={handleClick}
-      data-ocid="header.sync_badge"
-      aria-label={cfg.label}
+    <div
+      className="flex items-center gap-1 px-2 py-1 rounded-lg bg-destructive/10 border border-destructive/20"
+      title="You are offline. Changes cannot be saved."
+      data-ocid="header.offline_indicator"
     >
-      <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${cfg.color}`} />
-      {pendingCount > 0 && (
-        <span className="absolute -top-1 -right-1.5 w-3.5 h-3.5 rounded-full bg-amber-500 text-white text-[8px] font-bold flex items-center justify-center leading-none">
-          {pendingCount > 9 ? "9+" : pendingCount}
-        </span>
-      )}
-      {tooltip && (
-        <div className="absolute right-0 top-5 z-50 whitespace-nowrap bg-card border border-border shadow-elevated rounded-lg px-2.5 py-1.5 text-xs text-foreground">
-          {mode === "synced" && (
-            <CheckCircle2 className="w-3 h-3 text-emerald-500 inline mr-1" />
-          )}
-          {mode === "syncing" && (
-            <Loader2 className="w-3 h-3 text-amber-500 animate-spin inline mr-1" />
-          )}
-          {mode === "pending" && (
-            <AlertTriangle className="w-3 h-3 text-amber-500 inline mr-1" />
-          )}
-          {(mode === "error" || mode === "offline") && (
-            <WifiOff className="w-3 h-3 text-destructive inline mr-1" />
-          )}
-          {cfg.label}
-        </div>
-      )}
-    </button>
+      <WifiOff className="w-3.5 h-3.5 text-destructive" />
+      <span className="text-[11px] font-medium text-destructive hidden sm:inline">
+        Offline
+      </span>
+    </div>
   );
 }
 
@@ -142,7 +101,6 @@ function CreateSessionModal({ onClose, onCreated }: CreateSessionModalProps) {
   const [error, setError] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // Pre-fill with the next session label computed from the latest session
   useEffect(() => {
     if (sessions.length === 0) return;
     const sorted = [...sessions].sort((a, b) => b.startYear - a.startYear);
@@ -168,7 +126,6 @@ function CreateSessionModal({ onClose, onCreated }: CreateSessionModalProps) {
     }
     setCreating(true);
     try {
-      // createSession handles both local save and server push
       const session = createSession(trimmed, description.trim() || undefined);
       onCreated(session);
     } catch {
@@ -334,7 +291,6 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
           s.fatherName?.toLowerCase().includes(q) ||
           s.motherName?.toLowerCase().includes(q) ||
           s.address?.toLowerCase().includes(q) ||
-          s.village?.toLowerCase().includes(q) ||
           s.class?.toLowerCase().includes(q),
       )
       .slice(0, 10);
@@ -417,9 +373,6 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
           <div className="hidden sm:block leading-none">
             <span className="font-display font-bold text-sm text-foreground tracking-tight block">
               SHUBH SCHOOL ERP
-            </span>
-            <span className="text-[10px] text-primary font-medium block">
-              School B
             </span>
           </div>
         </div>
@@ -648,8 +601,8 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
           <Search className="w-4 h-4 text-foreground" />
         </button>
 
-        {/* Sync status dot */}
-        <SyncDot onNavigate={onNavigate} />
+        {/* Online/Offline indicator — only shows when offline */}
+        <OnlineIndicator />
 
         {/* Notification Bell */}
         <NotificationBell />
@@ -690,6 +643,24 @@ export default function Header({ onMenuToggle, onNavigate }: HeaderProps) {
                     {currentUser.position}
                   </div>
                 )}
+                {/* Online status in dropdown */}
+                <div className="flex items-center gap-1.5 mt-2">
+                  {navigator.onLine ? (
+                    <>
+                      <Wifi className="w-3 h-3 text-emerald-500" />
+                      <span className="text-[10px] text-emerald-600 font-medium">
+                        Online — connected to server
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <WifiOff className="w-3 h-3 text-destructive" />
+                      <span className="text-[10px] text-destructive font-medium">
+                        Offline
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
               <button
                 type="button"

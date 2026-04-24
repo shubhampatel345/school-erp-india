@@ -598,9 +598,12 @@ class PhpApiService {
 
   async getStudents(params?: {
     page?: string;
+    limit?: string;
     class?: string;
     section?: string;
     session?: string;
+    search?: string;
+    status?: string;
   }): Promise<StudentListResult> {
     const qs = params
       ? `&${new URLSearchParams(params as Record<string, string>).toString()}`
@@ -680,6 +683,86 @@ class PhpApiService {
     staff: Partial<StaffRecord> & { id: string },
   ): Promise<StaffRecord> {
     return this.put<StaffRecord>("staff/update", staff);
+  }
+
+  async deleteStaff(id: string): Promise<void> {
+    await this.del("staff/delete", { id });
+  }
+
+  async getSubjects(classId: string): Promise<Record<string, unknown>[]> {
+    try {
+      const params: Record<string, string> = classId ? { classId } : {};
+      return await this.get<Record<string, unknown>[]>("subjects/list", params);
+    } catch {
+      return [];
+    }
+  }
+
+  async saveSubject(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("subjects/add", data);
+  }
+
+  async getSections(classId: string): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("sections/list", {
+        classId,
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  async getPayroll(params?: { month?: string; year?: string }): Promise<
+    Record<string, unknown>[]
+  > {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "payroll/list",
+        params as Record<string, string>,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async savePayroll(data: Record<string, unknown>): Promise<void> {
+    await this.post("payroll/save", data);
+  }
+
+  async generatePayslip(
+    staffId: string,
+    month: string,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("payroll/generate-payslip", {
+      staffId,
+      month,
+    });
+  }
+
+  async saveFaceAttendance(data: {
+    studentId: string;
+    date: string;
+    time: string;
+  }): Promise<void> {
+    await this.post("attendance/face-mark", data);
+  }
+
+  async getAttendanceByClass(
+    classId: string,
+    sectionId: string,
+    date: string,
+  ): Promise<AttendanceRecord[]> {
+    try {
+      return await this.get<AttendanceRecord[]>("attendance/list", {
+        class: classId,
+        section: sectionId,
+        date,
+      });
+    } catch {
+      return [];
+    }
   }
 
   // ── Sessions ──────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 /**
- * SHUBH SCHOOL ERP — Inventory Module (Rebuilt)
- * Tabs: Items | Stores | Stock Report | Purchase
- * ALL price/rate/quantity fields: type="text" inputMode="decimal" — NO spinners
+ * SHUBH SCHOOL ERP — Inventory Module (Direct API rebuild)
+ * All data via phpApiService directly. No getData(), no local sync.
+ * ALL price/rate/quantity fields: type="text" inputMode="decimal" — NO spinners.
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -13,14 +13,15 @@ import {
   AlertTriangle,
   Download,
   Edit2,
+  Loader2,
   Package,
   Plus,
   Trash2,
   Warehouse,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useApp } from "../context/AppContext";
-import { formatCurrency, generateId } from "../utils/localStorage";
+import { toast } from "sonner";
+import phpApiService from "../utils/phpApiService";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -33,32 +34,23 @@ interface InvItem {
   sellingPrice: number;
   currentStock: number;
   reorderLevel: number;
-  storeLocation: string;
-  sessionId?: string;
+  storeLocation?: string;
 }
 
-interface InvStore {
-  id: string;
-  storeName: string;
-  location: string;
-  incharge: string;
-}
-
-interface InvPurchase {
+interface InvTransaction {
   id: string;
   itemId: string;
-  itemName: string;
+  itemName?: string;
+  type: "purchase" | "sale" | "adjustment";
   quantity: number;
-  rate: number;
-  totalCost: number;
-  vendor: string;
+  rate?: number;
+  totalCost?: number;
+  vendor?: string;
   date: string;
-  sessionId?: string;
+  note?: string;
 }
 
-type Tab = "items" | "stores" | "report" | "purchase";
-
-const LOW_STOCK_DEFAULT = 5;
+type Tab = "items" | "report" | "purchase";
 
 const DEFAULT_CATEGORIES = [
   "Uniform",
@@ -70,6 +62,10 @@ const DEFAULT_CATEGORIES = [
   "Sports",
   "Other",
 ];
+
+function formatCurrency(n: number) {
+  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
+}
 
 function exportCSV(rows: string[][], filename: string) {
   const csv = rows
@@ -87,7 +83,11 @@ function InvModal({
   title,
   onClose,
   children,
-}: { title: string; onClose: () => void; children: React.ReactNode }) {
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-card border border-border rounded-xl w-full max-w-lg shadow-elevated animate-slide-up max-h-[90vh] overflow-y-auto">
@@ -108,7 +108,7 @@ function InvModal({
   );
 }
 
-// ── Items form fields ─────────────────────────────────────────
+// ── Item Form State ───────────────────────────────────────────
 
 interface ItemFormState {
   name: string;
@@ -132,20 +132,7 @@ const EMPTY_ITEM_FORM: ItemFormState = {
   storeLocation: "",
 };
 
-// ── Store form ────────────────────────────────────────────────
-
-interface StoreFormState {
-  storeName: string;
-  location: string;
-  incharge: string;
-}
-const EMPTY_STORE_FORM: StoreFormState = {
-  storeName: "",
-  location: "",
-  incharge: "",
-};
-
-// ── Purchase form ─────────────────────────────────────────────
+// ── Purchase Form State ───────────────────────────────────────
 
 interface PurchaseFormState {
   itemId: string;
@@ -155,60 +142,34 @@ interface PurchaseFormState {
   date: string;
 }
 
+// ── Main Component ────────────────────────────────────────────
+
 export default function Inventory() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    deleteData,
-    addNotification,
-    isReadOnly,
-    currentSession,
-  } = useApp();
-  const sessionId = currentSession?.id ?? "sess_2025";
-
-  const [tab, setTab] = useState<Tab>("items");
-
   const [items, setItems] = useState<InvItem[]>([]);
-  const [stores, setStores] = useState<InvStore[]>([]);
-  const [purchases, setPurchases] = useState<InvPurchase[]>([]);
+  const [transactions, setTransactions] = useState<InvTransaction[]>([]);
+  const [totalItems, setTotalItems] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<Tab>("items");
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 50;
 
-  const categories = useMemo(() => {
-    const fromItems = [
-      ...new Set(items.map((i) => i.category).filter(Boolean)),
-    ];
-    return [...new Set([...DEFAULT_CATEGORIES, ...fromItems])].sort();
-  }, [items]);
-
-  useEffect(() => {
-    setItems(getData("inventory_items") as InvItem[]);
-    setStores(getData("inv_stores") as InvStore[]);
-    setPurchases(getData("inv_purchases") as InvPurchase[]);
-  }, [getData]);
-
-  // ── Items state ────────────────────────────────────────────
-
+  // Item form
   const [itemSearch, setItemSearch] = useState("");
   const [catFilter, setCatFilter] = useState("");
   const [showItemModal, setShowItemModal] = useState(false);
   const [editItemId, setEditItemId] = useState<string | null>(null);
   const [itemForm, setItemForm] = useState<ItemFormState>(EMPTY_ITEM_FORM);
+  const [savingItem, setSavingItem] = useState(false);
 
-  // Stock action modal
+  // Stock modal
   const [stockItemId, setStockItemId] = useState<string | null>(null);
   const [stockAction, setStockAction] = useState<"in" | "out">("in");
   const [stockQtyStr, setStockQtyStr] = useState("1");
   const [stockNote, setStockNote] = useState("");
   const [stockError, setStockError] = useState("");
+  const [savingStock, setSavingStock] = useState(false);
 
-  // ── Store state ────────────────────────────────────────────
-
-  const [showStoreModal, setShowStoreModal] = useState(false);
-  const [editStoreId, setEditStoreId] = useState<string | null>(null);
-  const [storeForm, setStoreForm] = useState<StoreFormState>(EMPTY_STORE_FORM);
-
-  // ── Purchase state ─────────────────────────────────────────
-
+  // Purchase modal
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState<PurchaseFormState>({
     itemId: "",
@@ -217,10 +178,9 @@ export default function Inventory() {
     vendor: "",
     date: new Date().toISOString().split("T")[0],
   });
+  const [savingPurchase, setSavingPurchase] = useState(false);
 
-  // ── Stable item field handlers ─────────────────────────────
-  // CRITICAL: useCallback([]) prevents remount on every keystroke
-
+  // ── Stable field handlers (prevent remounts) ──────────────
   const handleItemNameChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setItemForm((p) => ({ ...p, name: e.target.value })),
@@ -277,24 +237,62 @@ export default function Inventory() {
       setItemForm((p) => ({ ...p, storeLocation: e.target.value })),
     [],
   );
+  const handleStockQtyChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setStockError("");
+      setStockQtyStr(e.target.value.replace(/[^0-9]/g, ""));
+    },
+    [],
+  );
+  const handleStockNoteChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => setStockNote(e.target.value),
+    [],
+  );
 
-  // ── Stable store field handlers ────────────────────────────
+  // ── Load data ──────────────────────────────────────────────
 
-  const handleStoreNameChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setStoreForm((p) => ({ ...p, storeName: e.target.value })),
-    [],
-  );
-  const handleStoreLocationChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setStoreForm((p) => ({ ...p, location: e.target.value })),
-    [],
-  );
-  const handleStoreInchargeChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) =>
-      setStoreForm((p) => ({ ...p, incharge: e.target.value })),
-    [],
-  );
+  const loadItems = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await phpApiService.get<{ data: InvItem[]; total: number }>(
+        `inventory/list&page=${page}&limit=${PAGE_SIZE}${itemSearch ? `&search=${encodeURIComponent(itemSearch)}` : ""}${catFilter ? `&category=${encodeURIComponent(catFilter)}` : ""}`,
+      );
+      setItems(res.data ?? []);
+      setTotalItems(res.total ?? res.data?.length ?? 0);
+    } catch {
+      toast.error("Failed to load inventory items");
+    } finally {
+      setLoading(false);
+    }
+  }, [page, itemSearch, catFilter]);
+
+  const loadTransactions = useCallback(async () => {
+    try {
+      const data = await phpApiService.get<InvTransaction[]>(
+        "inventory/transactions&limit=50",
+      );
+      setTransactions(data ?? []);
+    } catch {
+      /* non-critical */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadItems();
+  }, [loadItems]);
+
+  useEffect(() => {
+    if (tab === "purchase" || tab === "report") void loadTransactions();
+  }, [tab, loadTransactions]);
+
+  // ── Categories ─────────────────────────────────────────────
+
+  const categories = useMemo(() => {
+    const fromItems = [
+      ...new Set(items.map((i) => i.category).filter(Boolean)),
+    ];
+    return [...new Set([...DEFAULT_CATEGORIES, ...fromItems])].sort();
+  }, [items]);
 
   // ── Item CRUD ──────────────────────────────────────────────
 
@@ -311,59 +309,68 @@ export default function Inventory() {
       unit: item.unit,
       costPriceStr: item.costPrice ? String(item.costPrice) : "",
       sellingPriceStr: item.sellingPrice ? String(item.sellingPrice) : "",
-      currentStockStr: item.currentStock ? String(item.currentStock) : "",
+      currentStockStr: item.currentStock ? String(item.currentStock) : "0",
       reorderLevelStr: item.reorderLevel ? String(item.reorderLevel) : "5",
-      storeLocation: item.storeLocation,
+      storeLocation: item.storeLocation ?? "",
     });
     setEditItemId(item.id);
     setShowItemModal(true);
   }, []);
 
   const handleSaveItem = useCallback(async () => {
-    if (!itemForm.name.trim()) return;
-    const itemData: InvItem = {
-      id: editItemId ?? generateId(),
-      name: itemForm.name.trim(),
-      category: itemForm.category,
-      unit: itemForm.unit,
-      costPrice: Number(itemForm.costPriceStr) || 0,
-      sellingPrice: Number(itemForm.sellingPriceStr) || 0,
-      currentStock: Number(itemForm.currentStockStr) || 0,
-      reorderLevel: Number(itemForm.reorderLevelStr) || LOW_STOCK_DEFAULT,
-      storeLocation: itemForm.storeLocation,
-      sessionId,
-    };
-    if (editItemId) {
-      await updateData(
-        "inventory_items",
-        editItemId,
-        itemData as unknown as Record<string, unknown>,
-      );
-      setItems((prev) => prev.map((i) => (i.id === editItemId ? itemData : i)));
-      addNotification(`"${itemData.name}" updated`, "success", "📦");
-    } else {
-      await saveData(
-        "inventory_items",
-        itemData as unknown as Record<string, unknown>,
-      );
-      setItems((prev) => [...prev, itemData]);
-      addNotification(`"${itemData.name}" added`, "success", "📦");
+    if (!itemForm.name.trim()) {
+      toast.error("Item name is required");
+      return;
     }
-    setShowItemModal(false);
-    setEditItemId(null);
-  }, [itemForm, editItemId, sessionId, updateData, saveData, addNotification]);
+    setSavingItem(true);
+    try {
+      const payload = {
+        id: editItemId ?? undefined,
+        name: itemForm.name.trim(),
+        category: itemForm.category,
+        unit: itemForm.unit,
+        costPrice: Number(itemForm.costPriceStr) || 0,
+        sellingPrice: Number(itemForm.sellingPriceStr) || 0,
+        currentStock: Number(itemForm.currentStockStr) || 0,
+        reorderLevel: Number(itemForm.reorderLevelStr) || 5,
+        storeLocation: itemForm.storeLocation,
+      };
+      if (editItemId) {
+        await phpApiService.updateInventoryItem(
+          payload as Record<string, unknown>,
+        );
+        toast.success(`"${payload.name}" updated`);
+      } else {
+        await phpApiService.addInventoryItem(
+          payload as Record<string, unknown>,
+        );
+        toast.success(`"${payload.name}" added`);
+      }
+      setShowItemModal(false);
+      setEditItemId(null);
+      await loadItems();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save item");
+    } finally {
+      setSavingItem(false);
+    }
+  }, [itemForm, editItemId, loadItems]);
 
   const handleDeleteItem = useCallback(
     async (id: string) => {
       if (!confirm("Delete this item?")) return;
-      await deleteData("inventory_items", id);
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      addNotification("Item deleted", "info");
+      try {
+        await phpApiService.del("inventory/delete", { id });
+        toast.success("Item deleted");
+        await loadItems();
+      } catch {
+        toast.error("Failed to delete item");
+      }
     },
-    [deleteData, addNotification],
+    [loadItems],
   );
 
-  // ── Stock In/Out ───────────────────────────────────────────
+  // ── Stock In/Out ────────────────────────────────────────────
 
   const openStockModal = useCallback((item: InvItem, action: "in" | "out") => {
     setStockItemId(item.id);
@@ -373,22 +380,12 @@ export default function Inventory() {
     setStockError("");
   }, []);
 
-  const handleStockQtyChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setStockError("");
-      setStockQtyStr(e.target.value.replace(/[^0-9]/g, ""));
-    },
-    [],
-  );
-
-  const handleStockNoteChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => setStockNote(e.target.value),
-    [],
-  );
-
   const handleStockUpdate = useCallback(async () => {
     const qty = Number(stockQtyStr) || 0;
-    if (!stockItemId || qty <= 0) return;
+    if (!stockItemId || qty <= 0) {
+      toast.error("Enter a valid quantity");
+      return;
+    }
     const item = items.find((i) => i.id === stockItemId);
     if (!item) return;
     if (stockAction === "out" && qty > item.currentStock) {
@@ -397,141 +394,71 @@ export default function Inventory() {
       );
       return;
     }
-    const newStock =
-      stockAction === "in" ? item.currentStock + qty : item.currentStock - qty;
-    const updated: InvItem = { ...item, currentStock: newStock };
-    await updateData(
-      "inventory_items",
-      item.id,
-      updated as unknown as Record<string, unknown>,
-    );
-    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
-    addNotification(
-      `${stockAction === "in" ? "Added" : "Issued"} ${qty} × ${item.name}`,
-      "success",
-    );
-    if (newStock <= item.reorderLevel)
-      addNotification(
-        `⚠️ Low stock: ${item.name} — ${newStock} left`,
-        "warning",
-      );
-    setStockItemId(null);
-  }, [
-    stockItemId,
-    stockAction,
-    stockQtyStr,
-    items,
-    updateData,
-    addNotification,
-  ]);
-
-  // ── Store CRUD ─────────────────────────────────────────────
-
-  const openAddStore = useCallback(() => {
-    setStoreForm(EMPTY_STORE_FORM);
-    setEditStoreId(null);
-    setShowStoreModal(true);
-  }, []);
-  const openEditStore = useCallback((s: InvStore) => {
-    setStoreForm({
-      storeName: s.storeName,
-      location: s.location,
-      incharge: s.incharge,
-    });
-    setEditStoreId(s.id);
-    setShowStoreModal(true);
-  }, []);
-
-  const handleSaveStore = useCallback(async () => {
-    if (!storeForm.storeName.trim()) return;
-    if (editStoreId) {
-      await updateData("inv_stores", editStoreId, {
-        id: editStoreId,
-        ...storeForm,
+    setSavingStock(true);
+    try {
+      await phpApiService.post("inventory/transaction", {
+        itemId: stockItemId,
+        type: stockAction === "in" ? "purchase" : "sale",
+        quantity: qty,
+        note: stockNote,
+        date: new Date().toISOString().split("T")[0],
       });
-      setStores((prev) =>
-        prev.map((s) =>
-          s.id === editStoreId ? { id: editStoreId, ...storeForm } : s,
-        ),
+      toast.success(
+        `${stockAction === "in" ? "Added" : "Issued"} ${qty} × ${item.name}`,
       );
-    } else {
-      const newStore: InvStore = { id: generateId(), ...storeForm };
-      await saveData(
-        "inv_stores",
-        newStore as unknown as Record<string, unknown>,
+      setStockItemId(null);
+      await loadItems();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update stock",
       );
-      setStores((prev) => [...prev, newStore]);
+    } finally {
+      setSavingStock(false);
     }
-    setShowStoreModal(false);
-    setEditStoreId(null);
-  }, [storeForm, editStoreId, updateData, saveData]);
+  }, [stockItemId, stockAction, stockQtyStr, stockNote, items, loadItems]);
 
-  const handleDeleteStore = useCallback(
-    async (id: string) => {
-      await deleteData("inv_stores", id);
-      setStores((prev) => prev.filter((s) => s.id !== id));
-    },
-    [deleteData],
-  );
-
-  // ── Purchase ──────────────────────────────────────────────
+  // ── Purchase ────────────────────────────────────────────────
 
   const handleSavePurchase = useCallback(async () => {
     const { itemId, quantityStr, rateStr, vendor, date } = purchaseForm;
-    if (!itemId || !quantityStr || !rateStr) return;
-    const item = items.find((i) => i.id === itemId);
-    if (!item) return;
+    if (!itemId || !quantityStr || !rateStr) {
+      toast.error("Fill all required fields");
+      return;
+    }
     const qty = Number(quantityStr) || 0;
     const rate = Number(rateStr) || 0;
-    const purchase: InvPurchase = {
-      id: generateId(),
-      itemId,
-      itemName: item.name,
-      quantity: qty,
-      rate,
-      totalCost: qty * rate,
-      vendor,
-      date,
-      sessionId,
-    };
-    await saveData(
-      "inv_purchases",
-      purchase as unknown as Record<string, unknown>,
-    );
-    setPurchases((prev) => [...prev, purchase]);
-    // Update stock
-    const updated: InvItem = { ...item, currentStock: item.currentStock + qty };
-    await updateData(
-      "inventory_items",
-      item.id,
-      updated as unknown as Record<string, unknown>,
-    );
-    setItems((prev) => prev.map((i) => (i.id === item.id ? updated : i)));
-    addNotification(
-      `Purchase recorded: ${qty} × ${item.name}`,
-      "success",
-      "🛒",
-    );
-    setShowPurchaseModal(false);
-    setPurchaseForm({
-      itemId: "",
-      quantityStr: "",
-      rateStr: "",
-      vendor: "",
-      date: new Date().toISOString().split("T")[0],
-    });
-  }, [purchaseForm, items, sessionId, saveData, updateData, addNotification]);
+    setSavingPurchase(true);
+    try {
+      await phpApiService.post("inventory/transaction", {
+        itemId,
+        type: "purchase",
+        quantity: qty,
+        rate,
+        totalCost: qty * rate,
+        vendor,
+        date,
+      });
+      toast.success("Purchase recorded");
+      setShowPurchaseModal(false);
+      setPurchaseForm({
+        itemId: "",
+        quantityStr: "",
+        rateStr: "",
+        vendor: "",
+        date: new Date().toISOString().split("T")[0],
+      });
+      await loadItems();
+      await loadTransactions();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to record purchase",
+      );
+    } finally {
+      setSavingPurchase(false);
+    }
+  }, [purchaseForm, loadItems, loadTransactions]);
 
   // ── Derived ────────────────────────────────────────────────
-
-  const filteredItems = useMemo(() => {
-    return items.filter((i) => {
-      const ms =
-        !itemSearch || i.name.toLowerCase().includes(itemSearch.toLowerCase());
-      const mc = !catFilter || i.category === catFilter;
-      return ms && mc;
-    });
-  }, [items, itemSearch, catFilter]);
 
   const totalStockValue = useMemo(
     () => items.reduce((a, i) => a + i.currentStock * i.costPrice, 0),
@@ -549,9 +476,8 @@ export default function Inventory() {
     icon: React.ComponentType<{ className?: string }>;
   }[] = [
     { id: "items", label: "Items", icon: Package },
-    { id: "stores", label: "Stores", icon: Warehouse },
     { id: "report", label: "Stock Report", icon: AlertTriangle },
-    { id: "purchase", label: "Purchase", icon: Plus },
+    { id: "purchase", label: "Purchases", icon: Warehouse },
   ];
 
   return (
@@ -569,9 +495,7 @@ export default function Inventory() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <Card className="bg-primary/5 border-primary/20">
           <CardContent className="py-3 text-center">
-            <div className="text-2xl font-bold text-primary">
-              {items.length}
-            </div>
+            <div className="text-2xl font-bold text-primary">{totalItems}</div>
             <div className="text-xs text-muted-foreground">Total Items</div>
           </CardContent>
         </Card>
@@ -586,9 +510,9 @@ export default function Inventory() {
         <Card>
           <CardContent className="py-3 text-center">
             <div className="text-2xl font-bold text-foreground">
-              {stores.length}
+              {transactions.filter((t) => t.type === "purchase").length}
             </div>
-            <div className="text-xs text-muted-foreground">Stores</div>
+            <div className="text-xs text-muted-foreground">Purchases</div>
           </CardContent>
         </Card>
         <Card
@@ -618,7 +542,11 @@ export default function Inventory() {
               key={t.id}
               type="button"
               onClick={() => setTab(t.id)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${tab === t.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`}
+              className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
+                tab === t.id
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+              }`}
               data-ocid={`inventory.${t.id}_tab`}
             >
               <Icon className="w-4 h-4" />
@@ -635,7 +563,10 @@ export default function Inventory() {
             <div className="flex flex-wrap gap-2">
               <Input
                 value={itemSearch}
-                onChange={(e) => setItemSearch(e.target.value)}
+                onChange={(e) => {
+                  setItemSearch(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Search items…"
                 className="w-44"
                 data-ocid="inventory.search_input"
@@ -643,7 +574,10 @@ export default function Inventory() {
               <select
                 className="border border-input rounded-md px-3 py-2 text-sm bg-background"
                 value={catFilter}
-                onChange={(e) => setCatFilter(e.target.value)}
+                onChange={(e) => {
+                  setCatFilter(e.target.value);
+                  setPage(1);
+                }}
                 data-ocid="inventory.category_select"
               >
                 <option value="">All Categories</option>
@@ -655,15 +589,13 @@ export default function Inventory() {
               </select>
             </div>
             <div className="flex gap-2">
-              {!isReadOnly && (
-                <Button
-                  onClick={openAddItem}
-                  data-ocid="inventory.add_item_button"
-                >
-                  <Plus className="w-4 h-4 mr-1" />
-                  Add Item
-                </Button>
-              )}
+              <Button
+                onClick={openAddItem}
+                data-ocid="inventory.add_item_button"
+              >
+                <Plus className="w-4 h-4 mr-1" />
+                Add Item
+              </Button>
               <Button
                 variant="outline"
                 size="sm"
@@ -674,12 +606,11 @@ export default function Inventory() {
                         "Item",
                         "Category",
                         "Unit",
-                        "Cost Price",
-                        "Sell Price",
+                        "Cost",
+                        "Sell",
                         "Stock",
-                        "Reorder Level",
+                        "Reorder",
                         "Location",
-                        "Value",
                       ],
                       ...items.map((i) => [
                         i.name,
@@ -689,8 +620,7 @@ export default function Inventory() {
                         String(i.sellingPrice),
                         String(i.currentStock),
                         String(i.reorderLevel),
-                        i.storeLocation,
-                        String(i.currentStock * i.costPrice),
+                        i.storeLocation ?? "",
                       ]),
                     ],
                     "inventory.csv",
@@ -704,84 +634,89 @@ export default function Inventory() {
             </div>
           </div>
 
-          <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  {[
-                    "Item Name",
-                    "Category",
-                    "Unit",
-                    "Cost Price",
-                    "Sell Price",
-                    "Stock",
-                    "Actions",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filteredItems.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="w-6 h-6 animate-spin text-primary" />
+              <span className="ml-2 text-muted-foreground">Loading items…</span>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-xl border border-border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
                   <tr>
-                    <td
-                      colSpan={7}
-                      className="px-4 py-12 text-center text-muted-foreground"
-                      data-ocid="inventory.items_empty_state"
-                    >
-                      <div className="text-4xl mb-2">📦</div>
-                      <div className="font-medium">No items found</div>
-                      <div className="text-xs mt-1">
-                        Add inventory items to get started
-                      </div>
-                    </td>
-                  </tr>
-                ) : (
-                  filteredItems.map((item, idx) => {
-                    const isLow = item.currentStock <= item.reorderLevel;
-                    return (
-                      <tr
-                        key={item.id}
-                        className={`border-t border-border hover:bg-muted/30 transition-colors ${isLow ? "bg-destructive/5" : ""}`}
-                        data-ocid={`inventory.item.${idx + 1}`}
+                    {[
+                      "Item Name",
+                      "Category",
+                      "Unit",
+                      "Cost Price",
+                      "Sell Price",
+                      "Stock",
+                      "Actions",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap"
                       >
-                        <td className="px-4 py-3 font-medium text-foreground">
-                          {item.name}
-                          {isLow && (
-                            <Badge
-                              variant="destructive"
-                              className="ml-2 text-xs"
-                            >
-                              Low Stock
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-4 py-12 text-center text-muted-foreground"
+                        data-ocid="inventory.items_empty_state"
+                      >
+                        <div className="text-4xl mb-2">📦</div>
+                        <div className="font-medium">No items found</div>
+                        <div className="text-xs mt-1">
+                          Add inventory items to get started
+                        </div>
+                      </td>
+                    </tr>
+                  ) : (
+                    items.map((item, idx) => {
+                      const isLow = item.currentStock <= item.reorderLevel;
+                      return (
+                        <tr
+                          key={item.id}
+                          className={`border-t border-border hover:bg-muted/30 transition-colors ${isLow ? "bg-destructive/5" : ""}`}
+                          data-ocid={`inventory.item.${idx + 1}`}
+                        >
+                          <td className="px-4 py-3 font-medium text-foreground">
+                            {item.name}
+                            {isLow && (
+                              <Badge
+                                variant="destructive"
+                                className="ml-2 text-xs"
+                              >
+                                Low
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant="secondary">
+                              {item.category || "—"}
                             </Badge>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="secondary">
-                            {item.category || "—"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {item.unit}
-                        </td>
-                        <td className="px-4 py-3 font-medium">
-                          {formatCurrency(item.costPrice)}
-                        </td>
-                        <td className="px-4 py-3 text-accent font-medium">
-                          {formatCurrency(item.sellingPrice)}
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant={isLow ? "destructive" : "outline"}>
-                            {item.currentStock} {item.unit}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3">
-                          {!isReadOnly && (
+                          </td>
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {item.unit}
+                          </td>
+                          <td className="px-4 py-3 font-medium">
+                            {formatCurrency(item.costPrice)}
+                          </td>
+                          <td className="px-4 py-3 text-accent font-medium">
+                            {formatCurrency(item.sellingPrice)}
+                          </td>
+                          <td className="px-4 py-3">
+                            <Badge variant={isLow ? "destructive" : "outline"}>
+                              {item.currentStock} {item.unit}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3">
                             <div className="flex gap-1 flex-wrap">
                               <Button
                                 variant="outline"
@@ -812,142 +747,69 @@ export default function Inventory() {
                                 variant="ghost"
                                 size="icon"
                                 className="h-8 w-8 text-destructive"
-                                onClick={() => handleDeleteItem(item.id)}
+                                onClick={() => void handleDeleteItem(item.id)}
                                 data-ocid={`inventory.delete_button.${idx + 1}`}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </Button>
                             </div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-              {filteredItems.length > 0 && (
-                <tfoot className="bg-muted/40">
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-3 text-right font-semibold text-foreground"
-                    >
-                      Total Stock Value:
-                    </td>
-                    <td
-                      colSpan={2}
-                      className="px-4 py-3 font-bold text-primary"
-                    >
-                      {formatCurrency(
-                        filteredItems.reduce(
-                          (a, i) => a + i.currentStock * i.costPrice,
-                          0,
-                        ),
-                      )}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ── STORES TAB ── */}
-      {tab === "stores" && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Stores</h2>
-            {!isReadOnly && (
-              <Button
-                onClick={openAddStore}
-                data-ocid="inventory.add_store_button"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Add Store
-              </Button>
-            )}
-          </div>
-          {stores.length === 0 ? (
-            <div
-              className="py-12 text-center text-muted-foreground"
-              data-ocid="inventory.stores_empty_state"
-            >
-              <Warehouse className="w-10 h-10 mx-auto mb-2 opacity-30" />
-              <p>No stores added yet</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50">
-                  <tr>
-                    {[
-                      "Store Name",
-                      "Location",
-                      "Incharge",
-                      "Items",
-                      "Actions",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-3 text-left font-semibold text-muted-foreground"
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+                {items.length > 0 && (
+                  <tfoot className="bg-muted/40">
+                    <tr>
+                      <td
+                        colSpan={5}
+                        className="px-4 py-3 text-right font-semibold text-foreground"
                       >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {stores.map((s, idx) => (
-                    <tr
-                      key={s.id}
-                      className="border-t border-border hover:bg-muted/30"
-                      data-ocid={`inventory.store.${idx + 1}`}
-                    >
-                      <td className="px-4 py-3 font-medium text-foreground">
-                        {s.storeName}
+                        Total Stock Value:
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {s.location || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {s.incharge || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="secondary">
-                          {
-                            items.filter((i) => i.storeLocation === s.storeName)
-                              .length
-                          }{" "}
-                          items
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3">
-                        {!isReadOnly && (
-                          <div className="flex gap-1">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => openEditStore(s)}
-                              data-ocid={`inventory.edit_store_button.${idx + 1}`}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDeleteStore(s.id)}
-                              data-ocid={`inventory.delete_store_button.${idx + 1}`}
-                            >
-                              Delete
-                            </Button>
-                          </div>
+                      <td
+                        colSpan={2}
+                        className="px-4 py-3 font-bold text-primary"
+                      >
+                        {formatCurrency(
+                          items.reduce(
+                            (a, i) => a + i.currentStock * i.costPrice,
+                            0,
+                          ),
                         )}
                       </td>
                     </tr>
-                  ))}
-                </tbody>
+                  </tfoot>
+                )}
               </table>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {totalItems > PAGE_SIZE && (
+            <div className="flex justify-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page === 1}
+                onClick={() => setPage((p) => p - 1)}
+                data-ocid="inventory.pagination_prev"
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-muted-foreground px-3 py-1.5">
+                Page {page} of {Math.ceil(totalItems / PAGE_SIZE)}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page * PAGE_SIZE >= totalItems}
+                onClick={() => setPage((p) => p + 1)}
+                data-ocid="inventory.pagination_next"
+              >
+                Next
+              </Button>
             </div>
           )}
         </div>
@@ -1124,24 +986,22 @@ export default function Inventory() {
         </div>
       )}
 
-      {/* ── PURCHASE TAB ── */}
+      {/* ── PURCHASES TAB ── */}
       {tab === "purchase" && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">
               Purchase Register
             </h2>
-            {!isReadOnly && (
-              <Button
-                onClick={() => setShowPurchaseModal(true)}
-                data-ocid="inventory.add_purchase_button"
-              >
-                <Plus className="w-4 h-4 mr-1" />
-                Record Purchase
-              </Button>
-            )}
+            <Button
+              onClick={() => setShowPurchaseModal(true)}
+              data-ocid="inventory.add_purchase_button"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              Record Purchase
+            </Button>
           </div>
-          {purchases.length === 0 ? (
+          {transactions.filter((t) => t.type === "purchase").length === 0 ? (
             <div
               className="py-12 text-center text-muted-foreground"
               data-ocid="inventory.purchase_empty_state"
@@ -1172,7 +1032,8 @@ export default function Inventory() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[...purchases]
+                  {[...transactions]
+                    .filter((t) => t.type === "purchase")
                     .sort((a, b) => b.date.localeCompare(a.date))
                     .map((p, idx) => (
                       <tr
@@ -1184,14 +1045,16 @@ export default function Inventory() {
                           {p.date}
                         </td>
                         <td className="px-4 py-3 font-medium text-foreground">
-                          {p.itemName}
+                          {p.itemName ?? "—"}
                         </td>
                         <td className="px-4 py-3 tabular-nums">{p.quantity}</td>
                         <td className="px-4 py-3 tabular-nums">
-                          {formatCurrency(p.rate)}
+                          {p.rate != null ? formatCurrency(p.rate) : "—"}
                         </td>
                         <td className="px-4 py-3 font-semibold text-primary tabular-nums">
-                          {formatCurrency(p.totalCost)}
+                          {p.totalCost != null
+                            ? formatCurrency(p.totalCost)
+                            : formatCurrency(p.quantity * (p.rate ?? 0))}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground">
                           {p.vendor || "—"}
@@ -1199,22 +1062,6 @@ export default function Inventory() {
                       </tr>
                     ))}
                 </tbody>
-                <tfoot className="bg-muted/40">
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-4 py-3 text-right font-semibold text-foreground"
-                    >
-                      Total:
-                    </td>
-                    <td className="px-4 py-3 font-bold text-primary">
-                      {formatCurrency(
-                        purchases.reduce((a, p) => a + p.totalCost, 0),
-                      )}
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
               </table>
             </div>
           )}
@@ -1325,9 +1172,11 @@ export default function Inventory() {
           </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={handleSaveItem}
+              onClick={() => void handleSaveItem()}
+              disabled={savingItem}
               data-ocid="inventory.item_save_button"
             >
+              {savingItem && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               Save Item
             </Button>
             <Button
@@ -1337,64 +1186,6 @@ export default function Inventory() {
                 setEditItemId(null);
               }}
               data-ocid="inventory.item_cancel_button"
-            >
-              Cancel
-            </Button>
-          </div>
-        </InvModal>
-      )}
-
-      {/* ── Store Modal ── */}
-      {showStoreModal && (
-        <InvModal
-          title={editStoreId ? "Edit Store" : "Add Store"}
-          onClose={() => {
-            setShowStoreModal(false);
-            setEditStoreId(null);
-          }}
-        >
-          <div>
-            <Label>Store Name *</Label>
-            <Input
-              value={storeForm.storeName}
-              onChange={handleStoreNameChange}
-              placeholder="e.g. Main Store"
-              className="mt-1"
-              data-ocid="inventory.store_name_input"
-            />
-          </div>
-          <div>
-            <Label>Location</Label>
-            <Input
-              value={storeForm.location}
-              onChange={handleStoreLocationChange}
-              placeholder="e.g. Ground Floor, Block B"
-              className="mt-1"
-            />
-          </div>
-          <div>
-            <Label>Incharge</Label>
-            <Input
-              value={storeForm.incharge}
-              onChange={handleStoreInchargeChange}
-              placeholder="Staff name"
-              className="mt-1"
-            />
-          </div>
-          <div className="flex gap-2 pt-1">
-            <Button
-              onClick={handleSaveStore}
-              data-ocid="inventory.store_save_button"
-            >
-              Save Store
-            </Button>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowStoreModal(false);
-                setEditStoreId(null);
-              }}
-              data-ocid="inventory.store_cancel_button"
             >
               Cancel
             </Button>
@@ -1449,9 +1240,11 @@ export default function Inventory() {
           </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={handleStockUpdate}
+              onClick={() => void handleStockUpdate()}
+              disabled={savingStock}
               data-ocid="inventory.stock_save_button"
             >
+              {savingStock && <Loader2 className="w-4 h-4 animate-spin mr-2" />}
               {stockAction === "in" ? "Add Stock" : "Issue Stock"}
             </Button>
             <Button
@@ -1484,10 +1277,10 @@ export default function Inventory() {
               }
               data-ocid="inventory.purchase_item_select"
             >
-              <option value="">— Select Item —</option>
+              <option value="">Select Item</option>
               {items.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.name} ({i.currentStock} {i.unit})
+                  {i.name} (Current: {i.currentStock} {i.unit})
                 </option>
               ))}
             </select>
@@ -1505,13 +1298,13 @@ export default function Inventory() {
                     quantityStr: e.target.value.replace(/[^0-9]/g, ""),
                   }))
                 }
-                placeholder="0"
+                placeholder="10"
                 className="mt-1"
                 data-ocid="inventory.purchase_qty_input"
               />
             </div>
             <div>
-              <Label>Rate per unit (₹) *</Label>
+              <Label>Rate (₹) *</Label>
               <Input
                 type="text"
                 inputMode="decimal"
@@ -1524,35 +1317,38 @@ export default function Inventory() {
                       .replace(/(\..*)\./g, "$1"),
                   }))
                 }
-                placeholder="0.00"
+                placeholder="200"
                 className="mt-1"
                 data-ocid="inventory.purchase_rate_input"
               />
             </div>
           </div>
           {purchaseForm.quantityStr && purchaseForm.rateStr && (
-            <p className="text-sm font-semibold text-primary">
-              Total Cost:{" "}
-              {formatCurrency(
-                (Number(purchaseForm.quantityStr) || 0) *
-                  (Number(purchaseForm.rateStr) || 0),
-              )}
-            </p>
+            <div className="bg-muted/40 rounded-lg px-3 py-2 text-sm flex justify-between">
+              <span className="text-muted-foreground">Total Cost</span>
+              <span className="font-bold text-foreground">
+                ₹
+                {(
+                  Number(purchaseForm.quantityStr) *
+                  Number(purchaseForm.rateStr)
+                ).toLocaleString("en-IN")}
+              </span>
+            </div>
           )}
           <div>
-            <Label>Vendor / Supplier</Label>
+            <Label>Vendor</Label>
             <Input
               value={purchaseForm.vendor}
               onChange={(e) =>
                 setPurchaseForm((p) => ({ ...p, vendor: e.target.value }))
               }
-              placeholder="Vendor name"
+              placeholder="Vendor / supplier name"
               className="mt-1"
               data-ocid="inventory.purchase_vendor_input"
             />
           </div>
           <div>
-            <Label>Date *</Label>
+            <Label>Date</Label>
             <Input
               type="date"
               value={purchaseForm.date}
@@ -1560,14 +1356,19 @@ export default function Inventory() {
                 setPurchaseForm((p) => ({ ...p, date: e.target.value }))
               }
               className="mt-1"
+              data-ocid="inventory.purchase_date_input"
             />
           </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={handleSavePurchase}
+              onClick={() => void handleSavePurchase()}
+              disabled={savingPurchase}
               data-ocid="inventory.purchase_save_button"
             >
-              Save Purchase
+              {savingPurchase && (
+                <Loader2 className="w-4 h-4 animate-spin mr-2" />
+              )}
+              Record Purchase
             </Button>
             <Button
               variant="outline"
