@@ -9,8 +9,9 @@
  * 5. load() returns IndexedDB data merged with any pending writes
  *
  * Events:
- *  - 'sync:complete' — fired when a record successfully saves to MySQL
- *  - 'sync:error'    — fired when server returns an error
+ *  - 'sync:complete'  — fired when a record successfully saves to MySQL
+ *  - 'sync:error'     — fired when server returns a permanent error
+ *  - 'sync:resumed'   — fired when the queue resumes after a token refresh
  */
 
 import phpApiService from "./phpApiService";
@@ -181,7 +182,10 @@ function genId(): string {
 
 // ── Event helpers ─────────────────────────────────────────────────────────────
 
-function emitSyncEvent(type: "sync:complete" | "sync:error", detail?: unknown) {
+function emitSyncEvent(
+  type: "sync:complete" | "sync:error" | "sync:resumed",
+  detail?: unknown,
+) {
   try {
     window.dispatchEvent(new CustomEvent(type, { detail }));
   } catch {
@@ -367,11 +371,12 @@ class LocalFirstSync {
         operation: item.operation,
       });
     } catch (err) {
-      this.scheduleRetry(
-        queueId,
-        item,
-        err instanceof Error ? err.message : "Sync error",
-      );
+      const errMsg = err instanceof Error ? err.message : "Sync error";
+
+      // If phpApiService already silently refreshed and retried but still
+      // failed (e.g. credentials gone), the queue should re-flush after
+      // the token is refreshed externally (via 'auth:token-refreshed' event).
+      this.scheduleRetry(queueId, item, errMsg);
     }
   }
 
@@ -403,6 +408,23 @@ class LocalFirstSync {
     }
   }
 
+  /**
+   * Resume sync after a token refresh.
+   * Resets retry counters on all pending items then flushes the queue.
+   * Emits 'sync:resumed' when done.
+   */
+  async resumeAfterTokenRefresh(): Promise<void> {
+    // Reset retry counters so items that were blocked by 401/403 get a clean
+    // attempt with the freshly issued token.
+    for (const item of pendingMap.values()) {
+      item.retries = 0;
+    }
+    await this.forceSync();
+    emitSyncEvent("sync:resumed", {
+      count: pendingMap.size,
+    });
+  }
+
   /** Load pending queue from IndexedDB (called on app init after page reload) */
   async restorePendingQueue(): Promise<void> {
     try {
@@ -428,6 +450,13 @@ class LocalFirstSync {
     if (typeof window !== "undefined") {
       window.addEventListener("online", () => {
         if (syncEnabled) void this.forceSync();
+      });
+
+      // Resume queue when token is refreshed (either by phpApiService or AppContext)
+      window.addEventListener("auth:token-refreshed", () => {
+        if (syncEnabled && pendingMap.size > 0) {
+          void this.resumeAfterTokenRefresh();
+        }
       });
     }
   }

@@ -5,7 +5,9 @@
  * All data operations go through this service — no canister, no IC.
  *
  * Auth: JWT Bearer token stored in localStorage ('erp_token').
- * Base URL: relative /api so it works on any domain.
+ * Silent re-auth: on 401/403, auto re-authenticates using stored credentials
+ *   (erp_username / erp_password) and retries the request once.
+ * If re-auth fails, emits 'auth:token-expired' DOM event.
  */
 
 const API_BASE = "/api";
@@ -152,6 +154,13 @@ export interface AllDataResult {
 
 class PhpApiService {
   private token: string | null = null;
+  /** True while a silent re-auth is in progress — prevents re-entrancy */
+  private isRefreshing = false;
+  /** Resolve/reject callbacks queued while refresh is in progress */
+  private refreshQueue: Array<{
+    resolve: (token: string) => void;
+    reject: (err: Error) => void;
+  }> = [];
 
   setToken(token: string | null): void {
     this.token = token;
@@ -179,9 +188,108 @@ class PhpApiService {
     this.setToken(null);
   }
 
+  /** Store credentials for silent re-auth — called by Login on success */
+  storeCredentials(username: string, password: string): void {
+    try {
+      localStorage.setItem("erp_username", username);
+      localStorage.setItem("erp_password", password);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
+  private getStoredCredentials(): {
+    username: string;
+    password: string;
+  } | null {
+    try {
+      const u = localStorage.getItem("erp_username");
+      const p = localStorage.getItem("erp_password");
+      if (u && p) return { username: u, password: p };
+    } catch {
+      /* noop */
+    }
+    return null;
+  }
+
+  /** Emit 'auth:token-expired' so the UI can prompt re-login */
+  private emitTokenExpired(): void {
+    try {
+      window.dispatchEvent(new CustomEvent("auth:token-expired"));
+    } catch {
+      /* noop */
+    }
+  }
+
+  /** Emit 'auth:token-refreshed' after a successful silent re-auth */
+  private emitTokenRefreshed(): void {
+    try {
+      window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+    } catch {
+      /* noop */
+    }
+  }
+
+  /**
+   * Attempt silent re-authentication using stored credentials.
+   * If a refresh is already in progress, queue the caller.
+   * Returns the new token on success, throws on failure.
+   */
+  private async silentRefresh(): Promise<string> {
+    // If already refreshing, queue and wait
+    if (this.isRefreshing) {
+      return new Promise<string>((resolve, reject) => {
+        this.refreshQueue.push({ resolve, reject });
+      });
+    }
+
+    const creds = this.getStoredCredentials();
+    if (!creds) {
+      this.clearToken();
+      this.emitTokenExpired();
+      throw new Error("Session expired — please log in again");
+    }
+
+    this.isRefreshing = true;
+    try {
+      const url = `${API_BASE}/?route=auth/login`;
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(creds),
+      });
+      const data = (await resp.json()) as ApiResponse<LoginResult>;
+      if (!resp.ok || !data.success || !data.data?.token) {
+        throw new Error("Re-authentication failed");
+      }
+      const newToken = data.data.token;
+      this.setToken(newToken);
+      this.emitTokenRefreshed();
+
+      // Resolve all queued callers
+      for (const q of this.refreshQueue) q.resolve(newToken);
+      this.refreshQueue = [];
+      return newToken;
+    } catch (err) {
+      this.clearToken();
+      this.emitTokenExpired();
+      const error = err instanceof Error ? err : new Error("Re-auth failed");
+      for (const q of this.refreshQueue) q.reject(error);
+      this.refreshQueue = [];
+      throw error;
+    } finally {
+      this.isRefreshing = false;
+    }
+  }
+
+  /**
+   * Internal request method.
+   * On 401/403: attempt silent re-auth, then retry exactly once.
+   */
   private async request<T>(
     route: string,
     options: RequestInit = {},
+    isRetry = false,
   ): Promise<ApiResponse<T>> {
     const token = this.getToken();
     const headers: Record<string, string> = {
@@ -201,6 +309,23 @@ class PhpApiService {
           ...((options.headers as Record<string, string>) ?? {}),
         },
       });
+
+      // Handle auth errors with silent re-auth (only once)
+      if ((response.status === 401 || response.status === 403) && !isRetry) {
+        const newToken = await this.silentRefresh();
+        // Retry original request with the new token
+        return this.request<T>(
+          route,
+          {
+            ...options,
+            headers: {
+              ...((options.headers as Record<string, string>) ?? {}),
+              Authorization: `Bearer ${newToken}`,
+            },
+          },
+          true,
+        );
+      }
 
       let data: ApiResponse<T>;
       try {

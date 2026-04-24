@@ -14,6 +14,11 @@
  *
  * CRITICAL: pendingWrites in localFirstSync ensures background fetch
  * never overwrites records that are pending MySQL confirmation.
+ *
+ * FIX 5: Listens for 'auth:token-expired' DOM event.
+ *  - If stored credentials exist → silent re-login automatically.
+ *  - If not → shows re-login modal/toast.
+ *  - After success → dispatches 'auth:token-refreshed'.
  */
 
 import {
@@ -24,6 +29,7 @@ import {
   useEffect,
   useReducer,
   useRef,
+  useState,
 } from "react";
 import type {
   AppUser,
@@ -347,7 +353,7 @@ function AppLoading({
             strokeWidth="2"
             role="img"
           >
-            <title>SHUBH School ERP</title>
+            <title>SHUBH School ERP Loading</title>
             <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
             <path d="M6 12v5c3 3 9 3 12 0v-5" />
           </svg>
@@ -392,15 +398,101 @@ function AppLoading({
   );
 }
 
+// ── Re-login modal — shown when token expires and no stored credentials ────────
+
+function ReLoginModal({
+  onDismiss,
+}: {
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+      data-ocid="relogin.dialog"
+    >
+      <div className="bg-card border border-border rounded-2xl shadow-elevated max-w-sm w-full p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+            <svg
+              className="w-5 h-5 text-amber-500"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            </svg>
+          </div>
+          <div>
+            <p className="font-semibold text-foreground font-display">
+              Session Expired
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Your login session has expired
+            </p>
+          </div>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Your session has expired and could not be automatically renewed.
+          Please log out and sign in again to continue.
+        </p>
+        <button
+          type="button"
+          onClick={onDismiss}
+          data-ocid="relogin.logout_button"
+          className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
+        >
+          Log Out & Sign In Again
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── AppProvider ───────────────────────────────────────────────────────────────
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
+  const [showReLoginModal, setShowReLoginModal] = useState(false);
   const initStartedRef = useRef(false);
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   });
+
+  // ── FIX 5 — Listen for auth:token-expired and attempt silent re-login ──────
+  useEffect(() => {
+    const handleTokenExpired = async () => {
+      // Try to grab credentials stored at login time by phpApiService
+      try {
+        const u = localStorage.getItem("erp_username");
+        const p = localStorage.getItem("erp_password");
+        if (u && p) {
+          // Attempt silent re-auth via phpApiService
+          const result = await phpApiService.login(u, p);
+          if (result?.token) {
+            // Success — dispatch refreshed event so the sync queue resumes
+            window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+            return;
+          }
+        }
+      } catch {
+        /* fall through to show modal */
+      }
+      // No credentials or re-auth failed — prompt user
+      setShowReLoginModal(true);
+    };
+
+    window.addEventListener("auth:token-expired", () => {
+      void handleTokenExpired();
+    });
+    return () => {
+      window.removeEventListener("auth:token-expired", () => {
+        void handleTokenExpired();
+      });
+    };
+  }, []);
 
   // ── Restore user from sessionStorage on page reload ───────────────────────
   useEffect(() => {
@@ -433,7 +525,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void (async () => {
       const verified = await phpApiService.verifyToken();
       if (!verified) {
-        // Token expired — force re-login
+        // Token expired — try silent refresh first
+        try {
+          const u = localStorage.getItem("erp_username");
+          const p = localStorage.getItem("erp_password");
+          if (u && p) {
+            const result = await phpApiService.login(u, p);
+            if (result?.token) {
+              window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+              return; // Successfully refreshed — continue with existing session
+            }
+          }
+        } catch {
+          /* fall through to force re-login */
+        }
         phpApiService.clearToken();
         sessionStorage.removeItem("shubh_current_user");
         dispatch({ type: "LOGOUT" });
@@ -736,6 +841,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     phpApiService.clearToken();
     localFirstSync.stopFlushTimer();
     initStartedRef.current = false;
+    setShowReLoginModal(false);
     dispatch({ type: "LOGOUT" });
   }, []);
 
@@ -1023,6 +1129,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) : (
         children
       )}
+      {/* Re-login modal — shown when token expires and silent re-auth fails */}
+      {showReLoginModal && <ReLoginModal onDismiss={logout} />}
     </AppContext.Provider>
   );
 }

@@ -3,7 +3,14 @@
  *
  * Uses a simulated face descriptor (canvas pixel hash → 128-value vector)
  * so the same API surface can be upgraded to real face-api.js later.
- * All data (face descriptors, attendance, logs) stored in canister via useApp().
+ *
+ * FIX 3:
+ *  - runDetectionFrame: after saving attendance to IndexedDB via saveData(),
+ *    also immediately POSTs to /api?route=attendance/mark via phpApiService.
+ *    If API call fails (token expired, network), the record stays safely in
+ *    IndexedDB and the localFirstSync queue will retry it later.
+ *  - Enrollment: face descriptors are also persisted to the server via
+ *    /api?route=attendance/enroll-face so they survive a browser cache clear.
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -29,6 +36,8 @@ import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { AttendanceRecord, Student } from "../../types";
 import { generateId } from "../../utils/localStorage";
+import phpApiService from "../../utils/phpApiService";
+import type { AttendanceRecord as PhpAttendanceRecord } from "../../utils/phpApiService";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -186,13 +195,13 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     [getData, currentSession],
   );
 
-  // Face descriptors from canister
+  // Face descriptors from local store
   const enrollDescriptors = useMemo(
     () => getData("face_descriptors") as FaceDescriptor[],
     [getData],
   );
 
-  // Face logs from canister
+  // Face logs from local store
   const faceLogs = useMemo(() => getData("face_logs") as FaceLog[], [getData]);
 
   const enrolledIds = useMemo(
@@ -219,7 +228,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     };
   }, []);
 
-  // ── Enrollment camera ──────────────────────────────────────────────────────
+  // ── Enrollment camera ──────────────────────────────────────────────────
 
   async function startEnrollCamera() {
     setEnrollCameraError("");
@@ -292,6 +301,19 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         );
       }
 
+      // FIX 3 — also persist enrollment to server so it survives browser cache clear
+      try {
+        await phpApiService.post("attendance/enroll-face", {
+          studentId: enrollingStudent.id,
+          descriptorId: descriptorRecord.id,
+          enrolledAt: descriptorRecord.enrolledAt,
+          // Note: descriptor array is large; server can store a hash or the full array
+          descriptor: descriptorRecord.descriptor,
+        });
+      } catch {
+        // Non-critical: enrollment is already in IndexedDB; server sync will retry
+      }
+
       toast.success(
         `✅ ${enrollingStudent.fullName} enrolled for face recognition`,
       );
@@ -307,7 +329,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     }
   }
 
-  // ── Live detection camera ──────────────────────────────────────────────────
+  // ── Live detection camera ──────────────────────────────────────────────
 
   async function startLiveCamera() {
     try {
@@ -354,7 +376,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     const frameDescriptor = computeDescriptor(ctx, canvas.width, canvas.height);
 
-    // Match against enrolled descriptors from canister
+    // Match against enrolled descriptors
     let bestMatch: { descriptor: FaceDescriptor; confidence: number } | null =
       null;
     for (const enrolled of enrollDescriptors) {
@@ -400,7 +422,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
 
       setRecentCheckins((prev) => [faceLog, ...prev].slice(0, 5));
 
-      // Save attendance record to canister
+      // Build attendance record
       const attRec: AttendanceRecord = {
         id: generateId(),
         studentId: student.id,
@@ -415,6 +437,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         sessionId: currentSession?.id,
       };
 
+      // Step 1 — Save to IndexedDB immediately (guaranteed, never lost)
       saveData(
         "attendance",
         attRec as unknown as Record<string, unknown>,
@@ -423,6 +446,16 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         "face_logs",
         faceLog as unknown as Record<string, unknown>,
       ).catch(() => {});
+
+      // FIX 3 — Step 2: also POST directly to PHP API for immediate MySQL write.
+      // If this fails (e.g. token expired), the record is already in IndexedDB
+      // and localFirstSync will retry it — so data is never lost.
+      phpApiService
+        .markAttendance([attRec as unknown as PhpAttendanceRecord])
+        .catch(() => {
+          // Silent fallback — IndexedDB queue handles the retry
+        });
+
       addNotification(
         `🎭 Face: ${student.fullName} marked Present`,
         "success",
@@ -458,7 +491,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     };
   }, [runDetectionFrame, detectionOn]);
 
-  // ── Log helpers ───────────────────────────────────────────────────────────
+  // ── Log helpers ───────────────────────────────────────────────────────
 
   const filteredLogs = useMemo(() => {
     return faceLogs.filter((log) => {
@@ -495,7 +528,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     [activeStudents],
   );
 
-  // ── Access gate ───────────────────────────────────────────────────────────
+  // ── Access gate ───────────────────────────────────────────────────────
 
   if (!canAccess) {
     return (
@@ -516,7 +549,7 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
     );
   }
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ── Render ────────────────────────────────────────────────────────────
 
   return (
     <div className="space-y-5">
@@ -525,8 +558,9 @@ export default function FaceAttendance({ date }: FaceAttendanceProps) {
         <Brain className="w-5 h-5 text-yellow-600 flex-shrink-0" />
         <p className="text-sm text-yellow-800 dark:text-yellow-300">
           <span className="font-semibold">AI Face Detection (Demo Mode)</span> —
-          Uses pixel-hash descriptors for face matching. All data stored in the
-          canister — works across all devices automatically.
+          Uses pixel-hash descriptors for face matching. Attendance saves to
+          browser storage first, then syncs to MySQL immediately and via
+          background queue.
         </p>
       </Card>
 

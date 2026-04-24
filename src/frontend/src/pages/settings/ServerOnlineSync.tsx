@@ -1,6 +1,12 @@
 /**
  * SHUBH SCHOOL ERP — Server & Online Sync Settings
  * Super Admin only — configure API endpoint, sync interval, view sync logs.
+ *
+ * FIX 4: Token Status section with self-healing "Refresh Token" button.
+ *  - Shows whether the current JWT is valid or expired.
+ *  - "Refresh Token" triggers silent re-auth using stored credentials.
+ *  - Shows last successful token refresh timestamp.
+ *  - If credentials are not stored, shows "Please log out and log back in".
  */
 
 import { Badge } from "@/components/ui/badge";
@@ -14,10 +20,13 @@ import {
   CheckCircle2,
   Clock,
   Database,
+  Key,
   Loader2,
   RefreshCw,
   RotateCcw,
   Server,
+  ShieldCheck,
+  ShieldX,
   Trash2,
   Wifi,
   WifiOff,
@@ -68,6 +77,7 @@ const LS_SYNC_INTERVAL = "erp_sync_interval";
 const LS_SYNC_LOGS = "erp_sync_logs";
 const LS_HEALTH_HISTORY = "erp_health_history";
 const LS_SYNC_STATS = "erp_sync_stats";
+const LS_LAST_TOKEN_REFRESH = "erp_last_token_refresh";
 
 const DEFAULT_INTERVAL = 15;
 const DEFAULT_URL = "/api";
@@ -220,6 +230,15 @@ export default function ServerOnlineSync() {
     "idle" | "checking" | "valid" | "invalid"
   >("idle");
   const [jwtRole, setJwtRole] = useState("");
+  const [tokenRefreshState, setTokenRefreshState] = useState<
+    "idle" | "refreshing" | "success" | "fail" | "no-credentials"
+  >("idle");
+  const [lastTokenRefresh, setLastTokenRefresh] = useState<number | null>(
+    () => loadLs(LS_LAST_TOKEN_REFRESH, null) as number | null,
+  );
+  const hasStoredCredentials =
+    !!localStorage.getItem("erp_username") &&
+    !!localStorage.getItem("erp_password");
 
   // Sync logs
   const [syncLogs, setSyncLogs] = useState<SyncLog[]>(
@@ -257,9 +276,6 @@ export default function ServerOnlineSync() {
   const refreshPending = useCallback(() => {
     const count = localFirstSync.getPendingCount();
     setPendingCount(count);
-    // Build per-module breakdown by inspecting IndexedDB pending store
-    // We approximate from the global count since pendingMap is private
-    // A real implementation would expose pendingByModule from localFirstSync
     setPendingByModule(count > 0 ? { pending: count } : {});
     setSyncStatus(count === 0 ? "synced" : "pending");
   }, []);
@@ -319,11 +335,22 @@ export default function ServerOnlineSync() {
       setSyncStatus("error");
     };
 
+    const handleTokenRefreshed = () => {
+      const ts = Date.now();
+      setLastTokenRefresh(ts);
+      saveLs(LS_LAST_TOKEN_REFRESH, ts);
+      setTokenRefreshState("success");
+      // Auto-reset success badge after 4s
+      setTimeout(() => setTokenRefreshState("idle"), 4000);
+    };
+
     window.addEventListener("sync:complete", handleComplete);
     window.addEventListener("sync:error", handleError);
+    window.addEventListener("auth:token-refreshed", handleTokenRefreshed);
     return () => {
       window.removeEventListener("sync:complete", handleComplete);
       window.removeEventListener("sync:error", handleError);
+      window.removeEventListener("auth:token-refreshed", handleTokenRefreshed);
     };
   }, []);
 
@@ -404,6 +431,38 @@ export default function ServerOnlineSync() {
       }
     } catch {
       setJwtState("invalid");
+    }
+  };
+
+  /**
+   * FIX 4 — Self-healing "Refresh Token" button.
+   * Uses stored credentials to silently re-authenticate.
+   */
+  const handleRefreshToken = async () => {
+    const u = localStorage.getItem("erp_username");
+    const p = localStorage.getItem("erp_password");
+    if (!u || !p) {
+      setTokenRefreshState("no-credentials");
+      return;
+    }
+    setTokenRefreshState("refreshing");
+    try {
+      const result = await phpApiService.login(u, p);
+      if (result?.token) {
+        const ts = Date.now();
+        setLastTokenRefresh(ts);
+        saveLs(LS_LAST_TOKEN_REFRESH, ts);
+        setTokenRefreshState("success");
+        setJwtState("valid");
+        setJwtRole(result.user.role ?? "unknown");
+        // Notify sync queue to resume
+        window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+        setTimeout(() => setTokenRefreshState("idle"), 4000);
+      } else {
+        setTokenRefreshState("fail");
+      }
+    } catch {
+      setTokenRefreshState("fail");
     }
   };
 
@@ -738,7 +797,135 @@ export default function ServerOnlineSync() {
         </div>
       </div>
 
-      {/* JWT Credential Status */}
+      {/* ── FIX 4: Token Status Card with self-healing refresh ──────────────── */}
+      <div
+        className="rounded-xl border border-border bg-card p-4 shadow-subtle space-y-4"
+        data-ocid="server-sync.token_card"
+      >
+        <div className="flex items-center gap-2">
+          <Key className="w-4 h-4 text-primary" />
+          <span className="font-semibold text-sm text-foreground">
+            Token Status
+          </span>
+        </div>
+
+        {/* Verify current token */}
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm text-foreground">Current Session Token</p>
+            <p className="text-xs text-muted-foreground">
+              {lastTokenRefresh
+                ? `Last refreshed: ${new Date(lastTokenRefresh).toLocaleTimeString("en-IN")}`
+                : "No token refresh recorded this session"}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCheckJwt}
+            disabled={jwtState === "checking"}
+            data-ocid="server-sync.check_jwt_button"
+          >
+            {jwtState === "checking" ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              "Verify Token"
+            )}
+          </Button>
+        </div>
+
+        {jwtState === "valid" && (
+          <div
+            className="flex items-center gap-2 text-xs text-accent"
+            data-ocid="server-sync.jwt_success_state"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>
+              Token valid · Authenticated as{" "}
+              <strong className="capitalize">{jwtRole}</strong>
+            </span>
+          </div>
+        )}
+        {jwtState === "invalid" && (
+          <div
+            className="flex items-center gap-2 text-xs text-destructive"
+            data-ocid="server-sync.jwt_error_state"
+          >
+            <ShieldX className="w-4 h-4" />
+            <span>Token expired or invalid</span>
+          </div>
+        )}
+
+        {/* Self-healing refresh section */}
+        <div className="border-t border-border pt-3 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-foreground">
+                Refresh Token
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {hasStoredCredentials
+                  ? "Silently re-authenticate using your stored login credentials"
+                  : "No stored credentials — log out and sign in again to enable auto-refresh"}
+              </p>
+            </div>
+            <Button
+              variant={jwtState === "invalid" ? "default" : "outline"}
+              size="sm"
+              onClick={handleRefreshToken}
+              disabled={
+                !hasStoredCredentials || tokenRefreshState === "refreshing"
+              }
+              data-ocid="server-sync.refresh_token_button"
+            >
+              {tokenRefreshState === "refreshing" ? (
+                <Loader2 className="w-4 h-4 animate-spin mr-1.5" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-1.5" />
+              )}
+              {tokenRefreshState === "refreshing"
+                ? "Refreshing…"
+                : "Refresh Token"}
+            </Button>
+          </div>
+
+          {tokenRefreshState === "success" && (
+            <div
+              className="flex items-center gap-2 text-xs text-accent animate-in fade-in"
+              data-ocid="server-sync.token_refresh_success_state"
+            >
+              <CheckCircle2 className="w-4 h-4" />
+              <span>Token refreshed successfully — sync queue has resumed</span>
+            </div>
+          )}
+          {tokenRefreshState === "fail" && (
+            <div
+              className="flex items-center gap-2 text-xs text-destructive animate-in fade-in"
+              data-ocid="server-sync.token_refresh_error_state"
+            >
+              <XCircle className="w-4 h-4" />
+              <span>
+                Refresh failed — your stored password may have changed. Please
+                log out and sign in again.
+              </span>
+            </div>
+          )}
+          {tokenRefreshState === "no-credentials" && (
+            <div
+              className="flex items-center gap-2 text-xs text-amber-600 animate-in fade-in"
+              data-ocid="server-sync.token_no_credentials_state"
+            >
+              <AlertCircle className="w-4 h-4" />
+              <span>
+                No stored credentials found. Please log out and sign in again to
+                enable automatic token refresh.
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* JWT Credential Status (legacy verify section) */}
       <div
         className="rounded-xl border border-border bg-card p-4 shadow-subtle"
         data-ocid="server-sync.jwt_card"
@@ -755,7 +942,7 @@ export default function ServerOnlineSync() {
             size="sm"
             onClick={handleCheckJwt}
             disabled={jwtState === "checking"}
-            data-ocid="server-sync.check_jwt_button"
+            data-ocid="server-sync.check_jwt_button_2"
           >
             {jwtState === "checking" ? (
               <Loader2 className="w-4 h-4 animate-spin" />
@@ -765,10 +952,7 @@ export default function ServerOnlineSync() {
           </Button>
         </div>
         {jwtState === "valid" && (
-          <div
-            className="flex items-center gap-2 mt-3 text-xs text-accent"
-            data-ocid="server-sync.jwt_success_state"
-          >
+          <div className="flex items-center gap-2 mt-3 text-xs text-accent">
             <CheckCircle2 className="w-4 h-4" />
             <span>
               Authenticated as <strong className="capitalize">{jwtRole}</strong>
@@ -776,13 +960,11 @@ export default function ServerOnlineSync() {
           </div>
         )}
         {jwtState === "invalid" && (
-          <div
-            className="flex items-center gap-2 mt-3 text-xs text-destructive"
-            data-ocid="server-sync.jwt_error_state"
-          >
+          <div className="flex items-center gap-2 mt-3 text-xs text-destructive">
             <XCircle className="w-4 h-4" />
             <span>
-              Token expired or invalid — please log out and log back in
+              Token expired — use the "Refresh Token" button above to renew
+              automatically, or log out and sign in again.
             </span>
           </div>
         )}

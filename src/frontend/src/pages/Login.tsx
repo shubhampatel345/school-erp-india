@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { useApp } from "../context/AppContext";
+import phpApiService from "../utils/phpApiService";
 
 export default function Login() {
   const { login } = useApp();
@@ -26,8 +27,15 @@ export default function Login() {
     setError("");
     setLoading(true);
     try {
-      const ok = await login(username.trim(), password.trim());
-      if (!ok) {
+      const trimmedUser = username.trim();
+      const trimmedPass = password.trim();
+      const ok = await login(trimmedUser, trimmedPass);
+      if (ok) {
+        // Store credentials for silent token re-auth (non-superadmin only)
+        if (trimmedUser !== "superadmin") {
+          phpApiService.storeCredentials(trimmedUser, trimmedPass);
+        }
+      } else {
         setError(
           "Invalid username or password. Please check your credentials and try again.",
         );
