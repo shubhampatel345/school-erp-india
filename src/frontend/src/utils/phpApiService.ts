@@ -115,6 +115,7 @@ export interface AttendanceRecord extends Record<string, unknown> {
 
 export interface LoginResult {
   token: string;
+  refresh_token?: string;
   user: {
     id: string;
     username: string;
@@ -186,6 +187,11 @@ class PhpApiService {
 
   clearToken(): void {
     this.setToken(null);
+    try {
+      localStorage.removeItem("erp_refresh_token");
+    } catch {
+      /* noop */
+    }
   }
 
   /** Store credentials for silent re-auth — called by Login on success */
@@ -195,6 +201,23 @@ class PhpApiService {
       localStorage.setItem("erp_password", password);
     } catch {
       /* storage unavailable */
+    }
+  }
+
+  /** Store refresh token — called after successful login */
+  storeRefreshToken(refreshToken: string): void {
+    try {
+      localStorage.setItem("erp_refresh_token", refreshToken);
+    } catch {
+      /* noop */
+    }
+  }
+
+  private getStoredRefreshToken(): string | null {
+    try {
+      return localStorage.getItem("erp_refresh_token");
+    } catch {
+      return null;
     }
   }
 
@@ -231,7 +254,9 @@ class PhpApiService {
   }
 
   /**
-   * Attempt silent re-authentication using stored credentials.
+   * Attempt silent re-authentication.
+   * Strategy: try /auth/refresh with stored refresh_token first (lightweight).
+   * If that fails or no refresh_token, fall back to full re-login with stored credentials.
    * If a refresh is already in progress, queue the caller.
    * Returns the new token on success, throws on failure.
    */
@@ -243,15 +268,50 @@ class PhpApiService {
       });
     }
 
-    const creds = this.getStoredCredentials();
-    if (!creds) {
-      this.clearToken();
-      this.emitTokenExpired();
-      throw new Error("Session expired — please log in again");
-    }
-
     this.isRefreshing = true;
     try {
+      // Step 1: Try refresh_token endpoint first (lightweight)
+      const storedRefreshToken = this.getStoredRefreshToken();
+      if (storedRefreshToken) {
+        try {
+          const refreshUrl = `${API_BASE}/?route=auth/refresh`;
+          const refreshResp = await fetch(refreshUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ refresh_token: storedRefreshToken }),
+          });
+          if (refreshResp.ok) {
+            const refreshData =
+              (await refreshResp.json()) as ApiResponse<LoginResult>;
+            if (refreshData.success && refreshData.data?.token) {
+              const newToken = refreshData.data.token;
+              this.setToken(newToken);
+              // Update refresh token if a new one was returned
+              if (refreshData.data.refresh_token) {
+                this.storeRefreshToken(refreshData.data.refresh_token);
+              } else {
+                // Keep existing refresh token (still valid for JWT_REFRESH window)
+              }
+              this.emitTokenRefreshed();
+              for (const q of this.refreshQueue) q.resolve(newToken);
+              this.refreshQueue = [];
+              return newToken;
+            }
+          }
+          // refresh_token invalid/expired — fall through to credential re-login
+        } catch {
+          /* network error — fall through */
+        }
+      }
+
+      // Step 2: Fall back to re-login with stored credentials
+      const creds = this.getStoredCredentials();
+      if (!creds) {
+        this.clearToken();
+        this.emitTokenExpired();
+        throw new Error("Session expired — please log in again");
+      }
+
       const url = `${API_BASE}/?route=auth/login`;
       const resp = await fetch(url, {
         method: "POST",
@@ -264,6 +324,10 @@ class PhpApiService {
       }
       const newToken = data.data.token;
       this.setToken(newToken);
+      // Store new refresh token if returned
+      if (data.data.refresh_token) {
+        this.storeRefreshToken(data.data.refresh_token);
+      }
       this.emitTokenRefreshed();
 
       // Resolve all queued callers
@@ -388,6 +452,10 @@ class PhpApiService {
       });
       if (res.data?.token) {
         this.setToken(res.data.token);
+        // Store refresh token if returned
+        if (res.data.refresh_token) {
+          this.storeRefreshToken(res.data.refresh_token);
+        }
       }
       return res.data ?? null;
     } catch {

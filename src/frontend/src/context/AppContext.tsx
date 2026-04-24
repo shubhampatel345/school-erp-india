@@ -464,15 +464,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── FIX 5 — Listen for auth:token-expired and attempt silent re-login ──────
   useEffect(() => {
     const handleTokenExpired = async () => {
-      // Try to grab credentials stored at login time by phpApiService
+      // Try silent re-auth via phpApiService (tries refresh_token then stored creds)
+      try {
+        // phpApiService.silentRefresh() is private; trigger it via a lightweight request
+        // that will auto-refresh on 401
+        const verified = await phpApiService.verifyToken();
+        if (verified) {
+          window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+      // Try explicit re-login with stored credentials
       try {
         const u = localStorage.getItem("erp_username");
         const p = localStorage.getItem("erp_password");
         if (u && p) {
-          // Attempt silent re-auth via phpApiService
           const result = await phpApiService.login(u, p);
           if (result?.token) {
-            // Success — dispatch refreshed event so the sync queue resumes
             window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
             return;
           }
@@ -484,13 +494,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setShowReLoginModal(true);
     };
 
-    window.addEventListener("auth:token-expired", () => {
+    const listener = () => {
       void handleTokenExpired();
-    });
+    };
+    window.addEventListener("auth:token-expired", listener);
     return () => {
-      window.removeEventListener("auth:token-expired", () => {
-        void handleTokenExpired();
-      });
+      window.removeEventListener("auth:token-expired", listener);
     };
   }, []);
 
@@ -514,18 +523,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // ── Verify token validity on restore ─────────────────────────────────────
+  // ── Verify token validity on restore (NOT on fresh login) ────────────────
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     const token = phpApiService.getToken();
-    if (!token) return; // fresh login handled separately — skip verify
+    if (!token) return;
     // For superadmin local login, skip server verify
     if (state.currentUser.role === "superadmin") return;
 
+    // CRITICAL FIX: Skip verification if this is a FRESH login (within last 60s).
+    // A fresh token was just issued by the server — it is always valid.
+    // Only verify on SESSION RESTORE (page refresh with existing token).
+    try {
+      const loginTs = localStorage.getItem("erp_login_timestamp");
+      if (loginTs) {
+        const age = Date.now() - Number(loginTs);
+        if (age < 60_000) {
+          // Fresh login — token is valid, skip verification entirely
+          return;
+        }
+      }
+    } catch {
+      /* noop */
+    }
+
+    // Session restore path: do a lightweight token check
     void (async () => {
       const verified = await phpApiService.verifyToken();
       if (!verified) {
-        // Token expired — try silent refresh first
+        // Token expired — try silent refresh first (refresh_token or stored creds)
         try {
           const u = localStorage.getItem("erp_username");
           const p = localStorage.getItem("erp_password");
@@ -539,8 +565,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         } catch {
           /* fall through to force re-login */
         }
+        // Both refresh and re-login failed — show re-login modal
         phpApiService.clearToken();
         sessionStorage.removeItem("shubh_current_user");
+        localStorage.removeItem("erp_login_timestamp");
         dispatch({ type: "LOGOUT" });
       }
     })();
@@ -706,6 +734,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
             name: serverUser.name ?? serverUser.fullName ?? username,
           };
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
+          // Store refresh token if returned
+          if (result.refresh_token) {
+            phpApiService.storeRefreshToken(result.refresh_token);
+          }
           // Apply server-side permissions if provided
           if (serverUser.permissions) {
             const matrix: PermissionMatrix = {};
@@ -721,6 +753,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
           initStartedRef.current = false;
+          // Stamp fresh-login before dispatch so the verify effect always sees it
+          try {
+            localStorage.setItem("erp_login_timestamp", Date.now().toString());
+          } catch {
+            /* noop */
+          }
           dispatch({ type: "SET_USER", user });
           return true;
         }
@@ -767,6 +805,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        try {
+          localStorage.setItem("erp_login_timestamp", Date.now().toString());
+        } catch {
+          /* noop */
+        }
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -796,6 +839,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        try {
+          localStorage.setItem("erp_login_timestamp", Date.now().toString());
+        } catch {
+          /* noop */
+        }
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -827,6 +875,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        try {
+          localStorage.setItem("erp_login_timestamp", Date.now().toString());
+        } catch {
+          /* noop */
+        }
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -838,6 +891,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");
+    localStorage.removeItem("erp_login_timestamp");
+    localStorage.removeItem("erp_refresh_token");
     phpApiService.clearToken();
     localFirstSync.stopFlushTimer();
     initStartedRef.current = false;

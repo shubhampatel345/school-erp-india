@@ -69,6 +69,7 @@ if ($route === '' || $route === 'health') {
 // ── Auth ──────────────────────────────────────────────────────────────────────
 if ($route === 'auth/login')           { route_auth_login($method, $body); }
 if ($route === 'auth/verify')          { route_auth_verify($auth); }
+if ($route === 'auth/refresh')         { route_auth_refresh($method, $body); }
 if ($route === 'auth/logout')          { jsonSuccess(null, 'Logged out'); }
 if ($route === 'auth/change-password') { route_auth_change_password($method, $body, $auth); }
 
@@ -216,10 +217,22 @@ function route_auth_login(string $method, array $body): void {
     ];
     $token = generateToken($payload);
 
+    // Generate refresh token (longer-lived, separate secret)
+    $refreshPayload = [
+        'user_id' => $user['id'],
+        'iat'     => $now,
+        'exp'     => $now + JWT_REFRESH,
+    ];
+    $rHeader      = b64u(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+    $rPay         = b64u(json_encode($refreshPayload));
+    $rSig         = b64u(hash_hmac('sha256', "$rHeader.$rPay", APP_SECRET . '_refresh', true));
+    $refreshToken = "$rHeader.$rPay.$rSig";
+
     jsonSuccess([
-        'token'      => $token,
-        'expires_in' => JWT_EXPIRY,
-        'user'       => [
+        'token'         => $token,
+        'refresh_token' => $refreshToken,
+        'expires_in'    => JWT_EXPIRY,
+        'user'          => [
             'id'       => $user['id'],
             'username' => $user['username'],
             'fullName' => $user['fullName'] ?? $user['name'] ?? $username,
@@ -244,6 +257,71 @@ function route_auth_verify(?array $auth): void {
     } catch (Throwable $e) {
         jsonSuccess(['valid' => true, 'user' => ['id' => $auth['user_id'] ?? '', 'role' => $auth['role'] ?? '']]);
     }
+}
+
+function route_auth_refresh(string $method, array $body): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+
+    $refreshToken = trim($body['refresh_token'] ?? '');
+    if (!$refreshToken) jsonError('refresh_token is required', 400);
+
+    // Verify the refresh token signature and expiry.
+    // We use a separate secret derivation so a stolen access token cannot be
+    // used as a refresh token.
+    $parts = explode('.', $refreshToken);
+    if (count($parts) !== 3) jsonError('Invalid refresh token', 401);
+    [$h, $p, $s] = $parts;
+    $expected = b64u(hash_hmac('sha256', "$h.$p", APP_SECRET . '_refresh', true));
+    if (!hash_equals($expected, $s)) jsonError('Invalid refresh token', 401);
+
+    $data = json_decode(b64d($p), true);
+    if (!$data || ($data['exp'] ?? 0) < time()) jsonError('Refresh token expired', 401);
+
+    $userId = $data['user_id'] ?? '';
+    if (!$userId) jsonError('Invalid refresh token payload', 401);
+
+    // Load the user to issue a fresh access token
+    try { $db = getDB(); } catch (Throwable $e) {
+        jsonError('Database not ready', 503);
+    }
+    $stmt = $db->prepare('SELECT * FROM `users` WHERE `id`=? LIMIT 1');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+    if (!$user) jsonError('User not found', 401);
+
+    $now     = time();
+    $payload = [
+        'user_id'  => $user['id'],
+        'role'     => $user['role'],
+        'username' => $user['username'],
+        'name'     => $user['fullName'] ?? $user['name'] ?? $user['username'],
+        'iat'      => $now,
+        'exp'      => $now + JWT_EXPIRY,
+    ];
+    $newToken = generateToken($payload);
+
+    // Issue a new refresh token as well (sliding window)
+    $refreshPayload = [
+        'user_id' => $user['id'],
+        'iat'     => $now,
+        'exp'     => $now + JWT_REFRESH,
+    ];
+    $rHeader       = b64u(json_encode(['alg' => 'HS256', 'typ' => 'JWT']));
+    $rPay          = b64u(json_encode($refreshPayload));
+    $rSig          = b64u(hash_hmac('sha256', "$rHeader.$rPay", APP_SECRET . '_refresh', true));
+    $newRefreshToken = "$rHeader.$rPay.$rSig";
+
+    jsonSuccess([
+        'token'         => $newToken,
+        'refresh_token' => $newRefreshToken,
+        'expires_in'    => JWT_EXPIRY,
+        'user'          => [
+            'id'       => $user['id'],
+            'username' => $user['username'],
+            'fullName' => $user['fullName'] ?? $user['name'] ?? $user['username'],
+            'role'     => $user['role'],
+        ],
+    ], 'Token refreshed');
 }
 
 function route_auth_change_password(string $method, array $body, ?array $auth): void {

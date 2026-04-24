@@ -34,6 +34,7 @@ export default function Login() {
         // Store credentials for silent token re-auth (non-superadmin only)
         if (trimmedUser !== "superadmin") {
           phpApiService.storeCredentials(trimmedUser, trimmedPass);
+          // erp_login_timestamp is already stamped inside AppContext.login() before dispatch
         }
       } else {
         setError(
