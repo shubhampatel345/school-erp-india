@@ -186,15 +186,11 @@ function appReducer(state: AppState, action: AppAction): AppState {
     }
 
     case "ADD_SESSION": {
-      const updated = state.sessions.map((s) => ({
-        ...s,
-        isActive: false,
-        isArchived: true,
-      }));
+      // Don't automatically archive existing sessions — let the caller decide.
+      // Just append the new session without changing others.
       return {
         ...state,
-        sessions: [...updated, action.session],
-        currentSession: action.session,
+        sessions: [...state.sessions, action.session],
       };
     }
 
@@ -290,7 +286,7 @@ interface AppContextValue {
   changePassword: (userId: string, newPassword: string) => boolean;
   // Session
   switchSession: (sessionId: string) => void;
-  createSession: (label: string) => Session;
+  createSession: (label: string, description?: string) => Session;
   // Notifications
   addNotification: (
     message: string,
@@ -457,6 +453,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [showReLoginModal, setShowReLoginModal] = useState(false);
   const initStartedRef = useRef(false);
   const stateRef = useRef(state);
+  // Tracks the timestamp of the most recent successful login.
+  // Using a ref (not localStorage) so it is set synchronously in the same
+  // render cycle as the SET_USER dispatch — localStorage writes can be delayed.
+  const freshLoginRef = useRef<number | null>(null);
   useEffect(() => {
     stateRef.current = state;
   });
@@ -464,6 +464,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── FIX 5 — Listen for auth:token-expired and attempt silent re-login ──────
   useEffect(() => {
     const handleTokenExpired = async () => {
+      // Guard 1: never handle token expiry when nobody is logged in
+      if (!stateRef.current.currentUser) return;
+      // Guard 2: don't show modal right after a fresh login (2-minute cool-down)
+      if (
+        freshLoginRef.current !== null &&
+        Date.now() - freshLoginRef.current < 120_000
+      )
+        return;
+
       // Try silent re-auth via phpApiService (tries refresh_token then stored creds)
       try {
         // phpApiService.silentRefresh() is private; trigger it via a lightweight request
@@ -509,7 +518,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (storedUserRaw) {
       try {
         const user = JSON.parse(storedUserRaw) as AppUser;
-        // If token still in localStorage, restore session directly
+        // If token still in localStorage, restore session directly.
+        // Do NOT set freshLoginRef here — this is a page-reload restore, not a
+        // fresh login. The verify effect will run normally and check the token.
         const token = phpApiService.getToken();
         if (token) {
           dispatch({ type: "SET_USER", user });
@@ -525,26 +536,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   // ── Verify token validity on restore (NOT on fresh login) ────────────────
   useEffect(() => {
-    if (!state.currentUser || !state.isInitializing) return;
+    // Guard 1: never run when no user is logged in (e.g. on the login screen)
+    if (!state.currentUser) return;
+    if (!state.isInitializing) return;
     const token = phpApiService.getToken();
     if (!token) return;
     // For superadmin local login, skip server verify
     if (state.currentUser.role === "superadmin") return;
 
-    // CRITICAL FIX: Skip verification if this is a FRESH login (within last 60s).
-    // A fresh token was just issued by the server — it is always valid.
-    // Only verify on SESSION RESTORE (page refresh with existing token).
-    try {
-      const loginTs = localStorage.getItem("erp_login_timestamp");
-      if (loginTs) {
-        const age = Date.now() - Number(loginTs);
-        if (age < 60_000) {
-          // Fresh login — token is valid, skip verification entirely
-          return;
-        }
-      }
-    } catch {
-      /* noop */
+    // Guard 2: skip verification entirely for 2 minutes after a fresh login.
+    // A freshly issued token is always valid — verifying it immediately can
+    // trigger a false-positive expiry event due to timing races.
+    if (
+      freshLoginRef.current !== null &&
+      Date.now() - freshLoginRef.current < 120_000
+    ) {
+      return;
     }
 
     // Session restore path: do a lightweight token check
@@ -717,6 +724,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           JSON.stringify(SUPER_ADMIN),
         );
         initStartedRef.current = false;
+        // Set freshLoginRef BEFORE dispatch so the verify effect always sees it
+        freshLoginRef.current = Date.now();
         dispatch({ type: "SET_USER", user: SUPER_ADMIN });
         return true;
       }
@@ -753,7 +762,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
           initStartedRef.current = false;
-          // Stamp fresh-login before dispatch so the verify effect always sees it
+          // Stamp fresh-login timestamp BEFORE dispatch so the verify effect
+          // always sees it in the same render cycle (ref updates are synchronous).
+          freshLoginRef.current = Date.now();
           try {
             localStorage.setItem("erp_login_timestamp", Date.now().toString());
           } catch {
@@ -805,6 +816,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        freshLoginRef.current = Date.now();
         try {
           localStorage.setItem("erp_login_timestamp", Date.now().toString());
         } catch {
@@ -839,6 +851,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        freshLoginRef.current = Date.now();
         try {
           localStorage.setItem("erp_login_timestamp", Date.now().toString());
         } catch {
@@ -875,6 +888,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
+        freshLoginRef.current = Date.now();
         try {
           localStorage.setItem("erp_login_timestamp", Date.now().toString());
         } catch {
@@ -896,6 +910,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     phpApiService.clearToken();
     localFirstSync.stopFlushTimer();
     initStartedRef.current = false;
+    freshLoginRef.current = null;
     setShowReLoginModal(false);
     dispatch({ type: "LOGOUT" });
   }, []);
@@ -1000,27 +1015,37 @@ export function AppProvider({ children }: { children: ReactNode }) {
     ls.set("current_session", sessionId);
   }, []);
 
-  const createSession = useCallback((label: string): Session => {
-    const [startStr] = label.split("-");
-    const startYear = Number.parseInt(startStr, 10);
-    const session: Session = {
-      id: generateId(),
-      label,
-      startYear,
-      endYear: startYear + 1,
-      isArchived: false,
-      isActive: true,
-      createdAt: new Date().toISOString(),
-    };
-    dispatch({ type: "ADD_SESSION", session });
-    void phpApiService.createSession({
-      label: session.label,
-      startYear: session.startYear,
-      endYear: session.endYear,
-    });
-    ls.set("current_session", session.id);
-    return session;
-  }, []);
+  const createSession = useCallback(
+    (label: string, description?: string): Session => {
+      const [startStr] = label.split("-");
+      const startYear = Number.parseInt(startStr, 10);
+      const session: Session = {
+        id: generateId(),
+        label,
+        startYear,
+        endYear: startYear + 1,
+        isArchived: false,
+        isActive: false,
+        createdAt: new Date().toISOString(),
+        description,
+      };
+      // ADD_SESSION never auto-archives siblings — caller controls that
+      dispatch({ type: "ADD_SESSION", session });
+      // Persist locally first, then server
+      void localFirstSync.save(
+        "sessions",
+        session as unknown as Record<string, unknown>,
+        "create",
+      );
+      void phpApiService.createSession({
+        label: session.label,
+        startYear: session.startYear,
+        endYear: session.endYear,
+      });
+      return session;
+    },
+    [],
+  );
 
   const markAllRead = useCallback(
     () => dispatch({ type: "MARK_ALL_READ" }),
@@ -1184,8 +1209,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) : (
         children
       )}
-      {/* Re-login modal — shown when token expires and silent re-auth fails */}
-      {showReLoginModal && <ReLoginModal onDismiss={logout} />}
+      {/* Re-login modal — only shown when a logged-in user's token expires and
+          silent re-auth fails. Never rendered on the login screen (currentUser
+          is null there) or immediately after a fresh login (freshLoginRef guard). */}
+      {showReLoginModal && state.currentUser !== null && (
+        <ReLoginModal onDismiss={logout} />
+      )}
     </AppContext.Provider>
   );
 }

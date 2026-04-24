@@ -1,6 +1,6 @@
 // ──────────────────────────────────────────────────────────
-// SHUBH SCHOOL ERP — Complete Type Definitions (School B)
-// All data stored in Internet Computer canister — no PHP/MySQL
+// SHUBH SCHOOL ERP — Complete Type Definitions
+// cPanel / MySQL backend — local-first sync
 // ──────────────────────────────────────────────────────────
 
 export type UserRole =
@@ -72,6 +72,55 @@ export interface Session {
   isArchived: boolean;
   isActive: boolean;
   createdAt: string;
+  description?: string;
+}
+
+/**
+ * Class promotion mapping — two-field interface used by the promotion wizard.
+ * `sourceClass` and `targetClass` are the canonical field names.
+ * `fromClass` / `toClass` are kept as optional aliases for backward compatibility.
+ */
+export interface ClassMapping {
+  sourceClass: string;
+  targetClass: string;
+  /** "Alumni/Discontinued" means terminal (graduate or drop out) */
+  isTerminal?: boolean;
+  /** @deprecated use sourceClass */
+  fromClass?: string;
+  /** @deprecated use targetClass */
+  toClass?: string;
+}
+
+/** Default class promotion ladder for Indian schools */
+export const DEFAULT_CLASS_MAPPINGS: ClassMapping[] = [
+  { sourceClass: "Nursery", targetClass: "LKG" },
+  { sourceClass: "LKG", targetClass: "UKG" },
+  { sourceClass: "UKG", targetClass: "Class 1" },
+  { sourceClass: "Class 1", targetClass: "Class 2" },
+  { sourceClass: "Class 2", targetClass: "Class 3" },
+  { sourceClass: "Class 3", targetClass: "Class 4" },
+  { sourceClass: "Class 4", targetClass: "Class 5" },
+  { sourceClass: "Class 5", targetClass: "Class 6" },
+  { sourceClass: "Class 6", targetClass: "Class 7" },
+  { sourceClass: "Class 7", targetClass: "Class 8" },
+  { sourceClass: "Class 8", targetClass: "Class 9" },
+  { sourceClass: "Class 9", targetClass: "Class 10" },
+  { sourceClass: "Class 10", targetClass: "Class 11" },
+  { sourceClass: "Class 11", targetClass: "Class 12" },
+  {
+    sourceClass: "Class 12",
+    targetClass: "Alumni/Discontinued",
+    isTerminal: true,
+  },
+];
+
+/** Build next session label from current: "2025-26" → "2026-27" */
+export function nextSessionLabel(currentLabel: string): string {
+  const [startStr] = currentLabel.split("-");
+  const startYear = Number.parseInt(startStr, 10);
+  if (Number.isNaN(startYear)) return "";
+  const nextStart = startYear + 1;
+  return `${nextStart}-${String(nextStart + 1).slice(2)}`;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -119,6 +168,11 @@ export interface Student {
   updatedAt?: string;
   credentials?: Credentials;
   remarks?: string;
+  openingBalance?: number;
+  carryForwardDues?: boolean;
+  promotedFrom?: string;
+  promotedFromSession?: string;
+  promotedAt?: string;
 }
 
 // ──────────────────────────────────────────────────────────
@@ -339,7 +393,7 @@ export interface AppConfig {
 }
 
 // ──────────────────────────────────────────────────────────
-// All data loaded from canister in one call
+// All data loaded from server in one call
 // ──────────────────────────────────────────────────────────
 export interface AllData {
   students: Student[];

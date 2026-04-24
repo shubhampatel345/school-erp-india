@@ -113,9 +113,12 @@ if ($route === 'attendance/list')    { route_attendance_list($auth); }
 if ($route === 'attendance/summary') { route_attendance_summary($auth); }
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
-if ($route === 'sessions/list')       { route_sessions_list($auth); }
-if ($route === 'sessions/create')     { route_sessions_create($method, $body, $auth); }
-if ($route === 'sessions/set-active') { route_sessions_set_active($method, $body, $auth); }
+if ($route === 'sessions/list')             { route_sessions_list($auth); }
+if ($route === 'sessions/create')           { route_sessions_create($method, $body, $auth); }
+if ($route === 'sessions/set-active')       { route_sessions_set_active($method, $body, $auth); }
+if ($route === 'sessions/auto-create')      { route_sessions_auto_create($method, $body, $auth); }
+if ($route === 'sessions/copy-data')        { route_sessions_copy_data($method, $body, $auth); }
+if ($route === 'sessions/promote-students') { route_sessions_promote_students($method, $body, $auth); }
 
 // ── Transport ─────────────────────────────────────────────────────────────────
 if ($route === 'transport/routes')      { route_transport_routes($auth); }
@@ -373,6 +376,12 @@ function route_migrate_run(): void {
         }
     }
 
+    // Schema evolution: add new columns to existing tables (safe IF NOT EXISTS via IGNORE)
+    $alterStatements = getAlterStatements();
+    foreach ($alterStatements as $desc => $sql) {
+        try { $db->exec($sql); } catch (Throwable $ignored) {}
+    }
+
     // Seed default data
     $seeded = [];
     $seeded[] = seed_admin_user($db);
@@ -532,9 +541,15 @@ function route_students_list(?array $auth): void {
     $where   = ['s.is_deleted = 0'];
     $params  = [];
 
-    if (!empty($_GET['class']))   { $where[] = 's.class=?';   $params[] = $_GET['class']; }
-    if (!empty($_GET['section'])) { $where[] = 's.section=?'; $params[] = $_GET['section']; }
-    if (!empty($_GET['session'])) { $where[] = 's.session=?'; $params[] = $_GET['session']; }
+    if (!empty($_GET['class']))      { $where[] = 's.class=?';       $params[] = $_GET['class']; }
+    if (!empty($_GET['section']))    { $where[] = 's.section=?';     $params[] = $_GET['section']; }
+    if (!empty($_GET['session']))    { $where[] = 's.session=?';     $params[] = $_GET['session']; }
+    if (!empty($_GET['session_id'])) {
+        // Support filtering by session UUID (joins against school_sessions label fallback)
+        $where[] = '(s.session_id = ? OR s.session = (SELECT label FROM `school_sessions` WHERE id = ? LIMIT 1))';
+        $params[] = $_GET['session_id'];
+        $params[] = $_GET['session_id'];
+    }
     if (!empty($_GET['search'])) {
         $s = '%' . $_GET['search'] . '%';
         $where[] = '(s.fullName LIKE ? OR s.admNo LIKE ? OR s.fatherMobile LIKE ?)';
@@ -566,15 +581,16 @@ function route_students_add(string $method, array $body, ?array $auth): void {
 
     $stmt = $db->prepare("INSERT INTO `students`
         (`id`,`admNo`,`fullName`,`fatherName`,`motherName`,`fatherMobile`,`motherMobile`,
-         `address`,`dob`,`class`,`section`,`session`,`transportBus`,`transportRoute`,
+         `address`,`dob`,`class`,`section`,`session`,`session_id`,`transportBus`,`transportRoute`,
          `transportPickup`,`transportFare`,`photoPath`,`is_deleted`,`created_at`,`updated_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())
         ON DUPLICATE KEY UPDATE
             `fullName`=VALUES(`fullName`),`fatherName`=VALUES(`fatherName`),
             `motherName`=VALUES(`motherName`),`fatherMobile`=VALUES(`fatherMobile`),
             `motherMobile`=VALUES(`motherMobile`),`address`=VALUES(`address`),
             `dob`=VALUES(`dob`),`class`=VALUES(`class`),`section`=VALUES(`section`),
-            `session`=VALUES(`session`),`transportBus`=VALUES(`transportBus`),
+            `session`=VALUES(`session`),`session_id`=VALUES(`session_id`),
+            `transportBus`=VALUES(`transportBus`),
             `transportRoute`=VALUES(`transportRoute`),`transportPickup`=VALUES(`transportPickup`),
             `transportFare`=VALUES(`transportFare`),`photoPath`=VALUES(`photoPath`),
             `updated_at`=NOW()");
@@ -592,6 +608,7 @@ function route_students_add(string $method, array $body, ?array $auth): void {
         sanitize($body['class'] ?? ''),
         sanitize($body['section'] ?? ''),
         sanitize($body['session'] ?? ''),
+        sanitize($body['session_id'] ?? '') ?: null,
         sanitize($body['transportBus'] ?? ''),
         sanitize($body['transportRoute'] ?? ''),
         sanitize($body['transportPickup'] ?? ''),
@@ -616,13 +633,17 @@ function route_students_update(string $method, array $body, ?array $auth): void 
     $fields = [
         'admNo','fullName','fatherName','motherName','fatherMobile','motherMobile',
         'address','dob','class','section','session','transportBus','transportRoute',
-        'transportPickup','transportFare','photoPath',
+        'transportPickup','transportFare','photoPath','status',
     ];
     foreach ($fields as $f) {
         if (array_key_exists($f, $body)) {
             $sets[] = "`{$f}`=?";
             $vals[] = $f === 'transportFare' ? (float)$body[$f] : sanitize((string)($body[$f] ?? ''));
         }
+    }
+    if (array_key_exists('session_id', $body)) {
+        $sets[] = '`session_id`=?';
+        $vals[] = sanitize($body['session_id'] ?? '') ?: null;
     }
     if (empty($sets)) jsonError('No valid fields to update', 400);
     $sets[] = '`updated_at`=NOW()';
@@ -657,14 +678,15 @@ function route_students_bulk_import(string $method, array $body, ?array $auth): 
 
     $stmt = $db->prepare("INSERT INTO `students`
         (`id`,`admNo`,`fullName`,`fatherName`,`motherName`,`fatherMobile`,`motherMobile`,
-         `address`,`dob`,`class`,`section`,`session`,`transportBus`,`transportRoute`,
+         `address`,`dob`,`class`,`section`,`session`,`session_id`,`transportBus`,`transportRoute`,
          `transportPickup`,`transportFare`,`photoPath`,`is_deleted`,`created_at`,`updated_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())
         ON DUPLICATE KEY UPDATE
             `fullName`=VALUES(`fullName`),`fatherName`=VALUES(`fatherName`),
             `motherName`=VALUES(`motherName`),`fatherMobile`=VALUES(`fatherMobile`),
             `motherMobile`=VALUES(`motherMobile`),`class`=VALUES(`class`),
-            `section`=VALUES(`section`),`session`=VALUES(`session`),`updated_at`=NOW()");
+            `section`=VALUES(`section`),`session`=VALUES(`session`),
+            `session_id`=VALUES(`session_id`),`updated_at`=NOW()");
 
     foreach ($records as $idx => $row) {
         if (!is_array($row)) { $errors[] = "Row {$idx}: not an object"; continue; }
@@ -685,6 +707,7 @@ function route_students_bulk_import(string $method, array $body, ?array $auth): 
                 sanitize($row['class'] ?? ''),
                 sanitize($row['section'] ?? ''),
                 sanitize($row['session'] ?? ''),
+                sanitize($row['session_id'] ?? '') ?: null,
                 sanitize($row['transportBus'] ?? ''),
                 sanitize($row['transportRoute'] ?? ''),
                 sanitize($row['transportPickup'] ?? ''),
@@ -721,7 +744,13 @@ function route_staff_list(?array $auth): void {
 
     $where  = ['is_deleted = 0'];
     $params = [];
-    if (!empty($_GET['session'])) { $where[] = 'session=?'; $params[] = $_GET['session']; }
+    if (!empty($_GET['session']))    { $where[] = 'session=?'; $params[] = $_GET['session']; }
+    if (!empty($_GET['session_id'])) {
+        // Support filtering by session UUID via label lookup fallback
+        $where[] = '(session_id = ? OR session = (SELECT label FROM `school_sessions` WHERE id = ? LIMIT 1))';
+        $params[] = $_GET['session_id'];
+        $params[] = $_GET['session_id'];
+    }
     if (!empty($_GET['search'])) {
         $s = '%' . $_GET['search'] . '%';
         $where[] = '(name LIKE ? OR position LIKE ? OR contact LIKE ?)';
@@ -744,12 +773,13 @@ function route_staff_add(string $method, array $body, ?array $auth): void {
     $id = $body['id'] ?? genUuid();
 
     $db->prepare("INSERT INTO `staff`
-        (`id`,`name`,`position`,`subject`,`assignedClasses`,`salary`,`contact`,`email`,
+        (`id`,`name`,`position`,`subject`,`assignedClasses`,`salary`,`contact`,`email`,`session`,`session_id`,
          `is_deleted`,`created_at`,`updated_at`)
-        VALUES (?,?,?,?,?,?,?,?,0,NOW(),NOW())
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())
         ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`position`=VALUES(`position`),
             `subject`=VALUES(`subject`),`salary`=VALUES(`salary`),`contact`=VALUES(`contact`),
-            `email`=VALUES(`email`),`updated_at`=NOW()")
+            `email`=VALUES(`email`),`session`=VALUES(`session`),`session_id`=VALUES(`session_id`),
+            `updated_at`=NOW()")
        ->execute([
            $id,
            $name,
@@ -761,6 +791,8 @@ function route_staff_add(string $method, array $body, ?array $auth): void {
            isset($body['salary']) ? (float)$body['salary'] : 0,
            sanitize($body['contact'] ?? ''),
            sanitize($body['email'] ?? ''),
+           sanitize($body['session'] ?? ''),
+           sanitize($body['session_id'] ?? '') ?: null,
        ]);
 
     writeChangelog($db, $auth, 'staff', 'add', $id, null, ['name' => $name]);
@@ -777,11 +809,15 @@ function route_staff_update(string $method, array $body, ?array $auth): void {
     $sets = [];
     $vals = [];
 
-    foreach (['name','position','subject','contact','email'] as $f) {
+    foreach (['name','position','subject','contact','email','session'] as $f) {
         if (array_key_exists($f, $body)) {
             $sets[] = "`{$f}`=?";
             $vals[] = sanitize($body[$f] ?? '');
         }
+    }
+    if (array_key_exists('session_id', $body)) {
+        $sets[] = '`session_id`=?';
+        $vals[] = sanitize($body['session_id'] ?? '') ?: null;
     }
     if (isset($body['salary'])) { $sets[] = '`salary`=?'; $vals[] = (float)$body['salary']; }
     if (isset($body['assignedClasses'])) {
@@ -884,24 +920,33 @@ function route_sections_add(string $method, array $body, ?array $auth): void {
 // FEES
 // =============================================================================
 function route_fees_headings_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-    $stmt = $db->query("SELECT * FROM `fee_headings` ORDER BY `name` ASC");
+    $auth   = requireAuth();
+    $db     = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['session_id'])) {
+        $where[] = '(session_id = ? OR session_id IS NULL)';
+        $params[] = $_GET['session_id'];
+    }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $stmt = $db->prepare("SELECT * FROM `fee_headings` $wc ORDER BY `name` ASC");
+    $stmt->execute($params);
     jsonSuccess($stmt->fetchAll());
 }
 
 function route_fees_headings_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireAuth();
-    $name = sanitize($body['name'] ?? '');
+    $auth      = requireAuth();
+    $name      = sanitize($body['name'] ?? '');
+    $sessionId = sanitize($body['session_id'] ?? '');
     if (!$name) jsonError('name is required', 400);
 
     $db = getDB();
     $id = $body['id'] ?? genUuid();
 
-    $db->prepare("INSERT INTO `fee_headings` (`id`,`name`,`created_at`) VALUES (?,?,NOW())
-        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`)")
-       ->execute([$id, $name]);
+    $db->prepare("INSERT INTO `fee_headings` (`id`,`name`,`session_id`,`created_at`) VALUES (?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `session_id`=COALESCE(VALUES(`session_id`), `session_id`)")
+       ->execute([$id, $name, $sessionId ?: null]);
 
     writeChangelog($db, $auth, 'fee_headings', 'add', $id, null, ['name' => $name]);
     jsonSuccess(['success' => true, 'id' => $id]);
@@ -913,8 +958,12 @@ function route_fees_plan_get(?array $auth): void {
 
     $where  = [];
     $params = [];
-    if (!empty($_GET['class_name']))   { $where[] = 'class_name=?';   $params[] = $_GET['class_name']; }
-    if (!empty($_GET['section_name'])) { $where[] = 'section_name=?'; $params[] = $_GET['section_name']; }
+    if (!empty($_GET['class_name']))   { $where[] = 'fp.class_name=?';   $params[] = $_GET['class_name']; }
+    if (!empty($_GET['section_name'])) { $where[] = 'fp.section_name=?'; $params[] = $_GET['section_name']; }
+    if (!empty($_GET['session_id']))   {
+        $where[] = '(fp.session_id = ? OR fp.session_id IS NULL)';
+        $params[] = $_GET['session_id'];
+    }
 
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT fp.*, fh.name AS heading_name
@@ -933,17 +982,19 @@ function route_fees_plan_save(string $method, array $body, ?array $auth): void {
     $sectionName = sanitize($body['section_name'] ?? $body['sectionName'] ?? '');
     $headingId   = sanitize($body['fee_heading_id'] ?? $body['feeHeadingId'] ?? '');
     $amount      = (float)($body['monthly_amount'] ?? $body['monthlyAmount'] ?? 0);
+    $sessionId   = sanitize($body['session_id'] ?? '');
 
     if (!$className || !$headingId) jsonError('class_name and fee_heading_id are required', 400);
 
     $db = getDB();
     $id = $body['id'] ?? genUuid();
 
+    // Build unique key dynamically to include session_id
     $db->prepare("INSERT INTO `fee_plan`
-        (`id`,`class_name`,`section_name`,`fee_heading_id`,`monthly_amount`,`updated_at`)
-        VALUES (?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `monthly_amount`=VALUES(`monthly_amount`), `updated_at`=NOW()")
-       ->execute([$id, $className, $sectionName, $headingId, $amount]);
+        (`id`,`class_name`,`section_name`,`fee_heading_id`,`monthly_amount`,`session_id`,`updated_at`)
+        VALUES (?,?,?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `monthly_amount`=VALUES(`monthly_amount`), `session_id`=COALESCE(VALUES(`session_id`), `session_id`), `updated_at`=NOW()")
+       ->execute([$id, $className, $sectionName, $headingId, $amount, $sessionId ?: null]);
 
     writeChangelog($db, $auth, 'fee_plan', 'save', $id, null, $body);
     jsonSuccess(['success' => true, 'id' => $id]);
@@ -960,6 +1011,7 @@ function route_fees_collect(string $method, array $body, ?array $auth): void {
     $paymentMethod = sanitize($body['paymentMethod'] ?? 'Cash');
     $receiptNumber = sanitize($body['receiptNumber'] ?? '');
     $qrData        = $body['qrData'] ?? '';
+    $sessionId     = sanitize($body['sessionId'] ?? $body['session_id'] ?? '');
 
     if (!$studentId || !$month) jsonError('studentId and month are required', 400);
     if ($totalAmount <= 0) jsonError('totalAmount must be greater than 0', 400);
@@ -969,8 +1021,8 @@ function route_fees_collect(string $method, array $body, ?array $auth): void {
 
     $db->prepare("INSERT INTO `fee_receipts`
         (`id`,`student_id`,`student_name`,`class`,`section`,`month`,`amounts`,
-         `total_amount`,`payment_method`,`reference_id`,`receipt_number`,`qr_data`,`created_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NOW())")
+         `total_amount`,`payment_method`,`reference_id`,`receipt_number`,`qr_data`,`session_id`,`created_at`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())")
        ->execute([
            $id,
            $studentId,
@@ -984,6 +1036,7 @@ function route_fees_collect(string $method, array $body, ?array $auth): void {
            sanitize($body['referenceId'] ?? ''),
            $receiptNumber ?: ('RCP-' . date('ymd') . '-' . strtoupper(substr($id, 0, 4))),
            is_array($qrData) ? json_encode($qrData) : $qrData,
+           $sessionId ?: null,
        ]);
 
     writeChangelog($db, $auth, 'fee_receipts', 'collect', $id, null, ['studentId' => $studentId, 'month' => $month, 'total' => $totalAmount]);
@@ -997,8 +1050,9 @@ function route_fees_receipts(?array $auth): void {
 
     $where  = [];
     $params = [];
-    if ($studentId) { $where[] = 'student_id=?'; $params[] = $studentId; }
-    if (!empty($_GET['month'])) { $where[] = 'month=?'; $params[] = $_GET['month']; }
+    if ($studentId)              { $where[] = 'student_id=?';  $params[] = $studentId; }
+    if (!empty($_GET['month']))  { $where[] = 'month=?';        $params[] = $_GET['month']; }
+    if (!empty($_GET['session_id'])) { $where[] = 'session_id=?'; $params[] = $_GET['session_id']; }
 
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT * FROM `fee_receipts` $wc ORDER BY `created_at` DESC LIMIT 200");
@@ -1079,9 +1133,10 @@ function route_attendance_list(?array $auth): void {
 
     $where  = [];
     $params = [];
-    if (!empty($_GET['class']))     { $where[] = 's.class=?';     $params[] = $_GET['class']; }
-    if (!empty($_GET['date']))      { $where[] = 'a.date=?';      $params[] = $_GET['date']; }
-    if (!empty($_GET['studentId'])) { $where[] = 'a.student_id=?'; $params[] = $_GET['studentId']; }
+    if (!empty($_GET['class']))      { $where[] = 's.class=?';      $params[] = $_GET['class']; }
+    if (!empty($_GET['date']))       { $where[] = 'a.date=?';       $params[] = $_GET['date']; }
+    if (!empty($_GET['studentId']))  { $where[] = 'a.student_id=?'; $params[] = $_GET['studentId']; }
+    if (!empty($_GET['session_id'])) { $where[] = 's.session=?';    $params[] = $_GET['session_id']; }
 
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT a.*, s.fullName, s.admNo, s.class, s.section
@@ -1118,7 +1173,27 @@ function route_attendance_summary(?array $auth): void {
 function route_sessions_list(?array $auth): void {
     $auth = requireAuth();
     $db   = getDB();
-    $stmt = $db->query("SELECT * FROM `school_sessions` ORDER BY `startYear` DESC");
+
+    $stmt = $db->query("
+        SELECT s.id,
+               s.label,
+               s.name,
+               s.description,
+               s.startYear,
+               s.endYear,
+               COALESCE(s.start_date, CONCAT(s.startYear, '-04-01')) AS start_date,
+               COALESCE(s.end_date,   CONCAT(s.endYear,   '-03-31')) AS end_date,
+               s.isActive,
+               s.isCurrent,
+               COALESCE(s.isArchived, 0) AS is_archived,
+               (
+                   SELECT COUNT(*) FROM `students` st
+                   WHERE (st.session_id = s.id OR st.session = s.label)
+                     AND st.is_deleted = 0
+               ) AS student_count
+        FROM `school_sessions` s
+        ORDER BY s.startYear DESC
+    ");
     jsonSuccess($stmt->fetchAll());
 }
 
@@ -1158,6 +1233,289 @@ function route_sessions_set_active(string $method, array $body, ?array $auth): v
     $db->prepare("UPDATE `school_sessions` SET `isActive`=1, `isCurrent`=1 WHERE `id`=?")->execute([$id]);
     writeChangelog($db, $auth, 'school_sessions', 'set_active', $id, null, null);
     jsonSuccess(['success' => true]);
+}
+
+
+// =============================================================================
+// SESSIONS — PROMOTION / COPY HELPERS
+// =============================================================================
+
+/**
+ * POST sessions/auto-create
+ * Body: { current_label: "2025-26" }
+ * Computes next session label, creates it if absent.
+ */
+function route_sessions_auto_create(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db            = getDB();
+    $currentLabel  = sanitize($body['current_label'] ?? '');
+    if (!$currentLabel) jsonError('current_label is required', 400);
+
+    // Parse YYYY-YY → compute next
+    // Supports "2025-26" (hyphen) and "2025/26" (slash)
+    $sep   = str_contains($currentLabel, '/') ? '/' : '-';
+    $parts = explode($sep, $currentLabel);
+    if (count($parts) !== 2) jsonError('current_label must be in YYYY-YY format', 400);
+
+    $startYear = (int)$parts[0];
+    $endYear   = $startYear + 1;  // current end year (full)
+    $nextStart = $endYear;
+    $nextEnd   = $nextStart + 1;
+    $nextLabel = $nextStart . '-' . substr((string)$nextEnd, 2);
+
+    // Check if already exists
+    $stmt = $db->prepare("SELECT * FROM `school_sessions` WHERE `label`=? LIMIT 1");
+    $stmt->execute([$nextLabel]);
+    $existing = $stmt->fetch();
+
+    if ($existing) {
+        jsonSuccess(['exists' => true, 'session' => $existing]);
+    }
+
+    // Create new session
+    $id = 'sess-' . $nextStart;
+    $db->prepare("INSERT INTO `school_sessions`
+        (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`isArchived`,`start_date`,`end_date`,`createdAt`)
+        VALUES (?,?,?,?,?,0,0,0,?,?,?)")
+       ->execute([
+           $id,
+           $nextLabel,
+           $nextLabel,
+           $nextStart,
+           $nextEnd,
+           $nextStart . '-04-01',
+           $nextEnd   . '-03-31',
+           nowStr(),
+       ]);
+
+    $stmt->execute([$nextLabel]);
+    $session = $db->prepare("SELECT * FROM `school_sessions` WHERE `id`=? LIMIT 1");
+    $session->execute([$id]);
+    $newSession = $session->fetch();
+
+    writeChangelog($db, getAuthPayload(), 'school_sessions', 'auto_create', $id, null, ['label' => $nextLabel]);
+    jsonSuccess(['exists' => false, 'session' => $newSession], 'Session created: ' . $nextLabel);
+}
+
+/**
+ * POST sessions/copy-data
+ * Body: { source_session_id: "...", target_session_id: "..." }
+ * Copies fee_headings (with new IDs, target session_id).
+ * Copies staff rows (with new IDs, target session_id).
+ * Does NOT copy fee_plan amounts (they reset to 0 for Super Admin to re-enter).
+ * Copies transport_routes if table has no session_id (routes are global, so skip).
+ */
+function route_sessions_copy_data(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireSuperAdmin();
+    $db             = getDB();
+    $sourceSessId   = sanitize($body['source_session_id'] ?? '');
+    $targetSessId   = sanitize($body['target_session_id'] ?? '');
+    if (!$sourceSessId || !$targetSessId) jsonError('source_session_id and target_session_id are required', 400);
+    if ($sourceSessId === $targetSessId)  jsonError('source and target sessions must differ', 400);
+
+    $counts = [];
+
+    // ── 1. Copy fee_headings ──────────────────────────────────────────────────
+    // Fetch headings belonging to source session (or global ones with no session)
+    $headStmt = $db->prepare("SELECT * FROM `fee_headings` WHERE session_id = ? OR session_id IS NULL");
+    $headStmt->execute([$sourceSessId]);
+    $headings = $headStmt->fetchAll();
+
+    $headIns = $db->prepare("INSERT IGNORE INTO `fee_headings` (`id`,`name`,`session_id`,`created_at`) VALUES (?,?,?,NOW())");
+    $hCount  = 0;
+    foreach ($headings as $h) {
+        // Avoid duplicates in target: check by name + target session
+        $ck = $db->prepare("SELECT id FROM `fee_headings` WHERE name=? AND session_id=? LIMIT 1");
+        $ck->execute([$h['name'], $targetSessId]);
+        if ($ck->fetch()) continue; // already exists
+        $headIns->execute([genUuid(), $h['name'], $targetSessId]);
+        $hCount++;
+    }
+    $counts['fee_headings'] = $hCount;
+
+    // ── 2. Copy staff ─────────────────────────────────────────────────────────
+    // Fetch staff from source session; staff table uses 'session' label column
+    // Resolve source session label first
+    $srcSess = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
+    $srcSess->execute([$sourceSessId]);
+    $srcLabel = $srcSess->fetchColumn();
+
+    $tgtSess = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
+    $tgtSess->execute([$targetSessId]);
+    $tgtLabel = $tgtSess->fetchColumn();
+
+    $staffStmt = $db->prepare("SELECT * FROM `staff` WHERE (session=? OR session IS NULL OR session='') AND is_deleted=0");
+    $staffStmt->execute([$srcLabel ?: $sourceSessId]);
+    $staffRows = $staffStmt->fetchAll();
+
+    $staffIns = $db->prepare("INSERT IGNORE INTO `staff`
+        (`id`,`name`,`position`,`subject`,`assignedClasses`,`salary`,`contact`,`email`,`session`,`session_id`,`is_deleted`,`created_at`,`updated_at`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())");
+    $sCount = 0;
+    foreach ($staffRows as $s) {
+        // Avoid duplicate by name + target session
+        $ck = $db->prepare("SELECT id FROM `staff` WHERE name=? AND session=? AND is_deleted=0 LIMIT 1");
+        $ck->execute([$s['name'], $tgtLabel ?: $targetSessId]);
+        if ($ck->fetch()) continue;
+        $staffIns->execute([
+            genUuid(),
+            $s['name'],
+            $s['position'] ?? '',
+            $s['subject'] ?? '',
+            $s['assignedClasses'] ?? null,
+            $s['salary'] ?? 0,
+            $s['contact'] ?? '',
+            $s['email'] ?? '',
+            $tgtLabel ?: $targetSessId,
+            $targetSessId,
+        ]);
+        $sCount++;
+    }
+    $counts['staff'] = $sCount;
+
+    // ── 3. fee_plan — intentionally NOT copied (amounts reset to 0) ───────────
+    $counts['fee_plan'] = 0; // Super Admin re-enters amounts in new session
+
+    // ── 4. Copy transport_routes if table has session_id column ──────────────
+    try {
+        // Probe whether transport_routes has a session_id column
+        $probe = $db->query("SHOW COLUMNS FROM `transport_routes` LIKE 'session_id'");
+        if ($probe && $probe->fetch()) {
+            $trStmt = $db->prepare("SELECT * FROM `transport_routes` WHERE session_id = ? OR session_id IS NULL");
+            $trStmt->execute([$sourceSessId]);
+            $trRoutes = $trStmt->fetchAll();
+
+            $trIns = $db->prepare("INSERT IGNORE INTO `transport_routes`
+                (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`session_id`,`created_at`)
+                VALUES (?,?,?,?,?,?,NOW())");
+            $trCount = 0;
+            foreach ($trRoutes as $tr) {
+                $ck = $db->prepare("SELECT id FROM `transport_routes` WHERE routeName=? AND session_id=? LIMIT 1");
+                $ck->execute([$tr['routeName'], $targetSessId]);
+                if ($ck->fetch()) continue;
+                $trIns->execute([
+                    genUuid(),
+                    $tr['busNumber'] ?? '',
+                    $tr['routeName'] ?? '',
+                    $tr['driverName'] ?? '',
+                    $tr['driverContact'] ?? '',
+                    $targetSessId,
+                ]);
+                $trCount++;
+            }
+            $counts['transport_routes'] = $trCount;
+        } else {
+            $counts['transport_routes'] = 0; // global routes, skip copy
+        }
+    } catch (Throwable $ignored) {
+        $counts['transport_routes'] = 0;
+    }
+
+    writeChangelog($db, getAuthPayload(), 'school_sessions', 'copy_data', $targetSessId, null, $counts);
+    jsonSuccess(['success' => true, 'counts' => $counts]);
+}
+
+/**
+ * POST sessions/promote-students
+ * Body: {
+ *   target_session_id: "...",
+ *   student_updates: [
+ *     { student_id: "...", new_class: "LKG", new_section: "A", carry_forward_dues: false }
+ *   ]
+ * }
+ */
+function route_sessions_promote_students(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth           = requireSuperAdmin();
+    $db             = getDB();
+    $targetSessId   = sanitize($body['target_session_id'] ?? '');
+    $updates        = $body['student_updates'] ?? [];
+
+    if (!$targetSessId)       jsonError('target_session_id is required', 400);
+    if (!is_array($updates))  jsonError('student_updates must be an array', 400);
+
+    // Resolve target session label
+    $tgtStmt = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
+    $tgtStmt->execute([$targetSessId]);
+    $tgtLabel = $tgtStmt->fetchColumn();
+    if (!$tgtLabel) jsonError('target session not found', 404);
+
+    $count  = 0;
+    $errors = [];
+
+    // Prepare statements
+    $insertStmt = $db->prepare("INSERT INTO `students`
+        (`id`,`admNo`,`fullName`,`fatherName`,`motherName`,`fatherMobile`,`motherMobile`,
+         `address`,`dob`,`class`,`section`,`session`,`session_id`,`transportBus`,`transportRoute`,
+         `transportPickup`,`transportFare`,`photoPath`,`status`,`is_deleted`,`created_at`,`updated_at`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'','','',NULL,'','active',0,NOW(),NOW())
+        ON DUPLICATE KEY UPDATE
+            `class`=VALUES(`class`), `section`=VALUES(`section`), `session`=VALUES(`session`),
+            `session_id`=VALUES(`session_id`), `status`='active', `updated_at`=NOW()");
+
+    $markPromotedStmt = $db->prepare("UPDATE `students` SET `status`='promoted', `updated_at`=NOW() WHERE `id`=?");
+
+    foreach ($updates as $idx => $upd) {
+        if (!is_array($upd)) { $errors[] = "Row $idx: not an object"; continue; }
+        $studentId       = sanitize($upd['student_id'] ?? '');
+        $newClass        = sanitize($upd['new_class'] ?? '');
+        $newSection      = sanitize($upd['new_section'] ?? '');
+        $carryForward    = (bool)($upd['carry_forward_dues'] ?? false);
+
+        if (!$studentId || !$newClass) {
+            $errors[] = "Row $idx: student_id and new_class are required";
+            continue;
+        }
+
+        // Load original student
+        $srcStmt = $db->prepare("SELECT * FROM `students` WHERE `id`=? LIMIT 1");
+        $srcStmt->execute([$studentId]);
+        $src = $srcStmt->fetch();
+        if (!$src) { $errors[] = "Row $idx: student $studentId not found"; continue; }
+
+        $newId = genUuid();
+
+        try {
+            // Insert promoted student in new session
+            $insertStmt->execute([
+                $newId,
+                $src['admNo'] ?? '',
+                $src['fullName'],
+                $src['fatherName'] ?? '',
+                $src['motherName'] ?? '',
+                $src['fatherMobile'] ?? '',
+                $src['motherMobile'] ?? '',
+                $src['address'] ?? '',
+                $src['dob'] ?? null,
+                $newClass,
+                $newSection,
+                $tgtLabel,
+                $targetSessId,
+            ]);
+
+            // Mark original student as promoted in old session
+            $markPromotedStmt->execute([$studentId]);
+
+            // Handle fee balance: if NOT carry forward, reset to 0
+            if (!$carryForward) {
+                // Try to clear any fee_balance entry for target session
+                try {
+                    $db->prepare("INSERT INTO `fee_balance` (`id`,`student_id`,`session_id`,`balance`) VALUES (UUID(),?,?,0)
+                        ON DUPLICATE KEY UPDATE `balance`=0")
+                       ->execute([$newId, $targetSessId]);
+                } catch (Throwable $ignored) {}
+            }
+
+            $count++;
+        } catch (Throwable $e) {
+            $errors[] = "Row $idx ($studentId): " . $e->getMessage();
+        }
+    }
+
+    writeChangelog($db, $auth, 'students', 'promote', null, null, ['count' => $count, 'target_session' => $tgtLabel]);
+    jsonSuccess(['success' => true, 'promoted' => $count, 'errors' => $errors]);
 }
 
 
@@ -1965,15 +2323,18 @@ function getTableDefinitions(): array {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         'school_sessions' => "CREATE TABLE IF NOT EXISTS `school_sessions` (
-            `id`         VARCHAR(36) PRIMARY KEY,
-            `label`      VARCHAR(20),
-            `name`       VARCHAR(20),
-            `startYear`  INT,
-            `endYear`    INT,
-            `isActive`   TINYINT(1) DEFAULT 0,
-            `isCurrent`  TINYINT(1) DEFAULT 0,
-            `isArchived` TINYINT(1) DEFAULT 0,
-            `createdAt`  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            `id`          VARCHAR(36) PRIMARY KEY,
+            `label`       VARCHAR(20),
+            `name`        VARCHAR(20),
+            `description` VARCHAR(255) DEFAULT NULL,
+            `startYear`   INT,
+            `endYear`     INT,
+            `start_date`  DATE,
+            `end_date`    DATE,
+            `isActive`    TINYINT(1) DEFAULT 0,
+            `isCurrent`   TINYINT(1) DEFAULT 0,
+            `isArchived`  TINYINT(1) DEFAULT 0,
+            `createdAt`   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         'classes' => "CREATE TABLE IF NOT EXISTS `classes` (
@@ -2003,11 +2364,13 @@ function getTableDefinitions(): array {
             `class`          VARCHAR(50),
             `section`        VARCHAR(10),
             `session`        VARCHAR(20),
+            `session_id`     VARCHAR(36) DEFAULT NULL,
             `transportBus`   VARCHAR(50),
             `transportRoute` VARCHAR(100),
             `transportPickup`VARCHAR(100),
             `transportFare`  DECIMAL(10,2),
             `photoPath`      VARCHAR(500),
+            `status`         ENUM('active','promoted','discontinued','alumni') DEFAULT 'active',
             `is_deleted`     TINYINT(1) DEFAULT 0,
             `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             `updated_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -2022,6 +2385,8 @@ function getTableDefinitions(): array {
             `salary`         DECIMAL(10,2) DEFAULT 0,
             `contact`        VARCHAR(20),
             `email`          VARCHAR(255),
+            `session`        VARCHAR(20),
+            `session_id`     VARCHAR(36) DEFAULT NULL,
             `is_deleted`     TINYINT(1) DEFAULT 0,
             `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             `updated_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
@@ -2030,6 +2395,7 @@ function getTableDefinitions(): array {
         'fee_headings' => "CREATE TABLE IF NOT EXISTS `fee_headings` (
             `id`         VARCHAR(36) PRIMARY KEY,
             `name`       VARCHAR(100) NOT NULL,
+            `session_id` VARCHAR(36) DEFAULT NULL,
             `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
@@ -2039,9 +2405,10 @@ function getTableDefinitions(): array {
             `section_name`   VARCHAR(10),
             `fee_heading_id` VARCHAR(36),
             `monthly_amount` DECIMAL(10,2) DEFAULT 0,
+            `session_id`     VARCHAR(36) DEFAULT NULL,
             `updated_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE KEY `unique_plan` (`class_name`,`section_name`,`fee_heading_id`)
+            UNIQUE KEY `unique_plan` (`class_name`,`section_name`,`fee_heading_id`,`session_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
         'fee_receipts' => "CREATE TABLE IF NOT EXISTS `fee_receipts` (
@@ -2057,6 +2424,7 @@ function getTableDefinitions(): array {
             `reference_id`   VARCHAR(100),
             `receipt_number` VARCHAR(50),
             `qr_data`        TEXT,
+            `session_id`     VARCHAR(36) DEFAULT NULL,
             `created_at`     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
@@ -2216,5 +2584,56 @@ function getTableDefinitions(): array {
             `updated_at`    TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
+        'fee_balance' => "CREATE TABLE IF NOT EXISTS `fee_balance` (
+            `id`         VARCHAR(36) PRIMARY KEY,
+            `student_id` VARCHAR(36),
+            `session_id` VARCHAR(36),
+            `balance`    DECIMAL(10,2) DEFAULT 0,
+            `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY `unique_balance` (`student_id`,`session_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+    ];
+}
+
+// =============================================================================
+// ALTER STATEMENTS (safe idempotent schema evolution)
+// =============================================================================
+function getAlterStatements(): array {
+    return [
+        // school_sessions: add start_date, end_date, isArchived, description columns
+        'school_sessions.start_date' =>
+            "ALTER TABLE `school_sessions` ADD COLUMN IF NOT EXISTS `start_date` DATE DEFAULT NULL",
+        'school_sessions.end_date' =>
+            "ALTER TABLE `school_sessions` ADD COLUMN IF NOT EXISTS `end_date` DATE DEFAULT NULL",
+        'school_sessions.isArchived' =>
+            "ALTER TABLE `school_sessions` ADD COLUMN IF NOT EXISTS `isArchived` TINYINT(1) DEFAULT 0",
+        'school_sessions.description' =>
+            "ALTER TABLE `school_sessions` ADD COLUMN IF NOT EXISTS `description` VARCHAR(255) DEFAULT NULL",
+
+        // students: add status column and session_id FK column
+        'students.status' =>
+            "ALTER TABLE `students` ADD COLUMN IF NOT EXISTS `status` ENUM('active','promoted','discontinued','alumni') DEFAULT 'active'",
+        'students.session_id' =>
+            "ALTER TABLE `students` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL",
+
+        // staff: add session column (label) and session_id FK column
+        'staff.session' =>
+            "ALTER TABLE `staff` ADD COLUMN IF NOT EXISTS `session` VARCHAR(20) DEFAULT NULL",
+        'staff.session_id' =>
+            "ALTER TABLE `staff` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL",
+
+        // fee_headings: add session_id if missing
+        'fee_headings.session_id' =>
+            "ALTER TABLE `fee_headings` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL",
+
+        // fee_plan: add session_id if missing
+        // Note: unique key change cannot be done via ADD COLUMN IF NOT EXISTS — handled gracefully
+        'fee_plan.session_id' =>
+            "ALTER TABLE `fee_plan` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL",
+
+        // fee_receipts: add session_id if missing
+        'fee_receipts.session_id' =>
+            "ALTER TABLE `fee_receipts` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL",
     ];
 }
