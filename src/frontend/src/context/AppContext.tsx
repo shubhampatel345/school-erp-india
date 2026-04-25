@@ -34,6 +34,7 @@ import type {
   UserRole,
 } from "../types";
 import { ls } from "../utils/localStorage";
+import type { SessionRecord } from "../utils/phpApiService";
 import phpApiService from "../utils/phpApiService";
 
 // ── Module-level login timestamp (outside React component) ────────────────────
@@ -71,6 +72,57 @@ function isFreshLogin(minutesThreshold = 10): boolean {
 
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+// ── Pre-loaded session years (2019-20 through 2025-26) ───────────────────────
+const PRELOADED_SESSIONS = [
+  { label: "2019-20", startYear: 2019, endYear: 2020 },
+  { label: "2020-21", startYear: 2020, endYear: 2021 },
+  { label: "2021-22", startYear: 2021, endYear: 2022 },
+  { label: "2022-23", startYear: 2022, endYear: 2023 },
+  { label: "2023-24", startYear: 2023, endYear: 2024 },
+  { label: "2024-25", startYear: 2024, endYear: 2025 },
+  { label: "2025-26", startYear: 2025, endYear: 2026 },
+];
+
+/**
+ * Ensure all 7 pre-loaded sessions exist.
+ * If the server returned fewer sessions, create the missing ones silently.
+ * Returns the full merged list (server sessions + any newly created ones).
+ */
+async function ensurePreloadedSessions(
+  existingSessions: SessionRecord[],
+): Promise<SessionRecord[]> {
+  const existingLabels = new Set(existingSessions.map((s) => s.label));
+  const missing = PRELOADED_SESSIONS.filter(
+    (p) => !existingLabels.has(p.label),
+  );
+  if (missing.length === 0) return existingSessions;
+
+  const created: SessionRecord[] = [];
+  for (const m of missing) {
+    try {
+      const s = await phpApiService.createSession({
+        label: m.label,
+        startYear: m.startYear,
+        endYear: m.endYear,
+      });
+      created.push(s);
+    } catch {
+      // If server create fails, add a local-only placeholder so the switcher
+      // still shows the session even without a server round-trip
+      created.push({
+        id: `preloaded_${m.label}`,
+        label: m.label,
+        startYear: m.startYear,
+        endYear: m.endYear,
+        isActive: false,
+        isArchived: false,
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+  return [...existingSessions, ...created];
 }
 
 // ── Default permissions per role ──────────────────────────────────────────────
@@ -525,11 +577,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
         }
 
-        // Fetch sessions from server
+        // Fetch sessions from server, then ensure all pre-loaded years exist
         let sessions: Session[] = [];
         try {
           const rawSessions = await phpApiService.getSessions();
-          sessions = rawSessions.map((s) => ({
+          // getSessions() now returns normalised SessionRecord[] already
+          const normalised: Session[] = rawSessions.map((s) => ({
             id: s.id,
             label: s.label,
             startYear: s.startYear,
@@ -538,6 +591,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
             isActive: s.isActive,
             createdAt: s.createdAt ?? new Date().toISOString(),
           }));
+          // Auto-create any missing pre-loaded sessions (2019-20 → 2025-26)
+          const allSessions = await ensurePreloadedSessions(rawSessions);
+          sessions = allSessions.map((s) => ({
+            id: s.id,
+            label: s.label,
+            startYear: s.startYear,
+            endYear: s.endYear,
+            isArchived: s.isArchived,
+            isActive: s.isActive,
+            createdAt: s.createdAt ?? new Date().toISOString(),
+          }));
+          // Persist current session id for class API queries
+          const active = sessions.find((s) => s.isActive) ?? normalised[0];
+          if (active) {
+            try {
+              localStorage.setItem("erp_current_session_id", active.id);
+            } catch {
+              /* noop */
+            }
+          }
         } catch {
           /* server unreachable — use default session */
         }

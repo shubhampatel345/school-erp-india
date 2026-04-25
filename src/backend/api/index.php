@@ -108,6 +108,8 @@ if (!$isPublic) {
     $user = requireAuth();
 }
 
+try {
+
 // ─── MIGRATE ─────────────────────────────────────────────────────────────────
 if ($section === 'migrate' && $action === 'run') {
     $db = getDB();
@@ -149,6 +151,7 @@ if ($section === 'migrate' && $action === 'run') {
             session_id INT,
             name VARCHAR(50) NOT NULL,
             display_order INT NOT NULL DEFAULT 0,
+            is_enabled TINYINT(1) NOT NULL DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )",
         "CREATE TABLE IF NOT EXISTS sections (
@@ -456,6 +459,11 @@ if ($section === 'migrate' && $action === 'run') {
         $db->exec($sql);
     }
 
+    // Add is_enabled column to classes for existing deployments
+    try {
+        $db->exec("ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_enabled TINYINT(1) NOT NULL DEFAULT 1");
+    } catch (Exception $e) { /* column may already exist */ }
+
     // Seed default super admin
     $exists = $db->query("SELECT id FROM users WHERE username='admin' LIMIT 1")->fetch();
     if (!$exists) {
@@ -470,6 +478,20 @@ if ($section === 'migrate' && $action === 'run') {
         $db->exec("INSERT INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1,'2025-26',2025,2026,1)");
     }
 
+    // Seed historical sessions 2019-20 through 2024-25 (is_current=0)
+    $historicalSessions = [
+        ['2019-20', 2019, 2020],
+        ['2020-21', 2020, 2021],
+        ['2021-22', 2021, 2022],
+        ['2022-23', 2022, 2023],
+        ['2023-24', 2023, 2024],
+        ['2024-25', 2024, 2025],
+    ];
+    $sessInsert = $db->prepare("INSERT IGNORE INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1, ?, ?, ?, 0)");
+    foreach ($historicalSessions as [$sName, $sStart, $sEnd]) {
+        $sessInsert->execute([$sName, $sStart, $sEnd]);
+    }
+
     // Seed default classes
     $clsExists = $db->query("SELECT COUNT(*) as cnt FROM classes WHERE school_id=1")->fetch();
     if ((int)$clsExists['cnt'] === 0) {
@@ -479,13 +501,13 @@ if ($section === 'migrate' && $action === 'run') {
             ['Class 6', 9], ['Class 7', 10], ['Class 8', 11], ['Class 9', 12],
             ['Class 10', 13], ['Class 11', 14], ['Class 12', 15],
         ];
-        $stmt = $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order) VALUES (1, NULL, ?, ?)");
+        $stmt = $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (1, NULL, ?, ?, 1)");
         foreach ($classes as [$name, $order]) {
             $stmt->execute([$name, $order]);
         }
     }
 
-    json_out(['success' => true, 'message' => 'Migration complete. Tables created, admin seeded.']);
+    json_out(['success' => true, 'message' => 'Migration complete. Tables created, admin seeded, sessions 2019-20 through 2025-26 pre-loaded.']);
 }
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -1028,10 +1050,11 @@ if ($section === 'academics') {
 
     if ($action === 'classes/save' && $method === 'POST') {
         $b = body(); $id = (int)($b['id'] ?? 0);
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
         if ($id) {
-            $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=? WHERE id=? AND school_id=?")->execute([$b['name'], (int)($b['display_order'] ?? 0), $b['session_id'] ?? null, $id, $schoolId]);
+            $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=?, is_enabled=? WHERE id=? AND school_id=?")->execute([$b['name'], (int)($b['display_order'] ?? 0), $b['session_id'] ?? null, $isEnabled, $id, $schoolId]);
         } else {
-            $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order) VALUES (?,?,?,?)")->execute([$schoolId, $b['session_id'] ?? null, $b['name'], (int)($b['display_order'] ?? 0)]);
+            $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")->execute([$schoolId, $b['session_id'] ?? null, $b['name'], (int)($b['display_order'] ?? 0), $isEnabled]);
             $id = (int)$db->lastInsertId();
         }
         json_out(['success' => true, 'id' => $id]);
@@ -1113,10 +1136,12 @@ if ($section === 'academic-sessions') {
     }
 
     if ($action === 'set-current' && $method === 'POST') {
-        $id = (int)($_GET['id'] ?? 0);
+        $b  = body();
+        $id = (int)($b['session_id'] ?? $_GET['id'] ?? 0);
+        if (!$id) json_error('session_id required');
         $db->prepare("UPDATE sessions_academic SET is_current=0 WHERE school_id=?")->execute([$schoolId]);
         $db->prepare("UPDATE sessions_academic SET is_current=1 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
-        json_out(['success' => true]);
+        json_out(['success' => true, 'session_id' => $id]);
     }
 
     if ($action === 'promote' && $method === 'POST') {
@@ -1697,3 +1722,9 @@ if ($section === 'homework') {
 
 // ─── 404 ────────────────────────────────────────────────────────────────────
 json_error("Route not found: $route", 404);
+
+} catch (Throwable $e) {
+    http_response_code(500);
+    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    exit;
+}

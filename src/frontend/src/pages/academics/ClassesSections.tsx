@@ -203,24 +203,19 @@ export default function ClassesSections() {
     setSaving(true);
     try {
       if (classModal.editing) {
-        // PUT classes/update — PHP expects 'name' and 'is_enabled'
-        await phpApiService.put("classes/update", {
-          id: classModal.editing.id,
+        // POST academics/classes/save with id → update
+        await phpApiService.updateClass(classModal.editing.id, {
           name: finalName,
-          className: finalName, // send both for broad PHP compatibility
           sections: classModal.sections,
           is_enabled: classModal.isEnabled ? 1 : 0,
-          isEnabled: classModal.isEnabled,
         });
         toast.success(`${displayClassName(finalName)} updated`);
       } else {
-        // POST classes/add — PHP expects 'name' (not 'className') and 'is_enabled'
+        // POST academics/classes/save without id → insert
         await phpApiService.addClass({
           name: finalName,
-          className: finalName, // send both for broad compatibility
           sections: classModal.sections,
           is_enabled: classModal.isEnabled ? 1 : 0,
-          isEnabled: classModal.isEnabled,
         });
         toast.success(`${displayClassName(finalName)} added`);
       }
@@ -230,11 +225,11 @@ export default function ClassesSections() {
       // Show error inside modal — do NOT close and do NOT show "Session expired"
       let msg = "Failed to save class. Please retry.";
       if (err instanceof Error) {
-        // Exclude generic session expired message from inline form error
-        const isSessionError =
+        // Never surface the generic auth error as an inline form error
+        const isAuthError =
           err.message.toLowerCase().includes("session expired") ||
           err.message.toLowerCase().includes("please log in");
-        msg = isSessionError
+        msg = isAuthError
           ? "Authentication error — please refresh the page and try again."
           : err.message;
       }
@@ -253,7 +248,8 @@ export default function ClassesSections() {
       return;
     setDeletingId(cls.id);
     try {
-      await phpApiService.del("classes/delete", { id: cls.id });
+      // PHP: DELETE /api/?route=academics/classes/delete&id=X
+      await phpApiService.del(`academics/classes/delete&id=${cls.id}`);
       toast.success(`${displayClassName(cls.className)} deleted`);
       loadClasses();
     } catch {
@@ -266,10 +262,9 @@ export default function ClassesSections() {
   async function handleToggleEnabled(cls: ClassRecord) {
     const nowEnabled = (cls as Record<string, unknown>).isEnabled !== false;
     try {
-      await phpApiService.put("classes/update", {
-        id: cls.id,
-        is_enabled: nowEnabled ? 0 : 1, // send 0/1 for PHP
-        isEnabled: !nowEnabled, // send boolean for broad compatibility
+      // POST academics/classes/save with id + is_enabled to toggle
+      await phpApiService.updateClass(cls.id, {
+        is_enabled: nowEnabled ? 0 : 1,
       });
       toast.success(
         `${displayClassName(cls.className)} ${!nowEnabled ? "enabled" : "disabled"}`,

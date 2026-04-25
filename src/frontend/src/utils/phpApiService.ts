@@ -677,9 +677,28 @@ class PhpApiService {
 
   // ── Classes ───────────────────────────────────────────────────────────────
 
-  async getClasses(): Promise<ClassRecord[]> {
+  async getClasses(sessionId?: string): Promise<ClassRecord[]> {
     try {
-      return await this.get<ClassRecord[]>("classes/list");
+      const params: Record<string, string> = {};
+      if (sessionId) params.session_id = sessionId;
+      // PHP: GET /api/?route=academics/classes[&session_id=X]
+      const raw = await this.get<
+        Array<{
+          id: string;
+          name: string;
+          display_order?: number;
+          is_enabled?: number;
+          sections?: string[];
+        }>
+      >("academics/classes", Object.keys(params).length ? params : undefined);
+      // Normalise snake_case → camelCase expected by UI
+      return (raw ?? []).map((c) => ({
+        id: String(c.id),
+        className: c.name ?? "",
+        displayOrder: c.display_order ?? 0,
+        isEnabled: c.is_enabled !== 0, // 0 = disabled, anything else = enabled
+        sections: Array.isArray(c.sections) ? c.sections : [],
+      }));
     } catch {
       return [];
     }
@@ -688,29 +707,89 @@ class PhpApiService {
   async addClass(cls: {
     name?: string;
     className?: string;
+    display_order?: number;
     sections?: string[];
     is_enabled?: number;
     isEnabled?: boolean;
+    sessionId?: string;
   }): Promise<ClassRecord> {
-    // PHP backend expects 'name' (not 'className') and 'is_enabled' (0/1)
+    // PHP: POST /api/?route=academics/classes/save
+    // body: { name, display_order, session_id?, is_enabled }
+    const currentSessionId = (() => {
+      try {
+        return localStorage.getItem("erp_current_session_id") ?? undefined;
+      } catch {
+        return undefined;
+      }
+    })();
     const payload: Record<string, unknown> = {
-      name: cls.name ?? cls.className,
-      sections: cls.sections ?? [],
+      name: cls.name ?? cls.className ?? "",
+      display_order: cls.display_order ?? 0,
     };
-    // Convert isEnabled boolean → is_enabled 0/1 for PHP
-    if (cls.is_enabled !== undefined) {
-      payload.is_enabled = cls.is_enabled;
-    } else if (cls.isEnabled !== undefined) {
-      payload.is_enabled = cls.isEnabled ? 1 : 0;
+    if (cls.sessionId ?? currentSessionId) {
+      payload.session_id = cls.sessionId ?? currentSessionId;
     }
-    return this.post<ClassRecord>("classes/add", payload);
+    payload.is_enabled =
+      cls.is_enabled !== undefined
+        ? cls.is_enabled
+        : cls.isEnabled !== undefined
+          ? cls.isEnabled
+            ? 1
+            : 0
+          : 1;
+    if (cls.sections) payload.sections = cls.sections;
+    return this.post<ClassRecord>("academics/classes/save", payload);
+  }
+
+  async updateClass(
+    id: string,
+    data: {
+      name?: string;
+      display_order?: number;
+      is_enabled?: number;
+      isEnabled?: boolean;
+      sections?: string[];
+    },
+  ): Promise<ClassRecord> {
+    // PHP: POST /api/?route=academics/classes/save (with id = update)
+    const payload: Record<string, unknown> = { id };
+    if (data.name !== undefined) payload.name = data.name;
+    if (data.display_order !== undefined)
+      payload.display_order = data.display_order;
+    if (data.sections !== undefined) payload.sections = data.sections;
+    payload.is_enabled =
+      data.is_enabled !== undefined
+        ? data.is_enabled
+        : data.isEnabled !== undefined
+          ? data.isEnabled
+            ? 1
+            : 0
+          : 1;
+    return this.post<ClassRecord>("academics/classes/save", payload);
   }
 
   async addSection(section: { classId: string; name: string }): Promise<{
     id: string;
     name: string;
   }> {
-    return this.post<{ id: string; name: string }>("sections/add", section);
+    // PHP: POST /api/?route=academics/sections/save, body: { class_id, name }
+    return this.post<{ id: string; name: string }>("academics/sections/save", {
+      class_id: section.classId,
+      name: section.name,
+    });
+  }
+
+  async getSectionsByClass(
+    classId: string,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      // PHP: GET /api/?route=academics/sections&class_id=X
+      return await this.get<Record<string, unknown>[]>("academics/sections", {
+        class_id: classId,
+      });
+    } catch {
+      return [];
+    }
   }
 
   // ── Staff ─────────────────────────────────────────────────────────────────
@@ -754,8 +833,9 @@ class PhpApiService {
 
   async getSections(classId: string): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("sections/list", {
-        classId,
+      // PHP: GET /api/?route=academics/sections&class_id=X
+      return await this.get<Record<string, unknown>[]>("academics/sections", {
+        class_id: classId,
       });
     } catch {
       return [];
@@ -817,7 +897,33 @@ class PhpApiService {
 
   async getSessions(): Promise<SessionRecord[]> {
     try {
-      return await this.get<SessionRecord[]>("sessions/list");
+      // PHP: GET /api/?route=academic-sessions/list
+      const raw = await this.get<
+        Array<{
+          id: string;
+          name?: string;
+          label?: string;
+          start_year?: number;
+          startYear?: number;
+          end_year?: number;
+          endYear?: number;
+          is_current?: number;
+          isActive?: boolean;
+          is_archived?: number;
+          isArchived?: boolean;
+          created_at?: string;
+          createdAt?: string;
+        }>
+      >("academic-sessions/list");
+      return (raw ?? []).map((s) => ({
+        id: String(s.id),
+        label: s.name ?? s.label ?? "",
+        startYear: s.start_year ?? s.startYear ?? 0,
+        endYear: s.end_year ?? s.endYear ?? 0,
+        isActive: s.is_current === 1 || s.isActive === true,
+        isArchived: s.is_archived === 1 || s.isArchived === true,
+        createdAt: s.created_at ?? s.createdAt ?? new Date().toISOString(),
+      }));
     } catch {
       return [];
     }
@@ -828,11 +934,18 @@ class PhpApiService {
     startYear: number;
     endYear: number;
   }): Promise<SessionRecord> {
-    return this.post<SessionRecord>("sessions/create", session);
+    // PHP: POST /api/?route=academic-sessions/create
+    // body: { name, start_year, end_year }
+    return this.post<SessionRecord>("academic-sessions/create", {
+      name: session.label,
+      start_year: session.startYear,
+      end_year: session.endYear,
+    });
   }
 
   async setActiveSession(id: string): Promise<void> {
-    await this.put("sessions/set-active", { id });
+    // PHP: POST /api/?route=academic-sessions/set-current
+    await this.post("academic-sessions/set-current", { session_id: id });
   }
 
   // ── Fee headings ──────────────────────────────────────────────────────────
