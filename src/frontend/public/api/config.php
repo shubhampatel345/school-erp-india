@@ -3,29 +3,32 @@
  * SHUBH SCHOOL ERP — Database Configuration & Helpers
  *
  * Upload api/index.php + api/config.php to cPanel public_html/api/
- * Fill in your MySQL credentials below, then visit:
- *   https://yourdomain.com/api/?route=migrate/run
- * to create all tables and seed the default admin account.
+ * DB credentials are already hardcoded for psmkgsco_shubherp_db.
+ * After uploading, visit: https://shubh.psmkgs.com/api/index.php?route=migrate/run
+ * to create all tables and seed the default admin account (admin / admin123).
  */
 
 @error_reporting(0);
 @ini_set('display_errors', '0');
 @ini_set('log_errors', '1');
 
-// ── Database credentials (fill these in for your cPanel hosting) ──────────────
-define('DB_HOST',    getenv('DB_HOST')    ?: 'localhost');
-define('DB_PORT',    getenv('DB_PORT')    ?: '3306');
-define('DB_NAME',    getenv('DB_NAME')    ?: 'school_erp_db');
-define('DB_USER',    getenv('DB_USER')    ?: 'root');
-define('DB_PASS',    getenv('DB_PASS')    ?: '');
+// ── Database credentials — hardcoded for psmkgs.com cPanel deployment ─────────
+// No environment variable setup needed. These values match the cPanel MySQL account.
+define('DB_HOST',    'localhost');
+define('DB_PORT',    '3306');
+define('DB_NAME',    'psmkgsco_shubherp_db');
+define('DB_USER',    'psmkgsco_shubherp_user');
+define('DB_PASS',    'Shubh@420');
 define('DB_CHARSET', 'utf8mb4');
 
 // ── JWT & App settings ─────────────────────────────────────────────────────────
-define('APP_SECRET',  getenv('JWT_SECRET') ?: 'shubh_school_erp_secret_change_me_2025');
-define('JWT_SECRET',  APP_SECRET);
-define('JWT_EXPIRY',  86400);   // 24 hours
-define('JWT_REFRESH', 604800);  // 7 days
-define('API_VERSION', '6.0');
+define('APP_SECRET',  'shubh_erp_secret_2025_psmkgs');
+define('JWT_SECRET',         APP_SECRET);
+define('JWT_EXPIRY',         86400);   // 24 hours
+define('JWT_REFRESH',        604800);  // 7 days — internal alias
+define('JWT_REFRESH_EXPIRY', 604800);  // 7 days — spec alias
+define('ALLOWED_ORIGINS',    ['https://shubh.psmkgs.com', 'http://localhost:3000', 'http://localhost:5173']);
+define('API_VERSION',        '6.0');
 define('MAX_FILE_SIZE', 5242880); // 5 MB
 define('UPLOAD_DIR',  __DIR__ . '/uploads/');
 

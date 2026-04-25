@@ -13,9 +13,9 @@
  *   - Every authenticated API call calls ensureValidToken() first
  * If all refresh methods fail, emits 'auth:token-expired' DOM event.
  *
- * API URL format: {serverUrl}/?route=ROUTE_NAME
- * serverUrl is read from localStorage 'erp_server_url' if set.
- * Default: '/api'
+ * API URL format: {serverUrl}/index.php?route=ROUTE_NAME
+ * Default: 'https://shubh.psmkgs.com/api' (hardcoded for production).
+ * Override via localStorage 'erp_server_url' for dev/testing.
  *
  * VALID ROUTES (must match backend exactly):
  * auth/login, auth/logout, auth/refresh, auth/me,
@@ -60,7 +60,11 @@
  * ping
  */
 
-/** Read server URL from localStorage — defaults to '/api' (same-origin) */
+/**
+ * Return the API base URL.
+ * Hardcoded to https://shubh.psmkgs.com/api for production.
+ * Can be overridden via localStorage 'erp_server_url' for dev/testing.
+ */
 function getApiBase(): string {
   try {
     const stored = localStorage.getItem("erp_server_url");
@@ -68,7 +72,7 @@ function getApiBase(): string {
   } catch {
     /* noop */
   }
-  return "/api";
+  return "https://shubh.psmkgs.com/api";
 }
 
 interface ApiResponse<T = unknown> {

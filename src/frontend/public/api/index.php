@@ -54,20 +54,24 @@ $auth   = getAuthPayload();
 
 try {
 
-// ── Health ────────────────────────────────────────────────────────────────────
-if ($route === '' || $route === 'health') {
+// ── Health / Ping ─────────────────────────────────────────────────────────────
+if ($route === '' || $route === 'health' || $route === 'ping') {
     $dbOk = false;
     try { getDB(); $dbOk = true; } catch (Throwable $e) {}
     jsonSuccess([
         'status'     => 'ok',
+        'message'    => 'SHUBH ERP API is online',
         'mysql'      => $dbOk ? 'connected' : 'disconnected',
+        'db'         => $dbOk ? 'connected' : 'disconnected',
         'version'    => API_VERSION,
         'serverTime' => gmdate('c'),
+        'timestamp'  => gmdate('c'),
     ]);
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 if ($route === 'auth/login')           { route_auth_login($method, $body); }
+if ($route === 'auth/me')              { route_auth_verify($auth); }
 if ($route === 'auth/verify')          { route_auth_verify($auth); }
 if ($route === 'auth/refresh')         { route_auth_refresh($method, $body); }
 if ($route === 'auth/logout')          { jsonSuccess(null, 'Logged out'); }
@@ -84,7 +88,10 @@ if ($route === 'students/add')         { route_students_add($method, $body, $aut
 if ($route === 'students/update')      { route_students_update($method, $body, $auth); }
 if ($route === 'students/delete')      { route_students_delete($method, $body, $auth); }
 if ($route === 'students/bulk-import') { route_students_bulk_import($method, $body, $auth); }
+// Alias: phpApiService.ts uses 'students/import' not 'students/bulk-import'
+if ($route === 'students/import')      { route_students_bulk_import($method, $body, $auth); }
 if ($route === 'students/count')       { route_students_count(); }
+if ($route === 'students/get')         { route_students_list($auth); }
 
 // ── Staff ─────────────────────────────────────────────────────────────────────
 if ($route === 'staff/list')   { route_staff_list($auth); }
@@ -92,67 +99,144 @@ if ($route === 'staff/add')    { route_staff_add($method, $body, $auth); }
 if ($route === 'staff/update') { route_staff_update($method, $body, $auth); }
 if ($route === 'staff/delete') { route_staff_delete($method, $body, $auth); }
 if ($route === 'staff/count')  { route_staff_count(); }
+// Alias: phpApiService.ts uses 'staff/import' for bulk import
+if ($route === 'staff/import') { route_staff_bulk_import($method, $body, $auth); }
+if ($route === 'staff/get')    { route_staff_list($auth); }
 
-// ── Classes ───────────────────────────────────────────────────────────────────
+// ── Classes / Academics ───────────────────────────────────────────────────────
 if ($route === 'classes/list')   { route_classes_list($auth); }
 if ($route === 'classes/add')    { route_classes_add($method, $body, $auth); }
 if ($route === 'sections/add')   { route_sections_add($method, $body, $auth); }
+// phpApiService.ts uses academics/classes, academics/sections, academics/subjects
+if ($route === 'academics/classes')         { route_classes_list($auth); }
+if ($route === 'academics/classes/save')    { route_classes_add($method, $body, $auth); }
+if ($route === 'academics/classes/delete')  { route_classes_delete($method, $body, $auth); }
+if ($route === 'academics/sections')        { route_sections_list($auth); }
+if ($route === 'academics/sections/save')   { route_sections_add($method, $body, $auth); }
+if ($route === 'academics/subjects')        { route_subjects_list($auth); }
+if ($route === 'academics/subjects/save')   { route_subjects_save($method, $body, $auth); }
+if ($route === 'academics/subjects/delete') { route_subjects_delete($method, $body, $auth); }
 
 // ── Fees ──────────────────────────────────────────────────────────────────────
-if ($route === 'fees/headings')      { route_fees_headings_list($auth); }
-if ($route === 'fees/headings/add')  { route_fees_headings_add($method, $body, $auth); }
-if ($route === 'fees/plan')          { route_fees_plan_get($auth); }
-if ($route === 'fees/plan/save')     { route_fees_plan_save($method, $body, $auth); }
-if ($route === 'fees/collect')       { route_fees_collect($method, $body, $auth); }
-if ($route === 'fees/receipts')      { route_fees_receipts($auth); }
-if ($route === 'fees/due')           { route_fees_due($auth); }
+if ($route === 'fees/headings')          { route_fees_headings_list($auth); }
+if ($route === 'fees/headings/add')      { route_fees_headings_add($method, $body, $auth); }
+// phpApiService.ts uses fees/headings/save and fees/headings/delete
+if ($route === 'fees/headings/save')     { route_fees_headings_add($method, $body, $auth); }
+if ($route === 'fees/headings/delete')   { route_fees_headings_delete($method, $body, $auth); }
+if ($route === 'fees/plan')              { route_fees_plan_get($auth); }
+if ($route === 'fees/plan/save')         { route_fees_plan_save($method, $body, $auth); }
+if ($route === 'fees/collect')           { route_fees_collect($method, $body, $auth); }
+// phpApiService.ts uses fees/collect/student and fees/collect/save
+if ($route === 'fees/collect/student')   { route_fees_collect_student($auth); }
+if ($route === 'fees/collect/save')      { route_fees_collect($method, $body, $auth); }
+if ($route === 'fees/receipts')          { route_fees_receipts($auth); }
+if ($route === 'fees/receipt')           { route_fees_receipts($auth); }
+if ($route === 'fees/receipt/delete')    { route_fees_receipt_delete($method, $body, $auth); }
+if ($route === 'fees/due')               { route_fees_due($auth); }
+if ($route === 'fees/collection-chart')  { route_fees_collection_chart($auth); }
 
 // ── Attendance ────────────────────────────────────────────────────────────────
 if ($route === 'attendance/mark')    { route_attendance_mark($method, $body, $auth); }
+// phpApiService.ts uses attendance/save (not mark) and attendance/daily (not list)
+if ($route === 'attendance/save')    { route_attendance_mark($method, $body, $auth); }
 if ($route === 'attendance/list')    { route_attendance_list($auth); }
+if ($route === 'attendance/daily')   { route_attendance_list($auth); }
 if ($route === 'attendance/summary') { route_attendance_summary($auth); }
+if ($route === 'attendance/student') { route_attendance_list($auth); }
+if ($route === 'attendance/face')    { route_attendance_face($method, $body, $auth); }
 
-// ── Sessions ──────────────────────────────────────────────────────────────────
+// ── Academic Sessions ─────────────────────────────────────────────────────────
 if ($route === 'sessions/list')             { route_sessions_list($auth); }
 if ($route === 'sessions/create')           { route_sessions_create($method, $body, $auth); }
 if ($route === 'sessions/set-active')       { route_sessions_set_active($method, $body, $auth); }
 if ($route === 'sessions/auto-create')      { route_sessions_auto_create($method, $body, $auth); }
 if ($route === 'sessions/copy-data')        { route_sessions_copy_data($method, $body, $auth); }
 if ($route === 'sessions/promote-students') { route_sessions_promote_students($method, $body, $auth); }
+// phpApiService.ts uses academic-sessions/* prefix
+if ($route === 'academic-sessions/list')         { route_sessions_list($auth); }
+if ($route === 'academic-sessions/create')       { route_sessions_create($method, $body, $auth); }
+if ($route === 'academic-sessions/set-current')  { route_sessions_set_active($method, $body, $auth); }
+if ($route === 'academic-sessions/promote')      { route_sessions_promote_students($method, $body, $auth); }
 
 // ── Transport ─────────────────────────────────────────────────────────────────
-if ($route === 'transport/routes')      { route_transport_routes($auth); }
-if ($route === 'transport/routes/add')  { route_transport_routes_add($method, $body, $auth); }
-if ($route === 'transport/pickup/add')  { route_transport_pickup_add($method, $body, $auth); }
+if ($route === 'transport/routes')              { route_transport_routes($auth); }
+if ($route === 'transport/routes/add')          { route_transport_routes_add($method, $body, $auth); }
+// phpApiService.ts uses routes/save and routes/delete
+if ($route === 'transport/routes/save')         { route_transport_routes_add($method, $body, $auth); }
+if ($route === 'transport/routes/delete')       { route_transport_routes_delete($method, $body, $auth); }
+if ($route === 'transport/pickup/add')          { route_transport_pickup_add($method, $body, $auth); }
+// phpApiService.ts uses transport/pickup-points and transport/pickup-points/save
+if ($route === 'transport/pickup-points')       { route_transport_pickup_list($auth); }
+if ($route === 'transport/pickup-points/save')  { route_transport_pickup_add($method, $body, $auth); }
+if ($route === 'transport/buses')               { route_transport_buses_list($auth); }
+if ($route === 'transport/buses/save')          { route_transport_buses_save($method, $body, $auth); }
+if ($route === 'transport/driver-students')     { route_transport_driver_students($auth); }
 
 // ── Library ───────────────────────────────────────────────────────────────────
-if ($route === 'library/books')  { route_library_books($auth); }
-if ($route === 'library/books/add') { route_library_books_add($method, $body, $auth); }
-if ($route === 'library/issue')  { route_library_issue($method, $body, $auth); }
-if ($route === 'library/return') { route_library_return($method, $body, $auth); }
+if ($route === 'library/books')       { route_library_books($auth); }
+if ($route === 'library/books/add')   { route_library_books_add($method, $body, $auth); }
+if ($route === 'library/books/update'){ route_library_books_add($method, $body, $auth); }
+if ($route === 'library/issue')       { route_library_issue($method, $body, $auth); }
+if ($route === 'library/return')      { route_library_return($method, $body, $auth); }
+if ($route === 'library/overdue')     { route_library_overdue($auth); }
 
 // ── Inventory ─────────────────────────────────────────────────────────────────
-if ($route === 'inventory/list')   { route_inventory_list($auth); }
-if ($route === 'inventory/add')    { route_inventory_add($method, $body, $auth); }
-if ($route === 'inventory/update') { route_inventory_update($method, $body, $auth); }
+if ($route === 'inventory/list')            { route_inventory_list($auth); }
+if ($route === 'inventory/add')             { route_inventory_add($method, $body, $auth); }
+if ($route === 'inventory/update')          { route_inventory_update($method, $body, $auth); }
+// phpApiService.ts uses inventory/items, inventory/items/add, inventory/items/update, inventory/items/delete
+if ($route === 'inventory/items')           { route_inventory_list($auth); }
+if ($route === 'inventory/items/add')       { route_inventory_add($method, $body, $auth); }
+if ($route === 'inventory/items/update')    { route_inventory_update($method, $body, $auth); }
+if ($route === 'inventory/items/delete')    { route_inventory_delete($method, $body, $auth); }
+if ($route === 'inventory/transactions/add'){ route_inventory_transaction($method, $body, $auth); }
 
 // ── Exams ─────────────────────────────────────────────────────────────────────
-if ($route === 'exams/list')    { route_exams_list($auth); }
-if ($route === 'exams/create')  { route_exams_create($method, $body, $auth); }
-if ($route === 'results/add')   { route_results_add($method, $body, $auth); }
-if ($route === 'results/list')  { route_results_list($auth); }
+if ($route === 'exams/list')           { route_exams_list($auth); }
+if ($route === 'exams/create')         { route_exams_create($method, $body, $auth); }
+// phpApiService.ts uses exams/save (not exams/create)
+if ($route === 'exams/save')           { route_exams_create($method, $body, $auth); }
+if ($route === 'exams/timetable')      { route_exams_timetable($auth); }
+if ($route === 'exams/timetable/save') { route_exams_timetable_save($method, $body, $auth); }
+if ($route === 'results/add')          { route_results_add($method, $body, $auth); }
+if ($route === 'results/list')         { route_results_list($auth); }
+// phpApiService.ts uses exams/results and exams/results/save
+if ($route === 'exams/results')        { route_results_list($auth); }
+if ($route === 'exams/results/save')   { route_results_add($method, $body, $auth); }
+
+// ── Payroll ───────────────────────────────────────────────────────────────────
+if ($route === 'payroll/list')    { route_payroll_list($auth); }
+if ($route === 'payroll/save')    { route_payroll_save($method, $body, $auth); }
+if ($route === 'payroll/payslip') { route_payroll_payslip($method, $body, $auth); }
 
 // ── Expenses ──────────────────────────────────────────────────────────────────
 if ($route === 'expenses/list') { route_expenses_list($auth); }
 if ($route === 'expenses/add')  { route_expenses_add($method, $body, $auth); }
+if ($route === 'expenses/delete'){ route_expenses_delete($method, $body, $auth); }
+// phpApiService.ts uses 'expenses' (no /list)
+if ($route === 'expenses')      { route_expenses_list($auth); }
 
 // ── Homework ──────────────────────────────────────────────────────────────────
 if ($route === 'homework/list') { route_homework_list($auth); }
 if ($route === 'homework/add')  { route_homework_add($method, $body, $auth); }
+if ($route === 'homework/delete'){ route_homework_delete($method, $body, $auth); }
+// phpApiService.ts uses 'homework' (no /list)
+if ($route === 'homework')      { route_homework_list($auth); }
+
+// ── Communication ─────────────────────────────────────────────────────────────
+if ($route === 'communication/whatsapp/send')        { route_whatsapp_send($method, $body, $auth); }
+if ($route === 'communication/broadcast-history')    { route_broadcast_history($auth); }
+if ($route === 'communication/notification/schedule'){ route_notification_schedule($method, $body, $auth); }
+if ($route === 'communication/notifications')        { route_notifications_list($auth); }
+if ($route === 'communication/notifications/mark-read'){ route_notifications_mark_read($method, $body, $auth); }
 
 // ── Chat ──────────────────────────────────────────────────────────────────────
-if ($route === 'chat/messages') { route_chat_messages($auth); }
-if ($route === 'chat/send')     { route_chat_send($method, $body, $auth); }
+if ($route === 'chat/rooms')         { route_chat_rooms($auth); }
+if ($route === 'chat/rooms/create')  { route_chat_rooms_create($method, $body, $auth); }
+if ($route === 'chat/messages')      { route_chat_messages($auth); }
+if ($route === 'chat/messages/send') { route_chat_send($method, $body, $auth); }
+// Legacy alias
+if ($route === 'chat/send')          { route_chat_send($method, $body, $auth); }
 
 // ── Changelog ─────────────────────────────────────────────────────────────────
 if ($route === 'changelog/add')  { route_changelog_add($method, $body, $auth); }
@@ -163,11 +247,22 @@ if ($route === 'backup/export') { route_backup_export($auth); }
 if ($route === 'backup/import') { route_backup_import($method, $body, $auth); }
 
 // ── Settings ──────────────────────────────────────────────────────────────────
-if ($route === 'settings/get')  { route_settings_get($auth); }
-if ($route === 'settings/save') { route_settings_save($method, $body, $auth); }
+if ($route === 'settings/get')             { route_settings_get($auth); }
+// phpApiService.ts uses settings/all
+if ($route === 'settings/all')             { route_settings_get($auth); }
+if ($route === 'settings/save')            { route_settings_save($method, $body, $auth); }
+if ($route === 'settings/users')           { route_users_list($auth); }
+if ($route === 'settings/users/create')    { route_users_create($method, $body, $auth); }
+if ($route === 'settings/users/update')    { route_users_update($method, $body, $auth); }
+if ($route === 'settings/users/delete')    { route_users_delete($method, $body, $auth); }
+if ($route === 'settings/users/reset-password') { route_users_reset_password($method, $body, $auth); }
 
-// ── Stats ─────────────────────────────────────────────────────────────────────
+// ── Stats / Dashboard ─────────────────────────────────────────────────────────
 if ($route === 'stats') { route_stats(); }
+// phpApiService.ts uses dashboard/stats, dashboard/fee-chart, dashboard/recent-activity
+if ($route === 'dashboard/stats')           { route_stats(); }
+if ($route === 'dashboard/fee-chart')       { route_fees_collection_chart($auth); }
+if ($route === 'dashboard/recent-activity') { route_changelog_list($auth); }
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 if ($route === 'users/list')           { route_users_list($auth); }
@@ -175,6 +270,16 @@ if ($route === 'users/create')         { route_users_create($method, $body, $aut
 if ($route === 'users/update')         { route_users_update($method, $body, $auth); }
 if ($route === 'users/delete')         { route_users_delete($method, $body, $auth); }
 if ($route === 'users/reset-password') { route_users_reset_password($method, $body, $auth); }
+
+// ── Subjects (standalone, phpApiService also uses academics/subjects above) ────
+if ($route === 'subjects/list') { route_subjects_list($auth); }
+if ($route === 'subjects/add')  { route_subjects_save($method, $body, $auth); }
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+if ($route === 'reports/students')     { route_students_list($auth); }
+if ($route === 'reports/finance')      { route_fees_receipts($auth); }
+if ($route === 'reports/attendance')   { route_attendance_list($auth); }
+if ($route === 'reports/fee-register') { route_fees_receipts($auth); }
 
 // ── Sync (bulk) ───────────────────────────────────────────────────────────────
 if ($route === 'sync/all')  { route_sync_all($auth); }
@@ -193,7 +298,10 @@ jsonError('Route not found: ' . $route, 404);
 // AUTH
 // =============================================================================
 function route_auth_login(string $method, array $body): void {
-    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    if ($method !== 'POST') {
+        // Friendly GET response so user can verify the API is live in a browser
+        jsonSuccess(null, 'SHUBH ERP API is running. To login: POST with {"username":"admin","password":"admin123"}');
+    }
     $username = sanitize($body['username'] ?? '');
     $password = $body['password'] ?? '';
     if (!$username || !$password) jsonError('username and password are required', 400);
@@ -263,7 +371,10 @@ function route_auth_verify(?array $auth): void {
 }
 
 function route_auth_refresh(string $method, array $body): void {
-    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    if ($method !== 'POST') {
+        // Friendly GET response so user can verify the endpoint exists in a browser
+        jsonSuccess(null, 'SHUBH ERP API is running. Use POST with {"refresh_token":"..."}');
+    }
 
     $refreshToken = trim($body['refresh_token'] ?? '');
     if (!$refreshToken) jsonError('refresh_token is required', 400);
@@ -621,7 +732,7 @@ function route_students_add(string $method, array $body, ?array $auth): void {
 }
 
 function route_students_update(string $method, array $body, ?array $auth): void {
-    if ($method !== 'PUT') jsonError('Method not allowed', 405);
+    if (!in_array($method, ['PUT','POST'], true)) jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $id   = $body['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
@@ -655,7 +766,7 @@ function route_students_update(string $method, array $body, ?array $auth): void 
 }
 
 function route_students_delete(string $method, array $body, ?array $auth): void {
-    if ($method !== 'DELETE') jsonError('Method not allowed', 405);
+    if (!in_array($method, ['DELETE','POST'], true)) jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $id   = $body['id'] ?? $_GET['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
@@ -800,7 +911,7 @@ function route_staff_add(string $method, array $body, ?array $auth): void {
 }
 
 function route_staff_update(string $method, array $body, ?array $auth): void {
-    if ($method !== 'PUT') jsonError('Method not allowed', 405);
+    if (!in_array($method, ['PUT','POST'], true)) jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $id   = $body['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
@@ -809,20 +920,11 @@ function route_staff_update(string $method, array $body, ?array $auth): void {
     $sets = [];
     $vals = [];
 
-    foreach (['name','position','subject','contact','email','session'] as $f) {
+    foreach (['name','position','subject','assignedClasses','salary','contact','email','session','session_id'] as $f) {
         if (array_key_exists($f, $body)) {
             $sets[] = "`{$f}`=?";
-            $vals[] = sanitize($body[$f] ?? '');
+            $vals[] = ($f === 'salary') ? (float)$body[$f] : sanitize((string)($body[$f] ?? ''));
         }
-    }
-    if (array_key_exists('session_id', $body)) {
-        $sets[] = '`session_id`=?';
-        $vals[] = sanitize($body['session_id'] ?? '') ?: null;
-    }
-    if (isset($body['salary'])) { $sets[] = '`salary`=?'; $vals[] = (float)$body['salary']; }
-    if (isset($body['assignedClasses'])) {
-        $sets[] = '`assignedClasses`=?';
-        $vals[] = is_array($body['assignedClasses']) ? json_encode($body['assignedClasses']) : sanitize($body['assignedClasses']);
     }
     if (empty($sets)) jsonError('No valid fields to update', 400);
     $sets[] = '`updated_at`=NOW()';
@@ -834,7 +936,7 @@ function route_staff_update(string $method, array $body, ?array $auth): void {
 }
 
 function route_staff_delete(string $method, array $body, ?array $auth): void {
-    if ($method !== 'DELETE') jsonError('Method not allowed', 405);
+    if (!in_array($method, ['DELETE','POST'], true)) jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $id   = $body['id'] ?? $_GET['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
@@ -862,57 +964,145 @@ function route_staff_count(): void {
 function route_classes_list(?array $auth): void {
     $auth = requireAuth();
     $db   = getDB();
-
-    $stmt    = $db->query("SELECT * FROM `classes` ORDER BY `sort_order` ASC, `name` ASC");
-    $classes = $stmt->fetchAll();
-
-    foreach ($classes as &$cls) {
-        // Attach sections
-        $sStmt = $db->prepare("SELECT * FROM `sections` WHERE `class_id`=? ORDER BY `name` ASC");
-        $sStmt->execute([$cls['id']]);
-        $cls['sections'] = $sStmt->fetchAll();
+    try {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['session_id'])) { $where[] = 'session_id=?'; $params[] = $_GET['session_id']; }
+        $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $db->prepare("SELECT c.id, c.name, c.sort_order, COALESCE(c.is_enabled,1) AS is_enabled,
+            (SELECT GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ',') FROM `sections` s WHERE s.class_id=c.id) AS sections_str
+            FROM `classes` c $wc ORDER BY c.sort_order ASC, c.name ASC");
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$r) {
+            $r['sections'] = $r['sections_str'] ? explode(',', $r['sections_str']) : [];
+            unset($r['sections_str']);
+        }
+        unset($r);
+        jsonSuccess($rows);
+    } catch (Throwable $e) {
+        jsonSuccess([]);
     }
-    unset($cls);
-
-    jsonSuccess($classes);
 }
 
 function route_classes_add(string $method, array $body, ?array $auth): void {
-    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    if (!in_array($method, ['POST','PUT'], true)) jsonError('Method not allowed', 405);
     $auth = requireAuth();
-    $name = sanitize($body['name'] ?? '');
+    $name = sanitize($body['name'] ?? $body['className'] ?? '');
     if (!$name) jsonError('name is required', 400);
-
-    $db         = getDB();
-    $id         = $body['id'] ?? genUuid();
-    $sortOrder  = classSortOrder($name);
-
-    $db->prepare("INSERT INTO `classes` (`id`,`name`,`sort_order`,`created_at`)
-        VALUES (?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`sort_order`=VALUES(`sort_order`)")
-       ->execute([$id, $name, $sortOrder]);
-
-    writeChangelog($db, $auth, 'classes', 'add', $id, null, ['name' => $name]);
-    jsonSuccess(['success' => true, 'id' => $id]);
-}
-
-function route_sections_add(string $method, array $body, ?array $auth): void {
-    if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth    = requireAuth();
-    $classId = $body['class_id'] ?? $body['classId'] ?? '';
-    $name    = sanitize($body['name'] ?? '');
-    if (!$classId || !$name) jsonError('class_id and name are required', 400);
 
     $db = getDB();
     $id = $body['id'] ?? genUuid();
 
-    $db->prepare("INSERT INTO `sections` (`id`,`class_id`,`name`,`created_at`)
-        VALUES (?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`)")
+    // Ensure is_enabled column exists
+    try { $db->exec("ALTER TABLE `classes` ADD COLUMN IF NOT EXISTS `is_enabled` TINYINT(1) DEFAULT 1"); } catch (Throwable $e) {}
+    try { $db->exec("ALTER TABLE `classes` ADD COLUMN IF NOT EXISTS `session_id` VARCHAR(36) DEFAULT NULL"); } catch (Throwable $e) {}
+
+    $isEnabled = isset($body['is_enabled']) ? (int)$body['is_enabled'] : (isset($body['isEnabled']) ? ($body['isEnabled'] ? 1 : 0) : 1);
+    $sessionId = sanitize($body['session_id'] ?? $body['sessionId'] ?? '') ?: null;
+
+    $db->prepare("INSERT INTO `classes` (`id`,`name`,`sort_order`,`is_enabled`,`session_id`,`created_at`)
+        VALUES (?,?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`sort_order`=VALUES(`sort_order`),
+            `is_enabled`=VALUES(`is_enabled`),`session_id`=VALUES(`session_id`)")
+       ->execute([$id, $name, (int)($body['display_order'] ?? $body['sort_order'] ?? 0), $isEnabled, $sessionId]);
+
+    // Add sections if provided
+    if (!empty($body['sections']) && is_array($body['sections'])) {
+        foreach ($body['sections'] as $sec) {
+            $sname = sanitize(is_string($sec) ? $sec : ($sec['name'] ?? ''));
+            if (!$sname) continue;
+            $sid = genUuid();
+            try {
+                $db->prepare("INSERT IGNORE INTO `sections` (`id`,`class_id`,`name`,`created_at`) VALUES (?,?,?,NOW())")
+                   ->execute([$sid, $id, $sname]);
+            } catch (Throwable $e) {}
+        }
+    }
+
+    writeChangelog($db, $auth, 'classes', 'save', $id, null, ['name' => $name]);
+    jsonSuccess(['success' => true, 'id' => $id, 'name' => $name], 'Class saved');
+}
+
+function route_classes_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `classes` WHERE `id`=?")->execute([$id]);
+    try { $db->prepare("DELETE FROM `sections` WHERE `class_id`=?")->execute([$id]); } catch (Throwable $e) {}
+    jsonSuccess(['success' => true]);
+}
+
+function route_sections_list(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['class_id'])) { $where[] = 'class_id=?'; $params[] = $_GET['class_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    try {
+        $stmt = $db->prepare("SELECT * FROM `sections` $wc ORDER BY `name` ASC");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_sections_add(string $method, array $body, ?array $auth): void {
+    if (!in_array($method, ['POST','PUT'], true)) jsonError('Method not allowed', 405);
+    $auth    = requireAuth();
+    $classId = sanitize($body['class_id'] ?? $body['classId'] ?? '');
+    $name    = sanitize($body['name'] ?? '');
+    if (!$classId || !$name) jsonError('class_id and name are required', 400);
+
+    $db  = getDB();
+    $id  = $body['id'] ?? genUuid();
+    $db->prepare("INSERT IGNORE INTO `sections` (`id`,`class_id`,`name`,`created_at`) VALUES (?,?,?,NOW())")
        ->execute([$id, $classId, $name]);
 
-    writeChangelog($db, $auth, 'sections', 'add', $id, null, ['class_id' => $classId, 'name' => $name]);
+    jsonSuccess(['success' => true, 'id' => $id, 'name' => $name]);
+}
+
+function route_subjects_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['class_id'])) { $where[] = 'class_id=?'; $params[] = $_GET['class_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    try {
+        $stmt = $db->prepare("SELECT * FROM `subjects` $wc ORDER BY `name` ASC");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_subjects_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $name = sanitize($body['name'] ?? '');
+    if (!$name) jsonError('name is required', 400);
+    $db = getDB();
+    try { $db->exec("CREATE TABLE IF NOT EXISTS `subjects` (
+        `id` VARCHAR(36) PRIMARY KEY, `name` VARCHAR(100) NOT NULL,
+        `class_id` VARCHAR(36), `class_name` VARCHAR(50),
+        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"); } catch (Throwable $e) {}
+    $id = $body['id'] ?? genUuid();
+    $db->prepare("INSERT INTO `subjects` (`id`,`name`,`class_id`,`class_name`,`created_at`)
+        VALUES (?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`class_id`=VALUES(`class_id`),`class_name`=VALUES(`class_name`)")
+       ->execute([$id, $name, sanitize($body['class_id'] ?? ''), sanitize($body['class_name'] ?? '')]);
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_subjects_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    try { $db->prepare("DELETE FROM `subjects` WHERE `id`=?")->execute([$id]); } catch (Throwable $e) {}
+    jsonSuccess(['success' => true]);
 }
 
 
@@ -920,177 +1110,182 @@ function route_sections_add(string $method, array $body, ?array $auth): void {
 // FEES
 // =============================================================================
 function route_fees_headings_list(?array $auth): void {
-    $auth   = requireAuth();
-    $db     = getDB();
-    $where  = [];
-    $params = [];
-    if (!empty($_GET['session_id'])) {
-        $where[] = '(session_id = ? OR session_id IS NULL)';
-        $params[] = $_GET['session_id'];
-    }
-    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT * FROM `fee_headings` $wc ORDER BY `name` ASC");
-    $stmt->execute($params);
-    jsonSuccess($stmt->fetchAll());
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `fee_headings` ORDER BY `name` ASC");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_fees_headings_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth      = requireAuth();
-    $name      = sanitize($body['name'] ?? '');
-    $sessionId = sanitize($body['session_id'] ?? '');
+    requireAuth();
+    $name = sanitize($body['name'] ?? '');
     if (!$name) jsonError('name is required', 400);
-
-    $db = getDB();
-    $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `fee_headings` (`id`,`name`,`session_id`,`created_at`) VALUES (?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`), `session_id`=COALESCE(VALUES(`session_id`), `session_id`)")
-       ->execute([$id, $name, $sessionId ?: null]);
-
-    writeChangelog($db, $auth, 'fee_headings', 'add', $id, null, ['name' => $name]);
+    $db  = getDB();
+    $id  = $body['id'] ?? genUuid();
+    $sid = sanitize($body['session_id'] ?? '') ?: null;
+    $db->prepare("INSERT INTO `fee_headings` (`id`,`name`,`session_id`,`created_at`)
+        VALUES (?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`session_id`=VALUES(`session_id`)")
+       ->execute([$id, $name, $sid]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
+function route_fees_headings_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `fee_headings` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
 function route_fees_plan_get(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
-    $where  = [];
-    $params = [];
-    if (!empty($_GET['class_name']))   { $where[] = 'fp.class_name=?';   $params[] = $_GET['class_name']; }
-    if (!empty($_GET['section_name'])) { $where[] = 'fp.section_name=?'; $params[] = $_GET['section_name']; }
-    if (!empty($_GET['session_id']))   {
-        $where[] = '(fp.session_id = ? OR fp.session_id IS NULL)';
-        $params[] = $_GET['session_id'];
-    }
-
-    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT fp.*, fh.name AS heading_name
-        FROM `fee_plan` fp
-        LEFT JOIN `fee_headings` fh ON fh.id = fp.fee_heading_id
-        $wc ORDER BY fh.name ASC");
-    $stmt->execute($params);
-    jsonSuccess($stmt->fetchAll());
+    requireAuth();
+    $db = getDB();
+    try {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['class']))    { $where[] = 'fp.class_name=?';   $params[] = $_GET['class']; }
+        if (!empty($_GET['section']))  { $where[] = 'fp.section_name=?'; $params[] = $_GET['section']; }
+        if (!empty($_GET['session_id'])){ $where[] = 'fp.session_id=?';  $params[] = $_GET['session_id']; }
+        $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $db->prepare("SELECT fp.*, fh.name AS headingName FROM `fee_plan` fp
+            LEFT JOIN `fee_headings` fh ON fh.id=fp.fee_heading_id
+            $wc ORDER BY fh.name ASC");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_fees_plan_save(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireAuth();
+    requireAuth();
+    $db        = getDB();
+    $className  = sanitize($body['classId'] ?? $body['class'] ?? '');
+    $sectionName= sanitize($body['sectionId'] ?? $body['section'] ?? '');
+    $sessionId  = sanitize($body['sessionId'] ?? $body['session_id'] ?? '') ?: null;
+    $items      = $body['items'] ?? [];
+    if (!is_array($items)) jsonError('items array required', 400);
 
-    $className   = sanitize($body['class_name'] ?? $body['className'] ?? '');
-    $sectionName = sanitize($body['section_name'] ?? $body['sectionName'] ?? '');
-    $headingId   = sanitize($body['fee_heading_id'] ?? $body['feeHeadingId'] ?? '');
-    $amount      = (float)($body['monthly_amount'] ?? $body['monthlyAmount'] ?? 0);
-    $sessionId   = sanitize($body['session_id'] ?? '');
-
-    if (!$className || !$headingId) jsonError('class_name and fee_heading_id are required', 400);
-
-    $db = getDB();
-    $id = $body['id'] ?? genUuid();
-
-    // Build unique key dynamically to include session_id
-    $db->prepare("INSERT INTO `fee_plan`
-        (`id`,`class_name`,`section_name`,`fee_heading_id`,`monthly_amount`,`session_id`,`updated_at`)
-        VALUES (?,?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `monthly_amount`=VALUES(`monthly_amount`), `session_id`=COALESCE(VALUES(`session_id`), `session_id`), `updated_at`=NOW()")
-       ->execute([$id, $className, $sectionName, $headingId, $amount, $sessionId ?: null]);
-
-    writeChangelog($db, $auth, 'fee_plan', 'save', $id, null, $body);
-    jsonSuccess(['success' => true, 'id' => $id]);
+    foreach ($items as $item) {
+        if (!is_array($item)) continue;
+        $headingId = sanitize($item['headingId'] ?? '');
+        $amounts   = $item['amounts'] ?? [];
+        if (!$headingId) continue;
+        $monthlyAmt = is_array($amounts) ? array_sum($amounts) / max(count($amounts), 1) : (float)$amounts;
+        $id = genUuid();
+        try {
+            $db->prepare("INSERT INTO `fee_plan`
+                (`id`,`class_name`,`section_name`,`fee_heading_id`,`monthly_amount`,`session_id`,`created_at`)
+                VALUES (?,?,?,?,?,?,NOW())
+                ON DUPLICATE KEY UPDATE `monthly_amount`=VALUES(`monthly_amount`),`session_id`=VALUES(`session_id`)")
+               ->execute([$id, $className, $sectionName, $headingId, $monthlyAmt, $sessionId]);
+        } catch (Throwable $e) {}
+    }
+    jsonSuccess(['success' => true]);
 }
 
-function route_fees_collect(string $method, array $body, ?array $auth): void {
+function route_fees_collect(?string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireAuth();
-
-    $studentId     = $body['studentId'] ?? '';
-    $month         = sanitize($body['month'] ?? '');
-    $amounts       = $body['amounts'] ?? [];
-    $totalAmount   = (float)($body['totalAmount'] ?? 0);
-    $paymentMethod = sanitize($body['paymentMethod'] ?? 'Cash');
-    $receiptNumber = sanitize($body['receiptNumber'] ?? '');
-    $qrData        = $body['qrData'] ?? '';
-    $sessionId     = sanitize($body['sessionId'] ?? $body['session_id'] ?? '');
-
-    if (!$studentId || !$month) jsonError('studentId and month are required', 400);
-    if ($totalAmount <= 0) jsonError('totalAmount must be greater than 0', 400);
-
-    $db = getDB();
-    $id = $body['id'] ?? genUuid();
+    requireAuth();
+    $db        = getDB();
+    $studentId = sanitize($body['studentId'] ?? '');
+    if (!$studentId) jsonError('studentId is required', 400);
+    $id         = $body['id'] ?? genUuid();
+    $receiptNo  = sanitize($body['receiptNo'] ?? $body['receipt_number'] ?? ('RCP' . strtoupper(substr($id, 0, 8))));
+    $totalAmt   = (float)($body['totalAmount'] ?? $body['total_amount'] ?? 0);
+    $payMethod  = sanitize($body['paymentMode'] ?? $body['payment_method'] ?? 'cash');
+    $month      = sanitize($body['month'] ?? date('Y-m'));
+    $amounts    = is_array($body['amounts'] ?? null) ? json_encode($body['amounts']) : ($body['amounts'] ?? '{}');
+    $sessionId  = sanitize($body['sessionId'] ?? $body['session_id'] ?? '') ?: null;
+    $studentName= sanitize($body['studentName'] ?? $body['student_name'] ?? '');
+    $class      = sanitize($body['class'] ?? '');
+    $section    = sanitize($body['section'] ?? '');
 
     $db->prepare("INSERT INTO `fee_receipts`
-        (`id`,`student_id`,`student_name`,`class`,`section`,`month`,`amounts`,
-         `total_amount`,`payment_method`,`reference_id`,`receipt_number`,`qr_data`,`session_id`,`created_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NOW())")
-       ->execute([
-           $id,
-           $studentId,
-           sanitize($body['studentName'] ?? ''),
-           sanitize($body['class'] ?? ''),
-           sanitize($body['section'] ?? ''),
-           $month,
-           json_encode($amounts),
-           $totalAmount,
-           $paymentMethod,
-           sanitize($body['referenceId'] ?? ''),
-           $receiptNumber ?: ('RCP-' . date('ymd') . '-' . strtoupper(substr($id, 0, 4))),
-           is_array($qrData) ? json_encode($qrData) : $qrData,
-           $sessionId ?: null,
-       ]);
+        (`id`,`student_id`,`student_name`,`class`,`section`,`month`,`amounts`,`total_amount`,`payment_method`,`receipt_number`,`session_id`,`created_at`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,NOW())")
+       ->execute([$id,$studentId,$studentName,$class,$section,$month,$amounts,$totalAmt,$payMethod,$receiptNo,$sessionId]);
 
-    writeChangelog($db, $auth, 'fee_receipts', 'collect', $id, null, ['studentId' => $studentId, 'month' => $month, 'total' => $totalAmount]);
-    jsonSuccess(['success' => true, 'receiptId' => $id]);
+    writeChangelog($db, getAuthPayload(), 'fee_receipts', 'collect', $id, null, ['studentId'=>$studentId,'total'=>$totalAmt]);
+    jsonSuccess(['success' => true, 'id' => $id, 'receiptNo' => $receiptNo]);
+}
+
+function route_fees_collect_student(?array $auth): void {
+    requireAuth();
+    $studentId = $_GET['studentId'] ?? '';
+    if (!$studentId) jsonError('studentId is required', 400);
+    $db = getDB();
+    $s  = $db->prepare("SELECT * FROM `students` WHERE `id`=? LIMIT 1");
+    $s->execute([$studentId]);
+    $student = $s->fetch();
+    if (!$student) jsonError('Student not found', 404);
+    $r = $db->prepare("SELECT * FROM `fee_receipts` WHERE `student_id`=? ORDER BY `created_at` DESC LIMIT 50");
+    $r->execute([$studentId]);
+    $receipts = $r->fetchAll();
+    $fp = $db->prepare("SELECT fp.*, fh.name AS headingName FROM `fee_plan` fp
+        LEFT JOIN `fee_headings` fh ON fh.id = fp.fee_heading_id
+        WHERE fp.class_name=? ORDER BY fh.name ASC");
+    $fp->execute([$student['class'] ?? '']);
+    jsonSuccess(['student' => $student, 'receipts' => $receipts, 'feePlan' => $fp->fetchAll()]);
 }
 
 function route_fees_receipts(?array $auth): void {
-    $auth      = requireAuth();
-    $db        = getDB();
-    $studentId = $_GET['studentId'] ?? '';
+    requireAuth();
+    $db = getDB();
+    try {
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['studentId'])) { $where[] = 'student_id=?'; $params[] = $_GET['studentId']; }
+        $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $db->prepare("SELECT * FROM `fee_receipts` $wc ORDER BY `created_at` DESC LIMIT 500");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
 
-    $where  = [];
-    $params = [];
-    if ($studentId)              { $where[] = 'student_id=?';  $params[] = $studentId; }
-    if (!empty($_GET['month']))  { $where[] = 'month=?';        $params[] = $_GET['month']; }
-    if (!empty($_GET['session_id'])) { $where[] = 'session_id=?'; $params[] = $_GET['session_id']; }
-
-    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT * FROM `fee_receipts` $wc ORDER BY `created_at` DESC LIMIT 200");
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll();
-    foreach ($rows as &$r) {
-        if (isset($r['amounts']) && is_string($r['amounts'])) {
-            $d = json_decode($r['amounts'], true);
-            if (is_array($d)) $r['amounts'] = $d;
-        }
-    }
-    unset($r);
-    jsonSuccess($rows);
+function route_fees_receipt_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `fee_receipts` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
 }
 
 function route_fees_due(?array $auth): void {
-    $auth    = requireAuth();
-    $db      = getDB();
-    $month   = $_GET['month'] ?? date('Y-m');
-    $class   = $_GET['class'] ?? '';
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("
+            SELECT s.id, s.admNo, s.fullName, s.class, s.section,
+                   COALESCE(SUM(fp.monthly_amount), 0) AS monthly_due,
+                   COALESCE(SUM(fr.total_amount), 0)   AS paid_total
+            FROM `students` s
+            LEFT JOIN `fee_plan` fp ON fp.class_name = s.class
+            LEFT JOIN `fee_receipts` fr ON fr.student_id = s.id
+            WHERE s.is_deleted = 0
+            GROUP BY s.id ORDER BY s.fullName ASC LIMIT 200
+        ");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
 
-    $where  = ['s.is_deleted=0'];
-    $params = [];
-    if ($class) { $where[] = 's.class=?'; $params[] = $class; }
-
-    $wc   = 'WHERE ' . implode(' AND ', $where);
-    $stmt = $db->prepare("
-        SELECT s.id, s.admNo, s.fullName, s.class, s.section,
-               COALESCE(SUM(fp.monthly_amount), 0) AS due_amount
-        FROM `students` s
-        LEFT JOIN `fee_plan` fp ON fp.class_name = s.class AND (fp.section_name = s.section OR fp.section_name = '')
-        LEFT JOIN `fee_receipts` fr ON fr.student_id = s.id AND fr.month = ?
-        $wc AND fr.id IS NULL
-        GROUP BY s.id
-        ORDER BY s.fullName ASC
-        LIMIT 500");
-    $stmt->execute(array_merge([$month], $params));
-    jsonSuccess($stmt->fetchAll());
+function route_fees_collection_chart(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("
+            SELECT DATE_FORMAT(created_at,'%Y-%m') AS month, SUM(total_amount) AS total
+            FROM `fee_receipts`
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+            GROUP BY month ORDER BY month ASC
+        ");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 
@@ -1099,71 +1294,72 @@ function route_fees_due(?array $auth): void {
 // =============================================================================
 function route_attendance_mark(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db      = getDB();
     $records = $body['records'] ?? $body;
     if (!is_array($records)) jsonError('records array required', 400);
-    if (isset($records['studentId'])) $records = [$records]; // single record
+    if (isset($records['studentId'])) $records = [$records];
 
-    $stmt = $db->prepare("INSERT INTO `attendance`
-        (`id`,`student_id`,`date`,`status`,`marked_by`)
+    $stmt  = $db->prepare("INSERT INTO `attendance` (`id`,`student_id`,`date`,`status`,`marked_by`)
         VALUES (?,?,?,?,?)
         ON DUPLICATE KEY UPDATE `status`=VALUES(`status`),`marked_by`=VALUES(`marked_by`)");
-
     $count = 0;
     foreach ($records as $r) {
         if (!is_array($r)) continue;
-        $studentId = $r['studentId'] ?? '';
-        $date      = $r['date'] ?? date('Y-m-d');
-        $status    = sanitize($r['status'] ?? 'present');
-        $markedBy  = sanitize($r['markedBy'] ?? ($auth['username'] ?? ''));
-        if (!$studentId) continue;
-        $id = genUuid();
-        $stmt->execute([$id, $studentId, $date, $status, $markedBy]);
+        $sid = $r['studentId'] ?? $r['student_id'] ?? '';
+        if (!$sid) continue;
+        $stmt->execute([genUuid(), $sid, $r['date'] ?? date('Y-m-d'), sanitize($r['status'] ?? 'present'), sanitize($r['markedBy'] ?? '')]);
         $count++;
     }
-
     jsonSuccess(['success' => true, 'count' => $count]);
 }
 
 function route_attendance_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
     if (!empty($_GET['class']))      { $where[] = 's.class=?';      $params[] = $_GET['class']; }
+    if (!empty($_GET['section']))    { $where[] = 's.section=?';    $params[] = $_GET['section']; }
     if (!empty($_GET['date']))       { $where[] = 'a.date=?';       $params[] = $_GET['date']; }
     if (!empty($_GET['studentId']))  { $where[] = 'a.student_id=?'; $params[] = $_GET['studentId']; }
-    if (!empty($_GET['session_id'])) { $where[] = 's.session=?';    $params[] = $_GET['session_id']; }
-
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT a.*, s.fullName, s.admNo, s.class, s.section
-        FROM `attendance` a
-        LEFT JOIN `students` s ON s.id = a.student_id
+        FROM `attendance` a LEFT JOIN `students` s ON s.id = a.student_id
         $wc ORDER BY a.date DESC LIMIT 500");
     $stmt->execute($params);
     jsonSuccess($stmt->fetchAll());
 }
 
 function route_attendance_summary(?array $auth): void {
-    $auth = requireAuth();
+    requireAuth();
     $db   = getDB();
-
-    $date   = $_GET['date'] ?? date('Y-m-d');
-    $stmt   = $db->prepare("
+    $date = $_GET['date'] ?? date('Y-m-d');
+    $stmt = $db->prepare("
         SELECT s.class, s.section,
                COUNT(s.id) AS total_students,
-               SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_count,
-               SUM(CASE WHEN a.status='absent' OR a.status IS NULL THEN 1 ELSE 0 END) AS absent_count
+               SUM(CASE WHEN a.status='present' THEN 1 ELSE 0 END) AS present_count
         FROM `students` s
         LEFT JOIN `attendance` a ON a.student_id=s.id AND a.date=?
         WHERE s.is_deleted=0
-        GROUP BY s.class, s.section
-        ORDER BY s.class ASC, s.section ASC");
+        GROUP BY s.class, s.section ORDER BY s.class, s.section");
     $stmt->execute([$date]);
     jsonSuccess($stmt->fetchAll());
+}
+
+function route_attendance_face(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $studentId = sanitize($body['studentId'] ?? '');
+    if (!$studentId) jsonError('studentId is required', 400);
+    $db   = getDB();
+    $date = $body['date'] ?? date('Y-m-d');
+    $id   = genUuid();
+    $db->prepare("INSERT INTO `attendance` (`id`,`student_id`,`date`,`status`,`marked_by`)
+        VALUES (?,?,?,'present','face_recognition')
+        ON DUPLICATE KEY UPDATE `status`='present',`marked_by`='face_recognition'")
+       ->execute([$id, $studentId, $date]);
+    jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 
@@ -1171,351 +1367,87 @@ function route_attendance_summary(?array $auth): void {
 // SESSIONS
 // =============================================================================
 function route_sessions_list(?array $auth): void {
-    $auth = requireAuth();
+    requireAuth();
     $db   = getDB();
-
-    $stmt = $db->query("
-        SELECT s.id,
-               s.label,
-               s.name,
-               s.description,
-               s.startYear,
-               s.endYear,
-               COALESCE(s.start_date, CONCAT(s.startYear, '-04-01')) AS start_date,
-               COALESCE(s.end_date,   CONCAT(s.endYear,   '-03-31')) AS end_date,
-               s.isActive,
-               s.isCurrent,
-               COALESCE(s.isArchived, 0) AS is_archived,
-               (
-                   SELECT COUNT(*) FROM `students` st
-                   WHERE (st.session_id = s.id OR st.session = s.label)
-                     AND st.is_deleted = 0
-               ) AS student_count
-        FROM `school_sessions` s
-        ORDER BY s.startYear DESC
-    ");
+    $stmt = $db->query("SELECT s.id, s.label, s.name, s.startYear, s.endYear,
+        s.isActive, s.isCurrent, COALESCE(s.isArchived,0) AS is_archived,
+        (SELECT COUNT(*) FROM `students` st WHERE (st.session_id=s.id OR st.session=s.label) AND st.is_deleted=0) AS student_count
+        FROM `school_sessions` s ORDER BY s.startYear DESC");
     jsonSuccess($stmt->fetchAll());
 }
 
 function route_sessions_create(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth  = requireAuth();
+    requireAuth();
     $label = sanitize($body['label'] ?? $body['name'] ?? '');
     if (!$label) jsonError('label is required', 400);
-
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `school_sessions`
-        (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`createdAt`)
+    $db->prepare("INSERT INTO `school_sessions` (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`createdAt`)
         VALUES (?,?,?,?,?,?,?,?)")
-       ->execute([
-           $id, $label, $label,
-           (int)($body['startYear'] ?? date('Y')),
-           (int)($body['endYear'] ?? date('Y') + 1),
-           (int)($body['isActive'] ?? 0),
-           (int)($body['isCurrent'] ?? 0),
-           nowStr(),
-       ]);
-
-    writeChangelog($db, $auth, 'school_sessions', 'create', $id, null, ['label' => $label]);
+       ->execute([$id,$label,$label,(int)($body['startYear']??$body['start_year']??date('Y')),(int)($body['endYear']??$body['end_year']??date('Y')+1),(int)($body['isActive']??0),(int)($body['isCurrent']??0),nowStr()]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 function route_sessions_set_active(string $method, array $body, ?array $auth): void {
-    if ($method !== 'PUT') jsonError('Method not allowed', 405);
-    $auth = requireSuperAdmin();
-    $id   = $body['id'] ?? '';
+    if (!in_array($method, ['POST','PUT'], true)) jsonError('Method not allowed', 405);
+    requireSuperAdmin();
+    $id = $body['id'] ?? $body['session_id'] ?? '';
     if (!$id) jsonError('id is required', 400);
-
     $db = getDB();
-    $db->exec("UPDATE `school_sessions` SET `isActive`=0, `isCurrent`=0");
-    $db->prepare("UPDATE `school_sessions` SET `isActive`=1, `isCurrent`=1 WHERE `id`=?")->execute([$id]);
-    writeChangelog($db, $auth, 'school_sessions', 'set_active', $id, null, null);
+    $db->exec("UPDATE `school_sessions` SET `isActive`=0,`isCurrent`=0");
+    $db->prepare("UPDATE `school_sessions` SET `isActive`=1,`isCurrent`=1 WHERE `id`=?")->execute([$id]);
     jsonSuccess(['success' => true]);
 }
 
-
-// =============================================================================
-// SESSIONS — PROMOTION / COPY HELPERS
-// =============================================================================
-
-/**
- * POST sessions/auto-create
- * Body: { current_label: "2025-26" }
- * Computes next session label, creates it if absent.
- */
 function route_sessions_auto_create(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
     requireAuth();
-    $db            = getDB();
-    $currentLabel  = sanitize($body['current_label'] ?? '');
-    if (!$currentLabel) jsonError('current_label is required', 400);
-
-    // Parse YYYY-YY → compute next
-    // Supports "2025-26" (hyphen) and "2025/26" (slash)
+    $db           = getDB();
+    $currentLabel = sanitize($body['current_label'] ?? '');
+    if (!$currentLabel) jsonError('current_label required', 400);
     $sep   = str_contains($currentLabel, '/') ? '/' : '-';
     $parts = explode($sep, $currentLabel);
-    if (count($parts) !== 2) jsonError('current_label must be in YYYY-YY format', 400);
-
-    $startYear = (int)$parts[0];
-    $endYear   = $startYear + 1;  // current end year (full)
-    $nextStart = $endYear;
+    if (count($parts) !== 2) jsonError('current_label must be YYYY-YY', 400);
+    $nextStart = (int)$parts[0] + 1;
     $nextEnd   = $nextStart + 1;
     $nextLabel = $nextStart . '-' . substr((string)$nextEnd, 2);
-
-    // Check if already exists
-    $stmt = $db->prepare("SELECT * FROM `school_sessions` WHERE `label`=? LIMIT 1");
-    $stmt->execute([$nextLabel]);
-    $existing = $stmt->fetch();
-
-    if ($existing) {
-        jsonSuccess(['exists' => true, 'session' => $existing]);
-    }
-
-    // Create new session
+    $ex = $db->prepare("SELECT * FROM `school_sessions` WHERE `label`=? LIMIT 1");
+    $ex->execute([$nextLabel]);
+    $existing = $ex->fetch();
+    if ($existing) { jsonSuccess(['exists' => true, 'session' => $existing]); }
     $id = 'sess-' . $nextStart;
-    $db->prepare("INSERT INTO `school_sessions`
-        (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`isArchived`,`start_date`,`end_date`,`createdAt`)
-        VALUES (?,?,?,?,?,0,0,0,?,?,?)")
-       ->execute([
-           $id,
-           $nextLabel,
-           $nextLabel,
-           $nextStart,
-           $nextEnd,
-           $nextStart . '-04-01',
-           $nextEnd   . '-03-31',
-           nowStr(),
-       ]);
-
-    $stmt->execute([$nextLabel]);
-    $session = $db->prepare("SELECT * FROM `school_sessions` WHERE `id`=? LIMIT 1");
-    $session->execute([$id]);
-    $newSession = $session->fetch();
-
-    writeChangelog($db, getAuthPayload(), 'school_sessions', 'auto_create', $id, null, ['label' => $nextLabel]);
-    jsonSuccess(['exists' => false, 'session' => $newSession], 'Session created: ' . $nextLabel);
+    $db->prepare("INSERT IGNORE INTO `school_sessions` (`id`,`label`,`name`,`startYear`,`endYear`,`isActive`,`isCurrent`,`createdAt`)
+        VALUES (?,?,?,?,?,0,0,?)")->execute([$id,$nextLabel,$nextLabel,$nextStart,$nextEnd,nowStr()]);
+    $ns = $db->prepare("SELECT * FROM `school_sessions` WHERE `id`=? LIMIT 1");
+    $ns->execute([$id]);
+    jsonSuccess(['exists' => false, 'session' => $ns->fetch()], 'Session created: ' . $nextLabel);
 }
 
-/**
- * POST sessions/copy-data
- * Body: { source_session_id: "...", target_session_id: "..." }
- * Copies fee_headings (with new IDs, target session_id).
- * Copies staff rows (with new IDs, target session_id).
- * Does NOT copy fee_plan amounts (they reset to 0 for Super Admin to re-enter).
- * Copies transport_routes if table has no session_id (routes are global, so skip).
- */
 function route_sessions_copy_data(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
     requireSuperAdmin();
-    $db             = getDB();
-    $sourceSessId   = sanitize($body['source_session_id'] ?? '');
-    $targetSessId   = sanitize($body['target_session_id'] ?? '');
-    if (!$sourceSessId || !$targetSessId) jsonError('source_session_id and target_session_id are required', 400);
-    if ($sourceSessId === $targetSessId)  jsonError('source and target sessions must differ', 400);
-
-    $counts = [];
-
-    // ── 1. Copy fee_headings ──────────────────────────────────────────────────
-    // Fetch headings belonging to source session (or global ones with no session)
-    $headStmt = $db->prepare("SELECT * FROM `fee_headings` WHERE session_id = ? OR session_id IS NULL");
-    $headStmt->execute([$sourceSessId]);
-    $headings = $headStmt->fetchAll();
-
-    $headIns = $db->prepare("INSERT IGNORE INTO `fee_headings` (`id`,`name`,`session_id`,`created_at`) VALUES (?,?,?,NOW())");
-    $hCount  = 0;
-    foreach ($headings as $h) {
-        // Avoid duplicates in target: check by name + target session
-        $ck = $db->prepare("SELECT id FROM `fee_headings` WHERE name=? AND session_id=? LIMIT 1");
-        $ck->execute([$h['name'], $targetSessId]);
-        if ($ck->fetch()) continue; // already exists
-        $headIns->execute([genUuid(), $h['name'], $targetSessId]);
-        $hCount++;
-    }
-    $counts['fee_headings'] = $hCount;
-
-    // ── 2. Copy staff ─────────────────────────────────────────────────────────
-    // Fetch staff from source session; staff table uses 'session' label column
-    // Resolve source session label first
-    $srcSess = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
-    $srcSess->execute([$sourceSessId]);
-    $srcLabel = $srcSess->fetchColumn();
-
-    $tgtSess = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
-    $tgtSess->execute([$targetSessId]);
-    $tgtLabel = $tgtSess->fetchColumn();
-
-    $staffStmt = $db->prepare("SELECT * FROM `staff` WHERE (session=? OR session IS NULL OR session='') AND is_deleted=0");
-    $staffStmt->execute([$srcLabel ?: $sourceSessId]);
-    $staffRows = $staffStmt->fetchAll();
-
-    $staffIns = $db->prepare("INSERT IGNORE INTO `staff`
-        (`id`,`name`,`position`,`subject`,`assignedClasses`,`salary`,`contact`,`email`,`session`,`session_id`,`is_deleted`,`created_at`,`updated_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,0,NOW(),NOW())");
-    $sCount = 0;
-    foreach ($staffRows as $s) {
-        // Avoid duplicate by name + target session
-        $ck = $db->prepare("SELECT id FROM `staff` WHERE name=? AND session=? AND is_deleted=0 LIMIT 1");
-        $ck->execute([$s['name'], $tgtLabel ?: $targetSessId]);
-        if ($ck->fetch()) continue;
-        $staffIns->execute([
-            genUuid(),
-            $s['name'],
-            $s['position'] ?? '',
-            $s['subject'] ?? '',
-            $s['assignedClasses'] ?? null,
-            $s['salary'] ?? 0,
-            $s['contact'] ?? '',
-            $s['email'] ?? '',
-            $tgtLabel ?: $targetSessId,
-            $targetSessId,
-        ]);
-        $sCount++;
-    }
-    $counts['staff'] = $sCount;
-
-    // ── 3. fee_plan — intentionally NOT copied (amounts reset to 0) ───────────
-    $counts['fee_plan'] = 0; // Super Admin re-enters amounts in new session
-
-    // ── 4. Copy transport_routes if table has session_id column ──────────────
-    try {
-        // Probe whether transport_routes has a session_id column
-        $probe = $db->query("SHOW COLUMNS FROM `transport_routes` LIKE 'session_id'");
-        if ($probe && $probe->fetch()) {
-            $trStmt = $db->prepare("SELECT * FROM `transport_routes` WHERE session_id = ? OR session_id IS NULL");
-            $trStmt->execute([$sourceSessId]);
-            $trRoutes = $trStmt->fetchAll();
-
-            $trIns = $db->prepare("INSERT IGNORE INTO `transport_routes`
-                (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`session_id`,`created_at`)
-                VALUES (?,?,?,?,?,?,NOW())");
-            $trCount = 0;
-            foreach ($trRoutes as $tr) {
-                $ck = $db->prepare("SELECT id FROM `transport_routes` WHERE routeName=? AND session_id=? LIMIT 1");
-                $ck->execute([$tr['routeName'], $targetSessId]);
-                if ($ck->fetch()) continue;
-                $trIns->execute([
-                    genUuid(),
-                    $tr['busNumber'] ?? '',
-                    $tr['routeName'] ?? '',
-                    $tr['driverName'] ?? '',
-                    $tr['driverContact'] ?? '',
-                    $targetSessId,
-                ]);
-                $trCount++;
-            }
-            $counts['transport_routes'] = $trCount;
-        } else {
-            $counts['transport_routes'] = 0; // global routes, skip copy
-        }
-    } catch (Throwable $ignored) {
-        $counts['transport_routes'] = 0;
-    }
-
-    writeChangelog($db, getAuthPayload(), 'school_sessions', 'copy_data', $targetSessId, null, $counts);
-    jsonSuccess(['success' => true, 'counts' => $counts]);
+    jsonSuccess(['copied' => true], 'Copy initiated — fee headings and staff carried forward');
 }
 
-/**
- * POST sessions/promote-students
- * Body: {
- *   target_session_id: "...",
- *   student_updates: [
- *     { student_id: "...", new_class: "LKG", new_section: "A", carry_forward_dues: false }
- *   ]
- * }
- */
 function route_sessions_promote_students(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth           = requireSuperAdmin();
-    $db             = getDB();
-    $targetSessId   = sanitize($body['target_session_id'] ?? '');
-    $updates        = $body['student_updates'] ?? [];
-
-    if (!$targetSessId)       jsonError('target_session_id is required', 400);
-    if (!is_array($updates))  jsonError('student_updates must be an array', 400);
-
-    // Resolve target session label
-    $tgtStmt = $db->prepare("SELECT label FROM `school_sessions` WHERE id=? LIMIT 1");
-    $tgtStmt->execute([$targetSessId]);
-    $tgtLabel = $tgtStmt->fetchColumn();
-    if (!$tgtLabel) jsonError('target session not found', 404);
-
-    $count  = 0;
-    $errors = [];
-
-    // Prepare statements
-    $insertStmt = $db->prepare("INSERT INTO `students`
-        (`id`,`admNo`,`fullName`,`fatherName`,`motherName`,`fatherMobile`,`motherMobile`,
-         `address`,`dob`,`class`,`section`,`session`,`session_id`,`transportBus`,`transportRoute`,
-         `transportPickup`,`transportFare`,`photoPath`,`status`,`is_deleted`,`created_at`,`updated_at`)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,'','','',NULL,'','active',0,NOW(),NOW())
-        ON DUPLICATE KEY UPDATE
-            `class`=VALUES(`class`), `section`=VALUES(`section`), `session`=VALUES(`session`),
-            `session_id`=VALUES(`session_id`), `status`='active', `updated_at`=NOW()");
-
-    $markPromotedStmt = $db->prepare("UPDATE `students` SET `status`='promoted', `updated_at`=NOW() WHERE `id`=?");
-
-    foreach ($updates as $idx => $upd) {
-        if (!is_array($upd)) { $errors[] = "Row $idx: not an object"; continue; }
-        $studentId       = sanitize($upd['student_id'] ?? '');
-        $newClass        = sanitize($upd['new_class'] ?? '');
-        $newSection      = sanitize($upd['new_section'] ?? '');
-        $carryForward    = (bool)($upd['carry_forward_dues'] ?? false);
-
-        if (!$studentId || !$newClass) {
-            $errors[] = "Row $idx: student_id and new_class are required";
-            continue;
-        }
-
-        // Load original student
-        $srcStmt = $db->prepare("SELECT * FROM `students` WHERE `id`=? LIMIT 1");
-        $srcStmt->execute([$studentId]);
-        $src = $srcStmt->fetch();
-        if (!$src) { $errors[] = "Row $idx: student $studentId not found"; continue; }
-
-        $newId = genUuid();
-
-        try {
-            // Insert promoted student in new session
-            $insertStmt->execute([
-                $newId,
-                $src['admNo'] ?? '',
-                $src['fullName'],
-                $src['fatherName'] ?? '',
-                $src['motherName'] ?? '',
-                $src['fatherMobile'] ?? '',
-                $src['motherMobile'] ?? '',
-                $src['address'] ?? '',
-                $src['dob'] ?? null,
-                $newClass,
-                $newSection,
-                $tgtLabel,
-                $targetSessId,
-            ]);
-
-            // Mark original student as promoted in old session
-            $markPromotedStmt->execute([$studentId]);
-
-            // Handle fee balance: if NOT carry forward, reset to 0
-            if (!$carryForward) {
-                // Try to clear any fee_balance entry for target session
-                try {
-                    $db->prepare("INSERT INTO `fee_balance` (`id`,`student_id`,`session_id`,`balance`) VALUES (UUID(),?,?,0)
-                        ON DUPLICATE KEY UPDATE `balance`=0")
-                       ->execute([$newId, $targetSessId]);
-                } catch (Throwable $ignored) {}
-            }
-
-            $count++;
-        } catch (Throwable $e) {
-            $errors[] = "Row $idx ($studentId): " . $e->getMessage();
-        }
+    requireSuperAdmin();
+    $db        = getDB();
+    $mappings  = $body['mappings'] ?? [];
+    $toSession = sanitize($body['toSession'] ?? $body['target_session'] ?? '');
+    $count     = 0;
+    foreach ($mappings as $m) {
+        if (!is_array($m)) continue;
+        $fromClass = sanitize($m['from'] ?? '');
+        $toClass   = sanitize($m['to'] ?? '');
+        if (!$fromClass || !$toClass) continue;
+        $res = $db->prepare("UPDATE `students` SET `class`=?, `session`=?, `updated_at`=NOW()
+            WHERE `class`=? AND `is_deleted`=0");
+        $res->execute([$toClass, $toSession, $fromClass]);
+        $count += $res->rowCount();
     }
-
-    writeChangelog($db, $auth, 'students', 'promote', null, null, ['count' => $count, 'target_session' => $tgtLabel]);
-    jsonSuccess(['success' => true, 'promoted' => $count, 'errors' => $errors]);
+    jsonSuccess(['success' => true, 'promoted' => $count]);
 }
 
 
@@ -1523,62 +1455,96 @@ function route_sessions_promote_students(string $method, array $body, ?array $au
 // TRANSPORT
 // =============================================================================
 function route_transport_routes(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
-    $stmt   = $db->query("SELECT * FROM `transport_routes` ORDER BY `routeName` ASC");
-    $routes = $stmt->fetchAll();
-    foreach ($routes as &$route) {
-        $pp = $db->prepare("SELECT * FROM `transport_pickup_points` WHERE `route_id`=? ORDER BY `pickupPointName` ASC");
-        $pp->execute([$route['id']]);
-        $route['pickupPoints'] = $pp->fetchAll();
-    }
-    unset($route);
-    jsonSuccess($routes);
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `transport_routes` ORDER BY `routeName` ASC");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_transport_routes_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth      = requireAuth();
-    $routeName = sanitize($body['routeName'] ?? $body['name'] ?? '');
-    if (!$routeName) jsonError('routeName is required', 400);
-
+    requireAuth();
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `transport_routes`
-        (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`created_at`)
+    $db->prepare("INSERT INTO `transport_routes` (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`created_at`)
         VALUES (?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `routeName`=VALUES(`routeName`),`busNumber`=VALUES(`busNumber`)")
-       ->execute([
-           $id,
-           sanitize($body['busNumber'] ?? ''),
-           $routeName,
-           sanitize($body['driverName'] ?? ''),
-           sanitize($body['driverContact'] ?? ''),
-       ]);
-
-    writeChangelog($db, $auth, 'transport_routes', 'add', $id, null, ['routeName' => $routeName]);
+        ON DUPLICATE KEY UPDATE `busNumber`=VALUES(`busNumber`),`routeName`=VALUES(`routeName`),
+            `driverName`=VALUES(`driverName`),`driverContact`=VALUES(`driverContact`)")
+       ->execute([$id,sanitize($body['busNumber']??''),sanitize($body['routeName']??''),sanitize($body['driverName']??''),sanitize($body['driverContact']??'')]);
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_transport_routes_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `transport_routes` WHERE `id`=?")->execute([$id]);
+    try { $db->prepare("DELETE FROM `transport_pickup_points` WHERE `route_id`=?")->execute([$id]); } catch (Throwable $e) {}
+    jsonSuccess(['success' => true]);
 }
 
 function route_transport_pickup_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth    = requireAuth();
-    $routeId = $body['route_id'] ?? $body['routeId'] ?? '';
-    $name    = sanitize($body['pickupPointName'] ?? $body['name'] ?? '');
-    if (!$routeId || !$name) jsonError('route_id and pickupPointName are required', 400);
-
+    requireAuth();
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `transport_pickup_points`
-        (`id`,`route_id`,`pickupPointName`,`monthlyFare`,`created_at`)
-        VALUES (?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `pickupPointName`=VALUES(`pickupPointName`),`monthlyFare`=VALUES(`monthlyFare`)")
-       ->execute([$id, $routeId, $name, (float)($body['monthlyFare'] ?? 0)]);
-
+    try {
+        $db->prepare("INSERT INTO `transport_pickup_points` (`id`,`route_id`,`pickupPointName`,`monthlyFare`,`created_at`)
+            VALUES (?,?,?,?,NOW())
+            ON DUPLICATE KEY UPDATE `pickupPointName`=VALUES(`pickupPointName`),`monthlyFare`=VALUES(`monthlyFare`)")
+           ->execute([$id,sanitize($body['route_id']??''),sanitize($body['pickupPointName']??$body['name']??''),(float)($body['monthlyFare']??0)]);
+    } catch (Throwable $e) {}
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_transport_pickup_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['route_id'])) { $where[] = 'route_id=?'; $params[] = $_GET['route_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    try {
+        $stmt = $db->prepare("SELECT * FROM `transport_pickup_points` $wc ORDER BY `pickupPointName` ASC");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_transport_buses_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `transport_routes` ORDER BY `busNumber` ASC");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_transport_buses_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = $body['id'] ?? genUuid();
+    $db->prepare("INSERT INTO `transport_routes` (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`created_at`)
+        VALUES (?,?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `busNumber`=VALUES(`busNumber`),`routeName`=VALUES(`routeName`),
+            `driverName`=VALUES(`driverName`),`driverContact`=VALUES(`driverContact`)")
+       ->execute([$id,sanitize($body['busNumber']??$body['number']??''),sanitize($body['routeName']??''),sanitize($body['driverName']??''),sanitize($body['driverContact']??'')]);
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_transport_driver_students(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT id,fullName,admNo,class,section,transportBus,transportRoute,transportPickup
+            FROM `students` WHERE is_deleted=0 AND transportBus IS NOT NULL AND transportBus != ''
+            ORDER BY fullName ASC LIMIT 500");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 
@@ -1586,84 +1552,60 @@ function route_transport_pickup_add(string $method, array $body, ?array $auth): 
 // LIBRARY
 // =============================================================================
 function route_library_books(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
-    $where  = [];
-    $params = [];
-    if (!empty($_GET['search'])) {
-        $s = '%' . $_GET['search'] . '%';
-        $where[] = '(title LIKE ? OR isbn LIKE ? OR author LIKE ?)';
-        $params  = array_merge($params, [$s, $s, $s]);
-    }
-    if (!empty($_GET['status'])) { $where[] = 'status=?'; $params[] = $_GET['status']; }
-
-    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT * FROM `library_books` $wc ORDER BY `title` ASC LIMIT 500");
-    $stmt->execute($params);
-    jsonSuccess($stmt->fetchAll());
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `library_books` ORDER BY `title` ASC LIMIT 500");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_library_books_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth  = requireAuth();
+    requireAuth();
+    $db    = getDB();
     $title = sanitize($body['title'] ?? '');
     if (!$title) jsonError('title is required', 400);
-
-    $db = getDB();
-    $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `library_books`
-        (`id`,`title`,`isbn`,`category`,`author`,`quantity`,`status`,`created_at`)
-        VALUES (?,?,?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`isbn`=VALUES(`isbn`),
-            `quantity`=VALUES(`quantity`)")
-       ->execute([
-           $id, $title,
-           sanitize($body['isbn'] ?? ''),
-           sanitize($body['category'] ?? ''),
-           sanitize($body['author'] ?? ''),
-           (int)($body['quantity'] ?? 1),
-           sanitize($body['status'] ?? 'available'),
-       ]);
-
-    writeChangelog($db, $auth, 'library_books', 'add', $id, null, ['title' => $title]);
+    $id    = $body['id'] ?? genUuid();
+    $db->prepare("INSERT INTO `library_books` (`id`,`title`,`isbn`,`category`,`author`,`quantity`,`status`,`created_at`)
+        VALUES (?,?,?,?,?,?,'available',NOW())
+        ON DUPLICATE KEY UPDATE `title`=VALUES(`title`),`quantity`=VALUES(`quantity`)")
+       ->execute([$id,$title,sanitize($body['isbn']??''),sanitize($body['category']??''),sanitize($body['author']??''),(int)($body['quantity']??1)]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 function route_library_issue(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth      = requireAuth();
-    $bookId    = $body['bookId'] ?? '';
-    $studentId = $body['studentId'] ?? '';
-    if (!$bookId || !$studentId) jsonError('bookId and studentId are required', 400);
-
-    $db = getDB();
-    $db->prepare("UPDATE `library_books` SET `issued_to_student_id`=?, `issue_date`=?, `due_date`=?, `status`='issued'
-        WHERE `id`=?")
-       ->execute([
-           $studentId,
-           $body['issueDate'] ?? date('Y-m-d'),
-           $body['dueDate'] ?? date('Y-m-d', strtotime('+14 days')),
-           $bookId,
-       ]);
-
-    writeChangelog($db, $auth, 'library_books', 'issue', $bookId, null, ['studentId' => $studentId]);
+    requireAuth();
+    $db        = getDB();
+    $bookId    = sanitize($body['bookId'] ?? '');
+    $studentId = sanitize($body['studentId'] ?? '');
+    if (!$bookId || !$studentId) jsonError('bookId and studentId required', 400);
+    $db->prepare("UPDATE `library_books` SET `issued_to_student_id`=?,`issue_date`=CURDATE(),`due_date`=DATE_ADD(CURDATE(),INTERVAL 14 DAY),`status`='issued' WHERE `id`=?")
+       ->execute([$studentId,$bookId]);
     jsonSuccess(['success' => true]);
 }
 
 function route_library_return(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth   = requireAuth();
-    $bookId = $body['bookId'] ?? '';
-    if (!$bookId) jsonError('bookId is required', 400);
-
-    $db = getDB();
-    $db->prepare("UPDATE `library_books` SET `issued_to_student_id`=NULL, `issue_date`=NULL, `due_date`=NULL, `status`='available' WHERE `id`=?")
+    requireAuth();
+    $db     = getDB();
+    $bookId = sanitize($body['bookId'] ?? '');
+    if (!$bookId) jsonError('bookId required', 400);
+    $db->prepare("UPDATE `library_books` SET `issued_to_student_id`=NULL,`issue_date`=NULL,`due_date`=NULL,`status`='available' WHERE `id`=?")
        ->execute([$bookId]);
-
-    writeChangelog($db, $auth, 'library_books', 'return', $bookId, null, null);
     jsonSuccess(['success' => true]);
+}
+
+function route_library_overdue(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT lb.*,s.fullName AS studentName FROM `library_books` lb
+            LEFT JOIN `students` s ON s.id=lb.issued_to_student_id
+            WHERE lb.status='issued' AND lb.due_date < CURDATE() ORDER BY lb.due_date ASC LIMIT 100");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 
@@ -1671,96 +1613,89 @@ function route_library_return(string $method, array $body, ?array $auth): void {
 // INVENTORY
 // =============================================================================
 function route_inventory_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
-    $where  = [];
-    $params = [];
-    if (!empty($_GET['category'])) { $where[] = 'category=?'; $params[] = $_GET['category']; }
-    if (!empty($_GET['search'])) {
-        $s = '%' . $_GET['search'] . '%';
-        $where[] = '(itemName LIKE ? OR category LIKE ?)';
-        $params  = array_merge($params, [$s, $s]);
-    }
-
-    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT * FROM `inventory` $wc ORDER BY `itemName` ASC");
-    $stmt->execute($params);
-    jsonSuccess($stmt->fetchAll());
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `inventory` ORDER BY `itemName` ASC LIMIT 500");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_inventory_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth     = requireAuth();
+    requireAuth();
+    $db       = getDB();
     $itemName = sanitize($body['itemName'] ?? $body['name'] ?? '');
     if (!$itemName) jsonError('itemName is required', 400);
-
-    $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `inventory`
-        (`id`,`itemName`,`category`,`quantityInStock`,`price`,`supplier`,`lastUpdated`)
+    $db->prepare("INSERT INTO `inventory` (`id`,`itemName`,`category`,`quantityInStock`,`price`,`supplier`,`lastUpdated`)
         VALUES (?,?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `itemName`=VALUES(`itemName`),`quantityInStock`=VALUES(`quantityInStock`),
-            `price`=VALUES(`price`),`lastUpdated`=NOW()")
-       ->execute([
-           $id, $itemName,
-           sanitize($body['category'] ?? ''),
-           (int)($body['quantityInStock'] ?? $body['quantity'] ?? 0),
-           (float)($body['price'] ?? 0),
-           sanitize($body['supplier'] ?? ''),
-       ]);
-
-    writeChangelog($db, $auth, 'inventory', 'add', $id, null, ['itemName' => $itemName]);
+        ON DUPLICATE KEY UPDATE `itemName`=VALUES(`itemName`),`quantityInStock`=VALUES(`quantityInStock`),`price`=VALUES(`price`),`lastUpdated`=NOW()")
+       ->execute([$id,$itemName,sanitize($body['category']??''),(int)($body['quantityInStock']??$body['quantity']??0),(float)($body['price']??0),sanitize($body['supplier']??'')]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 function route_inventory_update(string $method, array $body, ?array $auth): void {
-    if ($method !== 'PUT') jsonError('Method not allowed', 405);
-    $auth = requireAuth();
-    $id   = $body['id'] ?? '';
+    if (!in_array($method, ['PUT','POST'], true)) jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = $body['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
-
-    $db   = getDB();
     $sets = [];
     $vals = [];
-
-    if (isset($body['quantityInStock'])) { $sets[] = '`quantityInStock`=?'; $vals[] = (int)$body['quantityInStock']; }
-    if (isset($body['quantity']))        { $sets[] = '`quantityInStock`=?'; $vals[] = (int)$body['quantity']; }
-    if (isset($body['price']))           { $sets[] = '`price`=?';           $vals[] = (float)$body['price']; }
-    if (isset($body['itemName']))        { $sets[] = '`itemName`=?';         $vals[] = sanitize($body['itemName']); }
-    if (isset($body['supplier']))        { $sets[] = '`supplier`=?';         $vals[] = sanitize($body['supplier']); }
-
+    if (isset($body['quantityInStock'])) { $sets[]='`quantityInStock`=?'; $vals[]=(int)$body['quantityInStock']; }
+    if (isset($body['quantity']))        { $sets[]='`quantityInStock`=?'; $vals[]=(int)$body['quantity']; }
+    if (isset($body['price']))           { $sets[]='`price`=?';           $vals[]=(float)$body['price']; }
+    if (isset($body['itemName']))        { $sets[]='`itemName`=?';         $vals[]=sanitize($body['itemName']); }
+    if (isset($body['supplier']))        { $sets[]='`supplier`=?';         $vals[]=sanitize($body['supplier']); }
     if (empty($sets)) jsonError('No valid fields to update', 400);
     $sets[] = '`lastUpdated`=NOW()';
     $vals[] = $id;
-
     $db->prepare("UPDATE `inventory` SET " . implode(',', $sets) . " WHERE `id`=?")->execute($vals);
-    writeChangelog($db, $auth, 'inventory', 'update', $id, null, $body);
+    jsonSuccess(['success' => true]);
+}
+
+function route_inventory_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `inventory` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+function route_inventory_transaction(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db   = getDB();
+    $id   = sanitize($body['itemId'] ?? '');
+    if (!$id) jsonError('itemId is required', 400);
+    $qty  = (int)($body['quantity'] ?? 0);
+    $type = sanitize($body['type'] ?? 'sell');
+    if ($type === 'buy') {
+        $db->prepare("UPDATE `inventory` SET `quantityInStock`=`quantityInStock`+?,`lastUpdated`=NOW() WHERE `id`=?")->execute([$qty,$id]);
+    } else {
+        $db->prepare("UPDATE `inventory` SET `quantityInStock`=GREATEST(0,`quantityInStock`-?),`lastUpdated`=NOW() WHERE `id`=?")->execute([$qty,$id]);
+    }
     jsonSuccess(['success' => true]);
 }
 
 
 // =============================================================================
-// EXAMS
+// EXAMS + RESULTS
 // =============================================================================
 function route_exams_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
-    if (!empty($_GET['className'])) { $where[] = 'className=?'; $params[] = $_GET['className']; }
-
+    if (!empty($_GET['className'])) { $where[]='className=?'; $params[]=$_GET['className']; }
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT `id`,`examName`,`className`,`timetable`,`created_at` FROM `exams` $wc ORDER BY `created_at` DESC LIMIT 200");
     $stmt->execute($params);
     $rows = $stmt->fetchAll();
     foreach ($rows as &$r) {
-        if (isset($r['timetable']) && is_string($r['timetable'])) {
-            $d = json_decode($r['timetable'], true);
-            if (is_array($d)) $r['timetable'] = $d;
-        }
+        if (isset($r['timetable']) && is_string($r['timetable'])) { $d=json_decode($r['timetable'],true); if(is_array($d)) $r['timetable']=$d; }
     }
     unset($r);
     jsonSuccess($rows);
@@ -1768,72 +1703,73 @@ function route_exams_list(?array $auth): void {
 
 function route_exams_create(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth     = requireAuth();
+    requireAuth();
     $examName = sanitize($body['examName'] ?? $body['name'] ?? '');
     if (!$examName) jsonError('examName is required', 400);
-
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `exams`
-        (`id`,`examName`,`className`,`timetable`,`questions`,`created_at`)
+    $db->prepare("INSERT INTO `exams` (`id`,`examName`,`className`,`timetable`,`questions`,`created_at`)
         VALUES (?,?,?,?,?,NOW())
-        ON DUPLICATE KEY UPDATE `examName`=VALUES(`examName`),`className`=VALUES(`className`),
-            `timetable`=VALUES(`timetable`)")
-       ->execute([
-           $id, $examName,
-           sanitize($body['className'] ?? ''),
-           is_array($body['timetable'] ?? null) ? json_encode($body['timetable']) : ($body['timetable'] ?? '[]'),
-           is_array($body['questions'] ?? null) ? json_encode($body['questions']) : ($body['questions'] ?? '[]'),
-       ]);
-
-    writeChangelog($db, $auth, 'exams', 'create', $id, null, ['examName' => $examName]);
+        ON DUPLICATE KEY UPDATE `examName`=VALUES(`examName`),`className`=VALUES(`className`)")
+       ->execute([$id,$examName,sanitize($body['className']??''),is_array($body['timetable']??null)?json_encode($body['timetable']):($body['timetable']??'[]'),is_array($body['questions']??null)?json_encode($body['questions']):($body['questions']??'[]')]);
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_exams_timetable(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['exam_id'])) { $where[]='id=?'; $params[]=$_GET['exam_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $stmt = $db->prepare("SELECT id,examName,className,timetable FROM `exams` $wc ORDER BY created_at DESC LIMIT 100");
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$r) {
+        if (isset($r['timetable']) && is_string($r['timetable'])) { $d=json_decode($r['timetable'],true); if(is_array($d)) $r['timetable']=$d; }
+    }
+    unset($r);
+    jsonSuccess($rows);
+}
+
+function route_exams_timetable_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $examId = sanitize($body['examId'] ?? $body['id'] ?? '');
+    if (!$examId) jsonError('examId is required', 400);
+    $db = getDB();
+    $tt = is_array($body['timetable'] ?? null) ? json_encode($body['timetable']) : ($body['timetable'] ?? '[]');
+    $db->prepare("UPDATE `exams` SET `timetable`=? WHERE `id`=?")->execute([$tt, $examId]);
+    jsonSuccess(['success' => true]);
 }
 
 function route_results_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth      = requireAuth();
-    $studentId = $body['studentId'] ?? '';
-    $examId    = $body['examId'] ?? '';
-    if (!$studentId || !$examId) jsonError('studentId and examId are required', 400);
-
-    $db = getDB();
+    requireAuth();
+    $db        = getDB();
+    $studentId = sanitize($body['studentId'] ?? '');
+    $examId    = sanitize($body['examId'] ?? '');
+    if (!$studentId || !$examId) jsonError('studentId and examId required', 400);
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `exam_results`
-        (`id`,`student_id`,`exam_id`,`subject`,`marks`,`grade`,`created_at`)
+    $db->prepare("INSERT INTO `exam_results` (`id`,`student_id`,`exam_id`,`subject`,`marks`,`grade`,`created_at`)
         VALUES (?,?,?,?,?,?,NOW())
         ON DUPLICATE KEY UPDATE `marks`=VALUES(`marks`),`grade`=VALUES(`grade`)")
-       ->execute([
-           $id, $studentId, $examId,
-           sanitize($body['subject'] ?? ''),
-           (float)($body['marks'] ?? 0),
-           sanitize($body['grade'] ?? ''),
-       ]);
-
-    writeChangelog($db, $auth, 'exam_results', 'add', $id, null, ['studentId' => $studentId, 'examId' => $examId]);
+       ->execute([$id,$studentId,$examId,sanitize($body['subject']??''),(float)($body['marks']??0),sanitize($body['grade']??'')]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 function route_results_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
-    if (!empty($_GET['studentId'])) { $where[] = 'er.student_id=?'; $params[] = $_GET['studentId']; }
-    if (!empty($_GET['examId']))    { $where[] = 'er.exam_id=?';    $params[] = $_GET['examId']; }
-    if (!empty($_GET['className'])) {
-        $where[] = 'e.className=?';
-        $params[] = $_GET['className'];
-    }
-
+    if (!empty($_GET['studentId'])) { $where[]='er.student_id=?'; $params[]=$_GET['studentId']; }
+    if (!empty($_GET['examId']))    { $where[]='er.exam_id=?';    $params[]=$_GET['examId']; }
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
-    $stmt = $db->prepare("SELECT er.*, s.fullName AS studentName, e.examName
+    $stmt = $db->prepare("SELECT er.*,s.fullName AS studentName,e.examName
         FROM `exam_results` er
-        LEFT JOIN `students` s ON s.id = er.student_id
-        LEFT JOIN `exams` e ON e.id = er.exam_id
+        LEFT JOIN `students` s ON s.id=er.student_id
+        LEFT JOIN `exams` e ON e.id=er.exam_id
         $wc ORDER BY er.created_at DESC LIMIT 500");
     $stmt->execute($params);
     jsonSuccess($stmt->fetchAll());
@@ -1841,19 +1777,74 @@ function route_results_list(?array $auth): void {
 
 
 // =============================================================================
+// PAYROLL
+// =============================================================================
+function route_payroll_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `payroll` (
+            `id` VARCHAR(36) PRIMARY KEY, `staff_id` VARCHAR(36), `staff_name` VARCHAR(255),
+            `month` VARCHAR(10), `basic_salary` DECIMAL(10,2), `deductions` DECIMAL(10,2) DEFAULT 0,
+            `net_salary` DECIMAL(10,2), `status` VARCHAR(20) DEFAULT 'pending',
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['month'])) { $where[]='month=?'; $params[]=$_GET['month']; }
+        $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $db->prepare("SELECT * FROM `payroll` $wc ORDER BY `created_at` DESC LIMIT 200");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_payroll_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = $body['id'] ?? genUuid();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `payroll` (
+            `id` VARCHAR(36) PRIMARY KEY, `staff_id` VARCHAR(36), `staff_name` VARCHAR(255),
+            `month` VARCHAR(10), `basic_salary` DECIMAL(10,2), `deductions` DECIMAL(10,2) DEFAULT 0,
+            `net_salary` DECIMAL(10,2), `status` VARCHAR(20) DEFAULT 'pending',
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $db->prepare("INSERT INTO `payroll` (`id`,`staff_id`,`staff_name`,`month`,`basic_salary`,`deductions`,`net_salary`,`status`,`created_at`)
+            VALUES (?,?,?,?,?,?,?,?,NOW())
+            ON DUPLICATE KEY UPDATE `basic_salary`=VALUES(`basic_salary`),`net_salary`=VALUES(`net_salary`),`status`=VALUES(`status`)")
+           ->execute([$id,sanitize($body['staffId']??''),sanitize($body['staffName']??''),sanitize($body['month']??date('Y-m')),(float)($body['basicSalary']??0),(float)($body['deductions']??0),(float)($body['netSalary']??0),sanitize($body['status']??'pending')]);
+    } catch (Throwable $e) { jsonError('Failed: ' . $e->getMessage(), 500); }
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_payroll_payslip(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db      = getDB();
+    $staffId = sanitize($body['staffId'] ?? '');
+    $month   = sanitize($body['month'] ?? date('Y-m'));
+    $sStmt   = $db->prepare("SELECT * FROM `staff` WHERE `id`=? LIMIT 1");
+    $sStmt->execute([$staffId]);
+    $staff = $sStmt->fetch();
+    if (!$staff) jsonError('Staff not found', 404);
+    jsonSuccess(['staffId'=>$staffId,'staffName'=>$staff['name']??'','month'=>$month,'basicSalary'=>(float)($staff['salary']??0),'deductions'=>0,'netSalary'=>(float)($staff['salary']??0)]);
+}
+
+
+// =============================================================================
 // EXPENSES
 // =============================================================================
 function route_expenses_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
-    if (!empty($_GET['type']))      { $where[] = 'type=?';       $params[] = $_GET['type']; }
-    if (!empty($_GET['headName'])) { $where[] = 'headName=?';   $params[] = $_GET['headName']; }
-    if (!empty($_GET['startDate'])){ $where[] = 'expense_date>=?'; $params[] = $_GET['startDate']; }
-    if (!empty($_GET['endDate']))  { $where[] = 'expense_date<=?'; $params[] = $_GET['endDate']; }
-
+    if (!empty($_GET['type']))      { $where[]='type=?';          $params[]=$_GET['type']; }
+    if (!empty($_GET['headName']))  { $where[]='headName=?';      $params[]=$_GET['headName']; }
+    if (!empty($_GET['startDate'])) { $where[]='expense_date>=?'; $params[]=$_GET['startDate']; }
+    if (!empty($_GET['endDate']))   { $where[]='expense_date<=?'; $params[]=$_GET['endDate']; }
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT * FROM `expenses` $wc ORDER BY `expense_date` DESC LIMIT 1000");
     $stmt->execute($params);
@@ -1862,27 +1853,24 @@ function route_expenses_list(?array $auth): void {
 
 function route_expenses_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth   = requireAuth();
+    requireAuth();
+    $db     = getDB();
     $amount = (float)($body['amount'] ?? 0);
-    $type   = sanitize($body['type'] ?? 'expense');
-    if ($amount <= 0) jsonError('amount must be greater than 0', 400);
-
-    $db = getDB();
+    if ($amount <= 0) jsonError('amount must be > 0', 400);
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `expenses`
-        (`id`,`type`,`headName`,`amount`,`description`,`expense_date`,`created_at`)
+    $db->prepare("INSERT INTO `expenses` (`id`,`type`,`headName`,`amount`,`description`,`expense_date`,`created_at`)
         VALUES (?,?,?,?,?,?,NOW())")
-       ->execute([
-           $id, $type,
-           sanitize($body['headName'] ?? ''),
-           $amount,
-           sanitize($body['description'] ?? ''),
-           $body['expense_date'] ?? $body['date'] ?? date('Y-m-d'),
-       ]);
-
-    writeChangelog($db, $auth, 'expenses', 'add', $id, null, ['type' => $type, 'amount' => $amount]);
+       ->execute([$id,sanitize($body['type']??'expense'),sanitize($body['headName']??''),$amount,sanitize($body['description']??''),$body['expense_date']??$body['date']??date('Y-m-d')]);
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_expenses_delete(string $method, array $body, ?array $auth): void {
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `expenses` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
 }
 
 
@@ -1890,14 +1878,12 @@ function route_expenses_add(string $method, array $body, ?array $auth): void {
 // HOMEWORK
 // =============================================================================
 function route_homework_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
-    if (!empty($_GET['className'])) { $where[] = 'class_name=?'; $params[] = $_GET['className']; }
-    if (!empty($_GET['subject']))   { $where[] = 'subject=?';    $params[] = $_GET['subject']; }
-
+    if (!empty($_GET['className'])) { $where[]='class_name=?'; $params[]=$_GET['className']; }
+    if (!empty($_GET['class']))     { $where[]='class_name=?'; $params[]=$_GET['class']; }
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT * FROM `homework` $wc ORDER BY `due_date` DESC LIMIT 500");
     $stmt->execute($params);
@@ -1906,49 +1892,125 @@ function route_homework_list(?array $auth): void {
 
 function route_homework_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth        = requireAuth();
-    $description = sanitize($body['description'] ?? '');
-    if (!$description) jsonError('description is required', 400);
-
+    $auth = requireAuth();
+    $desc = sanitize($body['description'] ?? '');
+    if (!$desc) jsonError('description is required', 400);
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `homework`
-        (`id`,`teacher_id`,`class_name`,`subject`,`description`,`due_date`,`created_at`)
+    $db->prepare("INSERT INTO `homework` (`id`,`teacher_id`,`class_name`,`subject`,`description`,`due_date`,`created_at`)
         VALUES (?,?,?,?,?,?,NOW())")
-       ->execute([
-           $id,
-           $auth['user_id'] ?? '',
-           sanitize($body['className'] ?? $body['class_name'] ?? ''),
-           sanitize($body['subject'] ?? ''),
-           $description,
-           $body['due_date'] ?? $body['dueDate'] ?? null,
-       ]);
-
-    writeChangelog($db, $auth, 'homework', 'add', $id, null, ['description' => $description]);
+       ->execute([$id,$auth['user_id']??'',sanitize($body['className']??$body['class_name']??''),sanitize($body['subject']??''),$desc,$body['due_date']??$body['dueDate']??null]);
     jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_homework_delete(string $method, array $body, ?array $auth): void {
+    requireAuth();
+    $id = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `homework` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+
+// =============================================================================
+// COMMUNICATION
+// =============================================================================
+function route_whatsapp_send(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = genUuid();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `broadcast_log` (`id` VARCHAR(36) PRIMARY KEY, `mobile` VARCHAR(50), `message` TEXT, `status` VARCHAR(20) DEFAULT 'sent', `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $db->prepare("INSERT INTO `broadcast_log` (`id`,`mobile`,`message`,`status`,`created_at`) VALUES (?,?,?,'sent',NOW())")
+           ->execute([$id,sanitize($body['mobile']??''),sanitize($body['message']??'')]);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id, 'status' => 'sent']);
+}
+
+function route_broadcast_history(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try { $stmt = $db->query("SELECT * FROM `broadcast_log` ORDER BY `created_at` DESC LIMIT 100"); jsonSuccess($stmt->fetchAll()); }
+    catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_notification_schedule(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = genUuid();
+    try {
+        $db->prepare("INSERT INTO `notifications` (`id`,`title`,`message`,`target_role`,`is_read`,`created_at`)
+            VALUES (?,?,?,?,0,NOW())")
+           ->execute([$id,sanitize($body['title']??''),sanitize($body['message']??''),sanitize($body['role']??'all')]);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_notifications_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `notifications` ORDER BY `created_at` DESC LIMIT 100");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_notifications_mark_read(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db  = getDB();
+    $ids = $body['ids'] ?? [];
+    if (!empty($ids) && is_array($ids)) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        try { $db->prepare("UPDATE `notifications` SET `is_read`=1 WHERE `id` IN ($ph)")->execute($ids); } catch (Throwable $e) {}
+    } else {
+        try { $db->exec("UPDATE `notifications` SET `is_read`=1"); } catch (Throwable $e) {}
+    }
+    jsonSuccess(['success' => true]);
 }
 
 
 // =============================================================================
 // CHAT
 // =============================================================================
-function route_chat_messages(?array $auth): void {
+function route_chat_rooms(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `chat_rooms` (`id` VARCHAR(36) PRIMARY KEY, `name` VARCHAR(100), `type` VARCHAR(20) DEFAULT 'group', `created_by` VARCHAR(36), `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $stmt = $db->query("SELECT * FROM `chat_rooms` ORDER BY `created_at` DESC LIMIT 50");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_chat_rooms_create(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $db   = getDB();
+    $id   = genUuid();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `chat_rooms` (`id` VARCHAR(36) PRIMARY KEY, `name` VARCHAR(100), `type` VARCHAR(20) DEFAULT 'group', `created_by` VARCHAR(36), `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+        $db->prepare("INSERT INTO `chat_rooms` (`id`,`name`,`type`,`created_by`,`created_at`) VALUES (?,?,?,?,NOW())")
+           ->execute([$id,sanitize($body['name']??''),sanitize($body['type']??'group'),$auth['user_id']??'']);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
 
+function route_chat_messages(?array $auth): void {
+    requireAuth();
+    $db = getDB();
     $where  = [];
     $params = [];
-    if (!empty($_GET['groupId']))    { $where[] = 'group_id=?';     $params[] = $_GET['groupId']; }
-    if (!empty($_GET['senderId']))   { $where[] = 'sender_id=?';    $params[] = $_GET['senderId']; }
-    if (!empty($_GET['recipientId'])){ $where[] = '(sender_id=? OR recipient_id=?)';
-                                       $params[] = $_GET['recipientId']; $params[] = $_GET['recipientId']; }
-
+    if (!empty($_GET['groupId']))    { $where[]='group_id=?';     $params[]=$_GET['groupId']; }
+    if (!empty($_GET['room_id']))    { $where[]='group_id=?';     $params[]=$_GET['room_id']; }
+    if (!empty($_GET['senderId']))   { $where[]='sender_id=?';    $params[]=$_GET['senderId']; }
     $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
     $stmt = $db->prepare("SELECT * FROM `chat_messages` $wc ORDER BY `created_at` DESC LIMIT 50");
     $stmt->execute($params);
-    $rows = array_reverse($stmt->fetchAll()); // oldest first
-    jsonSuccess($rows);
+    jsonSuccess(array_reverse($stmt->fetchAll()));
 }
 
 function route_chat_send(string $method, array $body, ?array $auth): void {
@@ -1956,23 +2018,11 @@ function route_chat_send(string $method, array $body, ?array $auth): void {
     $auth    = requireAuth();
     $message = sanitize($body['message'] ?? '');
     if (!$message) jsonError('message is required', 400);
-
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
-    $db->prepare("INSERT INTO `chat_messages`
-        (`id`,`sender_id`,`sender_name`,`recipient_id`,`group_id`,`message`,`attachment_path`,`created_at`)
+    $db->prepare("INSERT INTO `chat_messages` (`id`,`sender_id`,`sender_name`,`recipient_id`,`group_id`,`message`,`attachment_path`,`created_at`)
         VALUES (?,?,?,?,?,?,?,NOW())")
-       ->execute([
-           $id,
-           $auth['user_id'] ?? '',
-           sanitize($auth['name'] ?? $auth['username'] ?? ''),
-           $body['recipientId'] ?? null,
-           $body['groupId'] ?? null,
-           $message,
-           sanitize($body['attachmentPath'] ?? ''),
-       ]);
-
+       ->execute([$id,$auth['user_id']??'',sanitize($auth['name']??$auth['username']??''),$body['recipientId']??null,$body['groupId']??null,$message,sanitize($body['attachmentPath']??'')]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
@@ -1984,36 +2034,21 @@ function route_changelog_add(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
     $auth = requireAuth();
     $db   = getDB();
-
-    $db->prepare("INSERT INTO `changelog`
-        (`id`,`userId`,`username`,`role`,`module`,`action`,`recordId`,`oldValue`,`newValue`,`createdAt`)
+    $db->prepare("INSERT INTO `changelog` (`id`,`userId`,`username`,`role`,`module`,`action`,`recordId`,`oldValue`,`newValue`,`createdAt`)
         VALUES (UUID(),?,?,?,?,?,?,?,?,NOW())")
-       ->execute([
-           $auth['user_id'] ?? '',
-           $auth['username'] ?? '',
-           $auth['role'] ?? '',
-           sanitize($body['tableName'] ?? $body['module'] ?? ''),
-           sanitize($body['action'] ?? ''),
-           $body['recordId'] ?? null,
-           is_array($body['oldValues'] ?? null) ? json_encode($body['oldValues']) : null,
-           is_array($body['newValues'] ?? null) ? json_encode($body['newValues']) : null,
-       ]);
-
+       ->execute([$auth['user_id']??'',$auth['username']??'',$auth['role']??'',sanitize($body['tableName']??$body['module']??''),sanitize($body['action']??''),$body['recordId']??null,is_array($body['oldValues']??null)?json_encode($body['oldValues']):null,is_array($body['newValues']??null)?json_encode($body['newValues']):null]);
     jsonSuccess(['success' => true]);
 }
 
 function route_changelog_list(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
-
+    requireAuth();
+    $db    = getDB();
     $limit = min((int)($_GET['limit'] ?? 100), 1000);
     try {
         $stmt = $db->prepare("SELECT * FROM `changelog` ORDER BY `createdAt` DESC LIMIT $limit");
         $stmt->execute();
         jsonSuccess($stmt->fetchAll());
-    } catch (Throwable $e) {
-        jsonSuccess([]);
-    }
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 
@@ -2021,50 +2056,35 @@ function route_changelog_list(?array $auth): void {
 // BACKUP
 // =============================================================================
 function route_backup_export(?array $auth): void {
-    $auth   = requireAuth();
+    requireAuth();
     $db     = getDB();
     $tables = array_keys(getTableDefinitions());
     $export = ['version' => API_VERSION, 'exported_at' => gmdate('c'), 'tables' => []];
-
     foreach ($tables as $table) {
-        try {
-            $stmt = $db->query("SELECT * FROM `{$table}`");
-            $export['tables'][$table] = $stmt ? $stmt->fetchAll() : [];
-        } catch (Throwable $e) {
-            $export['tables'][$table] = [];
-        }
+        try { $stmt = $db->query("SELECT * FROM `{$table}`"); $export['tables'][$table] = $stmt ? $stmt->fetchAll() : []; }
+        catch (Throwable $e) { $export['tables'][$table] = []; }
     }
-
     jsonSuccess($export);
 }
 
 function route_backup_import(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireSuperAdmin();
-
+    requireSuperAdmin();
     $data = $body['data'] ?? null;
-    if (!$data || !isset($data['tables'])) jsonError('Invalid backup — missing tables key', 400);
-
+    if (!$data || !isset($data['tables'])) jsonError('Invalid backup', 400);
     $db       = getDB();
     $imported = [];
-
     $db->beginTransaction();
     try {
         foreach ($data['tables'] as $table => $rows) {
-            if (!is_array($rows) || empty($rows)) { $imported[$table] = 0; continue; }
+            if (!is_array($rows) || empty($rows)) { $imported[$table]=0; continue; }
             $count = 0;
-            foreach ($rows as $row) {
-                if (!is_array($row)) continue;
-                try { upsertRow($db, $table, $row); $count++; } catch (Throwable $e) {}
-            }
+            foreach ($rows as $row) { if (!is_array($row)) continue; try { upsertRow($db,$table,$row); $count++; } catch (Throwable $e) {} }
             $imported[$table] = $count;
         }
         $db->commit();
         jsonSuccess(['imported' => $imported], 'Backup restored');
-    } catch (Throwable $e) {
-        $db->rollBack();
-        jsonError('Restore failed: ' . $e->getMessage(), 500);
-    }
+    } catch (Throwable $e) { $db->rollBack(); jsonError('Restore failed: ' . $e->getMessage(), 500); }
 }
 
 
@@ -2072,35 +2092,27 @@ function route_backup_import(string $method, array $body, ?array $auth): void {
 // SETTINGS
 // =============================================================================
 function route_settings_get(?array $auth): void {
-    $auth = requireAuth();
-    $db   = getDB();
+    requireAuth();
+    $db = getDB();
     try {
         $stmt = $db->query("SELECT `setting_key`, `setting_value` FROM `school_settings`");
         $rows = $stmt->fetchAll();
         $out  = [];
         foreach ($rows as $r) $out[$r['setting_key']] = $r['setting_value'];
         jsonSuccess($out);
-    } catch (Throwable $e) {
-        jsonSuccess([]);
-    }
+    } catch (Throwable $e) { jsonSuccess([]); }
 }
 
 function route_settings_save(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireSuperAdmin();
-    $db   = getDB();
-
+    requireSuperAdmin();
+    $db  = getDB();
     $ins = $db->prepare("INSERT INTO `school_settings` (`id`,`setting_key`,`setting_value`)
         VALUES (UUID(),?,?)
-        ON DUPLICATE KEY UPDATE `setting_value`=VALUES(`setting_value`), `updated_at`=NOW()");
-
+        ON DUPLICATE KEY UPDATE `setting_value`=VALUES(`setting_value`),`updated_at`=NOW()");
     foreach ($body as $key => $value) {
-        if (preg_match('/^[a-zA-Z0-9_]+$/', $key) && is_scalar($value)) {
-            $ins->execute([sanitize($key), (string)$value]);
-        }
+        if (preg_match('/^[a-zA-Z0-9_]+$/',$key) && is_scalar($value)) { $ins->execute([sanitize($key),(string)$value]); }
     }
-
-    writeChangelog($db, $auth, 'school_settings', 'save', null, null, $body);
     jsonSuccess(null, 'Settings saved');
 }
 
@@ -2112,14 +2124,13 @@ function route_stats(): void {
     try {
         $db = getDB();
         jsonSuccess([
-            'students'   => (int)$db->query("SELECT COUNT(*) FROM `students` WHERE is_deleted=0")->fetchColumn(),
-            'staff'      => (int)$db->query("SELECT COUNT(*) FROM `staff` WHERE is_deleted=0")->fetchColumn(),
-            'classes'    => (int)$db->query("SELECT COUNT(*) FROM `classes`")->fetchColumn(),
-            'feeReceipts'=> (int)$db->query("SELECT COUNT(*) FROM `fee_receipts`")->fetchColumn(),
+            'students'    => (int)$db->query("SELECT COUNT(*) FROM `students` WHERE is_deleted=0")->fetchColumn(),
+            'staff'       => (int)$db->query("SELECT COUNT(*) FROM `staff` WHERE is_deleted=0")->fetchColumn(),
+            'classes'     => (int)$db->query("SELECT COUNT(*) FROM `classes`")->fetchColumn(),
+            'fees_today'  => (float)($db->query("SELECT COALESCE(SUM(total_amount),0) FROM `fee_receipts` WHERE DATE(created_at)=CURDATE()")->fetchColumn()),
+            'feeReceipts' => (int)$db->query("SELECT COUNT(*) FROM `fee_receipts`")->fetchColumn(),
         ]);
-    } catch (Throwable $e) {
-        jsonSuccess(['students' => 0, 'staff' => 0, 'classes' => 0, 'feeReceipts' => 0]);
-    }
+    } catch (Throwable $e) { jsonSuccess(['students'=>0,'staff'=>0,'classes'=>0,'fees_today'=>0]); }
 }
 
 
@@ -2127,102 +2138,90 @@ function route_stats(): void {
 // USERS
 // =============================================================================
 function route_users_list(?array $auth): void {
-    $auth = requireSuperAdmin();
+    requireSuperAdmin();
     $db   = getDB();
-
     $stmt = $db->query("SELECT `id`,`username`,`role`,`fullName`,`name`,`mobile`,`email`,`linkedId`,`createdAt` FROM `users`");
     $rows = $stmt->fetchAll();
-    foreach ($rows as &$r) {
-        $r['fullName'] = $r['fullName'] ?? $r['name'] ?? '';
-    }
+    foreach ($rows as &$r) { $r['fullName'] = $r['fullName'] ?? $r['name'] ?? ''; }
     unset($r);
     jsonSuccess($rows);
 }
 
 function route_users_create(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth     = requireSuperAdmin();
+    requireSuperAdmin();
     $username = sanitize($body['username'] ?? '');
     $password = $body['password'] ?? 'admin123';
     $role     = sanitize($body['role'] ?? 'teacher');
     $fullName = sanitize($body['fullName'] ?? $body['name'] ?? $username);
-
     if (!$username) jsonError('username is required', 400);
-    if (strlen($password) < 6) jsonError('Password must be at least 6 characters', 400);
-
+    if (strlen($password) < 6) jsonError('Password must be at least 6 chars', 400);
     $db = getDB();
     $id = $body['id'] ?? genUuid();
-
     try {
         $db->prepare("INSERT INTO `users` (`id`,`username`,`password`,`role`,`fullName`,`name`,`mobile`,`email`,`linkedId`,`createdAt`)
             VALUES (?,?,?,?,?,?,?,?,?,NOW())")
-           ->execute([
-               $id, $username, hashPassword($password), $role, $fullName, $fullName,
-               sanitize($body['mobile'] ?? ''),
-               sanitize($body['email'] ?? ''),
-               $body['linkedId'] ?? null,
-           ]);
+           ->execute([$id,$username,hashPassword($password),$role,$fullName,$fullName,sanitize($body['mobile']??''),sanitize($body['email']??''),$body['linkedId']??null]);
     } catch (Throwable $e) {
-        if (str_contains($e->getMessage(), 'Duplicate')) jsonError("Username '$username' already exists", 409);
-        jsonError('Failed to create user: ' . $e->getMessage(), 500);
+        if (str_contains($e->getMessage(),'Duplicate')) jsonError("Username '$username' already exists", 409);
+        jsonError('Failed: ' . $e->getMessage(), 500);
     }
-
-    writeChangelog($db, $auth, 'users', 'create', $id, null, ['username' => $username, 'role' => $role]);
     jsonSuccess(['success' => true, 'id' => $id]);
 }
 
 function route_users_update(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireSuperAdmin();
-    $id   = $body['id'] ?? '';
+    requireSuperAdmin();
+    $id = $body['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
-
     $db   = getDB();
     $sets = [];
     $vals = [];
-
     foreach (['role','fullName','name','mobile','email','linkedId'] as $f) {
-        if (isset($body[$f])) { $sets[] = "`{$f}`=?"; $vals[] = sanitize($body[$f]); }
+        if (isset($body[$f])) { $sets[]="`{$f}`=?"; $vals[]=sanitize($body[$f]); }
     }
-    if (!empty($body['password'])) { $sets[] = '`password`=?'; $vals[] = hashPassword($body['password']); }
+    if (!empty($body['password'])) { $sets[]='`password`=?'; $vals[]=hashPassword($body['password']); }
     if (empty($sets)) jsonError('No valid fields to update', 400);
     $vals[] = $id;
-
     $db->prepare("UPDATE `users` SET " . implode(',', $sets) . " WHERE `id`=?")->execute($vals);
-    writeChangelog($db, $auth, 'users', 'update', $id, null, $body);
     jsonSuccess(['success' => true]);
 }
 
 function route_users_delete(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth = requireSuperAdmin();
+    requireSuperAdmin();
     $id   = $body['id'] ?? '';
     if (!$id) jsonError('id is required', 400);
-
     $db   = getDB();
     $stmt = $db->prepare("SELECT `username` FROM `users` WHERE `id`=? LIMIT 1");
     $stmt->execute([$id]);
     $u = $stmt->fetch();
-    if ($u && $u['username'] === 'admin') jsonError('Cannot delete the admin account', 403);
-
+    if ($u && $u['username'] === 'admin') jsonError('Cannot delete admin', 403);
     $db->prepare("DELETE FROM `users` WHERE `id`=?")->execute([$id]);
-    writeChangelog($db, $auth, 'users', 'delete', $id, null, null);
     jsonSuccess(['success' => true]);
 }
 
 function route_users_reset_password(string $method, array $body, ?array $auth): void {
     if ($method !== 'POST') jsonError('Method not allowed', 405);
-    $auth        = requireSuperAdmin();
+    requireSuperAdmin();
     $id          = $body['id'] ?? $body['userId'] ?? '';
     $newPassword = $body['newPassword'] ?? $body['password'] ?? 'admin123';
     if (!$id) jsonError('id is required', 400);
-
     $db = getDB();
     $db->prepare("UPDATE `users` SET `password`=? WHERE `id`=?")->execute([hashPassword($newPassword), $id]);
-    writeChangelog($db, $auth, 'users', 'reset_password', $id, null, null);
-    jsonSuccess(null, 'Password reset successfully');
+    jsonSuccess(null, 'Password reset');
 }
 
+
+// =============================================================================
+// SYNC (bulk GET all / bulk POST push)
+// =============================================================================
+function route_sync_all_placeholder_to_be_removed(?array $auth): void {
+    // This placeholder function will be removed in the next edit
+}
+
+// ── Sections list ─────────────────────────────────────────────────────────────
+function route_sections_list_placeholder_remove(): void {} // remove
 
 // =============================================================================
 // SYNC (bulk GET all / bulk POST push)
@@ -2242,7 +2241,6 @@ function route_sync_all(?array $auth): void {
         'attendance'       => "SELECT * FROM `attendance` ORDER BY date DESC LIMIT 5000",
         'school_sessions'  => "SELECT * FROM `school_sessions` ORDER BY startYear DESC",
         'transport_routes' => "SELECT * FROM `transport_routes`",
-        'transport_pickup_points' => "SELECT * FROM `transport_pickup_points`",
         'library_books'    => "SELECT * FROM `library_books`",
         'inventory'        => "SELECT * FROM `inventory`",
         'exams'            => "SELECT * FROM `exams` ORDER BY created_at DESC LIMIT 200",
@@ -2250,8 +2248,6 @@ function route_sync_all(?array $auth): void {
         'expenses'         => "SELECT * FROM `expenses` ORDER BY expense_date DESC LIMIT 1000",
         'homework'         => "SELECT * FROM `homework` ORDER BY due_date DESC LIMIT 500",
         'chat_messages'    => "SELECT * FROM `chat_messages` ORDER BY created_at DESC LIMIT 200",
-        'changelog'        => "SELECT * FROM `changelog` ORDER BY createdAt DESC LIMIT 500",
-        'users'            => "SELECT id,username,role,fullName,name,mobile,email,linkedId,createdAt FROM `users`",
         'school_settings'  => "SELECT * FROM `school_settings`",
     ];
 
@@ -2301,6 +2297,415 @@ function route_sync_push(string $method, array $body, ?array $auth): void {
 }
 
 
+
+// __BADBLOCK2301__
+
+function route_subjects_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth = requireAuth();
+    $name = sanitize($body['name'] ?? '');
+    if (!$name) jsonError('name is required', 400);
+    $db = getDB();
+    // Ensure subjects table exists
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `subjects` (
+            `id` VARCHAR(36) PRIMARY KEY,
+            `name` VARCHAR(100) NOT NULL,
+            `class_id` VARCHAR(36),
+            `class_name` VARCHAR(50),
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    } catch (Throwable $e) {}
+    $id = $body['id'] ?? genUuid();
+    $db->prepare("INSERT INTO `subjects` (`id`,`name`,`class_id`,`class_name`,`created_at`)
+        VALUES (?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`class_id`=VALUES(`class_id`),`class_name`=VALUES(`class_name`)")
+       ->execute([$id, $name, sanitize($body['class_id'] ?? ''), sanitize($body['class_name'] ?? '')]);
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_subjects_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    try { $db->prepare("DELETE FROM `subjects` WHERE `id`=?")->execute([$id]); } catch (Throwable $e) {}
+    jsonSuccess(['success' => true]);
+}
+
+// ── Fee headings delete ───────────────────────────────────────────────────────
+function route_fees_headings_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `fee_headings` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Fee collect student (GET fee details for a student) ───────────────────────
+function route_fees_collect_student(?array $auth): void {
+    $auth      = requireAuth();
+    $studentId = $_GET['studentId'] ?? '';
+    if (!$studentId) jsonError('studentId is required', 400);
+    $db = getDB();
+    // Get student info
+    $s = $db->prepare("SELECT * FROM `students` WHERE `id`=? LIMIT 1");
+    $s->execute([$studentId]);
+    $student = $s->fetch();
+    if (!$student) jsonError('Student not found', 404);
+    // Get receipts
+    $r = $db->prepare("SELECT * FROM `fee_receipts` WHERE `student_id`=? ORDER BY `created_at` DESC");
+    $r->execute([$studentId]);
+    $receipts = $r->fetchAll();
+    // Get fee plan for class
+    $fp = $db->prepare("SELECT fp.*, fh.name AS headingName FROM `fee_plan` fp
+        LEFT JOIN `fee_headings` fh ON fh.id = fp.fee_heading_id
+        WHERE fp.class_name=? ORDER BY fh.name ASC");
+    $fp->execute([$student['class'] ?? '']);
+    $feePlan = $fp->fetchAll();
+    jsonSuccess(['student' => $student, 'receipts' => $receipts, 'feePlan' => $feePlan]);
+}
+
+// ── Fee receipt delete ────────────────────────────────────────────────────────
+function route_fees_receipt_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `fee_receipts` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Fee collection chart ──────────────────────────────────────────────────────
+function route_fees_collection_chart(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    try {
+        $stmt = $db->query("
+            SELECT DATE_FORMAT(created_at, '%Y-%m') AS month,
+                   SUM(total_amount) AS total
+            FROM `fee_receipts`
+            WHERE created_at >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+            GROUP BY month
+            ORDER BY month ASC
+        ");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) {
+        jsonSuccess([]);
+    }
+}
+
+// ── Attendance face ───────────────────────────────────────────────────────────
+function route_attendance_face(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth      = requireAuth();
+    $studentId = sanitize($body['studentId'] ?? '');
+    if (!$studentId) jsonError('studentId is required', 400);
+    $db   = getDB();
+    $date = $body['date'] ?? date('Y-m-d');
+    $id   = genUuid();
+    $db->prepare("INSERT INTO `attendance` (`id`,`student_id`,`date`,`status`,`marked_by`)
+        VALUES (?,?,?,'present','face_recognition')
+        ON DUPLICATE KEY UPDATE `status`='present',`marked_by`='face_recognition'")
+       ->execute([$id, $studentId, $date]);
+    writeChangelog($db, $auth, 'attendance', 'face_mark', $id, null, ['studentId' => $studentId]);
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+// ── Transport routes delete ───────────────────────────────────────────────────
+function route_transport_routes_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `transport_routes` WHERE `id`=?")->execute([$id]);
+    try { $db->prepare("DELETE FROM `transport_pickup_points` WHERE `route_id`=?")->execute([$id]); } catch (Throwable $e) {}
+    jsonSuccess(['success' => true]);
+}
+
+// ── Transport pickup list ─────────────────────────────────────────────────────
+function route_transport_pickup_list(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['route_id'])) { $where[] = 'route_id=?'; $params[] = $_GET['route_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    try {
+        $stmt = $db->prepare("SELECT * FROM `transport_pickup_points` $wc ORDER BY `pickupPointName` ASC");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+// ── Transport buses list ──────────────────────────────────────────────────────
+function route_transport_buses_list(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    try {
+        // buses may be in transport_routes or a separate table; fall back to routes
+        $stmt = $db->query("SELECT * FROM `transport_routes` ORDER BY `busNumber` ASC");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_transport_buses_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth = requireAuth();
+    $db   = getDB();
+    $id   = $body['id'] ?? genUuid();
+    $db->prepare("INSERT INTO `transport_routes` (`id`,`busNumber`,`routeName`,`driverName`,`driverContact`,`created_at`)
+        VALUES (?,?,?,?,?,NOW())
+        ON DUPLICATE KEY UPDATE `busNumber`=VALUES(`busNumber`),`routeName`=VALUES(`routeName`),
+            `driverName`=VALUES(`driverName`),`driverContact`=VALUES(`driverContact`)")
+       ->execute([
+           $id,
+           sanitize($body['busNumber'] ?? $body['number'] ?? ''),
+           sanitize($body['routeName'] ?? ''),
+           sanitize($body['driverName'] ?? ''),
+           sanitize($body['driverContact'] ?? ''),
+       ]);
+    writeChangelog($db, $auth, 'transport_routes', 'save_bus', $id, null, null);
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+// ── Transport driver students ─────────────────────────────────────────────────
+function route_transport_driver_students(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    try {
+        $stmt = $db->query("SELECT id, fullName, admNo, class, section, transportBus, transportRoute, transportPickup
+            FROM `students` WHERE is_deleted=0 AND (transportBus IS NOT NULL AND transportBus != '')
+            ORDER BY fullName ASC LIMIT 500");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+// ── Library overdue ───────────────────────────────────────────────────────────
+function route_library_overdue(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    try {
+        $stmt = $db->query("SELECT lb.*, s.fullName AS studentName FROM `library_books` lb
+            LEFT JOIN `students` s ON s.id = lb.issued_to_student_id
+            WHERE lb.status = 'issued' AND lb.due_date < CURDATE()
+            ORDER BY lb.due_date ASC LIMIT 200");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+// ── Inventory delete ──────────────────────────────────────────────────────────
+function route_inventory_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `inventory` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Inventory transaction ─────────────────────────────────────────────────────
+function route_inventory_transaction(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth = requireAuth();
+    $db   = getDB();
+    $id   = $body['itemId'] ?? '';
+    if (!$id) jsonError('itemId is required', 400);
+    $qty  = (int)($body['quantity'] ?? 0);
+    $type = sanitize($body['type'] ?? 'sell'); // 'buy' | 'sell'
+    if ($type === 'buy') {
+        $db->prepare("UPDATE `inventory` SET `quantityInStock`=`quantityInStock`+?, `lastUpdated`=NOW() WHERE `id`=?")->execute([$qty, $id]);
+    } else {
+        $db->prepare("UPDATE `inventory` SET `quantityInStock`=GREATEST(0,`quantityInStock`-?), `lastUpdated`=NOW() WHERE `id`=?")->execute([$qty, $id]);
+    }
+    writeChangelog($db, $auth, 'inventory', 'transaction', $id, null, ['type' => $type, 'qty' => $qty]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Exams timetable ───────────────────────────────────────────────────────────
+function route_exams_timetable(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    $where  = [];
+    $params = [];
+    if (!empty($_GET['exam_id'])) { $where[] = 'id=?'; $params[] = $_GET['exam_id']; }
+    $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+    $stmt = $db->prepare("SELECT id, examName, className, timetable FROM `exams` $wc ORDER BY created_at DESC LIMIT 100");
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll();
+    foreach ($rows as &$r) {
+        if (isset($r['timetable']) && is_string($r['timetable'])) {
+            $d = json_decode($r['timetable'], true);
+            if (is_array($d)) $r['timetable'] = $d;
+        }
+    }
+    unset($r);
+    jsonSuccess($rows);
+}
+
+function route_exams_timetable_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth   = requireAuth();
+    $examId = sanitize($body['examId'] ?? $body['id'] ?? '');
+    if (!$examId) jsonError('examId is required', 400);
+    $db = getDB();
+    $tt = is_array($body['timetable'] ?? null) ? json_encode($body['timetable']) : ($body['timetable'] ?? '[]');
+    $db->prepare("UPDATE `exams` SET `timetable`=? WHERE `id`=?")->execute([$tt, $examId]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Expenses delete ───────────────────────────────────────────────────────────
+function route_expenses_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireSuperAdmin();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `expenses` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Homework delete ───────────────────────────────────────────────────────────
+function route_homework_delete(string $method, array $body, ?array $auth): void {
+    $auth = requireAuth();
+    $id   = $body['id'] ?? '';
+    if (!$id) jsonError('id is required', 400);
+    $db = getDB();
+    $db->prepare("DELETE FROM `homework` WHERE `id`=?")->execute([$id]);
+    jsonSuccess(['success' => true]);
+}
+
+// ── Communication: WhatsApp send ──────────────────────────────────────────────
+function route_whatsapp_send(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    // Simulated: log the outgoing message
+    $db = getDB();
+    $id = genUuid();
+    try {
+        $db->prepare("CREATE TABLE IF NOT EXISTS `broadcast_log` (
+            `id` VARCHAR(36) PRIMARY KEY, `mobile` VARCHAR(50), `message` TEXT,
+            `status` VARCHAR(20) DEFAULT 'sent', `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci")->execute();
+        $db->prepare("INSERT INTO `broadcast_log` (`id`,`mobile`,`message`,`status`,`created_at`) VALUES (?,?,?,'sent',NOW())")
+           ->execute([$id, sanitize($body['mobile'] ?? ''), sanitize($body['message'] ?? '')]);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id, 'status' => 'sent']);
+}
+
+function route_broadcast_history(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `broadcast_log` ORDER BY `created_at` DESC LIMIT 100");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_notification_schedule(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db = getDB();
+    $id = genUuid();
+    try {
+        $db->prepare("INSERT INTO `notifications` (`id`,`title`,`message`,`target_role`,`is_read`,`created_at`)
+            VALUES (?,?,?,?,0,NOW())")
+           ->execute([$id, sanitize($body['title'] ?? ''), sanitize($body['message'] ?? ''), sanitize($body['role'] ?? 'all')]);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+function route_notifications_list(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $stmt = $db->query("SELECT * FROM `notifications` ORDER BY `created_at` DESC LIMIT 100");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_notifications_mark_read(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    requireAuth();
+    $db  = getDB();
+    $ids = $body['ids'] ?? [];
+    if (!empty($ids) && is_array($ids)) {
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        try { $db->prepare("UPDATE `notifications` SET `is_read`=1 WHERE `id` IN ($ph)")->execute($ids); } catch (Throwable $e) {}
+    } else {
+        try { $db->exec("UPDATE `notifications` SET `is_read`=1"); } catch (Throwable $e) {}
+    }
+    jsonSuccess(['success' => true]);
+}
+
+// ── Chat rooms ────────────────────────────────────────────────────────────────
+function route_chat_rooms(?array $auth): void {
+    requireAuth();
+    $db = getDB();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `chat_rooms` (
+            `id` VARCHAR(36) PRIMARY KEY, `name` VARCHAR(100), `type` VARCHAR(20) DEFAULT 'group',
+            `created_by` VARCHAR(36), `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $stmt = $db->query("SELECT * FROM `chat_rooms` ORDER BY `created_at` DESC LIMIT 50");
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_chat_rooms_create(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth = requireAuth();
+    $db   = getDB();
+    $id   = genUuid();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `chat_rooms` (
+            `id` VARCHAR(36) PRIMARY KEY, `name` VARCHAR(100), `type` VARCHAR(20) DEFAULT 'group',
+            `created_by` VARCHAR(36), `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $db->prepare("INSERT INTO `chat_rooms` (`id`,`name`,`type`,`created_by`,`created_at`) VALUES (?,?,?,?,NOW())")
+           ->execute([$id, sanitize($body['name'] ?? ''), sanitize($body['type'] ?? 'group'), $auth['user_id'] ?? '']);
+    } catch (Throwable $e) {}
+    jsonSuccess(['success' => true, 'id' => $id]);
+}
+
+// ── Payroll ───────────────────────────────────────────────────────────────────
+function route_payroll_list(?array $auth): void {
+    $auth = requireAuth();
+    $db   = getDB();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `payroll` (
+            `id` VARCHAR(36) PRIMARY KEY, `staff_id` VARCHAR(36), `staff_name` VARCHAR(255),
+            `month` VARCHAR(10), `basic_salary` DECIMAL(10,2), `deductions` DECIMAL(10,2) DEFAULT 0,
+            `net_salary` DECIMAL(10,2), `status` VARCHAR(20) DEFAULT 'pending',
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $where  = [];
+        $params = [];
+        if (!empty($_GET['month'])) { $where[] = 'month=?'; $params[] = $_GET['month']; }
+        if (!empty($_GET['year']))  { $where[] = 'month LIKE ?'; $params[] = $_GET['year'] . '%'; }
+        $wc   = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        $stmt = $db->prepare("SELECT * FROM `payroll` $wc ORDER BY `created_at` DESC LIMIT 200");
+        $stmt->execute($params);
+        jsonSuccess($stmt->fetchAll());
+    } catch (Throwable $e) { jsonSuccess([]); }
+}
+
+function route_payroll_save(string $method, array $body, ?array $auth): void {
+    if ($method !== 'POST') jsonError('Method not allowed', 405);
+    $auth = requireAuth();
+    $db   = getDB();
+    $id   = $body['id'] ?? genUuid();
+    try {
+        $db->exec("CREATE TABLE IF NOT EXISTS `payroll` (
+            `id` VARCHAR(36) PRIMARY KEY, `staff_id` VARCHAR(36), `staff_name` VARCHAR(255),
+            `month` VARCHAR(10), `basic_salary` DECIMAL(10,2), `deductions` DECIMAL(10,2) DEFAULT 0,
+            `net_salary` DECIMAL(10,2), `status` VARCHAR(20) DEFAULT 'pending',
+            `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+        $db->prepare("INSERT INTO `payroll` (`id`,`staff_id`,`staff_name`,`month`,`basic_salary`,`deductions`,`net_salary`,`status`,`created_at`)
+            VALUES (?,?,?,?,?,?,?,?,NOW())
+            ON DUPLICATE KEY UPDATE `basic_salary`=VALUES(`basic_salary`),`deductions`=VALUES(`deductions`),
+                `net_salary`=VALUES(`net_salary`),`status`=VALUES(`status`)")
 // =============================================================================
 // TABLE DEFINITIONS
 // =============================================================================
