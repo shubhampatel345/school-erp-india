@@ -13,8 +13,51 @@
  *   - Every authenticated API call calls ensureValidToken() first
  * If all refresh methods fail, emits 'auth:token-expired' DOM event.
  *
- * API URL format: /api/?route=ROUTE_NAME (e.g. /api/?route=auth/login)
- * API_BASE is read from localStorage 'erp_server_url' if set (configurable in Settings).
+ * API URL format: {serverUrl}/?route=ROUTE_NAME
+ * serverUrl is read from localStorage 'erp_server_url' if set.
+ * Default: '/api'
+ *
+ * VALID ROUTES (must match backend exactly):
+ * auth/login, auth/logout, auth/refresh, auth/me,
+ * migrate/run,
+ * students/list, students/get, students/add, students/update, students/delete,
+ * students/import, students/count,
+ * fees/headings, fees/headings/save, fees/headings/delete,
+ * fees/plan, fees/plan/save,
+ * fees/collect/student, fees/collect/save,
+ * fees/receipts, fees/receipt, fees/receipt/delete,
+ * fees/due, fees/collection-chart,
+ * attendance/daily, attendance/save, attendance/summary, attendance/student,
+ * attendance/face,
+ * staff/list, staff/get, staff/add, staff/update, staff/delete, staff/import,
+ * payroll/list, payroll/save, payroll/payslip,
+ * academics/classes, academics/classes/save, academics/classes/delete,
+ * academics/sections, academics/sections/save,
+ * academics/subjects, academics/subjects/save, academics/subjects/delete,
+ * academic-sessions/list, academic-sessions/create,
+ * academic-sessions/set-current, academic-sessions/promote,
+ * exams/list, exams/save, exams/timetable, exams/timetable/save,
+ * exams/results, exams/results/save,
+ * transport/routes, transport/routes/save, transport/routes/delete,
+ * transport/buses, transport/buses/save,
+ * transport/pickup-points, transport/pickup-points/save,
+ * transport/driver-students,
+ * library/books, library/books/add, library/books/update,
+ * library/issue, library/return, library/overdue,
+ * inventory/items, inventory/items/add, inventory/items/update,
+ * inventory/items/delete, inventory/transactions/add,
+ * communication/whatsapp/send, communication/broadcast-history,
+ * communication/notification/schedule, communication/notifications,
+ * communication/notifications/mark-read,
+ * chat/rooms, chat/rooms/create, chat/messages, chat/messages/send,
+ * dashboard/stats, dashboard/fee-chart, dashboard/recent-activity,
+ * settings/all, settings/save, settings/users, settings/users/create,
+ * settings/users/update, settings/users/delete, settings/users/reset-password,
+ * reports/students, reports/finance, reports/attendance, reports/fee-register,
+ * expenses, expenses/add, expenses/delete,
+ * homework, homework/add, homework/delete,
+ * backup/export, backup/import,
+ * ping
  */
 
 /** Read server URL from localStorage — defaults to '/api' (same-origin) */
@@ -147,24 +190,6 @@ export interface StatsResult {
   staff: number;
   classes: number;
   fees_today: number;
-}
-
-export interface AllDataResult {
-  students: StudentRecord[];
-  staff: StaffRecord[];
-  classes: ClassRecord[];
-  sessions: SessionRecord[];
-  fee_headings: FeeHeadingRecord[];
-  fees_plan: FeePlanRecord[];
-  fee_receipts: FeeReceiptRecord[];
-  attendance: AttendanceRecord[];
-  transport_routes: Record<string, unknown>[];
-  inventory_items: Record<string, unknown>[];
-  expenses: Record<string, unknown>[];
-  homework: Record<string, unknown>[];
-  alumni: Record<string, unknown>[];
-  subjects: Record<string, unknown>[];
-  [key: string]: unknown[];
 }
 
 // ── Token helpers ──────────────────────────────────────────────────────────────
@@ -330,8 +355,6 @@ class PhpApiService {
    * This prevents false "session expired" errors right after login.
    */
   async ensureValidToken(): Promise<boolean> {
-    // Import fresh login check from AppContext module-level variable
-    // We do this dynamically to avoid circular import — read loginTime from localStorage fallback
     try {
       const loginTimeStr = localStorage.getItem("erp_login_time");
       if (loginTimeStr) {
@@ -384,7 +407,6 @@ class PhpApiService {
             if (refreshData.success && refreshData.data?.token) {
               const newToken = refreshData.data.token;
               this.setToken(newToken);
-              // Update refresh token if a new one was returned
               if (refreshData.data.refresh_token) {
                 this.storeRefreshToken(refreshData.data.refresh_token);
               }
@@ -545,18 +567,14 @@ class PhpApiService {
     return res.data as T;
   }
 
-  async put<T>(route: string, body: unknown): Promise<T> {
-    const res = await this.request<T>(route, {
-      method: "PUT",
+  /**
+   * POST with ?id= as query parameter (for updates).
+   * Never use PUT or DELETE — cPanel often blocks those HTTP methods.
+   */
+  async postWithId<T>(route: string, id: string, body: unknown): Promise<T> {
+    const res = await this.request<T>(`${route}&id=${encodeURIComponent(id)}`, {
+      method: "POST",
       body: JSON.stringify(body),
-    });
-    return res.data as T;
-  }
-
-  async del<T>(route: string, body?: unknown): Promise<T> {
-    const res = await this.request<T>(route, {
-      method: "DELETE",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     return res.data as T;
   }
@@ -572,7 +590,6 @@ class PhpApiService {
       if (res.data?.token) {
         this.setToken(res.data.token);
         this.recordTokenRefresh();
-        // Store refresh token under both key names for broad compatibility
         const rt = res.data.refresh_token ?? "";
         if (rt) {
           this.storeRefreshToken(rt);
@@ -582,13 +599,11 @@ class PhpApiService {
             /* noop */
           }
         }
-        // Store credentials for silent re-auth under both key names
         this.storeCredentials(username, password);
         try {
           localStorage.setItem("storedUsername", username);
           localStorage.setItem("storedPassword", password);
           localStorage.setItem("lastTokenRefresh", Date.now().toString());
-          // erp_login_time: used by ensureValidToken to skip expiry check for 10 min
           localStorage.setItem("erp_login_time", Date.now().toString());
         } catch {
           /* noop */
@@ -600,32 +615,41 @@ class PhpApiService {
     }
   }
 
+  /** Verify current token with backend — uses auth/me (not auth/verify) */
   async verifyToken(): Promise<LoginResult["user"] | null> {
     try {
-      return await this.get<LoginResult["user"]>("auth/verify");
+      return await this.get<LoginResult["user"]>("auth/me");
     } catch {
       return null;
     }
   }
 
-  // ── Stats ─────────────────────────────────────────────────────────────────
+  // ── Dashboard Stats ───────────────────────────────────────────────────────
 
   async getStats(): Promise<StatsResult> {
     try {
-      return await this.get<StatsResult>("stats");
+      return await this.get<StatsResult>("dashboard/stats");
     } catch {
       return { students: 0, staff: 0, classes: 0, fees_today: 0 };
     }
   }
 
-  // ── Initial load ──────────────────────────────────────────────────────────
-
-  async loadAll(): Promise<AllDataResult> {
-    return this.get<AllDataResult>("sync/all");
+  async getDashboardFeeChart(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("dashboard/fee-chart");
+    } catch {
+      return [];
+    }
   }
 
-  async pushChanges(changes: Record<string, unknown>[]): Promise<void> {
-    await this.post("sync/push", { changes });
+  async getDashboardRecentActivity(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "dashboard/recent-activity",
+      );
+    } catch {
+      return [];
+    }
   }
 
   // ── Students ──────────────────────────────────────────────────────────────
@@ -650,20 +674,32 @@ class PhpApiService {
     return this.post<StudentRecord>("students/add", student);
   }
 
+  /**
+   * Update student — uses POST with ?id= query param.
+   * Never use PUT — cPanel often blocks it.
+   */
   async updateStudent(
     student: Partial<StudentRecord> & { id: string },
   ): Promise<StudentRecord> {
-    return this.put<StudentRecord>("students/update", student);
+    const { id, ...body } = student;
+    return this.postWithId<StudentRecord>("students/update", id, body);
   }
 
+  /**
+   * Delete student — uses POST to students/delete with id in body.
+   * Never use DELETE method — cPanel often blocks it.
+   */
   async deleteStudent(id: string): Promise<void> {
-    await this.del("students/delete", { id });
+    await this.post("students/delete", { id });
   }
 
+  /**
+   * Bulk import students — route is students/import (not students/bulk-import).
+   */
   async bulkImportStudents(
     students: Partial<StudentRecord>[],
   ): Promise<{ count: number }> {
-    return this.post<{ count: number }>("students/bulk-import", { students });
+    return this.post<{ count: number }>("students/import", { students });
   }
 
   async getStudentCount(): Promise<number> {
@@ -681,7 +717,6 @@ class PhpApiService {
     try {
       const params: Record<string, string> = {};
       if (sessionId) params.session_id = sessionId;
-      // PHP: GET /api/?route=academics/classes[&session_id=X]
       const raw = await this.get<
         Array<{
           id: string;
@@ -691,12 +726,11 @@ class PhpApiService {
           sections?: string[];
         }>
       >("academics/classes", Object.keys(params).length ? params : undefined);
-      // Normalise snake_case → camelCase expected by UI
       return (raw ?? []).map((c) => ({
         id: String(c.id),
         className: c.name ?? "",
         displayOrder: c.display_order ?? 0,
-        isEnabled: c.is_enabled !== 0, // 0 = disabled, anything else = enabled
+        isEnabled: c.is_enabled !== 0,
         sections: Array.isArray(c.sections) ? c.sections : [],
       }));
     } catch {
@@ -713,8 +747,6 @@ class PhpApiService {
     isEnabled?: boolean;
     sessionId?: string;
   }): Promise<ClassRecord> {
-    // PHP: POST /api/?route=academics/classes/save
-    // body: { name, display_order, session_id?, is_enabled }
     const currentSessionId = (() => {
       try {
         return localStorage.getItem("erp_current_session_id") ?? undefined;
@@ -751,7 +783,6 @@ class PhpApiService {
       sections?: string[];
     },
   ): Promise<ClassRecord> {
-    // PHP: POST /api/?route=academics/classes/save (with id = update)
     const payload: Record<string, unknown> = { id };
     if (data.name !== undefined) payload.name = data.name;
     if (data.display_order !== undefined)
@@ -768,11 +799,14 @@ class PhpApiService {
     return this.post<ClassRecord>("academics/classes/save", payload);
   }
 
+  async deleteClass(id: string): Promise<void> {
+    await this.post("academics/classes/delete", { id });
+  }
+
   async addSection(section: { classId: string; name: string }): Promise<{
     id: string;
     name: string;
   }> {
-    // PHP: POST /api/?route=academics/sections/save, body: { class_id, name }
     return this.post<{ id: string; name: string }>("academics/sections/save", {
       class_id: section.classId,
       name: section.name,
@@ -783,7 +817,48 @@ class PhpApiService {
     classId: string,
   ): Promise<Record<string, unknown>[]> {
     try {
-      // PHP: GET /api/?route=academics/sections&class_id=X
+      return await this.get<Record<string, unknown>[]>("academics/sections", {
+        class_id: classId,
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  // ── Subjects ──────────────────────────────────────────────────────────────
+
+  /**
+   * Get subjects — route is academics/subjects (not subjects/list).
+   */
+  async getSubjects(classId?: string): Promise<Record<string, unknown>[]> {
+    try {
+      const params: Record<string, string> = classId
+        ? { class_id: classId }
+        : {};
+      return await this.get<Record<string, unknown>[]>(
+        "academics/subjects",
+        Object.keys(params).length ? params : undefined,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Save subject — route is academics/subjects/save (not subjects/add).
+   */
+  async saveSubject(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("academics/subjects/save", data);
+  }
+
+  async deleteSubject(id: string): Promise<void> {
+    await this.post("academics/subjects/delete", { id });
+  }
+
+  async getSections(classId: string): Promise<Record<string, unknown>[]> {
+    try {
       return await this.get<Record<string, unknown>[]>("academics/sections", {
         class_id: classId,
       });
@@ -806,41 +881,33 @@ class PhpApiService {
     return this.post<StaffRecord>("staff/add", staff);
   }
 
+  /**
+   * Update staff — uses POST with ?id= query param (not PUT).
+   */
   async updateStaff(
     staff: Partial<StaffRecord> & { id: string },
   ): Promise<StaffRecord> {
-    return this.put<StaffRecord>("staff/update", staff);
+    const { id, ...body } = staff;
+    return this.postWithId<StaffRecord>("staff/update", id, body);
   }
 
+  /**
+   * Delete staff — uses POST to staff/delete with id in body (not DELETE).
+   */
   async deleteStaff(id: string): Promise<void> {
-    await this.del("staff/delete", { id });
+    await this.post("staff/delete", { id });
   }
 
-  async getSubjects(classId: string): Promise<Record<string, unknown>[]> {
-    try {
-      const params: Record<string, string> = classId ? { classId } : {};
-      return await this.get<Record<string, unknown>[]>("subjects/list", params);
-    } catch {
-      return [];
-    }
+  /**
+   * Bulk import staff — route is staff/import.
+   */
+  async bulkImportStaff(
+    staffList: Partial<StaffRecord>[],
+  ): Promise<{ count: number }> {
+    return this.post<{ count: number }>("staff/import", { staff: staffList });
   }
 
-  async saveSubject(
-    data: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("subjects/add", data);
-  }
-
-  async getSections(classId: string): Promise<Record<string, unknown>[]> {
-    try {
-      // PHP: GET /api/?route=academics/sections&class_id=X
-      return await this.get<Record<string, unknown>[]>("academics/sections", {
-        class_id: classId,
-      });
-    } catch {
-      return [];
-    }
-  }
+  // ── Payroll ───────────────────────────────────────────────────────────────
 
   async getPayroll(params?: { month?: string; year?: string }): Promise<
     Record<string, unknown>[]
@@ -859,31 +926,42 @@ class PhpApiService {
     await this.post("payroll/save", data);
   }
 
+  /**
+   * Generate payslip — route is payroll/payslip (not payroll/generate-payslip).
+   */
   async generatePayslip(
     staffId: string,
     month: string,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("payroll/generate-payslip", {
+    return this.post<Record<string, unknown>>("payroll/payslip", {
       staffId,
       month,
     });
   }
 
+  // ── Attendance ────────────────────────────────────────────────────────────
+
+  /**
+   * Save face attendance — route is attendance/face (not attendance/face-mark).
+   */
   async saveFaceAttendance(data: {
     studentId: string;
     date: string;
     time: string;
   }): Promise<void> {
-    await this.post("attendance/face-mark", data);
+    await this.post("attendance/face", data);
   }
 
+  /**
+   * Get attendance by class — route is attendance/daily (not attendance/list).
+   */
   async getAttendanceByClass(
     classId: string,
     sectionId: string,
     date: string,
   ): Promise<AttendanceRecord[]> {
     try {
-      return await this.get<AttendanceRecord[]>("attendance/list", {
+      return await this.get<AttendanceRecord[]>("attendance/daily", {
         class: classId,
         section: sectionId,
         date,
@@ -893,11 +971,58 @@ class PhpApiService {
     }
   }
 
+  /**
+   * Save attendance records — route is attendance/save (not attendance/mark).
+   */
+  async markAttendance(records: AttendanceRecord[]): Promise<void> {
+    await this.post("attendance/save", { records });
+  }
+
+  /**
+   * Get attendance records — route is attendance/daily (not attendance/list).
+   */
+  async getAttendance(
+    className: string,
+    date: string,
+  ): Promise<AttendanceRecord[]> {
+    try {
+      return await this.get<AttendanceRecord[]>("attendance/daily", {
+        class: className,
+        date,
+      });
+    } catch {
+      return [];
+    }
+  }
+
+  async getAttendanceSummary(): Promise<Record<string, unknown>> {
+    try {
+      return await this.get<Record<string, unknown>>("attendance/summary");
+    } catch {
+      return {};
+    }
+  }
+
+  async getStudentAttendance(
+    studentId: string,
+    month?: string,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      const params: Record<string, string> = { studentId };
+      if (month) params.month = month;
+      return await this.get<Record<string, unknown>[]>(
+        "attendance/student",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
   // ── Sessions ──────────────────────────────────────────────────────────────
 
   async getSessions(): Promise<SessionRecord[]> {
     try {
-      // PHP: GET /api/?route=academic-sessions/list
       const raw = await this.get<
         Array<{
           id: string;
@@ -934,8 +1059,6 @@ class PhpApiService {
     startYear: number;
     endYear: number;
   }): Promise<SessionRecord> {
-    // PHP: POST /api/?route=academic-sessions/create
-    // body: { name, start_year, end_year }
     return this.post<SessionRecord>("academic-sessions/create", {
       name: session.label,
       start_year: session.startYear,
@@ -944,8 +1067,11 @@ class PhpApiService {
   }
 
   async setActiveSession(id: string): Promise<void> {
-    // PHP: POST /api/?route=academic-sessions/set-current
     await this.post("academic-sessions/set-current", { session_id: id });
+  }
+
+  async promoteStudents(data: Record<string, unknown>): Promise<void> {
+    await this.post("academic-sessions/promote", data);
   }
 
   // ── Fee headings ──────────────────────────────────────────────────────────
@@ -958,10 +1084,17 @@ class PhpApiService {
     }
   }
 
+  /**
+   * Add/save fee heading — route is fees/headings/save (not fees/headings/add).
+   */
   async addFeeHeading(
     heading: Partial<FeeHeadingRecord>,
   ): Promise<FeeHeadingRecord> {
-    return this.post<FeeHeadingRecord>("fees/headings/add", heading);
+    return this.post<FeeHeadingRecord>("fees/headings/save", heading);
+  }
+
+  async deleteFeeHeading(id: string): Promise<void> {
+    await this.post("fees/headings/delete", { id });
   }
 
   // ── Fee plan ──────────────────────────────────────────────────────────────
@@ -991,11 +1124,29 @@ class PhpApiService {
 
   // ── Fee collection ────────────────────────────────────────────────────────
 
+  /**
+   * Get student fee details — route is fees/collect/student.
+   */
+  async getStudentFeeDetails(
+    studentId: string,
+  ): Promise<Record<string, unknown>> {
+    try {
+      return await this.get<Record<string, unknown>>("fees/collect/student", {
+        studentId,
+      });
+    } catch {
+      return {};
+    }
+  }
+
+  /**
+   * Save fee collection receipt — route is fees/collect/save.
+   */
   async collectFees(
     receipt: Record<string, unknown>,
   ): Promise<{ receiptNo: string; id: string }> {
     return this.post<{ receiptNo: string; id: string }>(
-      "fees/collect",
+      "fees/collect/save",
       receipt,
     );
   }
@@ -1008,6 +1159,10 @@ class PhpApiService {
     }
   }
 
+  async deleteReceipt(id: string): Promise<void> {
+    await this.post("fees/receipt/delete", { id });
+  }
+
   async getFeeDue(): Promise<Record<string, unknown>[]> {
     try {
       return await this.get<Record<string, unknown>[]>("fees/due");
@@ -1016,31 +1171,11 @@ class PhpApiService {
     }
   }
 
-  // ── Attendance ────────────────────────────────────────────────────────────
-
-  async markAttendance(records: AttendanceRecord[]): Promise<void> {
-    await this.post("attendance/mark", { records });
-  }
-
-  async getAttendance(
-    className: string,
-    date: string,
-  ): Promise<AttendanceRecord[]> {
+  async getFeeCollectionChart(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<AttendanceRecord[]>("attendance/list", {
-        class: className,
-        date,
-      });
+      return await this.get<Record<string, unknown>[]>("fees/collection-chart");
     } catch {
       return [];
-    }
-  }
-
-  async getAttendanceSummary(): Promise<Record<string, unknown>> {
-    try {
-      return await this.get<Record<string, unknown>>("attendance/summary");
-    } catch {
-      return {};
     }
   }
 
@@ -1054,16 +1189,70 @@ class PhpApiService {
     }
   }
 
+  /**
+   * Add/save route — route is transport/routes/save (not transport/routes/add).
+   */
   async addRoute(
     route: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("transport/routes/add", route);
+    return this.post<Record<string, unknown>>("transport/routes/save", route);
   }
 
+  async deleteRoute(id: string): Promise<void> {
+    await this.post("transport/routes/delete", { id });
+  }
+
+  async getBuses(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("transport/buses");
+    } catch {
+      return [];
+    }
+  }
+
+  async saveBus(
+    bus: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("transport/buses/save", bus);
+  }
+
+  async getPickupPoints(routeId?: string): Promise<Record<string, unknown>[]> {
+    try {
+      const params = routeId ? { route_id: routeId } : undefined;
+      return await this.get<Record<string, unknown>[]>(
+        "transport/pickup-points",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Add/save pickup point — route is transport/pickup-points/save
+   * (not transport/pickup/add).
+   */
   async addPickupPoint(
     point: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("transport/pickup/add", point);
+    return this.post<Record<string, unknown>>(
+      "transport/pickup-points/save",
+      point,
+    );
+  }
+
+  async getDriverStudents(
+    driverId?: string,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      const params = driverId ? { driver_id: driverId } : undefined;
+      return await this.get<Record<string, unknown>[]>(
+        "transport/driver-students",
+        params,
+      );
+    } catch {
+      return [];
+    }
   }
 
   // ── Library ───────────────────────────────────────────────────────────────
@@ -1082,6 +1271,12 @@ class PhpApiService {
     return this.post<Record<string, unknown>>("library/books/add", book);
   }
 
+  async updateBook(
+    book: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("library/books/update", book);
+  }
+
   async issueBook(
     issue: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
@@ -1094,26 +1289,57 @@ class PhpApiService {
     return this.post<Record<string, unknown>>("library/return", ret);
   }
 
-  // ── Inventory ─────────────────────────────────────────────────────────────
-
-  async getInventory(): Promise<Record<string, unknown>[]> {
+  async getOverdueBooks(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("inventory/list");
+      return await this.get<Record<string, unknown>[]>("library/overdue");
     } catch {
       return [];
     }
   }
 
+  // ── Inventory ─────────────────────────────────────────────────────────────
+
+  /**
+   * Get inventory items — route is inventory/items (not inventory/list).
+   */
+  async getInventory(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("inventory/items");
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Add inventory item — route is inventory/items/add (not inventory/add).
+   */
   async addInventoryItem(
     item: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("inventory/add", item);
+    return this.post<Record<string, unknown>>("inventory/items/add", item);
   }
 
+  /**
+   * Update inventory item — route is inventory/items/update (not inventory/update).
+   * Uses POST (not PUT).
+   */
   async updateInventoryItem(
     item: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.put<Record<string, unknown>>("inventory/update", item);
+    return this.post<Record<string, unknown>>("inventory/items/update", item);
+  }
+
+  async deleteInventoryItem(id: string): Promise<void> {
+    await this.post("inventory/items/delete", { id });
+  }
+
+  async addInventoryTransaction(
+    transaction: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      "inventory/transactions/add",
+      transaction,
+    );
   }
 
   // ── Exams ─────────────────────────────────────────────────────────────────
@@ -1126,24 +1352,44 @@ class PhpApiService {
     }
   }
 
+  /**
+   * Create/save exam — route is exams/save (not exams/create).
+   */
   async createExam(
     exam: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("exams/create", exam);
+    return this.post<Record<string, unknown>>("exams/save", exam);
   }
 
-  async addResults(
-    results: Record<string, unknown>,
+  async getExamTimetable(examId?: string): Promise<Record<string, unknown>[]> {
+    try {
+      const params = examId ? { exam_id: examId } : undefined;
+      return await this.get<Record<string, unknown>[]>(
+        "exams/timetable",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async saveExamTimetable(
+    data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("results/add", results);
+    return this.post<Record<string, unknown>>("exams/timetable/save", data);
   }
 
-  async getResults(params?: { studentId?: string; class?: string }): Promise<
-    Record<string, unknown>[]
-  > {
+  /**
+   * Get results — route is exams/results (not results/list).
+   */
+  async getResults(params?: {
+    studentId?: string;
+    class?: string;
+    examId?: string;
+  }): Promise<Record<string, unknown>[]> {
     try {
       return await this.get<Record<string, unknown>[]>(
-        "results/list",
+        "exams/results",
         params as Record<string, string>,
       );
     } catch {
@@ -1151,11 +1397,23 @@ class PhpApiService {
     }
   }
 
+  /**
+   * Save results — route is exams/results/save (not results/add).
+   */
+  async addResults(
+    results: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("exams/results/save", results);
+  }
+
   // ── Expenses ──────────────────────────────────────────────────────────────
 
+  /**
+   * Get expenses — route is expenses (not expenses/list).
+   */
   async getExpenses(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("expenses/list");
+      return await this.get<Record<string, unknown>[]>("expenses");
     } catch {
       return [];
     }
@@ -1167,12 +1425,19 @@ class PhpApiService {
     return this.post<Record<string, unknown>>("expenses/add", expense);
   }
 
+  async deleteExpense(id: string): Promise<void> {
+    await this.post("expenses/delete", { id });
+  }
+
   // ── Homework ──────────────────────────────────────────────────────────────
 
+  /**
+   * Get homework — route is homework (not homework/list).
+   */
   async getHomework(className?: string): Promise<Record<string, unknown>[]> {
     try {
       return await this.get<Record<string, unknown>[]>(
-        "homework/list",
+        "homework",
         className ? { class: className } : undefined,
       );
     } catch {
@@ -1186,23 +1451,232 @@ class PhpApiService {
     return this.post<Record<string, unknown>>("homework/add", hw);
   }
 
-  // ── Chat ──────────────────────────────────────────────────────────────────
+  async deleteHomework(id: string): Promise<void> {
+    await this.post("homework/delete", { id });
+  }
 
-  async getChatMessages(groupId?: string): Promise<Record<string, unknown>[]> {
+  // ── Communication ─────────────────────────────────────────────────────────
+
+  async sendWhatsApp(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      "communication/whatsapp/send",
+      data,
+    );
+  }
+
+  async getBroadcastHistory(): Promise<Record<string, unknown>[]> {
     try {
       return await this.get<Record<string, unknown>[]>(
-        "chat/messages",
-        groupId ? { groupId } : undefined,
+        "communication/broadcast-history",
       );
     } catch {
       return [];
     }
   }
 
+  async scheduleNotification(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>(
+      "communication/notification/schedule",
+      data,
+    );
+  }
+
+  async getNotifications(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "communication/notifications",
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async markNotificationsRead(ids?: string[]): Promise<void> {
+    await this.post("communication/notifications/mark-read", {
+      ids: ids ?? [],
+    });
+  }
+
+  // ── Chat ──────────────────────────────────────────────────────────────────
+
+  async getChatRooms(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("chat/rooms");
+    } catch {
+      return [];
+    }
+  }
+
+  async createChatRoom(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("chat/rooms/create", data);
+  }
+
+  async getChatMessages(roomId?: string): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "chat/messages",
+        roomId ? { room_id: roomId } : undefined,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Send chat message — route is chat/messages/send (not chat/send).
+   */
   async sendChatMessage(
     msg: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("chat/send", msg);
+    return this.post<Record<string, unknown>>("chat/messages/send", msg);
+  }
+
+  // ── Settings ──────────────────────────────────────────────────────────────
+
+  /**
+   * Get settings — route is settings/all (not settings/get).
+   */
+  async getSettings(): Promise<Record<string, unknown>> {
+    try {
+      return await this.get<Record<string, unknown>>("settings/all");
+    } catch {
+      return {};
+    }
+  }
+
+  async saveSettings(settings: Record<string, unknown>): Promise<void> {
+    await this.post("settings/save", settings);
+  }
+
+  // ── User Management ───────────────────────────────────────────────────────
+
+  /**
+   * Get users — route is settings/users (not users/list).
+   */
+  async getUsers(): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>("settings/users");
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Create user — route is settings/users/create (not users/create).
+   */
+  async createUser(
+    user: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("settings/users/create", user);
+  }
+
+  /**
+   * Update user — route is settings/users/update (not users/update).
+   */
+  async updateUser(
+    user: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.post<Record<string, unknown>>("settings/users/update", user);
+  }
+
+  /**
+   * Delete user — route is settings/users/delete (not users/delete).
+   */
+  async deleteUser(id: string): Promise<void> {
+    await this.post("settings/users/delete", { id });
+  }
+
+  /**
+   * Reset user password — route is settings/users/reset-password.
+   */
+  async resetPassword(id: string, newPassword: string): Promise<void> {
+    await this.post("settings/users/reset-password", { id, newPassword });
+  }
+
+  // ── Reports ───────────────────────────────────────────────────────────────
+
+  async getStudentsReport(
+    params?: Record<string, string>,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "reports/students",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async getFinanceReport(
+    params?: Record<string, string>,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "reports/finance",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async getAttendanceReport(
+    params?: Record<string, string>,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "reports/attendance",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  async getFeeRegisterReport(
+    params?: Record<string, string>,
+  ): Promise<Record<string, unknown>[]> {
+    try {
+      return await this.get<Record<string, unknown>[]>(
+        "reports/fee-register",
+        params,
+      );
+    } catch {
+      return [];
+    }
+  }
+
+  // ── Backup ────────────────────────────────────────────────────────────────
+
+  async exportBackup(): Promise<Record<string, unknown>> {
+    return this.get<Record<string, unknown>>("backup/export");
+  }
+
+  async importBackup(
+    data: Record<string, unknown>,
+  ): Promise<{ count: number }> {
+    return this.post<{ count: number }>("backup/import", data);
+  }
+
+  // ── Health / Ping ─────────────────────────────────────────────────────────
+
+  /**
+   * Check API health — route is ping (not health).
+   */
+  async checkHealth(): Promise<boolean> {
+    try {
+      await this.get("ping");
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // ── Changelog ─────────────────────────────────────────────────────────────
@@ -1223,71 +1697,62 @@ class PhpApiService {
     }
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // ── Compatibility shims (legacy callers) ──────────────────────────────────
 
-  async getSettings(): Promise<Record<string, unknown>> {
-    try {
-      return await this.get<Record<string, unknown>>("settings/get");
-    } catch {
-      return {};
-    }
+  /**
+   * @deprecated Use postWithId() instead of put().
+   * PUT may be blocked by cPanel; use POST with ?id= param.
+   * This shim forwards to POST for backward compatibility.
+   */
+  async put<T>(route: string, body: unknown): Promise<T> {
+    const res = await this.request<T>(route, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    return res.data as T;
   }
 
-  async saveSettings(settings: Record<string, unknown>): Promise<void> {
-    await this.post("settings/save", settings);
+  /**
+   * @deprecated Use post('route/delete', { id }) instead of del().
+   * DELETE method may be blocked by cPanel.
+   * This shim forwards to POST for backward compatibility.
+   */
+  async del<T>(route: string, body?: unknown): Promise<T> {
+    const res = await this.request<T>(route, {
+      method: "POST",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    return res.data as T;
   }
 
-  // ── Users ─────────────────────────────────────────────────────────────────
-
-  async getUsers(): Promise<Record<string, unknown>[]> {
-    try {
-      return await this.get<Record<string, unknown>[]>("users/list");
-    } catch {
-      return [];
-    }
+  /**
+   * @deprecated sync/all route no longer exists — returns empty data shell.
+   * All data is fetched per-module via individual endpoints.
+   */
+  async loadAll(): Promise<Record<string, unknown[]>> {
+    return {
+      students: [],
+      staff: [],
+      classes: [],
+      sessions: [],
+      fee_headings: [],
+      fees_plan: [],
+      fee_receipts: [],
+      attendance: [],
+      transport_routes: [],
+      inventory_items: [],
+      expenses: [],
+      homework: [],
+      alumni: [],
+      subjects: [],
+    };
   }
 
-  async createUser(
-    user: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("users/create", user);
-  }
-
-  async updateUser(
-    user: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("users/update", user);
-  }
-
-  async deleteUser(id: string): Promise<void> {
-    await this.post("users/delete", { id });
-  }
-
-  async resetPassword(id: string, newPassword: string): Promise<void> {
-    await this.post("users/reset-password", { id, newPassword });
-  }
-
-  // ── Backup ────────────────────────────────────────────────────────────────
-
-  async exportBackup(): Promise<Record<string, unknown>> {
-    return this.get<Record<string, unknown>>("backup/export");
-  }
-
-  async importBackup(
-    data: Record<string, unknown>,
-  ): Promise<{ count: number }> {
-    return this.post<{ count: number }>("backup/import", data);
-  }
-
-  // ── Health ────────────────────────────────────────────────────────────────
-
-  async checkHealth(): Promise<boolean> {
-    try {
-      await this.get("health");
-      return true;
-    } catch {
-      return false;
-    }
+  /**
+   * @deprecated sync/push route no longer exists — no-op.
+   */
+  async pushChanges(_changes: Record<string, unknown>[]): Promise<void> {
+    /* no-op: online-only mode, no pending queue */
   }
 }
 

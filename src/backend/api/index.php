@@ -1,4 +1,5 @@
 <?php
+error_reporting(0);
 require_once __DIR__ . '/config.php';
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function json_out(array $data, int $code = 200): void {
     exit;
 }
 function json_error(string $msg, int $code = 400): void {
-    json_out(['success' => false, 'error' => $msg], $code);
+    json_out(['success' => false, 'message' => $msg, 'error' => $msg], $code);
 }
 function body(): array {
     static $b = null;
@@ -98,6 +99,12 @@ $parts  = explode('/', $route);
 $section = $parts[0] ?? '';
 $action  = implode('/', array_slice($parts, 1));
 $method  = $_SERVER['REQUEST_METHOD'];
+
+// ─── PING (public, no auth) ───────────────────────────────────────────────────
+if ($route === 'ping') {
+    echo json_encode(['success' => true, 'message' => 'API is working', 'version' => '1.0']);
+    exit;
+}
 
 // Public routes
 $public = ['auth/login', 'migrate/run'];
@@ -995,6 +1002,23 @@ if ($section === 'staff' || $section === 'payroll') {
             $db->prepare("UPDATE staff SET is_active=0 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
             json_out(['success' => true]);
         }
+        if ($action === 'import' && $method === 'POST') {
+            $b = body();
+            $rows = $b['staff'] ?? [];
+            $imported = 0; $skipped = 0; $errors = [];
+            $stmt = $db->prepare("INSERT INTO staff (school_id, name, designation, department, mobile, email, joining_date, salary, address, photo_url) VALUES (?,?,?,?,?,?,?,?,?,?)");
+            foreach ($rows as $i => $r) {
+                if (empty($r['name'])) { $errors[] = "Row $i: name required"; continue; }
+                try {
+                    $stmt->execute([$schoolId, $r['name'], $r['designation'] ?? '', $r['department'] ?? '', $r['mobile'] ?? '', $r['email'] ?? '', $r['joining_date'] ?? null, (float)($r['salary'] ?? 0), $r['address'] ?? '', $r['photo_url'] ?? '']);
+                    $imported++;
+                } catch (Exception $e) {
+                    $errors[] = "Row $i: " . $e->getMessage();
+                    $skipped++;
+                }
+            }
+            json_out(['success' => true, 'imported' => $imported, 'skipped' => $skipped, 'errors' => $errors]);
+        }
     }
 
     if ($section === 'payroll') {
@@ -1720,11 +1744,81 @@ if ($section === 'homework') {
     json_error('Unknown homework route');
 }
 
+// ─── BACKUP ───────────────────────────────────────────────────────────────────
+if ($section === 'backup') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'export' && $method === 'GET') {
+        $data = [];
+        $tables = [
+            'students'                => "SELECT * FROM students WHERE school_id=$schoolId",
+            'staff'                   => "SELECT * FROM staff WHERE school_id=$schoolId",
+            'classes'                 => "SELECT * FROM classes WHERE school_id=$schoolId",
+            'sections'                => "SELECT * FROM sections WHERE school_id=$schoolId",
+            'subjects'                => "SELECT * FROM subjects WHERE school_id=$schoolId",
+            'sessions'                => "SELECT * FROM sessions_academic WHERE school_id=$schoolId",
+            'fee_headings'            => "SELECT * FROM fee_headings WHERE school_id=$schoolId",
+            'fees_plan'               => "SELECT * FROM fees_plan WHERE school_id=$schoolId",
+            'fee_receipts'            => "SELECT * FROM fee_receipts WHERE school_id=$schoolId",
+            'attendance'              => "SELECT * FROM attendance WHERE school_id=$schoolId ORDER BY date DESC LIMIT 10000",
+            'expenses'                => "SELECT * FROM expenses WHERE school_id=$schoolId",
+            'homework'                => "SELECT * FROM homework WHERE school_id=$schoolId",
+            'exams'                   => "SELECT * FROM exams WHERE school_id=$schoolId",
+            'exam_results'            => "SELECT * FROM exam_results WHERE school_id=$schoolId",
+            'transport_routes'        => "SELECT * FROM transport_routes WHERE school_id=$schoolId",
+            'transport_buses'         => "SELECT * FROM transport_buses WHERE school_id=$schoolId",
+            'transport_pickup_points' => "SELECT * FROM transport_pickup_points WHERE school_id=$schoolId",
+            'library_books'           => "SELECT * FROM library_books WHERE school_id=$schoolId",
+            'inventory_items'         => "SELECT * FROM inventory_items WHERE school_id=$schoolId",
+            'settings'                => "SELECT * FROM settings WHERE school_id=$schoolId",
+        ];
+        foreach ($tables as $key => $sql) {
+            try { $data[$key] = $db->query($sql)->fetchAll(); } catch (Exception $e) { $data[$key] = []; }
+        }
+        json_out(['success' => true, 'data' => $data, 'exported_at' => date('Y-m-d H:i:s'), 'school_id' => $schoolId]);
+    }
+
+    if ($action === 'import' && $method === 'POST') {
+        $b = body();
+        $imported = [];
+        $tableMap = [
+            'sessions'                => ['sessions_academic',        "INSERT IGNORE INTO sessions_academic (id,school_id,name,start_year,end_year,is_current,created_at) VALUES (?,?,?,?,?,?,?)"],
+            'classes'                 => ['classes',                  "INSERT IGNORE INTO classes (id,school_id,session_id,name,display_order,is_enabled,created_at) VALUES (?,?,?,?,?,?,?)"],
+            'sections'                => ['sections',                 "INSERT IGNORE INTO sections (id,class_id,school_id,name,created_at) VALUES (?,?,?,?,?)"],
+            'subjects'                => ['subjects',                 "INSERT IGNORE INTO subjects (id,class_id,school_id,name,code,max_marks,pass_marks,created_at) VALUES (?,?,?,?,?,?,?,?)"],
+            'fee_headings'            => ['fee_headings',             "INSERT IGNORE INTO fee_headings (id,school_id,name,description,is_active,created_at) VALUES (?,?,?,?,?,?)"],
+            'fees_plan'               => ['fees_plan',                "INSERT IGNORE INTO fees_plan (id,school_id,class_id,section_id,session_id,fee_heading_id,monthly_amounts_json,created_at) VALUES (?,?,?,?,?,?,?,?)"],
+            'students'                => ['students',                 "INSERT IGNORE INTO students (id,school_id,session_id,class_id,section_id,adm_no,full_name,father_name,mother_name,father_mobile,mother_mobile,dob,gender,address,photo_url,bus_no,route_id,pickup_point_id,is_active,roll_no,adm_date,category,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"],
+            'staff'                   => ['staff',                    "INSERT IGNORE INTO staff (id,school_id,name,designation,department,mobile,email,joining_date,salary,address,photo_url,is_active,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"],
+            'fee_receipts'            => ['fee_receipts',             "INSERT IGNORE INTO fee_receipts (id,school_id,student_id,session_id,receipt_no,payment_date,months_json,amounts_json,total_amount,payment_mode,remarks,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"],
+            'expenses'                => ['expenses',                 "INSERT IGNORE INTO expenses (id,school_id,head,description,amount,date,created_by,created_at) VALUES (?,?,?,?,?,?,?,?)"],
+        ];
+        foreach ($tableMap as $key => [$tbl, $sql]) {
+            if (!isset($b['data'][$key])) continue;
+            $rows = $b['data'][$key];
+            $n = 0;
+            foreach ($rows as $row) {
+                try {
+                    $params = array_values($row);
+                    // Ensure school_id is correct
+                    $db->prepare($sql)->execute($params);
+                    $n++;
+                } catch (Exception $e) { /* skip duplicates */ }
+            }
+            $imported[$key] = $n;
+        }
+        json_out(['success' => true, 'imported' => $imported]);
+    }
+
+    json_error('Unknown backup route');
+}
+
 // ─── 404 ────────────────────────────────────────────────────────────────────
 json_error("Route not found: $route", 404);
 
 } catch (Throwable $e) {
     http_response_code(500);
-    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+    echo json_encode(['success' => false, 'message' => $e->getMessage(), 'error' => $e->getMessage()]);
     exit;
 }

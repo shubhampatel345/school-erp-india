@@ -54,50 +54,76 @@ const DOCS: DocSection[] = [
     badge: "Start Here",
     items: [
       {
-        heading: "First-Time Setup Checklist",
+        heading: "What is SHUBH SCHOOL ERP?",
+        body: `SHUBH SCHOOL ERP is a comprehensive, web-based school management system
+designed for Indian schools. It covers all standard school operations:
+
+  • Student management with bulk import/export
+  • Fee collection with INR receipts and UPI/QR payment support
+  • Attendance (manual, QR, RFID, biometric, AI face recognition)
+  • Examinations, results, and custom result designer
+  • HR & Payroll with payslip generation
+  • Transport with GPS tracking
+  • Library management with barcode scanning
+  • Inventory for uniforms, stationery, and equipment
+  • Communication via WhatsApp, SMS, and in-app notifications
+  • Virtual classes via Zoom / Google Meet
+  • Student analytics and performance charts
+  • Role-based access for 7 roles (Super Admin, Admin, Teacher, etc.)
+  • Installable as a PWA on Android/iOS
+
+System Requirements:
+  • cPanel hosting with PHP 7.4+ (8.0+ recommended)
+  • MySQL 5.7+ or MariaDB 10.3+
+  • Any modern browser (Chrome, Firefox, Edge, Safari)
+  • Minimum 1 GB disk space for API files and database`,
+      },
+      {
+        heading: "Quick Start Checklist",
         body: `Follow these steps in order — each step depends on the previous one.
 
-STEP 1 — Log in as Super Admin
-  • Username: superadmin
-  • Password: admin123
-  • Change this password immediately in Settings → Users
+STEP 1 — Upload PHP API to cPanel
+  See "cPanel Deployment Guide" section for full details.
 
-STEP 2 — Configure School Profile
-  • Settings → School Profile
-  • Fill in: Name, Address, Phone, Email, Logo
-  • This info appears on all printed receipts and certificates
+STEP 2 — Run database migration
+  Visit: https://yourdomain.com/api/index.php?route=migrate/run
+  This creates all tables and the default Super Admin account.
 
-STEP 3 — Create Academic Classes
-  • Academics → Classes → "+ Add Class"
-  • Add all classes: Nursery, LKG, UKG, Class 1–12
-  • Add sections per class: A, B, C, D, E
+STEP 3 — Set Server URL in the ERP
+  Settings → Server & Sync → enter API URL → Test Connection → Save
+
+STEP 4 — Log in as Super Admin
+  Username: admin
+  Password: admin123
+  ⚠ Change this password immediately!
+
+STEP 5 — Add academic classes
+  Academics → Classes → "+ Add Class"
+  Add: Nursery, LKG, UKG, Class 1 through Class 12
   ⚠ Do this BEFORE adding students — student form reads from this list
 
-STEP 4 — Add Fee Headings
-  • Fees → Fee Headings → "+ Add Heading"
-  • Add: Tuition Fee, Exam Fee, Development Fee, Transport, Computer, etc.
+STEP 6 — Add Fee Headings
+  Fees → Fee Headings → "+ Add Heading"
+  Add: Tuition Fee, Exam Fee, Development Fee, Computer, Sports, etc.
 
-STEP 5 — Set Fee Plans
-  • Fees → Fee Plans → select class and section
-  • Enter monthly amount for each heading
-  • Repeat for every class/section combination
+STEP 7 — Set Fee Plans
+  Fees → Fee Plans → select class/section → enter monthly amounts → Save
 
-STEP 6 — Add Students
-  • Students → "+ Add Student" (one by one) or "Import" (bulk Excel)
+STEP 8 — Add Students
+  Students → "+ Add Student" (one by one) or "Import" (bulk Excel/CSV)
 
-STEP 7 — Add Staff
-  • HR → Staff → "+ Add Staff"
+STEP 9 — Add Staff
+  HR → Staff → "+ Add Staff"
 
-STEP 8 — Create User Accounts
-  • Settings → User Management → "+ Create User"
-  • Assign roles: teacher, admin, receptionist, accountant, etc.`,
+STEP 10 — Create User Accounts
+  Settings → User Management → "+ Create User" → assign roles`,
       },
       {
         heading: "Default Login Credentials",
         body: `┌─────────────────┬──────────────────────────────────────────┐
 │ Role            │ Login Format                             │
 ├─────────────────┼──────────────────────────────────────────┤
-│ Super Admin     │ superadmin / admin123                    │
+│ Super Admin     │ admin / admin123                         │
 │ Admin           │ Set by Super Admin in User Management    │
 │ Teacher         │ Mobile Number / Date of Birth (DDMMYYYY)│
 │ Receptionist    │ Mobile Number / Date of Birth            │
@@ -108,118 +134,391 @@ STEP 8 — Create User Accounts
 └─────────────────┴──────────────────────────────────────────┘
 
 TIP: Parent login uses mobile as both username and password.
-     All children with the same parent mobile are shown together.`,
+     All children with the same parent mobile are shown together.
+
+⚠ Change admin123 password immediately after first login!`,
+      },
+    ],
+  },
+  {
+    id: "cpanel-deployment",
+    category: "Deployment",
+    title: "cPanel Deployment Guide",
+    icon: Server,
+    badge: "Important",
+    items: [
+      {
+        heading: "Step 1 — Create MySQL Database in cPanel",
+        body: `Log in to your cPanel (usually at yourdomain.com/cpanel).
+
+1. Go to: cPanel → Databases → MySQL Databases
+2. Under "Create New Database":
+   • Enter database name: e.g. school_erp
+   • Click "Create Database"
+3. Under "MySQL Users → Add New User":
+   • Username: e.g. erp_user
+   • Password: use a strong password (letters + numbers + symbols)
+   • Click "Create User"
+4. Under "Add User to Database":
+   • Select your user and database
+   • Click "Add"
+   • Tick "ALL PRIVILEGES" → click "Make Changes"
+
+Write down these four values — you'll need them:
+  • Database Host: localhost
+  • Database Name: your_database_name (cPanel adds your account prefix, e.g. psmkgsco_school_erp)
+  • Database User: your_username (also prefixed, e.g. psmkgsco_erp_user)
+  • Database Password: the password you set`,
       },
       {
-        heading: "Create First Academic Session",
-        body: `Go to Settings → Session Management → "+ New Session"
+        heading: "Step 2 — Upload PHP API Files",
+        body: `You need two files from the project: api/index.php and api/config.php
 
-  • Session Name: e.g. 2025-26 (year format YYYY-YY)
-  • Start Date: April 1
-  • End Date: March 31 of next year
-  • Check "Mark as Active"
+1. In cPanel, open: File Manager → public_html
+2. Create a new folder named: api
+   (Right-click → New Folder → type "api" → Create)
+3. Click into the api folder
+4. Click "Upload" in the toolbar
+5. Upload both files:
+   • api/index.php  — the complete PHP API router (~3,000 lines)
+   • api/config.php — your database configuration
 
-April–March is the standard Indian academic year.
-You can create multiple sessions. Only one can be Active at a time.
-Super Admin can view/edit any session. Other roles get read-only access to archived sessions.`,
+After uploading, you should see both files inside public_html/api/
+
+⚠ Make sure both files are directly inside /api/ — not in a subfolder inside /api/`,
+      },
+      {
+        heading: "Step 3 — Edit api/config.php with Your Credentials",
+        body: `In cPanel File Manager:
+1. Right-click api/config.php → Edit
+2. Update these four lines with your real values:
+
+   define('DB_HOST', 'localhost');
+   define('DB_NAME', 'psmkgsco_school_erp');  ← your database name
+   define('DB_USER', 'psmkgsco_erp_user');    ← your MySQL username
+   define('DB_PASS', 'YourPassword123!');      ← your MySQL password
+
+3. Also set a strong JWT secret (random string, 32+ characters):
+   define('JWT_SECRET', 'change-this-to-a-long-random-secret-2025');
+
+4. Set your domain for CORS:
+   define('ALLOWED_ORIGINS', 'https://yourdomain.com');
+
+5. Click "Save Changes"
+
+⚠ These values are case-sensitive. Copy them exactly from the MySQL Databases page.`,
+        code: `<?php
+// api/config.php — edit these values
+define('DB_HOST', 'localhost');
+define('DB_NAME', 'psmkgsco_school_erp');
+define('DB_USER', 'psmkgsco_erp_user');
+define('DB_PASS', 'YourSecurePassword123!');
+define('JWT_SECRET', 'ShubhSchoolERP_SecretKey_2025_XYZ');
+define('ALLOWED_ORIGINS', 'https://shubh.psmkgs.com');
+define('DB_CHARSET', 'utf8mb4');
+?>`,
+      },
+      {
+        heading: "Step 4 — Run the Database Migration",
+        body: `Open a new browser tab and visit this URL (replace yourdomain.com):
+
+  https://yourdomain.com/api/index.php?route=migrate/run
+
+You should see:
+  {"success":true,"message":"Migration complete"}
+
+This creates ALL database tables and seeds the default admin account:
+  • Username: admin
+  • Password: admin123
+
+If you see HTML instead of JSON:
+  → The file was uploaded to the wrong location. Verify index.php is at public_html/api/index.php
+
+If you see a PHP error:
+  → Check config.php — the DB credentials are wrong
+  → Also verify the database user has ALL PRIVILEGES
+
+If you see a 404 error:
+  → The /api/ folder doesn't exist or the file is named wrong
+  → Check File Manager: public_html → api → index.php should exist`,
+      },
+      {
+        heading: "Step 5 — Test the API Connection",
+        body: `After migration, verify the API is working:
+
+1. Open in browser: https://yourdomain.com/api/index.php?route=ping
+
+   Expected response:
+   {"success":true,"message":"API is working","version":"1.0"}
+
+2. If you see the expected JSON — your API is live!
+
+3. Test login:
+   POST https://yourdomain.com/api/index.php?route=auth/login
+   Body: {"username":"admin","password":"admin123"}
+
+   You can test this in browser using a tool like:
+   • Postman (recommended for testing)
+   • curl command in terminal`,
+        code: `# Test API with curl (run in terminal or Git Bash)
+curl -X POST "https://yourdomain.com/api/index.php?route=auth/login" \\
+  -H "Content-Type: application/json" \\
+  -d '{"username":"admin","password":"admin123"}'
+
+# Expected: {"success":true,"data":{"token":"...","user":{...}}}`,
+      },
+      {
+        heading: "Step 6 — Set Server URL in the ERP App",
+        body: `Now configure the ERP frontend to point to your PHP API:
+
+1. Open your ERP app in the browser
+2. Go to: Settings → Server & Sync tab
+3. In "Server URL" field, enter the FULL path to index.php:
+   https://yourdomain.com/api/index.php
+
+   ⚠ IMPORTANT: The URL must end with /api/index.php
+   NOT just /api/ or /api — this is the most common mistake.
+
+4. Click "Test Connection"
+   → Should show green: "API is working (Xms)"
+
+5. Click "Save Settings"
+
+The app is now connected to your MySQL database.
+All student, fee, attendance data will save to MySQL permanently.`,
+      },
+      {
+        heading: "Step 7 — Log In and Change Admin Password",
+        body: `1. Go to your ERP app login page
+2. Enter:
+   Username: admin
+   Password: admin123
+
+3. You should be logged in as Super Admin.
+
+4. IMMEDIATELY change the password:
+   Settings → User Management → find "admin" → Edit → change password
+
+5. Add your school profile:
+   Settings → School Profile → fill in name, address, phone, logo
+
+6. You're ready to start using SHUBH SCHOOL ERP!
+
+Next steps:
+   → Add academic classes (Academics → Classes)
+   → Add fee headings (Fees → Fee Headings)
+   → Import students (Students → Import)`,
+      },
+    ],
+  },
+  {
+    id: "api-verify",
+    category: "Deployment",
+    title: "Verifying the API",
+    icon: Wifi,
+    items: [
+      {
+        heading: "API Health Check",
+        body: `The ping route tests if the API is alive and responding with JSON.
+
+Visit in browser:
+  https://yourdomain.com/api/index.php?route=ping
+
+Expected response:
+  {"success":true,"message":"API is working","version":"1.0"}
+
+What each result means:
+  JSON response  → API is working correctly
+  HTML page      → index.php not uploaded or wrong path
+  PHP error text → config.php has wrong DB credentials
+  404 page       → /api/index.php file does not exist
+  500 error      → PHP error, check cPanel Error Logs
+  CORS error     → Update ALLOWED_ORIGINS in config.php`,
+      },
+      {
+        heading: "API Endpoints Quick Reference",
+        body: `All routes use the format: https://yourdomain.com/api/index.php?route=ROUTE_NAME
+
+┌──────────────────────────────────┬────────┬─────────────────────────────┐
+│ Route                            │ Method │ Description                 │
+├──────────────────────────────────┼────────┼─────────────────────────────┤
+│ ping                             │ GET    │ API health check            │
+│ auth/login                       │ POST   │ Login, get JWT              │
+│ auth/me                          │ GET    │ Validate current token      │
+│ auth/refresh                     │ POST   │ Refresh JWT token           │
+│ migrate/run                      │ GET    │ Create DB tables + seed     │
+│ dashboard/stats                  │ GET    │ Dashboard statistics        │
+│ dashboard/fee-chart              │ GET    │ Monthly fee chart data      │
+│ students/list                    │ GET    │ List students               │
+│ students/add                     │ POST   │ Add student                 │
+│ students/update                  │ POST   │ Update student (?id=)       │
+│ students/delete                  │ POST   │ Delete student              │
+│ students/import                  │ POST   │ Bulk import students        │
+│ academics/classes                │ GET    │ List classes                │
+│ academics/classes/save           │ POST   │ Add/update class            │
+│ academics/sections               │ GET    │ List sections               │
+│ academics/sections/save          │ POST   │ Add/update section          │
+│ academics/subjects               │ GET    │ List subjects               │
+│ academics/subjects/save          │ POST   │ Add/update subject          │
+│ fees/headings                    │ GET    │ List fee headings           │
+│ fees/headings/save               │ POST   │ Add/update fee heading      │
+│ fees/plan                        │ GET    │ Get fee plan                │
+│ fees/plan/save                   │ POST   │ Save fee plan               │
+│ fees/collect/student             │ GET    │ Get student fee details     │
+│ fees/collect/save                │ POST   │ Save fee receipt            │
+│ fees/receipts                    │ GET    │ List student receipts       │
+│ fees/due                         │ GET    │ Students with outstanding   │
+│ attendance/daily                 │ GET    │ Get daily attendance        │
+│ attendance/save                  │ POST   │ Save attendance records     │
+│ attendance/face                  │ POST   │ Face recognition attendance │
+│ staff/list                       │ GET    │ List staff                  │
+│ staff/add                        │ POST   │ Add staff                   │
+│ staff/update                     │ POST   │ Update staff (?id=)         │
+│ staff/import                     │ POST   │ Bulk import staff           │
+│ payroll/list                     │ GET    │ List payroll records        │
+│ payroll/save                     │ POST   │ Save payroll                │
+│ payroll/payslip                  │ POST   │ Generate payslip            │
+│ transport/routes                 │ GET    │ List routes                 │
+│ transport/routes/save            │ POST   │ Add/update route            │
+│ transport/pickup-points          │ GET    │ List pickup points          │
+│ transport/pickup-points/save     │ POST   │ Add/update pickup point     │
+│ settings/all                     │ GET    │ Get all settings            │
+│ settings/save                    │ POST   │ Save settings               │
+│ settings/users                   │ GET    │ List users                  │
+│ settings/users/create            │ POST   │ Create user account         │
+│ settings/users/update            │ POST   │ Update user account         │
+│ settings/users/delete            │ POST   │ Delete user account         │
+│ settings/users/reset-password    │ POST   │ Reset user password         │
+│ backup/export                    │ GET    │ Export all data as JSON     │
+│ backup/import                    │ POST   │ Import data from JSON       │
+│ academic-sessions/list           │ GET    │ List academic sessions      │
+│ academic-sessions/create         │ POST   │ Create new session          │
+│ academic-sessions/set-current    │ POST   │ Set active session          │
+│ academic-sessions/promote        │ POST   │ Promote students            │
+└──────────────────────────────────┴────────┴─────────────────────────────┘
+
+Note: Use POST for all write operations (add, update, delete).
+      Never use PUT or DELETE — cPanel may block those HTTP methods.`,
+        code: `// All requests follow this pattern:
+const API_URL = 'https://yourdomain.com/api/index.php';
+const token = localStorage.getItem('erp_token');
+
+// GET example:
+const res = await fetch(API_URL + '?route=students/list', {
+  headers: { 'Authorization': 'Bearer ' + token }
+});
+
+// POST example:
+const res = await fetch(API_URL + '?route=students/add', {
+  method: 'POST',
+  headers: {
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({ fullName: 'Rahul Sharma', ... })
+});`,
+      },
+      {
+        heading: "Response Format",
+        body: `All API responses follow this standard format:
+
+Success:
+  { "success": true, "data": <payload>, "total": 100 }
+
+Error:
+  { "success": false, "error": "Description of error" }
+
+HTTP Status Codes used:
+  200 — OK (also used for errors — check "success" field)
+  401 — Unauthorized (invalid/expired JWT — log in again)
+  403 — Forbidden (insufficient permissions)
+  404 — Route not found (wrong URL or missing ?route= param)
+  500 — Server Error (PHP error — check cPanel Error Logs)
+
+If you get HTML instead of JSON on any route:
+  • The ?route= parameter is missing
+  • You're hitting the wrong URL (missing index.php)
+  • The route name is wrong — check the table above`,
       },
     ],
   },
   {
     id: "server-setup",
     category: "Setup",
-    title: "Server Setup & Sync",
+    title: "Server Settings & Sync",
     icon: Server,
     items: [
       {
-        heading: "Upload PHP API to cPanel",
-        body: `Step 1 — Log in to your cPanel (e.g. shubh.psmkgs.com/cpanel)
+        heading: "Configure Server URL",
+        body: `Settings → Server & Sync tab (Super Admin only)
 
-Step 2 — File Manager → public_html → create folder "api"
+1. Enter your full API URL:
+   https://yourdomain.com/api/index.php
 
-Step 3 — Upload these two files into public_html/api/:
-  • api/index.php   — the full API router
-  • api/config.php  — your MySQL credentials
+   ⚠ Must end with /api/index.php — NOT /api/ alone
 
-Step 4 — Edit config.php with your actual MySQL credentials:
-  DB_HOST=localhost
-  DB_NAME=your_database_name
-  DB_USER=your_mysql_user
-  DB_PASS=your_mysql_password
+2. Click "Test Connection"
+   → Green "API is working (Xms)" = connected
+   → Red error = something is wrong (see error message)
 
-Step 5 — Visit this URL once in your browser to create all tables:
-  https://yourdomain.com/api/?route=migrate/run
+3. Click "Save Settings"
 
-Step 6 — Visit this URL once to seed default admin account:
-  https://yourdomain.com/api/?route=seed/run`,
-        code: `// config.php
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'school_erp');
-define('DB_USER', 'erp_user');
-define('DB_PASS', 'your_secure_password');
-define('JWT_SECRET', 'change-this-to-a-long-random-string');`,
+The app now sends all data directly to your MySQL database.
+Every add/edit/delete writes to MySQL and waits for confirmation.`,
       },
       {
-        heading: "Configure Server URL in the App",
-        body: `After uploading the PHP API:
+        heading: "Connection Errors and Fixes",
+        body: `"Server returned non-JSON response (HTTP 404)":
+  → index.php is not at public_html/api/index.php
+  → Test: open https://yourdomain.com/api/index.php?route=ping in browser
+  → If you see a 404 page: re-upload index.php to the correct location
 
-1. Log in as Super Admin
-2. Go to Settings → Server & Sync tab
-3. Enter your API URL:  https://yourdomain.com/api
-4. Click "Test Connection" — should show green "Connected (Xms)"
-5. Click "Save Settings"
+"Server returned non-JSON response (HTTP 500)":
+  → PHP error in index.php
+  → Check: config.php has correct DB credentials
+  → Check: database user has ALL PRIVILEGES
+  → Check: cPanel → Error Logs for the exact PHP error
 
-The app will now sync all changes to your MySQL database.`,
+"Connection refused" or "Failed to fetch":
+  → Server URL is wrong — verify the domain spelling
+  → SSL certificate issue — URL must start with https://
+
+"401 Unauthorized":
+  → JWT token is expired — log out and log in again
+  → Or: wrong JWT_SECRET in config.php (change it and re-login)
+
+"CORS Error" in browser console:
+  → Update ALLOWED_ORIGINS in config.php to your exact domain
+  → Example: define('ALLOWED_ORIGINS', 'https://shubh.psmkgs.com');`,
       },
+    ],
+  },
+  {
+    id: "first-setup",
+    category: "Setup",
+    title: "First-Time Setup Checklist",
+    icon: Settings,
+    items: [
       {
-        heading: "Understanding Pending Sync",
-        body: `SHUBH School ERP uses Local-First sync (WhatsApp-style):
+        heading: "Setup Order (Follow Exactly)",
+        body: `Do these in order — skipping steps causes dropdowns to be empty.
 
-When you add or edit data:
-1. Data saves to the browser (IndexedDB) INSTANTLY
-2. The record appears on screen immediately
-3. A background task sends it to MySQL silently
-4. The sync badge in the header shows pending count
+□ 1. Upload api/index.php and api/config.php to cPanel → public_html/api/
+□ 2. Update credentials in api/config.php
+□ 3. Visit: https://yourdomain.com/api/index.php?route=migrate/run
+□ 4. Open ERP → Settings → Server & Sync → set URL → Test → Save
+□ 5. Log in as: admin / admin123
+□ 6. Change admin password: Settings → User Management → Edit Admin
+□ 7. Add classes: Academics → Classes (Nursery, LKG, UKG, Class 1–12)
+□ 8. Add sections per class: A, B, C, D, E
+□ 9. Add fee headings: Fees → Fee Headings (Tuition, Exam Fee, etc.)
+□ 10. Set fee plans: Fees → Fee Plans → per class/section
+□ 11. Add students: Students → Import (bulk) or + Add Student
+□ 12. Add staff: HR → Staff → + Add Staff
+□ 13. Create user accounts: Settings → User Management → + Create User
+□ 14. Test login for each role to verify access
 
-Yellow badge = changes not yet confirmed by server
-Green badge  = all data saved to MySQL ✓
-Red badge    = server offline — data is safe locally, will sync when back online
-
-This means you NEVER lose data, even if the server goes down temporarily.`,
-      },
-      {
-        heading: "Force Manual Sync",
-        body: `If you see a yellow pending badge and want to sync immediately:
-
-Method 1 — Via Settings:
-  Settings → Server & Sync → "Sync Now" button
-  This immediately pushes all pending records to MySQL.
-
-Method 2 — Via Header:
-  Click the yellow/red sync dot in the header
-  This navigates to Settings → Server & Sync automatically.
-
-Method 3 — Automatic:
-  The app syncs automatically every 15 seconds by default.
-  Change interval in Settings → Server & Sync → Sync Interval dropdown.`,
-      },
-      {
-        heading: "Server Offline — What to Do",
-        body: `If the sync badge turns red (server offline):
-
-1. Check that api/index.php and api/config.php are uploaded
-2. Verify MySQL credentials in config.php are correct
-3. Go to Settings → Server & Sync → click "Test Connection"
-   — it shows the exact error message
-
-Common causes:
-  • Wrong MySQL credentials in config.php
-  • config.php not uploaded to /api/ folder
-  • Server URL entered without /api at the end
-  • .htaccess blocking the /api/ route — delete it or add AllowOverride All
-  • PHP version below 7.4 — upgrade in cPanel → PHP Version
-
-⚠ Data is NEVER lost while server is offline — it syncs when back online.`,
+DONE! Your ERP is ready for daily use.`,
       },
     ],
   },
@@ -246,13 +545,13 @@ Important fields:
   • Mother's Name and Mobile
   • Address, Village, City, Pin
 
-Optional fields (can be added later):
+Optional fields:
   • Aadhaar No, SR No, Pen No, Apaar No (government IDs)
-  • Category: General / OBC / SC / ST / OBC-A / OBC-B
+  • Category: General / OBC / SC / ST
   • Previous School, Blood Group
   • Student Photo (click camera icon)
 
-Click "Save Student" — data saves to browser instantly, syncs to server.`,
+Click "Save Student" — data saves to MySQL after server confirmation.`,
       },
       {
         heading: "Bulk Import via Excel",
@@ -281,14 +580,10 @@ TIP: Export existing students first (Export to Excel button) to see the exact fi
 
   Nursery → LKG → UKG → Class 1 → Class 2 → ... → Class 12
 
-This applies to:
-  • Add/Edit Student form
-  • Student filter grid
-  • Fee Plan selector
-  • Attendance class selector
-  • Report filters
+This applies to all forms: student, fee, attendance, reports.
 
-If the dropdown is empty: go to Academics → Classes and add your classes first.`,
+If the dropdown is empty:
+  Go to Academics → Classes and add your classes first.`,
       },
       {
         heading: "Export Students to Excel",
@@ -311,18 +606,6 @@ In Collect Fees:
 In Student Grid:
   • Family icon shows sibling count
   • Click to see all children of the same parent`,
-      },
-      {
-        heading: "Discontinue or Re-Admit a Student",
-        body: `Discontinue:
-  Students → find student → click Details → "Discontinue"
-  Enter reason and date. Student moves to Discontinued list.
-  Fees due carry forward.
-
-Re-Admit:
-  Students → filter "Discontinued" → find student → "Re-Admit"
-  Select new class/section for re-admission.
-  Old fee balance is restored.`,
       },
     ],
   },
@@ -444,8 +727,7 @@ The chart updates automatically as you collect fees.`,
 
 Bulk actions:
   • "Mark All Present" button at the top
-  • Shift-click to select a range
-  • Undo last save within 30 seconds`,
+  • Shift-click to select a range`,
       },
       {
         heading: "QR Code Scanner — Camera Mode",
@@ -461,19 +743,6 @@ Each student has a unique QR code in their profile (print from Certificate Studi
 Multiple scans in the same day = only one attendance record.`,
       },
       {
-        heading: "QR Scanner — USB/Bluetooth Scanner Device",
-        body: `Go to Attendance → QR Scanner → Device tab
-
-Works with any USB or Bluetooth barcode scanner that uses HID keyboard mode.
-
-  1. Plug in scanner or pair via Bluetooth
-  2. Click "Focus Input" to activate the text box
-  3. Student scans their QR card — code is captured automatically
-  4. Attendance marks in real-time (no Enter key needed)
-
-Recommended scanner: Any generic USB HID QR/barcode scanner (₹1,000–₹3,000)`,
-      },
-      {
         heading: "ESSL / ZKTeco Biometric Device",
         body: `Go to Attendance → Biometric Devices → "+ Add Device"
 
@@ -487,12 +756,11 @@ Setup steps:
   1. Device and server must be on same local network
   2. Enter IP and click "Test Connection" — should show green
   3. Click "Sync Logs Now" to pull today's attendance
-  4. Logs are auto-matched to students by biometric ID
 
 Troubleshooting:
-  • Cannot connect: verify IP, ensure port 4370 is open in firewall
+  • Cannot connect: verify IP, ensure port 4370 is open
   • No logs: check if device has recorded any punches today
-  • Students not matched: enroll students in device with their admission number as ID`,
+  • Students not matched: enroll with admission number as User ID`,
       },
       {
         heading: "AI Face Recognition Attendance",
@@ -572,17 +840,6 @@ These subjects appear in:
 Print timetable: Click "Print" → A4 format for classroom display.
 Export: Download as Excel for distribution to parents.`,
       },
-      {
-        heading: "Syllabus Chapter Tracker",
-        body: `Go to Academics → Syllabus
-
-  1. Select subject and class
-  2. Add chapters: Chapter 1, Chapter 2, etc.
-  3. Teachers mark chapters as Completed / In Progress / Pending
-  4. Progress bar shows % completion per subject
-
-Parents can see syllabus progress in their portal.`,
-      },
     ],
   },
   {
@@ -611,7 +868,7 @@ Admit cards auto-generate with exam schedule for each student.`,
   1. Select exam, class, section, and subject
   2. All enrolled students appear in the grid
   3. Enter marks out of maximum
-  4. System auto-calculates grade (A+/A/B/C/D/F based on %):
+  4. System auto-calculates grade:
      90%+ = A+, 80–89% = A, 70–79% = B, 60–69% = C, 50–59% = D, <50% = F
   5. Click "Save Marks"
 
@@ -622,16 +879,12 @@ Bulk import marks: Download template → fill → upload CSV`,
         body: `Go to Examinations → Online Exam → "+ Create Test"
 
   1. Enter: Title, Class, Duration (minutes), Total Marks
-  2. Add questions:
-     • Question text
-     • 4 options (A, B, C, D)
-     • Mark correct answer
+  2. Add questions with 4 options (A, B, C, D), mark correct answer
   3. Assign to class — students see it in their portal
   4. Students take the test with countdown timer
   5. Results generate instantly after submission
 
-View results: Examinations → Online Exam → Results tab
-Export to Excel for record keeping.`,
+View results: Examinations → Online Exam → Results tab`,
       },
       {
         heading: "Result Designer",
@@ -652,7 +905,6 @@ Save as default template — all result prints use this layout.`,
         body: `Print:
   Examinations → Results → select class → "Print All"
   Batch prints result sheets for entire class using your saved template.
-  Watermark and school stamp included.
 
 WhatsApp Broadcast:
   Results → "Send via WhatsApp"
@@ -708,8 +960,8 @@ This data feeds:
   2. System calculates for each staff:
      • Basic Salary (from staff profile)
      • Working Days vs Present Days (from attendance)
-     • Deductions: LWP (Leave Without Pay) = Salary/Days × Absent Days
-     • Allowances: DA, HRA, etc. (configurable in Payroll Setup)
+     • Deductions: LWP = Salary/Days × Absent Days
+     • Allowances: DA, HRA, etc.
      • Net Salary = Basic + Allowances − Deductions
 
   3. Review each payslip
@@ -747,7 +999,6 @@ Add Pickup Points to the route:
   • Select Pickup Point (dropdown — auto-fills fare)
   • Monthly fare auto-fills from the route setup
   • Select applicable months (checkboxes April–March)
-  • Uncheck months student doesn't use transport
 
 The transport fee integrates with Collect Fees automatically.`,
       },
@@ -762,11 +1013,9 @@ The transport fee integrates with Collect Fees automatically.`,
 Parent View:
   1. Parent logs in → Transport → "Track Bus"
   2. Map shows live bus location
-  3. ETA auto-calculates based on distance to pickup point
 
 Admin View:
-  Transport → Live Map
-  All active buses shown on map simultaneously`,
+  Transport → Live Map — all active buses shown simultaneously`,
       },
     ],
   },
@@ -894,29 +1143,7 @@ Done! WhatsApp receipts, reminders, and broadcasts are now active.`,
   3. Add attachment (optional): result card, timetable, notice PDF
 
   4. Click "Send" — progress shows in real-time
-     Sent: 234 / Failed: 3 / Pending: 12
-
-Common issue — Message not delivered:
-  • Check DND status — send during 9 AM to 9 PM only
-  • Verify API credit balance with your provider
-  • Check if template is pre-approved (required for marketing messages)`,
-      },
-      {
-        heading: "WhatsApp Auto-Reply Bot",
-        body: `Settings → WhatsApp Bot → enable "Auto-Reply"
-
-How it works:
-  1. Parent sends their child's admission number to school's WhatsApp
-  2. Bot automatically replies with:
-     • Child's name and class
-     • Today's attendance status (Present / Absent)
-     • Current fee balance (₹ amount outstanding)
-     • Next fee due date
-
-Setup:
-  • Webhook URL must be entered in your WhatsApp provider dashboard
-  • WhatsApp Business API required (not regular WhatsApp)
-  • Test by sending an admission number to your school number`,
+     Sent: 234 / Failed: 3 / Pending: 12`,
       },
       {
         heading: "Notification Scheduler",
@@ -938,359 +1165,75 @@ Each rule:
     ],
   },
   {
-    id: "chat",
-    category: "Communication",
-    title: "Chat System",
-    icon: MessageSquare,
+    id: "sessions",
+    category: "Admin",
+    title: "Sessions & Year-End Promotion",
+    icon: Settings,
     items: [
       {
-        heading: "Direct Messages",
-        body: `Chat → Direct Messages → "+ New Chat"
+        heading: "Session Management",
+        body: `Sessions 2019-20 through 2025-26 are pre-loaded by default.
+Super Admin can switch to any session and add historical data.
 
-  1. Search for user (teacher, admin, staff)
-  2. Type message → Enter or click Send
+Settings → Session Management
 
-Supports:
-  • Text messages
-  • File attachments (PDF, images, documents)
-  • Read receipts (ticks like WhatsApp)
+  • Create new session: "+ New Session" → e.g. "2026-27"
+  • Switch active session: click "Set Active" on any session
+  • View archived data: click any session to browse (read-only for non-Super Admin)
 
-Super Admin can view all conversations.`,
+Session data is isolated — switching to 2024-25 shows only that year's
+students, fees, attendance, and results.`,
       },
       {
-        heading: "Group Chats",
-        body: `Class Groups (auto-created):
-  Each class/section gets a group automatically.
-  Teachers assigned to that class are members.
+        heading: "Promote Students at Year End",
+        body: `Settings → Session Management → "Promote Students"
 
-Route Groups:
-  Transport groups per bus route are auto-created.
-  Driver and parents of students on that route are added.
+Step 1 — Auto-creates next session if it doesn't exist (e.g. 2026-27)
+Step 2 — Class mapping table shows: Nursery→LKG, LKG→UKG, Class 1→2, etc.
+Step 3 — You can change any mapping before proceeding
+Step 4 — Options:
+  • Carry forward fee dues: unpaid fees move to new session
+  • Auto-discontinue Class 12 graduates → moved to Alumni
+  • Keep current section or reassign
 
-Custom Groups:
-  Chat → Groups → "+ Create Group"
-  Add any combination of users.`,
-      },
-    ],
-  },
-  {
-    id: "virtualclasses",
-    category: "Communication",
-    title: "Virtual Classes",
-    icon: Smartphone,
-    items: [
-      {
-        heading: "Schedule a Meeting",
-        body: `Virtual Classes → "+ Schedule Meeting"
+Step 5 — Preview list of students affected
+Step 6 — Confirm → all selected students promoted at once
 
-  1. Title: e.g. "Class 10 Math — Chapter Review"
-  2. Date and Time
-  3. Platform: Zoom / Google Meet
-  4. Paste the meeting link (from Zoom/Google Meet)
-  5. Select classes to notify
-  6. Click "Schedule"
+What carries forward:
+  • Staff (all staff auto-copied to new session)
+  • Classes and sections
+  • Fee headings (amounts reset to zero — re-enter for new year)
 
-Students and parents see the meeting in their portal.
-A "Join Now" button appears at the scheduled time.`,
-      },
-      {
-        heading: "Zoom Setup",
-        body: `To create a Zoom link:
-  1. Open zoom.us → "New Meeting" or "Schedule"
-  2. Copy the meeting link
-  3. Paste into Virtual Classes → Schedule Meeting → Meeting Link
-
-For permanent meeting rooms:
-  Settings → Virtual Classes → enter your Personal Meeting ID
-  All future meetings use the same link.`,
-      },
-    ],
-  },
-  {
-    id: "certificates",
-    category: "Documents",
-    title: "Certificate Studio",
-    icon: FileText,
-    items: [
-      {
-        heading: "Available Certificate Types",
-        body: `Certificates → Template Studio
-
-Available templates:
-  1. Student ID Card (credit card size, front + back)
-  2. Fee Receipt (4 templates — A4, A5, thermal)
-  3. Admission Form
-  4. Result / Marksheet
-  5. Admit Card (for exams)
-  6. Bonafide Certificate
-  7. Transfer Certificate (TC)
-  8. Experience Certificate (for staff)
-
-Each type has its own default template that you can customize.`,
-      },
-      {
-        heading: "Customize Templates",
-        body: `Certificates → Template Studio → select template type → "Design"
-
-Designer tools:
-  • Drag and drop fields anywhere on the page
-  • Resize text boxes
-  • Change font, size, bold/italic/color
-  • Import background image (upload school letterhead)
-  • Set paper size: A4 / A5 / Letter / Custom
-  • Add school logo (auto-loads from School Profile)
-  • Add signature placeholder
-  • Toggle watermark ("ORIGINAL" / "DUPLICATE")
-
-Click "Save as Default" → all future prints use this layout.`,
-      },
-      {
-        heading: "Print Certificates",
-        body: `ID Cards:
-  Certificates → ID Cards → select class → "Print All"
-  All ID cards for the class print on A4 sheets (6 per page)
-
-Transfer Certificate:
-  Students → find student → right-click → "Generate TC"
-  Fills in all details automatically → Print
-
-Bonafide Certificate:
-  Students → find student → right-click → "Generate Bonafide"
-  Edit fields if needed → Print → stamped as official`,
-      },
-    ],
-  },
-  {
-    id: "reports",
-    category: "Analytics",
-    title: "Reports",
-    icon: Activity,
-    items: [
-      {
-        heading: "Available Report Types",
-        body: `Reports → select report type
-
-1. Students Report
-   • Count by class, section, gender, category
-   • Transport-wise breakdown
-   • New admissions vs discontinued
-
-2. Finance Report
-   • Monthly fee collected vs. due
-   • Class-wise collection summary
-   • Outstanding balance list
-
-3. Attendance Report
-   • Present/absent rate by class
-   • Student-wise attendance %
-   • Date-wise attendance graph
-
-4. Exam Results Report
-   • Marks/grade distribution by class
-   • Top performers list
-   • Subject-wise pass/fail %
-
-5. HR Report
-   • Staff salary summary
-   • Attendance-based payroll
-
-6. Transport Report
-   • Route-wise student count
-   • Fee collected per route
-
-7. Inventory Report
-   • Stock levels for all items
-   • Low stock alerts
-
-8. Fees Due Report
-   • All students with outstanding balance
-   • Sorted by amount, class, or date`,
-      },
-      {
-        heading: "Export Reports",
-        body: `Every report has export options:
-
-Export to Excel (.xlsx):
-  Reports → select type → configure filters → "Export Excel"
-  Opens the file directly for editing or printing.
-
-Export to PDF:
-  Reports → select type → "Export PDF"
-  Print-ready PDF with school header.
-
-Print directly:
-  Reports → "Print" button → opens browser print dialog
-  Use landscape mode for wide tables.`,
-      },
-    ],
-  },
-  {
-    id: "expenses",
-    category: "Finance",
-    title: "Expenses & Income",
-    icon: IndianRupee,
-    items: [
-      {
-        heading: "Record Transactions",
-        body: `Expenses → "+ Add Transaction"
-
-  • Type: Expense or Income
-  • Head: Salary / Electricity / Canteen / Maintenance / Donation / etc.
-  • Amount (₹)
-  • Date
-  • Description / Invoice Number
-  • Paid By / Received From
-
-Add heads: Expenses → Expense Heads → "+ Add Head"`,
-      },
-      {
-        heading: "Budget vs. Actual",
-        body: `Expenses → Budget
-
-  1. Set monthly budget per expense head (e.g. Electricity: ₹5,000/month)
-  2. Dashboard shows Budget vs. Actual comparison bar chart
-  3. Heads exceeding budget are highlighted in red
-
-Monthly Summary:
-  Expenses → Monthly Chart
-  Bar chart: Income (green) vs. Expenses (red) per month`,
-      },
-    ],
-  },
-  {
-    id: "homework",
-    category: "Daily Operations",
-    title: "Homework",
-    icon: FileText,
-    items: [
-      {
-        heading: "Assign Homework",
-        body: `Homework → "+ Assign"
-
-  • Subject
-  • Class and Section
-  • Due Date
-  • Description (rich text editor)
-  • Attach files (PDF, images)
-
-Students see homework in their portal under "Pending".`,
-      },
-      {
-        heading: "Track Submissions",
-        body: `Homework → Submissions
-
-  • See who submitted and who hasn't
-  • Overdue submissions highlighted in red
-  • Mark as reviewed / graded
-
-Analytics:
-  Homework → Analytics
-  Class-wise completion rate
-  Subject-wise overdue count`,
-      },
-    ],
-  },
-  {
-    id: "alumni",
-    category: "Records",
-    title: "Alumni",
-    icon: Users,
-    items: [
-      {
-        heading: "Alumni Directory",
-        body: `Alumni → Directory
-
-Students who are discontinued with "Graduated" status move to Alumni automatically.
-Or manually add: Alumni → "+ Add Alumni"
-
-Fields: Name, Batch Year, Class, Current Position, Company, Email, Mobile
-
-Search and filter by batch year or name.
-Export contact list as Excel.`,
-      },
-    ],
-  },
-  {
-    id: "analytics",
-    category: "Analytics",
-    title: "Student Analytics",
-    icon: Activity,
-    items: [
-      {
-        heading: "Per-Student Performance Dashboard",
-        body: `Analytics → select student
-
-Shows:
-  • Marks trend across all exams (line chart)
-  • Attendance percentage (per month)
-  • Fee payment history (paid/pending per month)
-  • Rank in class per exam
-
-Export: "Download Report" → PDF with all charts for parent meeting.`,
-      },
-      {
-        heading: "Class-wise Comparison",
-        body: `Analytics → Class Comparison
-
-  • Average marks per class for each subject
-  • Top 10 performers across the school
-  • Attendance comparison across classes
-  • Filter by session, exam, or subject`,
-      },
-    ],
-  },
-  {
-    id: "calling",
-    category: "Communication",
-    title: "Microsoft Phone System",
-    icon: Smartphone,
-    items: [
-      {
-        heading: "Click-to-Call via Microsoft Teams",
-        body: `Calling → Click-to-Call tab
-
-  1. Search for a student or staff member
-  2. Click the phone icon next to their name
-  3. Microsoft Teams opens and initiates the call
-
-Requirements:
-  • Microsoft 365 license with Teams Phone
-  • Teams desktop app installed on your PC
-  • Azure Communication Services configured in Settings → Calling`,
-      },
-      {
-        heading: "Bluetooth Call Bridging",
-        body: `To have Teams calls ring on both PC and mobile simultaneously:
-
-  1. Install Microsoft Teams on your mobile phone
-  2. Sign in with same Microsoft 365 account
-  3. Go to Teams Settings → Devices → Bluetooth
-  4. Pair your mobile phone with your PC
-  5. Both devices ring when a call comes in
-
-Note: Requires Teams Phone license (included in M365 Business Voice).`,
-      },
-      {
-        heading: "Azure ACS Setup",
-        body: `Settings → Calling → enter your credentials:
-
-  • Azure ACS Endpoint
-  • Azure ACS Access Key
-  • Microsoft Teams Phone Number
-
-Get these from:
-  Azure Portal → Communication Services → Keys
-
-Once configured, calls show as coming from your school's number.`,
+What resets:
+  • Attendance records (new year starts fresh)
+  • Fee receipts (start fresh, old dues carry forward optionally)`,
       },
     ],
   },
   {
     id: "user-management",
     category: "Admin",
-    title: "User Management",
+    title: "User Management & Permissions",
     icon: Shield,
     items: [
+      {
+        heading: "Role-Based Access Table",
+        body: `┌────────────────┬──────────────────────────────────────────────────┐
+│ Role           │ What They Can Access                             │
+├────────────────┼──────────────────────────────────────────────────┤
+│ Super Admin    │ Everything — full access to all modules          │
+│ Admin          │ All modules except User Management               │
+│ Teacher        │ Attendance, homework, timetable, own class only  │
+│ Accountant     │ Fees collection, receipts, reports               │
+│ Receptionist   │ Students, attendance, basic reports              │
+│ Parent         │ Own child's fees, attendance, results only       │
+│ Student        │ Own timetable, homework, results                 │
+│ Driver         │ Transport route and assigned students            │
+└────────────────┴──────────────────────────────────────────────────┘
+
+Super Admin cannot be restricted by permissions.
+All role dashboards are tailored to show only relevant modules.`,
+      },
       {
         heading: "Create User Accounts",
         body: `Settings → User Management → "+ Create User"
@@ -1307,20 +1250,6 @@ For Teachers:
   (Set automatically when teacher is added via HR → Staff)`,
       },
       {
-        heading: "Module-Level Permissions",
-        body: `Settings → Permissions → select role
-
-Configure per module:
-  ✓ canView  — can see the module
-  ✓ canAdd   — can add new records
-  ✓ canEdit  — can edit existing records
-  ✓ canDelete — can delete records
-
-Apply changes → affects all users with that role immediately.
-
-Super Admin always has full access and cannot be restricted.`,
-      },
-      {
         heading: "Reset a User's Password",
         body: `Settings → User Management → find user → "Reset Password"
 
@@ -1332,41 +1261,18 @@ Super Admin always has full access and cannot be restricted.`,
 Or reset your own password:
   Header → click your name → "Change Password"`,
       },
-    ],
-  },
-  {
-    id: "sessions",
-    category: "Admin",
-    title: "Sessions & Year-End Promotion",
-    icon: Settings,
-    items: [
       {
-        heading: "Session Management",
-        body: `Settings → Session Management
+        heading: "Module-Level Permissions",
+        body: `Settings → Permissions → select role
 
-  • Create new session: "+ New Session" → e.g. "2026-27"
-  • Switch active session: click "Set Active" on any session
-  • Archive old session: automatic when new session is created
-  • View archived data: click any archived session to browse (read-only)
+Configure per module:
+  ✓ canView   — can see the module
+  ✓ canAdd    — can add new records
+  ✓ canEdit   — can edit existing records
+  ✓ canDelete — can delete records
 
-Super Admin can edit any session.
-Other roles are read-only on archived sessions.`,
-      },
-      {
-        heading: "Promote Students at Year End",
-        body: `Settings → Session Management → "Promote Students"
-
-Step 1 — Select source class (e.g. Class 9)
-Step 2 — Select target class (e.g. Class 10)
-Step 3 — Options:
-  • Carry forward fee dues: unpaid fees move to new session
-  • Auto-discontinue Class 12 graduates
-  • Keep current section or reassign
-
-Step 4 — Preview list of students affected
-Step 5 — Confirm → all students promoted at once
-
-Repeat for each class. Run after creating new session.`,
+Apply changes → affects all users with that role immediately.
+Super Admin always has full access and cannot be restricted.`,
       },
     ],
   },
@@ -1383,6 +1289,11 @@ Repeat for each class. Run after creating new session.`,
   • Downloads a single JSON file containing ALL school data
   • Includes: students, fees, staff, attendance, and all other modules
   • File name: shubh_erp_backup_YYYY-MM-DD.json
+
+Store the backup file on:
+  • Google Drive (recommended)
+  • USB flash drive
+  • Email to yourself
 
 Schedule reminders:
   Settings → Data Management → Backup Reminders
@@ -1412,217 +1323,20 @@ Always export a backup BEFORE performing factory reset.
 Use case: Starting new school year with fresh data (rare — usually Promote is better).`,
       },
       {
-        heading: "Data Storage Information",
-        body: `Where is your data stored?
+        heading: "phpMyAdmin Backup (Direct Database)",
+        body: `For a direct database backup from cPanel:
 
-  1. Browser (IndexedDB): all data cached locally for instant access
-     • Location: Browser → Application → IndexedDB → shubh_erp_db
-     • Cleared by: clearing browser data, or Factory Reset
+  1. cPanel → phpMyAdmin → select your database
+  2. Click "Export" tab
+  3. Format: SQL → click "Go"
+  4. Saves a .sql file — complete database backup
 
-  2. MySQL Server (via API): persistent server-side storage
-     • Location: cPanel phpMyAdmin → your database
-     • Synced: continuously in background (every 15 seconds)
+To restore from .sql file:
+  1. phpMyAdmin → select your database
+  2. Click "Import" tab
+  3. Choose your .sql file → click "Go"
 
-Data is NEVER lost because both copies exist.
-Even if server is offline, local copy is always intact.`,
-      },
-    ],
-  },
-  {
-    id: "themes",
-    category: "Customization",
-    title: "Themes",
-    icon: Settings,
-    items: [
-      {
-        heading: "Change Color Theme",
-        body: `Settings → Themes → select from 10 options
-
-Available themes:
-  1. Default (Navy Blue)     — dark navy sidebar, clean white content
-  2. Deep Ocean              — rich teal/blue tones
-  3. Forest Green            — earthy green tones
-  4. Sunset Rose             — warm pink and coral
-  5. Dark Night              — full dark mode
-  6. Slate Gray              — professional gray
-  7. Royal Purple            — elegant purple
-  8. Copper Bronze           — warm bronze tones
-  9. Cherry Red              — bold red accents
-  10. Midnight Teal          — deep teal dark theme
-
-Theme applies immediately and persists across browser sessions (saved to localStorage).
-Each user's theme preference is independent.`,
-      },
-    ],
-  },
-  {
-    id: "cpanel-deployment",
-    category: "Deployment",
-    title: "cPanel Deployment Guide",
-    icon: Server,
-    items: [
-      {
-        heading: "Complete Deployment Steps",
-        body: `Step 1 — Get your files
-  The build creates two files you need to upload:
-  • api/index.php — all PHP API routes
-  • api/config.php — database configuration
-
-Step 2 — Log into cPanel
-  Go to: yourdomain.com/cpanel or use your hosting panel
-
-Step 3 — Upload via File Manager
-  File Manager → public_html → New Folder "api"
-  Upload both .php files into public_html/api/
-
-Step 4 — Edit config.php with your MySQL credentials
-  Right-click config.php → Edit
-  Update: DB_HOST, DB_NAME, DB_USER, DB_PASS, JWT_SECRET
-
-Step 5 — Create database tables (run once)
-  Visit in browser: https://yourdomain.com/api/?route=migrate/run
-  Should show: {"success":true,"message":"Tables created successfully"}
-
-Step 6 — Seed admin account (run once)
-  Visit: https://yourdomain.com/api/?route=seed/run
-  Should show: {"success":true,"message":"Admin seeded"}
-
-Step 7 — Configure in ERP
-  Settings → Server & Sync → enter API URL → Test Connection`,
-      },
-      {
-        heading: "Troubleshooting cPanel",
-        body: `.htaccess issues:
-  If API returns 404, add to public_html/.htaccess:
-  ┌─────────────────────────────────────────┐
-  │ RewriteEngine On                        │
-  │ RewriteCond %{REQUEST_FILENAME} !-f     │
-  │ RewriteCond %{REQUEST_FILENAME} !-d     │
-  │ RewriteRule ^api/(.*)$ api/index.php?route=$1 [L,QSA] │
-  └─────────────────────────────────────────┘
-
-PHP version too old:
-  cPanel → PHP Version → select PHP 8.0 or higher
-
-MySQL charset errors:
-  Add to config.php: define('DB_CHARSET', 'utf8mb4');
-
-Blank response from API:
-  cPanel → Error Logs → check for PHP errors in api/index.php`,
-        code: `# .htaccess in public_html/
-RewriteEngine On
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^api/(.*)$ /api/index.php?route=$1 [L,QSA]`,
-      },
-      {
-        heading: "Connect Custom Domain",
-        body: `If your domain is managed through your hosting panel:
-
-  1. cPanel → Subdomains → create "school.yourdomain.com"
-  2. Point to same public_html directory
-  3. Wait for DNS propagation (up to 24 hours)
-
-If using Caffeine's domain management:
-  1. Settings → Domains → "Bring your own domain"
-  2. Enter your domain name
-  3. Copy the CNAME and TXT records
-  4. Go to your domain registrar → DNS settings → add those records
-  5. Wait for verification (10 min – 24 hours)`,
-      },
-    ],
-  },
-  {
-    id: "whatsapp-setup",
-    category: "Integrations",
-    title: "WhatsApp Setup Guide",
-    icon: MessageSquare,
-    items: [
-      {
-        heading: "Step-by-Step WhatsApp API Setup",
-        body: `Step 1 — Create WhatsApp Business Account
-  • Download WhatsApp Business app
-  • Register with your school's phone number
-
-Step 2 — Choose an API Provider
-  Recommended providers (India):
-  • Gupshup (gupshup.io) — most popular in India
-  • WATI (wati.io) — easy setup
-  • Interakt (interakt.shop) — affordable plans
-  • WaCoder (wacoder.in) — budget option
-
-Step 3 — Get API Credentials
-  From your provider dashboard:
-  • API Key
-  • App Key
-  • Sender Phone Number
-
-Step 4 — Enter in ERP
-  Settings → WhatsApp API
-  → Enter API Key, App Key, Phone Number
-  → Click "Save"
-
-Step 5 — Test
-  Settings → WhatsApp → "Send Test Message"
-  Enter your personal number → Send
-  You should receive a test message within 30 seconds
-
-Step 6 — Set up Webhook
-  Copy webhook URL from Settings → WhatsApp
-  Go to your API provider's dashboard → Webhook → paste URL
-  This enables auto-reply bot and delivery confirmations`,
-      },
-      {
-        heading: "WhatsApp Troubleshooting",
-        body: `Message not delivered:
-  • Verify recipient is not in DND (Do Not Disturb) list
-  • Check API credit balance in provider dashboard
-  • Templates must be pre-approved by Meta for promotional messages
-  • Personal messages only allowed 9 AM to 9 PM
-
-Webhook not firing:
-  • Server URL must be publicly accessible (not localhost)
-  • SSL certificate required (HTTPS only)
-  • Test webhook from your provider's dashboard
-
-High failure rate:
-  • Clean your phone number list (remove invalid/off numbers)
-  • Check if your WhatsApp Business number is verified`,
-      },
-    ],
-  },
-  {
-    id: "biometric-setup",
-    category: "Integrations",
-    title: "Biometric / RFID Setup",
-    icon: Shield,
-    items: [
-      {
-        heading: "Add Biometric Device",
-        body: `Attendance → Biometric Devices → "+ Add Device"
-
-  1. Get device's IP address from device's menu (Network Settings)
-  2. Enter in ERP:
-     • Device Name (e.g. "Main Gate ESSL")
-     • IP Address (e.g. 192.168.1.100)
-     • Port: 4370 (default for ESSL/ZKTeco)
-     • Device Type: ESSL / ZKTeco / Generic
-  3. Click "Test Connection" → must show green before saving
-  4. Click "Sync Logs" to pull today's attendance records
-
-The device and your server MUST be on the same local network (same WiFi/LAN).`,
-      },
-      {
-        heading: "Enroll Students in Device",
-        body: `Method 1 — RFID Card:
-  • Assign a card number to each student in their profile
-  • Use device software to assign same card number to the RFID card
-  • Student taps card → auto-matches to ERP
-
-Method 2 — Fingerprint:
-  • Use device's own enrollment menu (or vendor software)
-  • Enroll fingerprint with student's admission number as User ID
-  • Device sends User ID to ERP → matches to student`,
+This is the most reliable backup method — keeps your MySQL data safe independently.`,
       },
     ],
   },
@@ -1633,93 +1347,109 @@ Method 2 — Fingerprint:
     icon: HelpCircle,
     items: [
       {
-        heading: "Blank White Screen on App Load",
-        body: `Cause: JavaScript error preventing app from rendering.
+        heading: '"Server returned non-JSON response (HTTP 404)"',
+        body: `This error means the API file is not at the expected URL.
 
-Fixes:
-  1. Hard refresh: Ctrl+Shift+R (Windows) / Cmd+Shift+R (Mac)
-  2. Clear browser cache: Settings → Privacy → Clear Data
-  3. Open browser console (F12 → Console) — look for red errors
-  4. If error mentions "api": check that api/config.php has correct credentials
-  5. If error says "canister": this is an old reference — ignore (data is in MySQL now)
+Cause: The frontend is calling a URL that returns HTML (a 404 page) instead of JSON.
 
-If still blank after all above:
-  Try a different browser (Chrome preferred)`,
+Step 1 — Test the ping route directly in your browser:
+  https://yourdomain.com/api/index.php?route=ping
+
+  If you see: {"success":true,"message":"API is working"}
+    → The API is working. The error is from a specific route being wrong.
+    → Check the exact URL being called (look in browser DevTools → Network tab)
+
+  If you see a 404 HTML page:
+    → index.php is not at public_html/api/index.php
+    → Re-upload index.php to the correct location in cPanel File Manager
+
+  If you see HTML output (not a 404):
+    → index.php is in the wrong folder — verify it's in public_html/api/
+
+Step 2 — Verify the Server URL in Settings:
+  Settings → Server & Sync → Server URL
+  Must be: https://yourdomain.com/api/index.php
+  NOT: https://yourdomain.com/api/ (this causes 404)
+  NOT: https://yourdomain.com/api (missing index.php)`,
       },
       {
-        heading: "Student Data Disappears",
-        body: `Likely causes:
-  • Sync badge is red = server offline, data queued locally
-  • Background refresh overwriting pending records (fixed in latest version)
+        heading: '"Server returned non-JSON response (HTTP 500)"',
+        body: `A PHP error occurred on the server.
 
-What to do:
-  1. Check header sync badge color:
-     Green = data is saved on server ✓
-     Yellow = syncing in progress
-     Red = server offline — data IS still in your browser
+Step 1 — Check config.php credentials:
+  In cPanel File Manager → public_html/api/config.php → Edit
+  Verify DB_HOST, DB_NAME, DB_USER, DB_PASS are all correct
 
-  2. If red, go to Settings → Server & Sync → Test Connection
-     Fix the connection issue shown in error message
-     Then click "Sync Now"
+Step 2 — Verify migration was run:
+  Visit: https://yourdomain.com/api/index.php?route=migrate/run
+  Should return: {"success":true,"message":"Migration complete"}
 
-  3. Data is NEVER permanently lost while server is offline
-     Browser keeps a complete local copy at all times`,
+Step 3 — Check cPanel Error Logs:
+  cPanel → Logs → Error Log
+  Look for PHP errors with "api/index.php" in the path
+
+Common PHP 500 causes:
+  • Wrong MySQL credentials in config.php
+  • MySQL user doesn't have ALL PRIVILEGES
+  • PHP version below 7.4 (upgrade in cPanel → PHP Version)
+  • Missing PHP extensions: mysqli, json (very rare on modern cPanel)`,
       },
       {
-        heading: "Fee Plan Amount Fields Not Typeable",
-        body: `The fee plan amount fields must be plain number inputs with no spinner arrows.
+        heading: '"Session expired" Immediately After Login',
+        body: `This is a client-side timing issue, not a real session problem.
 
-If you see spinner arrows or can't type amounts:
-  1. Click the field once to focus
-  2. Select all with Ctrl+A
-  3. Type the amount
+Fix 1 — Clear browser data and log in again:
+  Chrome: Ctrl+Shift+Delete → clear "Cookies and site data" for the domain
+  Then open the ERP and log in fresh.
 
-If the field still doesn't accept typing:
-  1. Try a different browser
-  2. Disable browser extensions (some modify form inputs)
-  3. Report the bug with browser name and version
+Fix 2 — Hard refresh:
+  Ctrl+Shift+R (Windows) / Cmd+Shift+R (Mac)
 
-Note: The design INTENTIONALLY removes spinner arrows. If they appear, it is a bug.`,
+Fix 3 — Check JWT_SECRET in config.php:
+  If JWT_SECRET was changed after logging in, the old token becomes invalid.
+  Log out and log in again after any config.php change.
+
+The "Session expired" modal should NEVER appear immediately after a fresh login.
+If it appears right after logging in, clear browser cookies/localStorage and try again.`,
       },
       {
-        heading: "Cannot Login",
-        body: `Super Admin can't login:
-  • Username: superadmin (exactly, no spaces)
-  • Default password: admin123
-  • If changed: go to phpMyAdmin → users table → reset manually
+        heading: "Connection Failed in Server Settings",
+        body: `Settings → Server & Sync → Test Connection shows "Connection failed"
 
-Teacher / Staff can't login:
-  • Username = mobile number (10 digits, no spaces)
-  • Password = DOB in DDMMYYYY format (e.g. 15082001)
-  • Check mobile in HR → Staff profile
+Step 1 — Verify the URL format:
+  ✓ Correct: https://yourdomain.com/api/index.php
+  ✗ Wrong:   https://yourdomain.com/api/
+  ✗ Wrong:   https://yourdomain.com/api
+  ✗ Wrong:   http://... (must be https://)
 
-Parent can't login:
-  • Username and Password = same mobile number
-  • Must match fatherMobile or guardianMobile in student profile
+Step 2 — Test ping directly:
+  Open in browser: https://yourdomain.com/api/index.php?route=ping
+  If this works but Test Connection fails, check if there are extra spaces in the URL.
 
-Admin reset:
-  Settings → User Management → find user → "Reset Password"`,
+Step 3 — Check CORS settings in config.php:
+  define('ALLOWED_ORIGINS', 'https://your-erp-app-domain.com');
+  Must match the exact domain where the ERP is running.`,
       },
       {
-        heading: "Sync Stuck on Yellow",
-        body: `Yellow badge means records are pending server confirmation.
+        heading: "Data Not Saving",
+        body: `When you add a student/staff/record and it disappears or doesn't save:
 
-Step 1 — Check Settings → Server & Sync → "Test Connection"
-  The error message tells you exactly what's wrong.
+Step 1 — Check the Server URL:
+  Settings → Server & Sync → Test Connection
+  Must show green "API is working" before data can save.
 
-Common errors and fixes:
-  • "Connection refused": server URL wrong or PHP API not uploaded
-  • "Invalid JSON": PHP error in api/index.php — check cPanel error logs
-  • "401 Unauthorized": JWT token expired — log out and back in
-  • "404 Not Found": /api/ folder doesn't exist or .htaccess routing issue
+Step 2 — Verify migration was run:
+  Visit: https://yourdomain.com/api/index.php?route=migrate/run
+  All tables must exist for data to save.
 
-Step 2 — Click "Sync Now"
-  Forces immediate sync attempt — check logs for errors.
+Step 3 — Check browser console for errors:
+  Press F12 → Console tab → look for red error messages
 
-Step 3 — If sync keeps failing:
-  Settings → Data Management → Export All Data (backup)
-  Settings → Server & Sync → Restore Defaults
-  Try again`,
+Step 4 — Check the specific route:
+  Open DevTools → Network tab → click "Add Student"
+  Find the failing request → check URL and response
+
+Common cause: config.php has wrong DB credentials so MySQL write fails silently.`,
       },
       {
         heading: "Class Dropdown Empty",
@@ -1731,8 +1461,36 @@ If the dropdown shows no classes:
   3. For each class, add sections: A, B, C, etc.
   4. Return to the student/fee form — dropdown should now be populated
 
-Note: If classes exist but dropdown is still empty:
+If classes exist but dropdown is still empty:
   Hard refresh the page (Ctrl+Shift+R) and try again.`,
+      },
+      {
+        heading: "Blank White Screen on App Load",
+        body: `Cause: JavaScript error preventing app from rendering.
+
+Fixes:
+  1. Hard refresh: Ctrl+Shift+R (Windows) / Cmd+Shift+R (Mac)
+  2. Clear browser cache: Settings → Privacy → Clear Data
+  3. Open browser console (F12 → Console) — look for red errors
+  4. If error mentions "api": check that api/config.php has correct credentials
+  5. Try a different browser (Chrome is recommended)`,
+      },
+      {
+        heading: "Fee Plan Amount Fields Not Typeable",
+        body: `The fee plan amount fields must be plain number inputs with no spinner arrows.
+
+If you see spinner arrows or can't type amounts:
+  1. Click the field once to focus
+  2. Select all with Ctrl+A
+  3. Type the amount directly
+
+If the field still doesn't accept typing:
+  1. Try a different browser (Chrome works best)
+  2. Disable browser extensions (some modify form inputs)
+  3. Hard refresh the page (Ctrl+Shift+R)
+
+Note: The design INTENTIONALLY removes spinner arrows everywhere.
+If spinner arrows appear on any amount field, it is a bug — please report it.`,
       },
     ],
   },
@@ -1746,16 +1504,11 @@ Note: If classes exist but dropdown is still empty:
         heading: "Frequently Asked Questions",
         body: `Q: How many students can the app handle?
 A: Tested with 1,000+ students. Pagination loads 50 at a time for performance.
-   There is no hard limit — the database can handle tens of thousands.
+   There is no hard limit — MySQL can handle tens of thousands of records.
 
 Q: Can parents see other children's data?
 A: No. Parent login shows only children whose parent mobile matches the login number.
    Complete data isolation between families.
-
-Q: What happens if the server goes down?
-A: All read and write operations continue working in offline mode.
-   Changes queue locally and sync automatically when server returns.
-   You never lose any data.
 
 Q: Can I use this on mobile?
 A: Yes — install as a PWA:
@@ -1763,30 +1516,37 @@ A: Yes — install as a PWA:
    Works on Android and iOS. All features available on mobile.
 
 Q: Can I run multiple schools?
-A: Yes. Each school gets its own separate Caffeine project with its own URL.
+A: Yes. Each school gets its own separate project with its own URL and database.
    Example: schoola.psmkgs.com, schoolb.psmkgs.com — completely separate data.
 
 Q: How do I reset Super Admin password?
-A: Method 1: phpMyAdmin → users table → edit → set new hashed password
-   Method 2: Contact support with your domain for remote reset assistance.
+A: Method 1: phpMyAdmin → users table → edit → reset password
+   Method 2: Settings → User Management → find admin → Reset Password
 
 Q: Does the app work offline?
-A: Yes. All reading works offline (data cached in browser).
-   Writing works offline too (queued locally, syncs when online).
-   Only real-time features (WhatsApp, GPS) need internet.
+A: No — this version requires an active internet connection to the cPanel server.
+   All data reads and writes go directly to MySQL. No offline support.
 
 Q: How do I backup my data?
-A: Settings → Data Management → "Export All Data"
-   Saves a complete JSON file. Store it on Google Drive or a USB stick.
+A: Method 1: Settings → Data Management → "Export All Data" → JSON file
+   Method 2: cPanel → phpMyAdmin → Export → SQL file (more reliable)
 
 Q: Can I export student list to Excel?
 A: Yes. Students → "Export to Excel" button downloads a .xlsx file.
 
-Q: What do the sync badge colors mean?
-A: Green = all data saved to server ✓
-   Yellow (spinning) = syncing now
-   Yellow (static) = changes pending, will sync soon
-   Red = server offline — data safe locally, not yet on server`,
+Q: Why do I get "HTTP 404" errors?
+A: The API route doesn't exist or the URL is wrong. Check:
+   1. Settings → Server & Sync → must end with /api/index.php
+   2. Run ?route=ping to verify API is reachable
+   3. See "Troubleshooting" section for detailed fixes.
+
+Q: What PHP version do I need?
+A: PHP 7.4 minimum, PHP 8.0+ recommended.
+   Check in cPanel → PHP Version → select 8.0 or 8.1
+
+Q: Does the app support .htaccess routing?
+A: No — the API uses query parameter routing (?route=) by design, so .htaccess
+   is not required. This ensures maximum compatibility with all cPanel servers.`,
       },
     ],
   },
@@ -1814,10 +1574,6 @@ Fee Plan:
   The monthly amount for each fee heading, per class and section.
   Set in Fees → Fee Plans. Students are charged based on their class's plan.
 
-Pending Sync:
-  Records saved in browser (IndexedDB) but not yet confirmed by MySQL server.
-  Shown as a count in the header badge. Always syncs automatically.
-
 Family Grouping:
   Students sharing the same parent mobile number are grouped together.
   Useful for collecting fees for siblings in one transaction.
@@ -1830,21 +1586,17 @@ RFID:
   Radio Frequency Identification — a card students tap on a reader to mark attendance.
   Card number is enrolled in the device and matched to the student in ERP.
 
-IndexedDB:
-  Browser's built-in local database. Stores all ERP data for offline access.
-  Works like a local MySQL on your device.
+JWT (JSON Web Token):
+  An authentication token stored in your browser after login.
+  Sent with every API request to verify your identity. Expires after some time.
 
 Super Admin:
   The top-level user with full access to all settings, data, and user accounts.
-  Cannot be restricted by permissions.
+  Default credentials: admin / admin123. Cannot be restricted by permissions.
 
-canister:
-  An older term from a previous version of the app (Internet Computer storage).
-  No longer used — data is now in MySQL/cPanel.
-
-JWT (JSON Web Token):
-  An authentication token stored in your browser after login.
-  Sent with every API request to verify your identity. Expires after some time.`,
+cPanel:
+  A web hosting control panel. Used to manage files, databases, and PHP settings.
+  The PHP API files (index.php, config.php) are uploaded here.`,
       },
     ],
   },
@@ -1871,15 +1623,20 @@ v125 (2025 Q1) — Migration to cPanel/MySQL.
   Eliminated deployment errors. Data now in MySQL on user's cPanel.
 
 v126+ — Bug fixes and improvements.
-  Local-first sync with WhatsApp-style pending counter.
   Fee plan typing fixes. Student disappearing data fixed.
   Performance: skeleton loading, pagination, parallel data fetch.
+  All offline/sync code removed — fully online, direct MySQL.
 
-Current — Server & Sync Settings + Documentation overhaul.
-  New: Settings → Server & Sync tab for full sync control.
-  New: Comprehensive in-app documentation (this page).
-  Updated: Sync badge shows cPanel server status with pending count.
-  Updated: Header sync dot navigates to Server & Sync on click.`,
+v127–v130 — Session and API fixes.
+  Token expiry fixed: "Session expired" no longer appears right after login.
+  API route mismatches fixed across all modules.
+  Sessions 2019-26 pre-loaded for historical data entry.
+
+Current — Full route audit and documentation overhaul.
+  All HTTP 404 mismatches in API routes are now fixed.
+  Complete cPanel deployment guide added to Documentation.
+  All API calls use verified routes matching the backend exactly.
+  No PUT or DELETE methods used — POST only for maximum cPanel compatibility.`,
       },
     ],
   },
@@ -1891,91 +1648,178 @@ Current — Server & Sync Settings + Documentation overhaul.
     items: [
       {
         heading: "Base URL and Authentication",
-        body: `Base URL:   https://yourdomain.com/api
+        body: `Base URL:   https://yourdomain.com/api/index.php
 Auth:       Bearer JWT in Authorization header
 Format:     All requests/responses are JSON
+Routing:    All routes use ?route= query parameter
 
 Login to get JWT:
-  POST /api/?route=auth/login
-  Body: { "username": "superadmin", "password": "admin123" }
+  POST https://yourdomain.com/api/index.php?route=auth/login
+  Body: { "username": "admin", "password": "admin123" }
   Response: { "success": true, "data": { "token": "...", "user": {...} } }
 
 Include token in all subsequent requests:
-  Authorization: Bearer <your_jwt_token>`,
-        code: `// Example fetch with auth
-const res = await fetch('/api/?route=students/list', {
-  headers: {
-    'Authorization': 'Bearer ' + localStorage.getItem('erp_token'),
-    'Content-Type': 'application/json'
+  Authorization: Bearer <your_jwt_token>
+
+⚠ Important: Use POST for all write operations.
+   Never use PUT or DELETE — cPanel may block those HTTP methods.
+   Updates use POST with ?id= in the URL (e.g. ?route=students/update&id=123)`,
+        code: `// Example: Login and get token
+const loginRes = await fetch(
+  'https://yourdomain.com/api/index.php?route=auth/login',
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: 'admin', password: 'admin123' })
   }
-});
-const data = await res.json();`,
+);
+const { data } = await loginRes.json();
+const token = data.token;
+
+// Example: Fetch students with auth
+const studentsRes = await fetch(
+  'https://yourdomain.com/api/index.php?route=students/list',
+  { headers: { 'Authorization': 'Bearer ' + token } }
+);
+const students = await studentsRes.json();`,
       },
       {
-        heading: "API Endpoints Reference",
-        body: `┌──────────────────────────────┬────────┬──────────────────────────┐
-│ Route                        │ Method │ Description              │
-├──────────────────────────────┼────────┼──────────────────────────┤
-│ auth/login                   │ POST   │ Login, get JWT           │
-│ auth/verify                  │ GET    │ Validate current token   │
-│ health                       │ GET    │ Server health check      │
-│ ping                         │ GET    │ Latency ping             │
-│ sync/all                     │ GET    │ Download all data        │
-│ sync/push                    │ POST   │ Push changes to server   │
-│ students/list                │ GET    │ List students            │
-│ students/add                 │ POST   │ Add student              │
-│ students/update              │ PUT    │ Update student           │
-│ students/delete              │ DELETE │ Delete student           │
-│ students/bulk-import         │ POST   │ Bulk import from CSV     │
-│ classes/list                 │ GET    │ List classes             │
-│ classes/add                  │ POST   │ Add class                │
-│ fees/headings                │ GET    │ List fee headings        │
-│ fees/plan                    │ GET    │ Get fee plan             │
-│ fees/plan/save               │ POST   │ Save fee plan            │
-│ fees/collect                 │ POST   │ Collect fees             │
-│ fees/receipts                │ GET    │ Get student receipts     │
-│ attendance/mark              │ POST   │ Mark attendance          │
-│ attendance/list              │ GET    │ Get attendance records   │
-│ staff/list                   │ GET    │ List staff               │
-│ staff/add                    │ POST   │ Add staff                │
-│ migrate/run                  │ GET    │ Create DB tables         │
-│ seed/run                     │ GET    │ Seed admin user          │
-└──────────────────────────────┴────────┴──────────────────────────┘`,
-      },
-      {
-        heading: "Response Format",
-        body: `All responses follow this format:
+        heading: "Complete Route Reference",
+        body: `AUTH
+  POST auth/login             — Login, returns JWT token
+  GET  auth/me                — Verify token and get current user
+  POST auth/refresh           — Refresh token with refresh_token
+  POST auth/logout            — Logout
 
-Success:
-  { "success": true, "data": <payload>, "total": 100 }
+SYSTEM
+  GET  ping                   — API health check (no auth needed)
+  GET  migrate/run            — Create tables + seed admin (run once)
 
-Error:
-  { "success": false, "error": "Description of error" }
+DASHBOARD
+  GET  dashboard/stats        — Student/staff/class counts, today's fees
+  GET  dashboard/fee-chart    — Monthly fee collection data
+  GET  dashboard/recent-activity — Recent changes/events
 
-HTTP Status Codes:
-  200 — OK
-  400 — Bad Request (missing required field)
-  401 — Unauthorized (invalid/expired JWT)
-  403 — Forbidden (insufficient permissions)
-  404 — Not Found
-  500 — Server Error (check PHP error logs in cPanel)
+STUDENTS
+  GET  students/list          — All students (paginated: ?page=1&limit=50)
+  GET  students/get           — Single student (?id=123)
+  POST students/add           — Add new student
+  POST students/update        — Update student (?id=123 in URL)
+  POST students/delete        — Delete student (id in body)
+  POST students/import        — Bulk import (body: {students:[...]})
+  GET  students/count         — Total student count
 
-Batch sync endpoint:
-  POST /api/?route=batch/sync
-  Body: { "changes": [ { "collection": "students", "operation": "create", "data": {...} } ] }
-  Response: { "success": true, "data": { "pushed": 10, "errors": [] } }`,
-        code: `// Batch sync example
-const changes = pendingItems.map(item => ({
-  collection: item.collection,
-  operation: item.operation,
-  data: item.data
-}));
+ACADEMICS
+  GET  academics/classes      — List classes
+  POST academics/classes/save — Add or update class (id in body = update)
+  POST academics/classes/delete — Delete class (id in body)
+  GET  academics/sections     — List sections (?class_id=X)
+  POST academics/sections/save — Add section
+  GET  academics/subjects     — List subjects (?class_id=X)
+  POST academics/subjects/save — Add or update subject
+  POST academics/subjects/delete — Delete subject
 
-await fetch('/api/?route=batch/sync', {
-  method: 'POST',
-  headers: { 'Authorization': 'Bearer ' + token },
-  body: JSON.stringify({ changes })
-});`,
+FEES
+  GET  fees/headings          — List fee headings
+  POST fees/headings/save     — Add or update fee heading
+  POST fees/headings/delete   — Delete fee heading
+  GET  fees/plan              — Get fee plan (?class=X&section=Y)
+  POST fees/plan/save         — Save fee plan
+  GET  fees/collect/student   — Get student fee details (?studentId=X)
+  POST fees/collect/save      — Save fee receipt
+  GET  fees/receipts          — Get receipts (?studentId=X)
+  POST fees/receipt/delete    — Delete receipt
+  GET  fees/due               — Students with outstanding dues
+  GET  fees/collection-chart  — Monthly chart data
+
+ATTENDANCE
+  GET  attendance/daily       — Daily attendance (?class=X&date=Y)
+  POST attendance/save        — Save attendance records
+  GET  attendance/summary     — Attendance summary
+  GET  attendance/student     — Student attendance (?studentId=X)
+  POST attendance/face        — Face recognition attendance record
+
+STAFF & PAYROLL
+  GET  staff/list             — List all staff
+  GET  staff/get              — Single staff (?id=X)
+  POST staff/add              — Add staff member
+  POST staff/update           — Update staff (?id=X in URL)
+  POST staff/delete           — Delete staff (id in body)
+  POST staff/import           — Bulk import staff
+  GET  payroll/list           — List payroll records
+  POST payroll/save           — Save payroll record
+  POST payroll/payslip        — Generate payslip
+
+SESSIONS
+  GET  academic-sessions/list       — List all sessions
+  POST academic-sessions/create     — Create new session
+  POST academic-sessions/set-current — Set active session
+  POST academic-sessions/promote    — Promote students
+
+TRANSPORT
+  GET  transport/routes             — List routes
+  POST transport/routes/save        — Add/update route
+  POST transport/routes/delete      — Delete route
+  GET  transport/buses              — List buses
+  POST transport/buses/save         — Add/update bus
+  GET  transport/pickup-points      — List pickup points
+  POST transport/pickup-points/save — Add/update pickup point
+  GET  transport/driver-students    — Students for a driver
+
+LIBRARY
+  GET  library/books          — List books
+  POST library/books/add      — Add book
+  POST library/books/update   — Update book
+  POST library/issue          — Issue book to student
+  POST library/return         — Return book
+  GET  library/overdue        — Overdue books
+
+INVENTORY
+  GET  inventory/items              — List items
+  POST inventory/items/add          — Add item
+  POST inventory/items/update       — Update item
+  POST inventory/items/delete       — Delete item
+  POST inventory/transactions/add   — Add transaction (stock in/out)
+
+COMMUNICATION
+  POST communication/whatsapp/send          — Send WhatsApp
+  GET  communication/broadcast-history      — Broadcast history
+  POST communication/notification/schedule  — Schedule notification
+  GET  communication/notifications          — Get notifications
+  POST communication/notifications/mark-read — Mark as read
+
+CHAT
+  GET  chat/rooms             — List chat rooms
+  POST chat/rooms/create      — Create chat room
+  GET  chat/messages          — Get messages (?room_id=X)
+  POST chat/messages/send     — Send message
+
+SETTINGS & USERS
+  GET  settings/all                       — All settings
+  POST settings/save                      — Save settings
+  GET  settings/users                     — List user accounts
+  POST settings/users/create              — Create user account
+  POST settings/users/update              — Update user account
+  POST settings/users/delete              — Delete user account
+  POST settings/users/reset-password      — Reset user password
+
+REPORTS
+  GET  reports/students       — Student report
+  GET  reports/finance        — Finance report
+  GET  reports/attendance     — Attendance report
+  GET  reports/fee-register   — Fee register report
+
+EXPENSES & HOMEWORK
+  GET  expenses               — List expenses
+  POST expenses/add           — Add expense
+  POST expenses/delete        — Delete expense (id in body)
+  GET  homework               — List homework
+  POST homework/add           — Add homework
+  POST homework/delete        — Delete homework
+
+BACKUP
+  GET  backup/export          — Export all data as JSON
+  POST backup/import          — Import data from JSON`,
       },
     ],
   },
@@ -2201,7 +2045,7 @@ export default function Documentation() {
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
           <Input
-            placeholder="Search — e.g. 'fees', 'import', 'attendance', 'backup', 'sync'…"
+            placeholder="Search — e.g. '404', 'deploy', 'fees', 'import', 'attendance', 'backup'…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10 h-9"
@@ -2270,7 +2114,13 @@ export default function Documentation() {
             <div className="p-3 rounded-lg bg-card border text-xs space-y-1.5">
               <p className="font-semibold text-foreground">Quick Login</p>
               <code className="text-[10px] text-muted-foreground break-all block">
-                superadmin / admin123
+                admin / admin123
+              </code>
+              <p className="font-semibold text-foreground mt-1.5">
+                API Health Check
+              </p>
+              <code className="text-[10px] text-muted-foreground break-all block">
+                ?route=ping
               </code>
               <p className="font-semibold text-foreground mt-1.5">
                 Data Storage
@@ -2343,7 +2193,7 @@ export default function Documentation() {
                 <FileText className="w-12 h-12 mb-3 opacity-20" />
                 <p className="font-medium">No results for "{search}"</p>
                 <p className="text-xs mt-1">
-                  Try: fees, attendance, import, backup, sync, server
+                  Try: deploy, 404, fees, attendance, import, backup, api
                 </p>
               </div>
             )}
@@ -2371,16 +2221,19 @@ export default function Documentation() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   {[
                     { label: "Storage", value: "MySQL / cPanel" },
-                    { label: "Default Login", value: "superadmin / admin123" },
+                    { label: "Default Login", value: "admin / admin123" },
                     {
                       label: "Teacher Login",
                       value: "Mobile / DOB (DDMMYYYY)",
                     },
                     { label: "Parent Login", value: "Mobile / Mobile" },
-                    { label: "API Health Check", value: "/api/?route=health" },
+                    {
+                      label: "API Health Check",
+                      value: "/api/index.php?route=ping",
+                    },
                     {
                       label: "Create Tables",
-                      value: "/api/?route=migrate/run",
+                      value: "/api/index.php?route=migrate/run",
                     },
                   ].map((item) => (
                     <div key={item.label} className="space-y-0.5">
