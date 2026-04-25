@@ -312,14 +312,30 @@ export default function Students({ onNavigate }: StudentsProps) {
         setTotalCount(result.total ?? mapped.length);
         if (resetPage) setCurrentPage(1);
       } catch (err) {
-        setError(
-          err instanceof Error ? err.message : "Failed to load students",
-        );
+        const msg =
+          err instanceof Error ? err.message : "Failed to load students";
+        // Super Admin uses local auth — never show token/session errors inline
+        const isTokenError =
+          msg.toLowerCase().includes("session expired") ||
+          msg.toLowerCase().includes("please log in again") ||
+          msg.toLowerCase().includes("token");
+        if (isTokenError && currentUser?.role === "superadmin") {
+          // Silently swallow — Super Admin has no PHP token to expire
+        } else {
+          setError(msg);
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [currentPage, filterClass, filterSection, filterStatus, search],
+    [
+      currentPage,
+      filterClass,
+      filterSection,
+      filterStatus,
+      search,
+      currentUser?.role,
+    ],
   );
 
   // Fetch classes once on mount

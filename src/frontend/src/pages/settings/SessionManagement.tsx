@@ -30,6 +30,26 @@ import { useApp } from "../../context/AppContext";
 import type { Session, Student } from "../../types";
 import { nextSessionLabel } from "../../types";
 import { generateId } from "../../utils/localStorage";
+import phpApiService from "../../utils/phpApiService";
+
+// ── Pre-seeded sessions (historical + current) ──────────────────────────────────
+
+interface SeedSession {
+  label: string;
+  startYear: number;
+  endYear: number;
+  isActive: boolean;
+}
+
+const SEED_SESSIONS: SeedSession[] = [
+  { label: "2019-20", startYear: 2019, endYear: 2020, isActive: false },
+  { label: "2020-21", startYear: 2020, endYear: 2021, isActive: false },
+  { label: "2021-22", startYear: 2021, endYear: 2022, isActive: false },
+  { label: "2022-23", startYear: 2022, endYear: 2023, isActive: false },
+  { label: "2023-24", startYear: 2023, endYear: 2024, isActive: false },
+  { label: "2024-25", startYear: 2024, endYear: 2025, isActive: false },
+  { label: "2025-26", startYear: 2025, endYear: 2026, isActive: true },
+];
 
 function dateRange(session: Session): string {
   return `Apr ${session.startYear} – Mar ${session.endYear}`;
@@ -52,6 +72,7 @@ export default function SessionManagement() {
 
   const [localSessions, setLocalSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
 
   const [newLabel, setNewLabel] = useState("");
   const [newDescription, setNewDescription] = useState("");
@@ -74,7 +95,8 @@ export default function SessionManagement() {
   const [deleteTarget, setDeleteTarget] = useState<Session | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // ── Load sessions ───────────────────────────────────────────────────────────
+  // ── Load sessions + seed missing defaults ────────────────────────────────────
+
   useEffect(() => {
     void loadSessions();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -85,11 +107,81 @@ export default function SessionManagement() {
     try {
       await refreshCollection("sessions");
       const rows = getData("sessions") as Session[];
-      setLocalSessions(rows.length > 0 ? rows : sessions);
+      const list = rows.length > 0 ? rows : sessions;
+      setLocalSessions(list);
+      // After loading, seed any missing default sessions
+      await seedMissingSessions(list);
     } catch {
       setLocalSessions(sessions);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function seedMissingSessions(existing: Session[]) {
+    const existingLabels = new Set(existing.map((s) => s.label));
+    const missing = SEED_SESSIONS.filter((s) => !existingLabels.has(s.label));
+    if (missing.length === 0) return;
+
+    setSeeding(true);
+    try {
+      // Determine if any session is already active
+      const hasActive = existing.some((s) => s.isActive);
+
+      for (const seed of missing) {
+        const session: Session = {
+          id: generateId(),
+          label: seed.label,
+          startYear: seed.startYear,
+          endYear: seed.endYear,
+          // Only mark 2025-26 as active if no session is active yet
+          isActive: seed.isActive && !hasActive,
+          isArchived: !seed.isActive,
+          createdAt: new Date().toISOString(),
+          description: `Academic Year ${seed.label}`,
+        };
+        try {
+          await saveData(
+            "sessions",
+            session as unknown as Record<string, unknown>,
+          );
+        } catch {
+          // If the context saveData fails, try direct API
+          try {
+            await phpApiService.createSession({
+              label: seed.label,
+              startYear: seed.startYear,
+              endYear: seed.endYear,
+            });
+          } catch {
+            /* ignore individual failures */
+          }
+        }
+      }
+
+      // Reload after seeding
+      await refreshCollection("sessions");
+      const refreshed = getData("sessions") as Session[];
+      setLocalSessions(
+        refreshed.length > 0
+          ? refreshed
+          : [
+              ...existing,
+              ...missing.map((s) => ({
+                id: generateId(),
+                label: s.label,
+                startYear: s.startYear,
+                endYear: s.endYear,
+                isActive: s.isActive,
+                isArchived: !s.isActive,
+                createdAt: new Date().toISOString(),
+              })),
+            ],
+      );
+    } catch {
+      /* seeding failed — not critical */
+    } finally {
+      setSeeding(false);
     }
   }
 
@@ -290,6 +382,14 @@ export default function SessionManagement() {
           </Button>
         )}
       </div>
+
+      {/* Seeding indicator */}
+      {seeding && (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm bg-muted/30 border border-border rounded-lg px-4 py-2">
+          <Loader2 className="w-4 h-4 animate-spin text-primary" />
+          Setting up default sessions (2019-20 to 2025-26)…
+        </div>
+      )}
 
       {/* Add Form */}
       {showAddForm && isSuperAdmin && (
@@ -504,7 +604,13 @@ export default function SessionManagement() {
                 </div>
 
                 {/* Archived read-only notice */}
-                {isReadOnly && (
+                {isReadOnly && isSuperAdmin && (
+                  <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 mt-3">
+                    This session is archived — Super Admin can switch to it to
+                    view or add historical data.
+                  </p>
+                )}
+                {isReadOnly && !isSuperAdmin && (
                   <p className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5 mt-3">
                     This session is archived — data is read-only and cannot be
                     edited.

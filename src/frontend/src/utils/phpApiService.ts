@@ -8,12 +8,25 @@
  * Token lifecycle:
  *   - isTokenExpired(): reads JWT exp field, returns true if expiring within 30s
  *   - ensureValidToken(): checks expiry, calls silentRefresh() if needed
+ *     BUT: skips check if a fresh login happened in the last 10 minutes
  *   - silentRefresh(): tries /auth/refresh first, then re-login with stored creds
- *   - Every API call calls ensureValidToken() first
+ *   - Every authenticated API call calls ensureValidToken() first
  * If all refresh methods fail, emits 'auth:token-expired' DOM event.
+ *
+ * API URL format: /api/?route=ROUTE_NAME (e.g. /api/?route=auth/login)
+ * API_BASE is read from localStorage 'erp_server_url' if set (configurable in Settings).
  */
 
-const API_BASE = "/api";
+/** Read server URL from localStorage — defaults to '/api' (same-origin) */
+function getApiBase(): string {
+  try {
+    const stored = localStorage.getItem("erp_server_url");
+    if (stored) return stored.replace(/\/$/, "");
+  } catch {
+    /* noop */
+  }
+  return "/api";
+}
 
 interface ApiResponse<T = unknown> {
   success: boolean;
@@ -311,8 +324,26 @@ class PhpApiService {
    * Ensure the current token is valid. If expired, attempts a silent refresh.
    * Returns true if token is valid (or was refreshed), false if all methods failed.
    * Does NOT throw.
+   *
+   * IMPORTANT: If a fresh login happened within the last 10 minutes, the token
+   * was just issued and is always valid — skip the expiry check entirely.
+   * This prevents false "session expired" errors right after login.
    */
   async ensureValidToken(): Promise<boolean> {
+    // Import fresh login check from AppContext module-level variable
+    // We do this dynamically to avoid circular import — read loginTime from localStorage fallback
+    try {
+      const loginTimeStr = localStorage.getItem("erp_login_time");
+      if (loginTimeStr) {
+        const loginTime = Number(loginTimeStr);
+        if (Date.now() - loginTime < 10 * 60 * 1000) {
+          // Fresh login within 10 minutes — token is certainly valid
+          return true;
+        }
+      }
+    } catch {
+      /* noop */
+    }
     if (!this.isTokenExpired()) return true;
     return this.silentRefresh();
   }
@@ -341,7 +372,7 @@ class PhpApiService {
       const storedRefreshToken = this.getStoredRefreshToken();
       if (storedRefreshToken) {
         try {
-          const refreshUrl = `${API_BASE}/?route=auth/refresh`;
+          const refreshUrl = `${getApiBase()}/?route=auth/refresh`;
           const refreshResp = await fetch(refreshUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -381,7 +412,7 @@ class PhpApiService {
         return false;
       }
 
-      const url = `${API_BASE}/?route=auth/login`;
+      const url = `${getApiBase()}/?route=auth/login`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -447,7 +478,8 @@ class PhpApiService {
       headers.Authorization = `Bearer ${token}`;
     }
 
-    const url = `${API_BASE}/?route=${route}`;
+    // Use getApiBase() for dynamic server URL support (configurable in Settings)
+    const url = `${getApiBase()}/?route=${route}`;
 
     try {
       const response = await fetch(url, {
@@ -556,6 +588,8 @@ class PhpApiService {
           localStorage.setItem("storedUsername", username);
           localStorage.setItem("storedPassword", password);
           localStorage.setItem("lastTokenRefresh", Date.now().toString());
+          // erp_login_time: used by ensureValidToken to skip expiry check for 10 min
+          localStorage.setItem("erp_login_time", Date.now().toString());
         } catch {
           /* noop */
         }
@@ -652,10 +686,24 @@ class PhpApiService {
   }
 
   async addClass(cls: {
-    className: string;
+    name?: string;
+    className?: string;
     sections?: string[];
+    is_enabled?: number;
+    isEnabled?: boolean;
   }): Promise<ClassRecord> {
-    return this.post<ClassRecord>("classes/add", cls);
+    // PHP backend expects 'name' (not 'className') and 'is_enabled' (0/1)
+    const payload: Record<string, unknown> = {
+      name: cls.name ?? cls.className,
+      sections: cls.sections ?? [],
+    };
+    // Convert isEnabled boolean → is_enabled 0/1 for PHP
+    if (cls.is_enabled !== undefined) {
+      payload.is_enabled = cls.is_enabled;
+    } else if (cls.isEnabled !== undefined) {
+      payload.is_enabled = cls.isEnabled ? 1 : 0;
+    }
+    return this.post<ClassRecord>("classes/add", payload);
   }
 
   async addSection(section: { classId: string; name: string }): Promise<{

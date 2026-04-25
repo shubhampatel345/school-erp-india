@@ -7,9 +7,12 @@
  * NO: pendingWrites, syncStatus, offlineQueue, IndexedDB, syncEngine, localFirstSync.
  *
  * Session Expired modal rules:
- *  - NEVER shown on login screen (currentUser is null there)
- *  - NEVER shown within 5 minutes of a fresh login
- *  - Only shown after token genuinely expires mid-session
+ *  - NEVER shown on login screen (currentUser is null)
+ *  - NEVER shown within 10 minutes of a fresh login
+ *  - Only shown after token genuinely expires mid-session AND silent refresh fails
+ *
+ * loginTime: module-level variable (outside React) so ALL closures see it immediately.
+ * This prevents the race condition where freshLoginRef.current isn't visible in stale closures.
  */
 
 import {
@@ -32,6 +35,37 @@ import type {
 } from "../types";
 import { ls } from "../utils/localStorage";
 import phpApiService from "../utils/phpApiService";
+
+// ── Module-level login timestamp (outside React component) ────────────────────
+// Using a module-level variable ensures ALL closures (including those in
+// phpApiService event handlers) see the latest value immediately without
+// stale-closure issues that affect useRef inside callbacks.
+let _loginTime: number | null = null;
+
+export function setLoginTime(t: number | null): void {
+  _loginTime = t;
+  // Also persist to localStorage so phpApiService.ensureValidToken can read it
+  // without a circular import — avoids false "session expired" right after login
+  try {
+    if (t !== null) {
+      localStorage.setItem("erp_login_time", String(t));
+    } else {
+      localStorage.removeItem("erp_login_time");
+    }
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+export function getLoginTime(): number | null {
+  return _loginTime;
+}
+
+/** Returns true if a fresh login happened within the last N minutes */
+function isFreshLogin(minutesThreshold = 10): boolean {
+  if (_loginTime === null) return false;
+  return Date.now() - _loginTime < minutesThreshold * 60 * 1000;
+}
 
 // ── ID generator ──────────────────────────────────────────────────────────────
 
@@ -413,8 +447,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [showReLoginModal, setShowReLoginModal] = useState(false);
   const initStartedRef = useRef(false);
   const stateRef = useRef(state);
-  // Tracks the timestamp of the most recent successful login (ref = synchronous)
-  const freshLoginRef = useRef<number | null>(null);
 
   useEffect(() => {
     stateRef.current = state;
@@ -425,22 +457,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const handleTokenExpired = async () => {
       // Guard 1: never handle when nobody is logged in
       if (!stateRef.current.currentUser) return;
-      // Guard 2: never show modal within 5 min of fresh login
-      if (
-        freshLoginRef.current !== null &&
-        Date.now() - freshLoginRef.current < 5 * 60 * 1000
-      )
-        return;
 
+      // Guard 2: never show modal within 10 min of fresh login
+      // Use module-level _loginTime — always current, no stale closure issues
+      if (isFreshLogin(10)) return;
+
+      // Guard 3: attempt silent refresh first — only show modal if it fails
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
 
       // All refresh attempts failed — show modal only for mid-session expiry
-      const loggedInDuration =
-        freshLoginRef.current !== null
-          ? Date.now() - freshLoginRef.current
-          : Number.POSITIVE_INFINITY;
-      if (loggedInDuration > 5 * 60 * 1000) {
+      if (!isFreshLogin(10) && stateRef.current.currentUser) {
         setShowReLoginModal(true);
       }
     };
@@ -460,6 +487,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const user = JSON.parse(storedUserRaw) as AppUser;
         const token = phpApiService.getToken();
         if (token) {
+          // Treat page reload as a fresh login to prevent false expiry on startup
+          // (the user was already authenticated; no need to re-verify immediately)
+          setLoginTime(Date.now()); // also writes erp_login_time to localStorage
           dispatch({ type: "SET_USER", user });
         } else {
           sessionStorage.removeItem("shubh_current_user");
@@ -481,14 +511,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         // Superadmin doesn't need server verify
         if (state.currentUser?.role !== "superadmin") {
-          const tokenOk = await phpApiService.ensureValidToken();
-          if (!tokenOk) {
-            dispatch({
-              type: "SET_INIT_ERROR",
-              error: "Could not verify session. Please log in again.",
-            });
-            initStartedRef.current = false;
-            return;
+          // Only verify token if we haven't just logged in
+          if (!isFreshLogin(10)) {
+            const tokenOk = await phpApiService.ensureValidToken();
+            if (!tokenOk) {
+              dispatch({
+                type: "SET_INIT_ERROR",
+                error: "Could not verify session. Please log in again.",
+              });
+              initStartedRef.current = false;
+              return;
+            }
           }
         }
 
@@ -537,7 +570,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           JSON.stringify(SUPER_ADMIN),
         );
         initStartedRef.current = false;
-        freshLoginRef.current = Date.now();
+        // Set module-level loginTime FIRST (synchronous, before any state updates)
+        setLoginTime(Date.now());
         dispatch({ type: "SET_USER", user: SUPER_ADMIN });
         return true;
       }
@@ -572,7 +606,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
           initStartedRef.current = false;
-          freshLoginRef.current = Date.now();
+          // Set module-level loginTime FIRST (synchronous, before state updates)
+          setLoginTime(Date.now());
           dispatch({ type: "SET_USER", user });
           return true;
         }
@@ -618,7 +653,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        freshLoginRef.current = Date.now();
+        setLoginTime(Date.now());
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -647,7 +682,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        freshLoginRef.current = Date.now();
+        setLoginTime(Date.now());
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -661,7 +696,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     sessionStorage.removeItem("shubh_current_user");
     phpApiService.clearToken();
     initStartedRef.current = false;
-    freshLoginRef.current = null;
+    setLoginTime(null);
     setShowReLoginModal(false);
     dispatch({ type: "LOGOUT" });
   }, []);
@@ -909,9 +944,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ) : (
         children
       )}
-      {/* Session Expired modal — only shown when a logged-in user's token expires
-          and silent re-auth fails. NEVER shown on login screen or right after login. */}
-      {showReLoginModal && state.currentUser !== null && (
+      {/*
+        Session Expired modal:
+        - Only shown when currentUser is authenticated
+        - Never shown on login page (currentUser is null there)
+        - Never shown within 10 minutes of login (module-level _loginTime guard)
+        - Only shown after all silent refresh attempts have already failed
+      */}
+      {showReLoginModal && state.currentUser !== null && !isFreshLogin(10) && (
         <ReLoginModal onDismiss={logout} />
       )}
     </AppContext.Provider>

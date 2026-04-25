@@ -3,6 +3,7 @@
  * All CRUD via phpApiService.getStaff/addStaff/updateStaff/deleteStaff.
  * Waits for HTTP 200 before showing success.
  * NO getData/saveData context usage. NO amount spinners.
+ * Includes bulk CSV/XLSX import modal.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,10 +25,11 @@ import {
   RefreshCw,
   Search,
   Trash2,
+  Upload,
   UserCircle,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
 import type { StaffRecord } from "../../utils/phpApiService";
@@ -107,6 +109,67 @@ function autoEmpId(existing: StaffRecord[]): string {
   return `EMP${String(next).padStart(3, "0")}`;
 }
 
+// ── CSV parser (RFC 4180 — handles quoted fields with commas) ──────────────────
+
+function parseCSV(text: string): string[][] {
+  const rows: string[][] = [];
+  const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const fields: string[] = [];
+    let i = 0;
+    while (i < line.length) {
+      if (line[i] === '"') {
+        let val = "";
+        i++;
+        while (i < line.length) {
+          if (line[i] === '"' && line[i + 1] === '"') {
+            val += '"';
+            i += 2;
+          } else if (line[i] === '"') {
+            i++;
+            break;
+          } else {
+            val += line[i++];
+          }
+        }
+        fields.push(val);
+        if (line[i] === ",") i++;
+      } else {
+        const end = line.indexOf(",", i);
+        if (end === -1) {
+          fields.push(line.slice(i).trim());
+          break;
+        }
+        fields.push(line.slice(i, end).trim());
+        i = end + 1;
+      }
+    }
+    rows.push(fields);
+  }
+  return rows;
+}
+
+const IMPORT_TEMPLATE_COLS = [
+  "empId",
+  "fullName",
+  "designation",
+  "department",
+  "subject",
+  "phone",
+  "email",
+  "address",
+  "gender",
+  "dob",
+  "joiningDate",
+  "salary",
+  "qualification",
+  "experience",
+  "emergencyContact",
+  "bankAccount",
+  "ifscCode",
+];
+
 const PAGE_SIZE = 50;
 
 export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
@@ -127,6 +190,19 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
   const [form, setForm] = useState<StaffForm>(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  // ── Import state ─────────────────────────────────────────────────────────────
+  const [showImport, setShowImport] = useState(false);
+  const [importRows, setImportRows] = useState<string[][]>([]);
+  const [importHeaders, setImportHeaders] = useState<string[]>([]);
+  const [importFileName, setImportFileName] = useState("");
+  const [importProgress, setImportProgress] = useState<{
+    done: number;
+    total: number;
+    failed: number;
+    running: boolean;
+  }>({ done: 0, total: 0, failed: 0, running: false });
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const canWrite =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
@@ -286,6 +362,143 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
     a.click();
   }
 
+  // ── Import helpers ────────────────────────────────────────────────────────────
+
+  function downloadTemplate() {
+    const header = IMPORT_TEMPLATE_COLS.join(",");
+    const example =
+      "EMP001,Ramesh Kumar,Teacher,Teaching,Mathematics,9876543210,ramesh@school.com,123 Main St,Male,1985-06-15,2020-04-01,30000,B.Ed,5 years,9876543211,1234567890123456,SBIN0001234";
+    const blob = new Blob([[header, example].join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "staff_import_template.csv";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImportFileName(file.name);
+    setImportRows([]);
+    setImportHeaders([]);
+    setImportProgress({ done: 0, total: 0, failed: 0, running: false });
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      const rows = parseCSV(text);
+      if (rows.length < 2) {
+        toast.error("File appears empty or has only a header row.");
+        return;
+      }
+      const [header, ...data] = rows;
+      setImportHeaders(header);
+      setImportRows(data.filter((r) => r.some((c) => c.trim())));
+    };
+    reader.readAsText(file, "UTF-8");
+    // Reset input so same file can be re-selected
+    e.target.value = "";
+  }
+
+  function colIdx(header: string[], col: string): number {
+    // Try exact match first, then case-insensitive, then partial
+    let i = header.findIndex((h) => h === col);
+    if (i !== -1) return i;
+    i = header.findIndex((h) => h.toLowerCase() === col.toLowerCase());
+    if (i !== -1) return i;
+    // Common aliases
+    const aliases: Record<string, string[]> = {
+      empId: ["emp_id", "employeeid", "employee_id", "empid"],
+      fullName: ["full_name", "name", "staffname", "staff_name"],
+      phone: ["mobile", "mobileno", "phone_no", "phoneno", "contact"],
+      joiningDate: ["joining_date", "dateofjoining", "date_of_joining"],
+    };
+    const aliasList = aliases[col] ?? [];
+    for (const alias of aliasList) {
+      const idx = header.findIndex(
+        (h) => h.toLowerCase() === alias.toLowerCase(),
+      );
+      if (idx !== -1) return idx;
+    }
+    return -1;
+  }
+
+  function rowToStaff(
+    row: string[],
+    headers: string[],
+  ): Partial<StaffRecord> & Record<string, unknown> {
+    function get(col: string): string {
+      const i = colIdx(headers, col);
+      return i !== -1 ? (row[i] ?? "").trim() : "";
+    }
+    const salary = get("salary");
+    return {
+      empId: get("empId") || get("fullName").slice(0, 8).replace(/\s/g, ""),
+      name: get("fullName"),
+      designation: get("designation") || "Teacher",
+      department: get("department") || "Teaching",
+      subject: get("subject"),
+      mobile: get("phone"),
+      email: get("email"),
+      address: get("address"),
+      gender: get("gender") || "Male",
+      dob: get("dob"),
+      joiningDate: get("joiningDate"),
+      salary: salary ? Number(salary.replace(/[^0-9.]/g, "")) : undefined,
+      qualification: get("qualification"),
+      experience: get("experience"),
+      emergencyContact: get("emergencyContact"),
+      bankAccount: get("bankAccount"),
+      ifscCode: get("ifscCode"),
+      status: "active",
+    };
+  }
+
+  async function handleImport() {
+    if (importRows.length === 0) return;
+    const total = importRows.length;
+    setImportProgress({ done: 0, total, failed: 0, running: true });
+
+    let done = 0;
+    let failed = 0;
+    const batchSize = 10;
+
+    for (let i = 0; i < importRows.length; i += batchSize) {
+      const batch = importRows.slice(i, i + batchSize);
+      await Promise.allSettled(
+        batch.map(async (row) => {
+          const record = rowToStaff(row, importHeaders);
+          if (!record.name) {
+            failed++;
+            return;
+          }
+          try {
+            await phpApiService.addStaff(record);
+            done++;
+          } catch {
+            failed++;
+          }
+        }),
+      );
+      setImportProgress((p) => ({ ...p, done: i + batch.length - failed }));
+    }
+
+    setImportProgress({ done, total, failed, running: false });
+    toast.success(
+      `Imported ${done} staff successfully${failed > 0 ? `, ${failed} failed` : ""}`,
+    );
+    void loadStaff();
+  }
+
+  function closeImport() {
+    setShowImport(false);
+    setImportRows([]);
+    setImportHeaders([]);
+    setImportFileName("");
+    setImportProgress({ done: 0, total: 0, failed: 0, running: false });
+  }
+
   return (
     <div className="space-y-4 p-4 lg:p-6">
       {/* Header */}
@@ -365,9 +578,19 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
           <Download className="w-4 h-4 mr-1.5" /> Export
         </Button>
         {canWrite && (
-          <Button size="sm" onClick={openAdd} data-ocid="staff.add.button">
-            <Plus className="w-4 h-4 mr-1.5" /> Add Staff
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowImport(true)}
+              data-ocid="staff.import.button"
+            >
+              <Upload className="w-4 h-4 mr-1.5" /> Import Staff
+            </Button>
+            <Button size="sm" onClick={openAdd} data-ocid="staff.add.button">
+              <Plus className="w-4 h-4 mr-1.5" /> Add Staff
+            </Button>
+          </>
         )}
       </div>
 
@@ -748,6 +971,213 @@ export default function StaffDirectory({ onNavigate: _onNavigate }: Props) {
                   "Update Staff"
                 ) : (
                   "Add Staff"
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Staff Modal */}
+      {showImport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          data-ocid="staff.import.dialog"
+        >
+          <div className="bg-card rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-5 border-b border-border">
+              <div>
+                <h2 className="font-display font-semibold text-foreground text-lg">
+                  Import Staff
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  CSV format recommended. Download the template to see required
+                  columns.
+                </p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={closeImport}
+                data-ocid="staff.import.close_button"
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Step 1 — Download template */}
+              <div className="flex items-center justify-between rounded-lg bg-muted/30 border border-border px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Step 1 — Download Template
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Fill in your staff data and save as CSV
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={downloadTemplate}
+                  data-ocid="staff.import.template_button"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1.5" /> Template
+                </Button>
+              </div>
+
+              {/* Step 2 — Choose file */}
+              <div className="space-y-2">
+                <p className="text-sm font-medium text-foreground">
+                  Step 2 — Select CSV File
+                </p>
+                <label
+                  htmlFor="staff-import-file"
+                  className="rounded-lg border-2 border-dashed border-border hover:border-primary/40 transition-colors cursor-pointer flex flex-col items-center justify-center py-8 gap-2 bg-muted/20 w-full"
+                  data-ocid="staff.import.dropzone"
+                >
+                  <Upload className="w-8 h-8 text-muted-foreground/40" />
+                  {importFileName ? (
+                    <p className="text-sm text-foreground font-medium">
+                      {importFileName}
+                    </p>
+                  ) : (
+                    <>
+                      <p className="text-sm text-muted-foreground">
+                        Click to select a CSV file
+                      </p>
+                      <p className="text-xs text-muted-foreground/70">
+                        .csv format (UTF-8 recommended)
+                      </p>
+                    </>
+                  )}
+                  <input
+                    id="staff-import-file"
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    className="hidden"
+                    onChange={handleFileSelect}
+                  />
+                </label>
+              </div>
+
+              {/* Preview */}
+              {importRows.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-foreground">
+                      Preview — {importRows.length} records found
+                    </p>
+                    <Badge variant="secondary" className="text-xs">
+                      First 5 rows shown
+                    </Badge>
+                  </div>
+                  <div className="rounded-lg border border-border overflow-x-auto max-h-48">
+                    <table className="text-xs w-full">
+                      <thead className="bg-muted/60 sticky top-0">
+                        <tr>
+                          {importHeaders.slice(0, 8).map((h) => (
+                            <th
+                              key={h}
+                              className="p-2 text-left font-semibold text-muted-foreground whitespace-nowrap border-r border-border last:border-r-0"
+                            >
+                              {h}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {importRows.slice(0, 5).map((row, ri) => {
+                          const rowKey = row[0] || `row${ri}`;
+                          return (
+                            <tr
+                              key={rowKey}
+                              className="border-t border-border hover:bg-muted/20"
+                            >
+                              {row.slice(0, 8).map((cell, ci) => (
+                                <td
+                                  key={`${rowKey}-${importHeaders[ci] ?? ci}`}
+                                  className="p-2 text-muted-foreground border-r border-border last:border-r-0 max-w-[100px] truncate"
+                                >
+                                  {cell || "—"}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Progress */}
+              {importProgress.running && (
+                <div
+                  className="space-y-2"
+                  data-ocid="staff.import.loading_state"
+                >
+                  <p className="text-sm text-foreground">
+                    Saving {importProgress.done} of {importProgress.total}…
+                  </p>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300 rounded-full"
+                      style={{
+                        width: `${importProgress.total > 0 ? (importProgress.done / importProgress.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Done summary */}
+              {!importProgress.running &&
+                importProgress.total > 0 &&
+                importProgress.done > 0 && (
+                  <div
+                    className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 px-4 py-3 text-sm"
+                    data-ocid="staff.import.success_state"
+                  >
+                    <span className="text-emerald-700 font-medium">
+                      ✓ Imported {importProgress.done} staff successfully
+                    </span>
+                    {importProgress.failed > 0 && (
+                      <span className="text-amber-600 ml-2">
+                        · {importProgress.failed} failed
+                      </span>
+                    )}
+                  </div>
+                )}
+            </div>
+
+            <div className="flex justify-end gap-3 p-5 border-t border-border">
+              <Button
+                variant="outline"
+                onClick={closeImport}
+                data-ocid="staff.import.cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => void handleImport()}
+                disabled={importRows.length === 0 || importProgress.running}
+                data-ocid="staff.import.submit_button"
+              >
+                {importProgress.running ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Importing…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Import{" "}
+                    {importRows.length > 0
+                      ? `${importRows.length} Staff Members`
+                      : "Staff"}
+                  </>
                 )}
               </Button>
             </div>

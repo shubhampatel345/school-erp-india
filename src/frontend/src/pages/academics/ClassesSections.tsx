@@ -2,6 +2,7 @@
  * ClassesSections — Direct API rebuild
  * All CRUD via phpApiService.getClasses/saveClass/addSection/getSections.
  * Waits for HTTP 200 before success. Indian class order (Nursery → Class 12).
+ * Supports Enable/Disable toggle per class.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,9 @@ interface ClassModalState {
   customName: string;
   sections: string[];
   newSection: string;
+  isEnabled: boolean;
+  /** Error message to show inside modal without closing */
+  saveError: string | null;
 }
 
 interface SectionModalState {
@@ -90,6 +94,8 @@ export default function ClassesSections() {
     customName: "",
     sections: [],
     newSection: "",
+    isEnabled: true,
+    saveError: null,
   });
   const [sectionModal, setSectionModal] = useState<SectionModalState>({
     open: false,
@@ -127,6 +133,8 @@ export default function ClassesSections() {
       customName: "",
       sections: ["A"],
       newSection: "",
+      isEnabled: true,
+      saveError: null,
     });
   }
 
@@ -138,6 +146,8 @@ export default function ClassesSections() {
       customName: CLASS_ORDER.includes(cls.className) ? "" : cls.className,
       sections: [...(cls.sections as string[])],
       newSection: "",
+      isEnabled: (cls as Record<string, unknown>).isEnabled !== false,
+      saveError: null,
     });
   }
 
@@ -165,42 +175,70 @@ export default function ClassesSections() {
   }
 
   async function handleSaveClass() {
+    // Clear previous error
+    setClassModal((p) => ({ ...p, saveError: null }));
+
     const finalName =
       classModal.name === "__custom__"
         ? classModal.customName.trim()
         : classModal.name;
     if (!finalName) {
-      toast.error("Class name is required");
+      setClassModal((p) => ({ ...p, saveError: "Class name is required." }));
       return;
     }
     if (classModal.sections.length === 0) {
-      toast.error("At least one section is required");
+      setClassModal((p) => ({
+        ...p,
+        saveError: "At least one section is required.",
+      }));
       return;
     }
     if (!classModal.editing && usedClassNames.has(finalName)) {
-      toast.error(`${displayClassName(finalName)} already exists`);
+      setClassModal((p) => ({
+        ...p,
+        saveError: `${displayClassName(finalName)} already exists.`,
+      }));
       return;
     }
     setSaving(true);
     try {
       if (classModal.editing) {
+        // PUT classes/update — PHP expects 'name' and 'is_enabled'
         await phpApiService.put("classes/update", {
           id: classModal.editing.id,
-          className: finalName,
+          name: finalName,
+          className: finalName, // send both for broad PHP compatibility
           sections: classModal.sections,
+          is_enabled: classModal.isEnabled ? 1 : 0,
+          isEnabled: classModal.isEnabled,
         });
         toast.success(`${displayClassName(finalName)} updated`);
       } else {
+        // POST classes/add — PHP expects 'name' (not 'className') and 'is_enabled'
         await phpApiService.addClass({
-          className: finalName,
+          name: finalName,
+          className: finalName, // send both for broad compatibility
           sections: classModal.sections,
+          is_enabled: classModal.isEnabled ? 1 : 0,
+          isEnabled: classModal.isEnabled,
         });
         toast.success(`${displayClassName(finalName)} added`);
       }
       setClassModal((prev) => ({ ...prev, open: false }));
       loadClasses();
-    } catch {
-      toast.error("Failed to save class. Please retry.");
+    } catch (err) {
+      // Show error inside modal — do NOT close and do NOT show "Session expired"
+      let msg = "Failed to save class. Please retry.";
+      if (err instanceof Error) {
+        // Exclude generic session expired message from inline form error
+        const isSessionError =
+          err.message.toLowerCase().includes("session expired") ||
+          err.message.toLowerCase().includes("please log in");
+        msg = isSessionError
+          ? "Authentication error — please refresh the page and try again."
+          : err.message;
+      }
+      setClassModal((p) => ({ ...p, saveError: msg }));
     } finally {
       setSaving(false);
     }
@@ -222,6 +260,23 @@ export default function ClassesSections() {
       toast.error("Failed to delete class. Please retry.");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function handleToggleEnabled(cls: ClassRecord) {
+    const nowEnabled = (cls as Record<string, unknown>).isEnabled !== false;
+    try {
+      await phpApiService.put("classes/update", {
+        id: cls.id,
+        is_enabled: nowEnabled ? 0 : 1, // send 0/1 for PHP
+        isEnabled: !nowEnabled, // send boolean for broad compatibility
+      });
+      toast.success(
+        `${displayClassName(cls.className)} ${!nowEnabled ? "enabled" : "disabled"}`,
+      );
+      loadClasses();
+    } catch {
+      toast.error("Failed to update class status.");
     }
   }
 
@@ -323,74 +378,101 @@ export default function ClassesSections() {
         </Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {sortedClasses.map((cls, idx) => (
-            <Card
-              key={cls.id}
-              className="p-4"
-              data-ocid={`classes.item.${idx + 1}`}
-            >
-              <div className="flex items-start justify-between gap-2 mb-3">
-                <div>
-                  <h3 className="font-display font-semibold text-foreground">
-                    {displayClassName(cls.className)}
-                  </h3>
-                  <p className="text-xs text-muted-foreground">
-                    {(cls.sections as string[]).length} section
-                    {(cls.sections as string[]).length !== 1 ? "s" : ""}
-                  </p>
-                </div>
-                {canWrite && (
-                  <div className="flex gap-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => openEditClass(cls)}
-                      data-ocid={`classes.edit.${idx + 1}`}
-                      aria-label="Edit class"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-destructive hover:text-destructive"
-                      disabled={deletingId === cls.id}
-                      onClick={() => void handleDeleteClass(cls)}
-                      data-ocid={`classes.delete.${idx + 1}`}
-                      aria-label="Delete class"
-                    >
-                      {deletingId === cls.id ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Trash2 className="w-3 h-3" />
-                      )}
-                    </Button>
+          {sortedClasses.map((cls, idx) => {
+            const isEnabled =
+              (cls as Record<string, unknown>).isEnabled !== false;
+            return (
+              <Card
+                key={cls.id}
+                className={`p-4 transition-opacity ${!isEnabled ? "opacity-60" : ""}`}
+                data-ocid={`classes.item.${idx + 1}`}
+              >
+                <div className="flex items-start justify-between gap-2 mb-3">
+                  <div>
+                    <h3 className="font-display font-semibold text-foreground">
+                      {displayClassName(cls.className)}
+                    </h3>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <p className="text-xs text-muted-foreground">
+                        {(cls.sections as string[]).length} section
+                        {(cls.sections as string[]).length !== 1 ? "s" : ""}
+                      </p>
+                      {/* Enabled/Disabled badge */}
+                      <Badge
+                        variant={isEnabled ? "default" : "secondary"}
+                        className={`text-[9px] px-1.5 py-0 cursor-pointer select-none ${
+                          isEnabled
+                            ? "bg-emerald-500/10 text-emerald-700 border-emerald-500/30 hover:bg-emerald-500/20"
+                            : "hover:bg-muted"
+                        }`}
+                        onClick={() =>
+                          canWrite ? void handleToggleEnabled(cls) : undefined
+                        }
+                        title={
+                          canWrite
+                            ? isEnabled
+                              ? "Click to disable"
+                              : "Click to enable"
+                            : undefined
+                        }
+                      >
+                        {isEnabled ? "Enabled" : "Disabled"}
+                      </Badge>
+                    </div>
                   </div>
+                  {canWrite && (
+                    <div className="flex gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => openEditClass(cls)}
+                        data-ocid={`classes.edit.${idx + 1}`}
+                        aria-label="Edit class"
+                      >
+                        <Edit2 className="w-3 h-3" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        disabled={deletingId === cls.id}
+                        onClick={() => void handleDeleteClass(cls)}
+                        data-ocid={`classes.delete.${idx + 1}`}
+                        aria-label="Delete class"
+                      >
+                        {deletingId === cls.id ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Trash2 className="w-3 h-3" />
+                        )}
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {(cls.sections as string[]).map((s) => (
+                    <Badge key={s} variant="secondary" className="text-xs">
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
+
+                {canWrite && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="w-full h-7 text-xs"
+                    onClick={() => openAddSection(cls)}
+                    data-ocid={`classes.add-section.${idx + 1}`}
+                  >
+                    <Plus className="w-3 h-3 mr-1" /> Add Section
+                  </Button>
                 )}
-              </div>
-
-              <div className="flex flex-wrap gap-1.5 mb-3">
-                {(cls.sections as string[]).map((s) => (
-                  <Badge key={s} variant="secondary" className="text-xs">
-                    {s}
-                  </Badge>
-                ))}
-              </div>
-
-              {canWrite && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="w-full h-7 text-xs"
-                  onClick={() => openAddSection(cls)}
-                  data-ocid={`classes.add-section.${idx + 1}`}
-                >
-                  <Plus className="w-3 h-3 mr-1" /> Add Section
-                </Button>
-              )}
-            </Card>
-          ))}
+              </Card>
+            );
+          })}
         </div>
       )}
 
@@ -416,6 +498,7 @@ export default function ClassesSections() {
             </div>
 
             <div className="p-5 space-y-4">
+              {/* Class name picker */}
               <div className="space-y-1">
                 <Label className="text-xs">Class Name *</Label>
                 <div className="grid grid-cols-4 gap-1.5">
@@ -428,6 +511,7 @@ export default function ClassesSections() {
                           ...p,
                           name: c,
                           customName: "",
+                          saveError: null,
                         }))
                       }
                       disabled={!classModal.editing && usedClassNames.has(c)}
@@ -443,7 +527,11 @@ export default function ClassesSections() {
                   <button
                     type="button"
                     onClick={() =>
-                      setClassModal((p) => ({ ...p, name: "__custom__" }))
+                      setClassModal((p) => ({
+                        ...p,
+                        name: "__custom__",
+                        saveError: null,
+                      }))
                     }
                     className={`py-1.5 rounded-md text-xs font-medium border transition-colors col-span-2 ${
                       classModal.name === "__custom__"
@@ -463,6 +551,7 @@ export default function ClassesSections() {
                       setClassModal((p) => ({
                         ...p,
                         customName: e.target.value,
+                        saveError: null,
                       }))
                     }
                     data-ocid="classes.custom-name.input"
@@ -470,6 +559,7 @@ export default function ClassesSections() {
                 )}
               </div>
 
+              {/* Sections */}
               <div className="space-y-2">
                 <Label className="text-xs">Sections *</Label>
                 <div className="flex flex-wrap gap-1.5">
@@ -542,6 +632,50 @@ export default function ClassesSections() {
                     ))}
                 </div>
               </div>
+
+              {/* Enable / Disable toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Class Status
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {classModal.isEnabled
+                      ? "This class is active and visible in dropdowns"
+                      : "This class is hidden from student dropdowns"}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={classModal.isEnabled}
+                  onClick={() =>
+                    setClassModal((p) => ({
+                      ...p,
+                      isEnabled: !p.isEnabled,
+                    }))
+                  }
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full border-2 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
+                    classModal.isEnabled
+                      ? "bg-primary border-primary"
+                      : "bg-muted border-border"
+                  }`}
+                  data-ocid="classes.enabled.toggle"
+                >
+                  <span
+                    className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                      classModal.isEnabled ? "translate-x-5" : "translate-x-0.5"
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {/* Inline save error */}
+              {classModal.saveError && (
+                <div className="rounded-lg bg-destructive/10 border border-destructive/30 px-4 py-2.5 text-sm text-destructive">
+                  {classModal.saveError}
+                </div>
+              )}
             </div>
 
             <div className="flex justify-end gap-3 p-5 border-t border-border">
@@ -554,7 +688,13 @@ export default function ClassesSections() {
               </Button>
               <Button
                 onClick={() => void handleSaveClass()}
-                disabled={saving}
+                disabled={
+                  saving ||
+                  // Disabled only when class name is not yet selected
+                  classModal.name === "" ||
+                  (classModal.name === "__custom__" &&
+                    classModal.customName.trim() === "")
+                }
                 data-ocid="classes.submit_button"
               >
                 {saving ? (
@@ -563,8 +703,8 @@ export default function ClassesSections() {
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 className="w-4 h-4 mr-2" />{" "}
-                    {classModal.editing ? "Update" : "Add Class"}
+                    <CheckCircle2 className="w-4 h-4 mr-2" />
+                    {classModal.editing ? "Save Class" : "Save Class"}
                   </>
                 )}
               </Button>
