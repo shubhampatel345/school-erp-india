@@ -75,6 +75,7 @@ $publicRoutes = [
     'auth'    => ['login', 'refresh'],
     'sync'    => ['status'],          // ← health check must be public; push/batch/pull require JWT
     'migrate' => ['run', 'seed', 'status', 'reset-superadmin', ''],  // ← setup/recovery endpoints
+    'debug'   => ['token'],           // ← diagnostic: test JWT extraction without side effects
 ];
 
 $isPublic = false;
@@ -91,20 +92,39 @@ if (isset($publicRoutes[$resource])) {
 // ── JWT validation ────────────────────────────────────────────────────────────
 $auth = null;
 if (!$isPublic) {
+    // Extract Authorization header using every possible source cPanel Apache may use
     $authHeader = '';
-    if (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
         $authHeader = $_SERVER['HTTP_AUTHORIZATION'];
-    } elseif (isset($_SERVER['HTTP_X_AUTHORIZATION'])) {
+    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        // cPanel Apache mod_rewrite redirect strips HTTP_AUTHORIZATION; it ends up here
+        $authHeader = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
         $authHeader = $_SERVER['HTTP_X_AUTHORIZATION'];
-    } elseif (function_exists('apache_request_headers')) {
-        $apacheHeaders = apache_request_headers();
-        $authHeader = $apacheHeaders['Authorization'] ?? $apacheHeaders['authorization'] ?? '';
+    } else {
+        // getallheaders() is available on Apache with mod_php; case-insensitive scan
+        if (function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strtolower($name) === 'authorization') {
+                    $authHeader = $value;
+                    break;
+                }
+            }
+        }
+        // Fallback: apache_request_headers() (older Apache builds)
+        if ($authHeader === '' && function_exists('apache_request_headers')) {
+            $apacheHeaders = apache_request_headers();
+            $authHeader = $apacheHeaders['Authorization'] ?? $apacheHeaders['authorization'] ?? '';
+        }
     }
+
+    $authHeader = trim($authHeader);
 
     if (!preg_match('/^Bearer\s+(.+)$/i', $authHeader, $m)) {
         json_error('Missing or invalid Authorization header. Please login first.', 401);
     }
-    $auth = jwt_verify($m[1]);
+    $rawToken = trim($m[1]);
+    $auth = jwt_verify($rawToken);
     if (!$auth) {
         json_error('Token expired or invalid. Please login again.', 401);
     }
@@ -174,6 +194,44 @@ $GLOBALS['route'] = [
     'role'     => $auth['role']    ?? '',
 ];
 
+// ── debug/token — JWT diagnostic (always available; read-only) ────────────────
+if ($resource === 'debug' && $sub === 'token') {
+    $dbgHeader = '';
+    foreach ([
+        'HTTP_AUTHORIZATION',
+        'REDIRECT_HTTP_AUTHORIZATION',
+        'HTTP_X_AUTHORIZATION',
+    ] as $key) {
+        if (!empty($_SERVER[$key])) { $dbgHeader = $_SERVER[$key]; break; }
+    }
+    if ($dbgHeader === '' && function_exists('getallheaders')) {
+        foreach (getallheaders() as $n => $v) {
+            if (strtolower($n) === 'authorization') { $dbgHeader = $v; break; }
+        }
+    }
+    if ($dbgHeader === '' && function_exists('apache_request_headers')) {
+        $ah = apache_request_headers();
+        $dbgHeader = $ah['Authorization'] ?? $ah['authorization'] ?? '';
+    }
+    $dbgHeader = trim($dbgHeader);
+    if (!preg_match('/^Bearer\s+(.+)$/i', $dbgHeader, $dbgM)) {
+        json_success(['valid' => false, 'reason' => 'No Bearer token found in Authorization header', 'header_found' => $dbgHeader !== '', 'user' => null]);
+    }
+    $dbgToken = trim($dbgM[1]);
+    $dbgData  = jwt_verify($dbgToken);
+    if (!$dbgData) {
+        // Try to decode without verifying to get expiry info
+        $parts = explode('.', $dbgToken);
+        $rawPayload = (count($parts) === 3) ? json_decode(base64url_decode($parts[1]), true) : null;
+        $reason = 'Signature mismatch or token malformed';
+        if ($rawPayload && ($rawPayload['exp'] ?? 0) < time()) {
+            $reason = 'Token expired at ' . date('c', $rawPayload['exp']);
+        }
+        json_success(['valid' => false, 'reason' => $reason, 'user' => $rawPayload]);
+    }
+    json_success(['valid' => true, 'reason' => 'Token is valid', 'user' => $dbgData]);
+}
+
 require $handlerFile;
 
 // ── JWT helpers ───────────────────────────────────────────────────────────────
@@ -186,13 +244,16 @@ function jwt_encode(array $payload): string {
 }
 
 function jwt_verify(string $token): ?array {
+    $token = trim($token);
     $parts = explode('.', $token);
     if (count($parts) !== 3) return null;
     [$header, $payload, $sig] = $parts;
     $expected = base64url_encode(hash_hmac('sha256', "$header.$payload", JWT_SECRET, true));
     if (!hash_equals($expected, $sig)) return null;
     $data = json_decode(base64url_decode($payload), true);
-    if (!$data || ($data['exp'] ?? 0) < time()) return null;
+    if (!is_array($data)) return null;
+    // Allow 30-second clock skew tolerance
+    if (($data['exp'] ?? 0) < (time() - 30)) return null;
     return $data;
 }
 

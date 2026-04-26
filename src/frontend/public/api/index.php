@@ -50,13 +50,15 @@ function createJWT(array $payload): string {
     return "$header.$body.$sig";
 }
 function verifyJWT(string $token): bool {
+    $token = trim($token);
     $parts = explode('.', $token);
     if (count($parts) !== 3) return false;
     [$header, $body, $sig] = $parts;
     $expected = base64url_encode(hash_hmac('sha256', "$header.$body", JWT_SECRET, true));
     if (!hash_equals($expected, $sig)) return false;
     $payload = json_decode(base64url_decode($body), true);
-    return isset($payload['exp']) && $payload['exp'] > time();
+    // Allow 30-second clock skew tolerance
+    return is_array($payload) && isset($payload['exp']) && $payload['exp'] >= (time() - 30);
 }
 function decodeJWT(string $token): ?array {
     $parts = explode('.', $token);
@@ -82,13 +84,29 @@ function body(): array {
     return $b;
 }
 function requireAuth(): array {
-    $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (!$h && function_exists('apache_request_headers')) {
-        $headers = apache_request_headers();
-        $h = $headers['Authorization'] ?? '';
+    // Extract Authorization header using every possible source cPanel Apache may use
+    $h = '';
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $h = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        // cPanel Apache mod_rewrite redirect strips HTTP_AUTHORIZATION; it ends up here
+        $h = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
+        $h = $_SERVER['HTTP_X_AUTHORIZATION'];
+    } else {
+        if (function_exists('getallheaders')) {
+            foreach (getallheaders() as $name => $value) {
+                if (strtolower($name) === 'authorization') { $h = $value; break; }
+            }
+        }
+        if ($h === '' && function_exists('apache_request_headers')) {
+            $headers = apache_request_headers();
+            $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        }
     }
+    $h = trim($h);
     $token = '';
-    if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+    if (preg_match('/^Bearer\s+(.+)$/i', $h, $m)) $token = trim($m[1]);
     if (!$token || !verifyJWT($token)) json_error('Unauthorized', 401);
     return decodeJWT($token);
 }
