@@ -71,7 +71,7 @@ function json_out(array $data, int $code = 200): void {
     exit;
 }
 function json_error(string $msg, int $code = 400): void {
-    json_out(['success' => false, 'message' => $msg, 'error' => $msg], $code);
+    json_out(['success' => false, 'message' => $msg, 'error' => $msg, 'data' => null], $code);
 }
 function body(): array {
     static $b = null;
@@ -102,7 +102,7 @@ $method  = $_SERVER['REQUEST_METHOD'];
 
 // ─── PING (public, no auth) ───────────────────────────────────────────────────
 if ($route === 'ping') {
-    echo json_encode(['success' => true, 'message' => 'API is working', 'version' => '1.0']);
+    echo json_encode(['success' => true, 'message' => 'SHUBH ERP API is online', 'version' => API_VERSION, 'timestamp' => date('c')]);
     exit;
 }
 
@@ -545,10 +545,12 @@ if ($section === 'auth') {
         $expires = date('Y-m-d H:i:s', time() + REFRESH_TOKEN_EXPIRY);
         $db->prepare("INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)")->execute([$u['id'], $refreshHash, $expires]);
         $perms = json_decode($u['permissions_json'] ?? '{}', true) ?? [];
+        $expiresAt = (time() + JWT_EXPIRY) * 1000; // milliseconds for frontend
         json_out([
             'success' => true,
             'token'   => $token,
             'refreshToken' => $refreshToken,
+            'expiresAt' => $expiresAt,
             'user'    => ['id' => $u['id'], 'name' => $u['name'], 'role' => $u['role'], 'permissions' => $perms, 'schoolId' => $u['school_id']],
         ]);
     }
@@ -1898,8 +1900,152 @@ if ($section === 'notifications') {
     json_error('Unknown notifications route');
 }
 
+// ─── CLASSES (direct route: ?route=classes/...) ──────────────────────────────
+if ($section === 'classes') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'list' && $method === 'GET') {
+        $sessionId = $_GET['session_id'] ?? null;
+        $where  = "school_id = $schoolId";
+        $params = [];
+        if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
+        $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
+        $stmt->execute($params);
+        $classes = $stmt->fetchAll();
+        // Attach sections for each class
+        foreach ($classes as &$cls) {
+            $secStmt = $db->prepare("SELECT name FROM sections WHERE class_id=? AND school_id=? ORDER BY name");
+            $secStmt->execute([$cls['id'], $schoolId]);
+            $cls['sections'] = array_column($secStmt->fetchAll(), 'name');
+        }
+        json_out(['success' => true, 'classes' => $classes]);
+    }
+
+    if ($action === 'add' && $method === 'POST') {
+        $b         = body();
+        $name      = trim($b['name'] ?? '');
+        $sections  = $b['sections'] ?? [];
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
+        $sessionId = $b['session_id'] ?? null;
+        if (!$name) json_error('Class name is required');
+        // Determine display order (max + 1)
+        $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
+        $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
+           ->execute([$schoolId, $sessionId, $name, $maxOrder + 1, $isEnabled]);
+        $classId = (int)$db->lastInsertId();
+        // Insert sections if provided
+        $sectionNames = [];
+        if (!empty($sections) && is_array($sections)) {
+            $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+            foreach ($sections as $sec) {
+                $sec = trim($sec);
+                if ($sec) {
+                    $secStmt->execute([$schoolId, $classId, $sec]);
+                    $sectionNames[] = $sec;
+                }
+            }
+        }
+        json_out(['success' => true, 'data' => [
+            'id'         => (string)$classId,
+            'name'       => $name,
+            'sections'   => $sectionNames,
+            'is_enabled' => (bool)$isEnabled,
+        ]]);
+    }
+
+    if ($action === 'save' && $method === 'POST') {
+        $b         = body();
+        $id        = (int)($b['id'] ?? 0);
+        $name      = trim($b['name'] ?? '');
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
+        $sessionId = $b['session_id'] ?? null;
+        if ($id) {
+            $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=?, is_enabled=? WHERE id=? AND school_id=?")
+               ->execute([$name, (int)($b['display_order'] ?? 0), $sessionId, $isEnabled, $id, $schoolId]);
+        } else {
+            $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
+            $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
+               ->execute([$schoolId, $sessionId, $name, $maxOrder + 1, $isEnabled]);
+            $id = (int)$db->lastInsertId();
+        }
+        json_out(['success' => true, 'id' => $id]);
+    }
+
+    if ($action === 'delete' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $db->prepare("DELETE FROM classes WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    json_error("Route not found: $route", 404);
+}
+
+// ─── USERS (direct route: ?route=users/...) ───────────────────────────────────
+if ($section === 'users') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'list' && $method === 'GET') {
+        $stmt = $db->prepare("SELECT id, school_id, username, name, role, email, mobile, is_active, created_at FROM users WHERE school_id=? ORDER BY name");
+        $stmt->execute([$schoolId]);
+        json_out(['success' => true, 'users' => $stmt->fetchAll()]);
+    }
+
+    if ($action === 'add' && $method === 'POST') {
+        $b        = body();
+        $fullName = trim($b['fullName'] ?? $b['name'] ?? '');
+        $username = trim($b['username'] ?? '');
+        $email    = trim($b['email'] ?? '');
+        $phone    = trim($b['phone'] ?? $b['mobile'] ?? '');
+        $password = $b['password'] ?? '';
+        $role     = $b['role'] ?? 'teacher';
+        if (!$username) json_error('Username is required');
+        if (!$password) json_error('Password is required');
+        // Check duplicate
+        $dup = $db->prepare("SELECT id FROM users WHERE (username=? OR (email!='' AND email=?)) AND school_id=? LIMIT 1");
+        $dup->execute([$username, $email ?: '__no_email__', $schoolId]);
+        if ($dup->fetch()) json_error('Username or email already exists');
+        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, email, mobile, is_active) VALUES (?,?,?,?,?,?,?,1)")
+           ->execute([$schoolId, $username, $hash, $fullName, $role, $email, $phone]);
+        $newId = (int)$db->lastInsertId();
+        json_out(['success' => true, 'data' => [
+            'id'       => (string)$newId,
+            'username' => $username,
+            'name'     => $fullName,
+            'role'     => $role,
+            'email'    => $email,
+        ]]);
+    }
+
+    if ($action === 'update' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $b  = body();
+        $db->prepare("UPDATE users SET name=?, role=?, email=?, mobile=?, is_active=?, updated_at=NOW() WHERE id=? AND school_id=?")
+           ->execute([$b['name'] ?? '', $b['role'] ?? 'teacher', $b['email'] ?? '', $b['mobile'] ?? '', (int)($b['is_active'] ?? 1), $id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'delete' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $db->prepare("UPDATE users SET is_active=0 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'reset-password' && $method === 'POST') {
+        $id   = (int)($_GET['id'] ?? 0);
+        $b    = body();
+        $hash = password_hash($b['password'] ?? 'changeme123', PASSWORD_BCRYPT);
+        $db->prepare("UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=? AND school_id=?")->execute([$hash, $id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    json_error("Route not found: $route", 404);
+}
+
 // ─── 404 ────────────────────────────────────────────────────────────────────
-json_error("Route not found: $route", 404);
+json_out(['success' => false, 'error' => "Route not found: $route", 'data' => null], 404);
 
 } catch (Throwable $e) {
     http_response_code(500);

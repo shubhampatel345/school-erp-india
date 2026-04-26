@@ -142,11 +142,20 @@ export default function UserManagement() {
     setError("");
     try {
       if (modal === "add") {
-        await phpApiService.createUser({ ...form });
+        await phpApiService.createUser({
+          username: form.username,
+          password: form.password,
+          name: form.name,
+          fullName: form.name,
+          email: form.email,
+          phone: form.phone,
+          role: form.role,
+        });
       } else if (modal === "edit" && selected) {
         await phpApiService.updateUser({
           id: selected.id,
           name: form.name,
+          fullName: form.name,
           email: form.email,
           phone: form.phone,
           role: form.role,
@@ -155,7 +164,14 @@ export default function UserManagement() {
       load();
       setModal(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to save user");
+      const msg = e instanceof Error ? e.message : "Failed to save user";
+      // Never show auth-internal messages to the user — give a clear action
+      setError(
+        msg.toLowerCase().includes("expired") ||
+          msg.toLowerCase().includes("log in")
+          ? "Could not save — check your server connection and try again."
+          : msg,
+      );
     } finally {
       setSaving(false);
     }
@@ -319,7 +335,7 @@ export default function UserManagement() {
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0"
-                        onClick={() => handleToggleActive(u)}
+                        onClick={() => void handleToggleActive(u)}
                         data-ocid={`user-mgmt.toggle_button.${idx + 1}`}
                       >
                         {u.isActive !== false ? (
@@ -332,7 +348,7 @@ export default function UserManagement() {
                         variant="ghost"
                         size="sm"
                         className="h-7 w-7 p-0 text-destructive hover:text-destructive"
-                        onClick={() => handleDelete(u)}
+                        onClick={() => void handleDelete(u)}
                         data-ocid={`user-mgmt.delete_button.${idx + 1}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -413,7 +429,7 @@ export default function UserManagement() {
                 Cancel
               </Button>
               <Button
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={saving}
                 data-ocid="user-modal.confirm_button"
               >
@@ -461,7 +477,7 @@ export default function UserManagement() {
                 Cancel
               </Button>
               <Button
-                onClick={handleReset}
+                onClick={() => void handleReset()}
                 disabled={saving || !newPw}
                 data-ocid="user-reset.confirm_button"
               >

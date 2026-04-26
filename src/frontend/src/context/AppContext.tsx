@@ -520,9 +520,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const handleTokenExpired = async () => {
       // Guard 1: never handle when nobody is logged in
       if (!stateRef.current.currentUser) return;
-      // Guard 2: never show modal within 10 min of fresh login
+      // Guard 2: superadmin uses local auth — never has a PHP token to expire
+      if (stateRef.current.currentUser.role === "superadmin") return;
+      // Guard 3: never show modal within 10 min of fresh login
       if (isWithinGracePeriod(10)) return;
-      // Guard 3: attempt silent refresh first
+      // Guard 4: attempt silent refresh first
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
       // All refresh attempts failed — show modal only for mid-session expiry
@@ -984,6 +986,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       */}
       {showReLoginModal &&
         state.currentUser !== null &&
+        state.currentUser.role !== "superadmin" &&
         !isWithinGracePeriod(10) && <ReLoginModal onDismiss={logout} />}
     </AppContext.Provider>
   );

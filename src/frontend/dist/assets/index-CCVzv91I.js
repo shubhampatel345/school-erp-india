@@ -14166,6 +14166,21 @@ class PhpApiService {
     __publicField(this, "isRefreshing", false);
     __publicField(this, "refreshQueue", []);
   }
+  /**
+   * Returns true if the current user is superadmin (locally authenticated).
+   * Superadmin does NOT use a PHP JWT token — they authenticate locally.
+   * When in superadmin mode, ALL token validation is bypassed.
+   */
+  isSuperAdmin() {
+    try {
+      const raw = sessionStorage.getItem("shubh_current_user");
+      if (!raw) return false;
+      const u2 = JSON.parse(raw);
+      return u2.role === "superadmin";
+    } catch {
+      return false;
+    }
+  }
   // ── Token management ───────────────────────────────────────────────────────
   getToken() {
     if (this._token) return this._token;
@@ -14246,6 +14261,7 @@ class PhpApiService {
    * Tokens without an exp claim are treated as always valid.
    */
   isTokenExpired() {
+    if (this.isSuperAdmin()) return false;
     const token = this.getToken();
     if (!token) return true;
     const payload = decodeJwtPayload(token);
@@ -14269,10 +14285,12 @@ class PhpApiService {
   }
   /**
    * Ensure the current token is valid.
+   * Superadmin is always considered valid (no PHP token needed).
    * Skips expiry check if within the 10-minute grace period after login.
    * Returns true if valid (or refreshed), false if all refresh attempts failed.
    */
   async ensureValidToken() {
+    if (this.isSuperAdmin()) return true;
     if (this.isWithinGracePeriod(10)) return true;
     if (!this.isTokenExpired()) return true;
     return this.silentRefresh();
@@ -14284,6 +14302,7 @@ class PhpApiService {
    */
   async silentRefresh() {
     var _a2, _b2;
+    if (this.isSuperAdmin()) return true;
     if (this.isRefreshing) {
       return new Promise((resolve) => {
         this.refreshQueue.push({
@@ -14385,7 +14404,8 @@ class PhpApiService {
   }
   async request(route, options = {}, isRetry = false) {
     const isAuthRoute = route.startsWith("auth/login") || route.startsWith("auth/refresh");
-    if (!isAuthRoute && !isRetry) {
+    const superAdmin = this.isSuperAdmin();
+    if (!isAuthRoute && !isRetry && !superAdmin) {
       const ok = await this.ensureValidToken();
       if (!ok) {
         this.emitTokenExpired();
@@ -14399,7 +14419,7 @@ class PhpApiService {
     };
     try {
       const response = await fetch(url, { ...options, headers });
-      if ((response.status === 401 || response.status === 403) && !isRetry) {
+      if ((response.status === 401 || response.status === 403) && !isRetry && !superAdmin) {
         const refreshed = await this.silentRefresh();
         if (!refreshed)
           throw new Error("Session expired — please log in again");
@@ -15525,6 +15545,7 @@ function AppProvider({ children }) {
   reactExports.useEffect(() => {
     const handleTokenExpired = async () => {
       if (!stateRef.current.currentUser) return;
+      if (stateRef.current.currentUser.role === "superadmin") return;
       if (isWithinGracePeriod(10)) return;
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
@@ -15890,7 +15911,7 @@ function AppProvider({ children }) {
             onRetry: retryInit
           }
         ) : children,
-        showReLoginModal && state.currentUser !== null && !isWithinGracePeriod(10) && /* @__PURE__ */ jsxRuntimeExports.jsx(ReLoginModal, { onDismiss: logout })
+        showReLoginModal && state.currentUser !== null && state.currentUser.role !== "superadmin" && !isWithinGracePeriod(10) && /* @__PURE__ */ jsxRuntimeExports.jsx(ReLoginModal, { onDismiss: logout })
       ]
     }
   );
@@ -28599,11 +28620,7 @@ function Classes() {
       setModal(BLANK_MODAL);
       void loadClasses();
     } catch (err) {
-      let msg = "Failed to save. Please retry.";
-      if (err instanceof Error) {
-        const lower = err.message.toLowerCase();
-        msg = lower.includes("session expired") || lower.includes("log in") ? "API error — please refresh the page and try again." : err.message;
-      }
+      const msg = err instanceof Error ? err.message : "Failed to save. Please retry.";
       setModal((p2) => ({ ...p2, error: msg }));
     } finally {
       setSaving(false);
@@ -89439,11 +89456,20 @@ function UserManagement() {
     setError("");
     try {
       if (modal === "add") {
-        await phpApiService.createUser({ ...form });
+        await phpApiService.createUser({
+          username: form.username,
+          password: form.password,
+          name: form.name,
+          fullName: form.name,
+          email: form.email,
+          phone: form.phone,
+          role: form.role
+        });
       } else if (modal === "edit" && selected) {
         await phpApiService.updateUser({
           id: selected.id,
           name: form.name,
+          fullName: form.name,
           email: form.email,
           phone: form.phone,
           role: form.role
@@ -89452,7 +89478,10 @@ function UserManagement() {
       load();
       setModal(null);
     } catch (e3) {
-      setError(e3 instanceof Error ? e3.message : "Failed to save user");
+      const msg = e3 instanceof Error ? e3.message : "Failed to save user";
+      setError(
+        msg.toLowerCase().includes("expired") || msg.toLowerCase().includes("log in") ? "Could not save — check your server connection and try again." : msg
+      );
     } finally {
       setSaving(false);
     }
@@ -89596,7 +89625,7 @@ function UserManagement() {
                   variant: "ghost",
                   size: "sm",
                   className: "h-7 w-7 p-0",
-                  onClick: () => handleToggleActive(u2),
+                  onClick: () => void handleToggleActive(u2),
                   "data-ocid": `user-mgmt.toggle_button.${idx + 1}`,
                   children: u2.isActive !== false ? /* @__PURE__ */ jsxRuntimeExports.jsx(UserX, { className: "w-3.5 h-3.5" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(UserCheck, { className: "w-3.5 h-3.5" })
                 }
@@ -89607,7 +89636,7 @@ function UserManagement() {
                   variant: "ghost",
                   size: "sm",
                   className: "h-7 w-7 p-0 text-destructive hover:text-destructive",
-                  onClick: () => handleDelete(u2),
+                  onClick: () => void handleDelete(u2),
                   "data-ocid": `user-mgmt.delete_button.${idx + 1}`,
                   children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
                 }
@@ -89686,7 +89715,7 @@ function UserManagement() {
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               Button,
               {
-                onClick: handleSave,
+                onClick: () => void handleSave(),
                 disabled: saving,
                 "data-ocid": "user-modal.confirm_button",
                 children: saving ? "Saving…" : "Save User"
@@ -89734,7 +89763,7 @@ function UserManagement() {
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               Button,
               {
-                onClick: handleReset,
+                onClick: () => void handleReset(),
                 disabled: saving || !newPw,
                 "data-ocid": "user-reset.confirm_button",
                 children: saving ? "Resetting…" : "Reset Password"

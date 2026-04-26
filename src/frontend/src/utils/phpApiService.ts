@@ -178,6 +178,22 @@ class PhpApiService {
     reject: (err: Error) => void;
   }> = [];
 
+  /**
+   * Returns true if the current user is superadmin (locally authenticated).
+   * Superadmin does NOT use a PHP JWT token — they authenticate locally.
+   * When in superadmin mode, ALL token validation is bypassed.
+   */
+  private isSuperAdmin(): boolean {
+    try {
+      const raw = sessionStorage.getItem("shubh_current_user");
+      if (!raw) return false;
+      const u = JSON.parse(raw) as { role?: string };
+      return u.role === "superadmin";
+    } catch {
+      return false;
+    }
+  }
+
   // ── Token management ───────────────────────────────────────────────────────
 
   getToken(): string | null {
@@ -279,6 +295,8 @@ class PhpApiService {
    * Tokens without an exp claim are treated as always valid.
    */
   isTokenExpired(): boolean {
+    // Superadmin uses local auth — token is never "expired" for them
+    if (this.isSuperAdmin()) return false;
     const token = this.getToken();
     if (!token) return true;
     const payload = decodeJwtPayload(token);
@@ -304,10 +322,13 @@ class PhpApiService {
 
   /**
    * Ensure the current token is valid.
+   * Superadmin is always considered valid (no PHP token needed).
    * Skips expiry check if within the 10-minute grace period after login.
    * Returns true if valid (or refreshed), false if all refresh attempts failed.
    */
   async ensureValidToken(): Promise<boolean> {
+    // Superadmin uses local auth — no PHP JWT token required
+    if (this.isSuperAdmin()) return true;
     if (this.isWithinGracePeriod(10)) return true;
     if (!this.isTokenExpired()) return true;
     return this.silentRefresh();
@@ -319,6 +340,9 @@ class PhpApiService {
    * If a refresh is in progress, queue and wait.
    */
   async silentRefresh(): Promise<boolean> {
+    // Superadmin uses local auth — never needs PHP token refresh
+    if (this.isSuperAdmin()) return true;
+
     if (this.isRefreshing) {
       return new Promise<boolean>((resolve) => {
         this.refreshQueue.push({
@@ -441,7 +465,10 @@ class PhpApiService {
     const isAuthRoute =
       route.startsWith("auth/login") || route.startsWith("auth/refresh");
 
-    if (!isAuthRoute && !isRetry) {
+    // Superadmin uses local auth — skip ALL PHP token validation
+    const superAdmin = this.isSuperAdmin();
+
+    if (!isAuthRoute && !isRetry && !superAdmin) {
       const ok = await this.ensureValidToken();
       if (!ok) {
         this.emitTokenExpired();
@@ -458,7 +485,11 @@ class PhpApiService {
     try {
       const response = await fetch(url, { ...options, headers });
 
-      if ((response.status === 401 || response.status === 403) && !isRetry) {
+      if (
+        (response.status === 401 || response.status === 403) &&
+        !isRetry &&
+        !superAdmin
+      ) {
         const refreshed = await this.silentRefresh();
         if (!refreshed)
           throw new Error("Session expired — please log in again");

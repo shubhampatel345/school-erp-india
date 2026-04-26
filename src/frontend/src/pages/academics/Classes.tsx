@@ -229,15 +229,8 @@ export default function Classes() {
       setModal(BLANK_MODAL);
       void loadClasses();
     } catch (err) {
-      let msg = "Failed to save. Please retry.";
-      if (err instanceof Error) {
-        const lower = err.message.toLowerCase();
-        // Never show auth error as a class-form error — it's confusing
-        msg =
-          lower.includes("session expired") || lower.includes("log in")
-            ? "API error — please refresh the page and try again."
-            : err.message;
-      }
+      const msg =
+        err instanceof Error ? err.message : "Failed to save. Please retry.";
       setModal((p) => ({ ...p, error: msg }));
     } finally {
       setSaving(false);
