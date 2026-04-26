@@ -11,6 +11,30 @@ interface LayoutProps {
   children: React.ReactNode;
 }
 
+/** Apply theme from localStorage to the <html> element */
+function applyTheme() {
+  const themeId = ls.get<string>("shubh_erp_theme", "default");
+  const root = document.documentElement;
+  root.removeAttribute("data-theme");
+  root.classList.remove("dark");
+  const themeMap: Record<string, string> = {
+    ocean: "ocean",
+    forest: "forest",
+    rose: "rose",
+    "dark-navy": "dark",
+    slate: "slate",
+    purple: "purple",
+    copper: "copper",
+    cherry: "cherry",
+    midnight: "midnight",
+  };
+  if (themeId !== "default") {
+    const dt = themeMap[themeId];
+    if (dt === "dark") root.classList.add("dark");
+    else if (dt) root.setAttribute("data-theme", dt);
+  }
+}
+
 export default function Layout({
   activePage,
   onNavigate,
@@ -19,28 +43,16 @@ export default function Layout({
   const { currentSession } = useApp();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Initialize theme on app boot from localStorage
+  // Apply theme on mount
   useEffect(() => {
-    const themeId = ls.get<string>("shubh_erp_theme", "default");
-    const themeMap: Record<string, string> = {
-      ocean: "ocean",
-      forest: "forest",
-      rose: "rose",
-      "dark-navy": "dark",
-      slate: "slate",
-      purple: "purple",
-      copper: "copper",
-      cherry: "cherry",
-      midnight: "midnight",
-    };
-    const root = document.documentElement;
-    root.removeAttribute("data-theme");
-    root.classList.remove("dark");
-    if (themeId !== "default") {
-      const dt = themeMap[themeId];
-      if (dt === "dark") root.classList.add("dark");
-      else if (dt) root.setAttribute("data-theme", dt);
-    }
+    applyTheme();
+  }, []);
+
+  // Listen for theme change events (fired by Settings page)
+  useEffect(() => {
+    const handler = () => applyTheme();
+    window.addEventListener("shubh:theme-changed", handler);
+    return () => window.removeEventListener("shubh:theme-changed", handler);
   }, []);
 
   const handleMenuToggle = () => setMobileMenuOpen((v) => !v);
@@ -88,12 +100,11 @@ export default function Layout({
           id="main-content"
           data-ocid="main-content"
         >
-          {/* Extra bottom padding on mobile for MobileNav */}
           <div className="min-h-full pb-20 md:pb-0">{children}</div>
         </main>
       </div>
 
-      {/* Mobile Navigation — bottom fixed, hidden on md+ */}
+      {/* Mobile Navigation */}
       <MobileNav
         activePage={activePage}
         onNavigate={handleNavigate}

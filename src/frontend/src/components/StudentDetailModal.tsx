@@ -1,2656 +1,589 @@
+/**
+ * StudentDetailModal.tsx — Full student detail view
+ *
+ * Tabs: Info | Fees | Transport | Attendance | Results | Documents
+ * Works as both a floating modal (inline=false) and inline page content (inline=true).
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  AlertCircle,
   Bus,
-  Camera,
-  Check,
-  Copy,
+  Calendar,
   CreditCard,
+  Edit2,
   FileText,
-  Lock,
-  MessageCircle,
-  Pencil,
-  Plus,
-  Trash2,
+  Phone,
+  Printer,
+  User,
   UserCheck,
+  UserX,
   X,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
-import type {
-  DiscountEntry,
-  FeeHeading,
-  FeeReceipt,
-  FeesPlan,
-  OldFeeEntry,
-  Student,
-  TransportRoute,
-} from "../types";
-import {
-  CLASSES,
-  MONTHS,
-  MONTH_SHORT,
-  SECTIONS,
-  formatCurrency,
-  generateId,
-  ls,
-} from "../utils/localStorage";
+import type { Student } from "../types";
+import { formatCurrency } from "../types";
+import phpApiService from "../utils/phpApiService";
+import StudentForm from "./StudentForm";
 
 interface Props {
   student: Student;
   onClose: () => void;
   onUpdate: (s: Student) => void;
-  onNavigate?: (page: string) => void;
   updateData?: (
     collection: string,
     id: string,
     changes: Record<string, unknown>,
   ) => Promise<void>;
   deleteData?: (collection: string, id: string) => Promise<void>;
-  /** All students in context — used to find family members by mobile */
   allStudents?: Student[];
+  /** When true, renders as inline content (no fixed overlay) */
+  inline?: boolean;
 }
 
-function parseDobToParts(dob: string): [string, string, string] {
-  const p = dob.split("/");
-  return [p[0] ?? "", p[1] ?? "", p[2] ?? ""];
-}
-function makeDob(dd: string, mm: string, yyyy: string) {
-  return `${dd}/${mm}/${yyyy}`;
+function InfoRow({ label, value }: { label: string; value?: string | null }) {
+  if (!value) return null;
+  return (
+    <div className="flex gap-3 py-2 border-b border-border/50 last:border-0">
+      <span className="text-xs text-muted-foreground w-32 flex-shrink-0 mt-0.5">
+        {label}
+      </span>
+      <span className="text-sm text-foreground font-medium flex-1 break-words">
+        {value}
+      </span>
+    </div>
+  );
 }
 
-type PrintTemplate = "basic" | "detailed" | "official";
+function SectionHead({ title }: { title: string }) {
+  return (
+    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mt-4 mb-2 first:mt-0">
+      {title}
+    </p>
+  );
+}
+
+type FeeRecord = {
+  id: string;
+  receiptNo: string;
+  date: string;
+  totalAmount: number;
+  paymentMode: string;
+  months?: string;
+};
+
+type AttendanceEntry = {
+  date: string;
+  status: string;
+};
 
 export default function StudentDetailModal({
   student,
   onClose,
   onUpdate,
-  onNavigate,
   updateData,
-  deleteData,
+  deleteData: _deleteData,
   allStudents = [],
+  inline = false,
 }: Props) {
-  const { currentUser, currentSession, getData } = useApp();
-  const isSuperAdmin = currentUser?.role === "superadmin";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
-  const canChat =
-    currentUser?.role === "superadmin" ||
-    currentUser?.role === "admin" ||
-    currentUser?.role === "teacher";
+  const { updateData: ctxUpdateData } = useApp();
+  const effectiveUpdateData = updateData ?? ctxUpdateData;
 
-  const [editing, setEditing] = useState(false);
-  const [form, setForm] = useState({ ...student });
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [current, setCurrent] = useState(student);
 
-  // Context classes for edit dropdowns (placed after form is initialized)
-  const CLASS_ORDER_DETAIL = [
-    "Nursery",
-    "LKG",
-    "UKG",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12",
-  ];
-  const contextClassList = getData("classes") as Array<{
-    id: string;
-    className: string;
-    sections: string[];
-  }>;
-  const sortedContextClasses = [...contextClassList].sort((a, b) => {
-    const ai = CLASS_ORDER_DETAIL.indexOf(a.className ?? "");
-    const bi = CLASS_ORDER_DETAIL.indexOf(b.className ?? "");
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
-  const classNamesForEdit =
-    sortedContextClasses.length > 0
-      ? sortedContextClasses.map((c) => c.className)
-      : CLASSES;
-  const sectionsForEdit = (() => {
-    const found = sortedContextClasses.find((c) => c.className === form.class);
-    return found?.sections ?? SECTIONS;
-  })();
-  const [dobParts, setDobParts] = useState<[string, string, string]>(
-    parseDobToParts(student.dob ?? ""),
-  );
-  const [showDiscontinue, setShowDiscontinue] = useState(false);
-  const [leaveDate, setLeaveDate] = useState(student.leavingDate ?? "");
-  const [leaveReason, setLeaveReason] = useState(student.leavingReason ?? "");
-  const [leaveRemarks, setLeaveRemarks] = useState(
-    student.leavingRemarks ?? "",
-  );
-  const [printTemplate, setPrintTemplate] = useState<PrintTemplate | null>(
-    null,
-  );
-  const [copiedUser, setCopiedUser] = useState(false);
-  const [copiedPass, setCopiedPass] = useState(false);
-  const [newDiscMonth, setNewDiscMonth] = useState(MONTHS[0]);
-  const [newDiscAmt, setNewDiscAmt] = useState("");
-  const [newDiscReason, setNewDiscReason] = useState("");
-  // Discount scope: which fee-type IDs (headingIds + 'transport') this discount applies to
-  // Always explicit — starts with all applicable items pre-selected
-  const [newDiscScope, setNewDiscScope] = useState<string[]>(() => {
-    const allHeadings = ls.get<FeeHeading[]>("fee_headings", []);
-    const applicable = allHeadings.filter(
-      (h) =>
-        !h.applicableClasses ||
-        h.applicableClasses.length === 0 ||
-        h.applicableClasses.includes(student.class),
-    );
-    return [...applicable.map((h) => h.id), "transport"];
-  });
+  const [fees, setFees] = useState<FeeRecord[]>([]);
+  const [feesLoading, setFeesLoading] = useState(false);
+  const [attendance, setAttendance] = useState<AttendanceEntry[]>([]);
+  const [attendanceLoading, setAttendanceLoading] = useState(false);
 
-  // Default 11 months: all except June (index 2 in Apr-Mar MONTHS array)
-  const DEFAULT_TRANSPORT_MONTHS = MONTHS.filter((m) => m !== "June");
+  // Sync if parent updates student prop
+  useEffect(() => {
+    setCurrent(student);
+  }, [student]);
 
-  // Transport months wizard state
-  const [transportMonths, setTransportMonths] = useState<string[]>(() => {
-    const stored = ls.get<Record<string, string[]>>(
-      "student_transport_months",
-      {},
-    );
-    // If student already has saved data, use it. Otherwise default to 11 months (June excluded).
-    if (stored[student.id] !== undefined) return stored[student.id];
-    return DEFAULT_TRANSPORT_MONTHS;
-  });
-  const [transportMonthsSaved, setTransportMonthsSaved] = useState(false);
-
-  const mmRef = useRef<HTMLInputElement>(null);
-  const yyyyRef = useRef<HTMLInputElement>(null);
-  const photoRef = useRef<HTMLInputElement>(null);
-
-  const schoolProfile = ls.get("school_profile", {
-    name: "SHUBH SCHOOL ERP",
-    address: "",
-    phone: "",
-    principalName: "",
-    affiliationNo: "",
-  }) as {
-    name: string;
-    address: string;
-    phone: string;
-    principalName: string;
-    affiliationNo: string;
-  };
-
-  const feeHeadings = ls.get<FeeHeading[]>("fee_headings", []);
-  const feesPlan = ls.get<FeesPlan[]>("fees_plan", []);
-  const receipts = ls
-    .get<FeeReceipt[]>("fee_receipts", [])
-    .filter((r) => r.studentId === student.id && !r.isDeleted);
-  const [discounts, setDiscounts] = useState<DiscountEntry[]>(() =>
-    ls
-      .get<DiscountEntry[]>("discounts", [])
-      .filter(
-        (d) => d.studentId === student.id && d.sessionId === currentSession?.id,
-      ),
-  );
-
-  // ── Old Fee Entries (manual, editable) ──────────────────
-  const [oldFeeEntries, setOldFeeEntries] = useState<OldFeeEntry[]>(() =>
-    ls
-      .get<OldFeeEntry[]>("old_fee_entries", [])
-      .filter((e) => e.studentId === student.id),
-  );
-
-  // Form state for Add/Edit old fee entry
-  const [oldFeeFormOpen, setOldFeeFormOpen] = useState(false);
-  const [editingOldFeeId, setEditingOldFeeId] = useState<string | null>(null);
-  const [oldFeeFormData, setOldFeeFormData] = useState({
-    sessionLabel: "",
-    month: MONTHS[0],
-    headingName: "",
-    amount: "",
-    remarks: "",
-  });
-
-  function openAddOldFee() {
-    setEditingOldFeeId(null);
-    setOldFeeFormData({
-      sessionLabel: "",
-      month: MONTHS[0],
-      headingName: feeHeadings[0]?.name ?? "",
-      amount: "",
-      remarks: "",
-    });
-    setOldFeeFormOpen(true);
+  function loadFees() {
+    setFeesLoading(true);
+    phpApiService
+      .getReceipts(current.id)
+      .then((res) => setFees(res as FeeRecord[]))
+      .catch(() => setFees([]))
+      .finally(() => setFeesLoading(false));
   }
 
-  function openEditOldFee(entry: OldFeeEntry) {
-    setEditingOldFeeId(entry.id);
-    setOldFeeFormData({
-      sessionLabel: entry.sessionLabel,
-      month: entry.month,
-      headingName: entry.headingName,
-      amount: String(entry.amount),
-      remarks: entry.remarks ?? "",
-    });
-    setOldFeeFormOpen(true);
+  function loadAttendance() {
+    setAttendanceLoading(true);
+    phpApiService
+      .getStudentAttendance(current.id)
+      .then((res) => setAttendance(res as AttendanceEntry[]))
+      .catch(() => setAttendance([]))
+      .finally(() => setAttendanceLoading(false));
   }
 
-  function saveOldFeeEntry() {
-    const amt = Number.parseFloat(oldFeeFormData.amount);
-    if (!oldFeeFormData.sessionLabel.trim()) {
-      toast.error("Session label is required");
-      return;
-    }
-    if (!oldFeeFormData.headingName.trim()) {
-      toast.error("Fee heading is required");
-      return;
-    }
-    if (Number.isNaN(amt) || amt <= 0) {
-      toast.error("Enter a valid amount");
-      return;
-    }
-
-    const all = ls.get<OldFeeEntry[]>("old_fee_entries", []);
-
-    if (editingOldFeeId) {
-      const idx = all.findIndex((e) => e.id === editingOldFeeId);
-      if (idx >= 0) {
-        all[idx] = {
-          ...all[idx],
-          sessionLabel: oldFeeFormData.sessionLabel.trim(),
-          month: oldFeeFormData.month,
-          headingName: oldFeeFormData.headingName.trim(),
-          amount: amt,
-          remarks: oldFeeFormData.remarks.trim() || undefined,
-        };
-      }
-    } else {
-      const entry: OldFeeEntry = {
-        id: generateId(),
-        studentId: student.id,
-        sessionLabel: oldFeeFormData.sessionLabel.trim(),
-        month: oldFeeFormData.month,
-        headingName: oldFeeFormData.headingName.trim(),
-        amount: amt,
-        remarks: oldFeeFormData.remarks.trim() || undefined,
+  // ── Toggle active/discontinued ─────────────────────────────────────────────
+  async function toggleStatus() {
+    const newStatus = current.status === "active" ? "discontinued" : "active";
+    try {
+      await effectiveUpdateData("students", current.id, { status: newStatus });
+      const updated = {
+        ...current,
+        status: newStatus as "active" | "discontinued",
       };
-      all.push(entry);
-    }
-
-    ls.set("old_fee_entries", all);
-    setOldFeeEntries(all.filter((e) => e.studentId === student.id));
-    setOldFeeFormOpen(false);
-    setEditingOldFeeId(null);
-    toast.success(editingOldFeeId ? "Entry updated" : "Old fee entry added");
-  }
-
-  function deleteOldFeeEntry(id: string) {
-    const all = ls
-      .get<OldFeeEntry[]>("old_fee_entries", [])
-      .filter((e) => e.id !== id);
-    ls.set("old_fee_entries", all);
-    setOldFeeEntries(all.filter((e) => e.studentId === student.id));
-    toast.success("Entry removed");
-  }
-
-  // Use v2 transport data (from Transport module)
-  const studentTransportV2 = ls
-    .get<
-      Array<{
-        studentId: string;
-        busNo: string;
-        routeName: string;
-        routeId: string;
-        pickupPointName: string;
-      }>
-    >("student_transport_v2", [])
-    .find((t) => t.studentId === student.id);
-
-  const transportRoutesV2 = ls.get<
-    Array<{
-      id: string;
-      busNo: string;
-      routeName: string;
-      driverName: string;
-      driverMobile: string;
-      pickupPoints: Array<{
-        id: string;
-        stopName: string;
-        order: number;
-        fare?: number;
-      }>;
-    }>
-  >("transport_routes_v2", []);
-  const assignedRouteV2 = studentTransportV2
-    ? transportRoutesV2.find((r) => r.id === studentTransportV2.routeId)
-    : null;
-
-  // Legacy fallback
-  const transportRoutes = ls.get<TransportRoute[]>("transport_routes", []);
-  const assignedRoute =
-    assignedRouteV2 ??
-    transportRoutes.find((r) => r.students?.includes(student.id));
-
-  const prevDues = ls.get<Record<string, Record<string, number>>>(
-    "prev_dues",
-    {},
-  );
-  const studentPrevDues = prevDues[student.id] ?? {};
-
-  // Current academic month index: Apr=0 … Mar=11
-  const jsMonth = new Date().getMonth(); // 0=Jan … 11=Dec
-  const currentAcademicMonthIndex = (jsMonth + 9) % 12;
-
-  function handleFieldChange(field: keyof Student, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function handlePhotoUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      const dataUrl = ev.target?.result as string;
-      setForm((prev) => ({ ...prev, photo: dataUrl }));
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function saveEdits() {
-    const dob = makeDob(dobParts[0], dobParts[1], dobParts[2]);
-    const dobForPwd = `${dobParts[0]}${dobParts[1]}${dobParts[2]}`;
-    const updated: Student = {
-      ...form,
-      dob,
-      credentials: { username: form.admNo, password: dobForPwd },
-    };
-    if (updateData) {
-      // Await server confirmation; call onUpdate regardless so parent refreshes
-      void updateData("students", updated.id, {
-        ...updated,
-        name: updated.fullName,
-      } as unknown as Record<string, unknown>)
-        .then(() => {
-          onUpdate(updated);
-        })
-        .catch(() => {
-          // Fallback to localStorage if server fails, but still update UI
-          const all = ls.get<Student[]>("students", []);
-          const idx = all.findIndex((s) => s.id === updated.id);
-          if (idx >= 0) all[idx] = updated;
-          ls.set("students", all);
-          onUpdate(updated);
-        });
-    } else {
-      const all = ls.get<Student[]>("students", []);
-      const idx = all.findIndex((s) => s.id === updated.id);
-      if (idx >= 0) all[idx] = updated;
-      ls.set("students", all);
+      setCurrent(updated);
       onUpdate(updated);
+      toast.success(
+        `Student ${newStatus === "active" ? "activated" : "discontinued"}`,
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to update status",
+      );
     }
-    setEditing(false);
   }
 
-  function handleDiscontinue() {
-    const updated: Student = {
-      ...student,
-      status: "discontinued",
-      leavingDate: leaveDate,
-      leavingReason: leaveReason,
-      leavingRemarks: leaveRemarks,
+  // ── Print ──────────────────────────────────────────────────────────────────
+  function handlePrint(type: "admission" | "idcard" | "admitcard") {
+    const msgs = {
+      admission:
+        "Admission form print not available. Please configure in Settings → Certificate Studio.",
+      idcard:
+        "ID card print not available. Please configure in Settings → Certificate Studio.",
+      admitcard:
+        "Admit card print not available. Please configure in Settings → Certificate Studio.",
     };
-    if (updateData) {
-      void updateData("students", updated.id, {
-        ...updated,
-        name: updated.fullName,
-      } as unknown as Record<string, unknown>)
-        .then(() => {
-          onUpdate(updated);
-        })
-        .catch(() => {
-          const all = ls.get<Student[]>("students", []);
-          const idx = all.findIndex((s) => s.id === updated.id);
-          if (idx >= 0) all[idx] = updated;
-          ls.set("students", all);
-          onUpdate(updated);
-        });
-    } else {
-      const all = ls.get<Student[]>("students", []);
-      const idx = all.findIndex((s) => s.id === updated.id);
-      if (idx >= 0) all[idx] = updated;
-      ls.set("students", all);
-      onUpdate(updated);
-    }
-    setShowDiscontinue(false);
+    toast.info(msgs[type]);
   }
 
-  function handleReinstate() {
-    const updated: Student = {
-      ...student,
-      status: "active",
-      leavingDate: undefined,
-      leavingReason: undefined,
-      leavingRemarks: undefined,
-    };
-    if (updateData) {
-      void updateData("students", updated.id, {
-        ...updated,
-        name: updated.fullName,
-      } as unknown as Record<string, unknown>)
-        .then(() => {
-          onUpdate(updated);
-        })
-        .catch(() => {
-          const all = ls.get<Student[]>("students", []);
-          const idx = all.findIndex((s) => s.id === updated.id);
-          if (idx >= 0) all[idx] = updated;
-          ls.set("students", all);
-          onUpdate(updated);
-        });
-    } else {
-      const all = ls.get<Student[]>("students", []);
-      const idx = all.findIndex((s) => s.id === updated.id);
-      if (idx >= 0) all[idx] = updated;
-      ls.set("students", all);
-      onUpdate(updated);
-    }
-  }
-
-  function getPaidMonthsForHeading(headingId: string): string[] {
-    const paid: string[] = [];
-    for (const r of receipts) {
-      for (const item of r.items) {
-        if (item.headingId === headingId) paid.push(item.month);
-      }
-    }
-    return paid;
-  }
-
-  function getApplicablePlan(headingId: string) {
-    return (
-      feesPlan.find(
-        (p) =>
-          p.headingId === headingId &&
-          p.classId === student.class &&
-          p.sectionId === student.section,
-      ) ??
-      feesPlan.find(
-        (p) => p.headingId === headingId && p.classId === student.class,
-      )
-    );
-  }
-
-  function saveTransportMonths(months: string[]) {
-    const stored = ls.get<Record<string, string[]>>(
-      "student_transport_months",
-      {},
-    );
-    stored[student.id] = months;
-    ls.set("student_transport_months", stored);
-    setTransportMonthsSaved(true);
-    setTimeout(() => setTransportMonthsSaved(false), 2000);
-  }
-
-  function toggleTransportMonth(month: string) {
-    setTransportMonths((prev) => {
-      const next = prev.includes(month)
-        ? prev.filter((m) => m !== month)
-        : [...prev, month];
-      return next;
-    });
-  }
-
-  function addDiscount() {
-    const amt = Number.parseFloat(newDiscAmt);
-    if (!newDiscMonth || Number.isNaN(amt) || amt <= 0) return;
-    const entry: DiscountEntry = {
-      id: generateId(),
-      studentId: student.id,
-      month: newDiscMonth,
-      amount: amt,
-      reason: newDiscReason,
-      sessionId: currentSession?.id ?? "sess_2025",
-      applicableTo: newDiscScope,
-    };
-    const all = ls.get<DiscountEntry[]>("discounts", []);
-    all.push(entry);
-    ls.set("discounts", all);
-    setDiscounts((prev) => [...prev, entry]);
-    setNewDiscAmt("");
-    setNewDiscReason("");
-  }
-
-  function removeDiscount(id: string) {
-    const all = ls
-      .get<DiscountEntry[]>("discounts", [])
-      .filter((d) => d.id !== id);
-    ls.set("discounts", all);
-    setDiscounts((prev) => prev.filter((d) => d.id !== id));
-  }
-
-  function copyToClipboard(text: string, type: "user" | "pass") {
-    navigator.clipboard.writeText(text).catch(() => {});
-    if (type === "user") {
-      setCopiedUser(true);
-      setTimeout(() => setCopiedUser(false), 2000);
-    } else {
-      setCopiedPass(true);
-      setTimeout(() => setCopiedPass(false), 2000);
-    }
-  }
-
-  function printAdmForm(template: PrintTemplate) {
-    setPrintTemplate(template);
-    setTimeout(() => window.print(), 300);
-  }
-
-  function handleSendMessage() {
-    if (!onNavigate) return;
-    onClose();
-    onNavigate("chat");
-  }
-
-  // ── Net Payable calculation (fix3) ──────────────────────────────────────
-  // A. Fee master amount: only months up to current academic month
-  const totalFees = feeHeadings.reduce((sum, h) => {
-    const plan = getApplicablePlan(h.id);
-    const amt = plan?.amount ?? h.amount;
-    const monthCount = MONTHS.filter((m) => {
-      if (!h.months.includes(m)) return false;
-      const idx = MONTHS.indexOf(m);
-      return idx >= 0 && idx <= currentAcademicMonthIndex;
-    }).length;
-    return sum + amt * monthCount;
-  }, 0);
-
-  // B. Transport fees: pickup fare × applicable transport months up to current month
-  const ppIdForNet = (
-    studentTransportV2 as { pickupPointId?: string } | undefined
-  )?.pickupPointId;
-  const assignedPPForNet =
-    ppIdForNet && assignedRouteV2
-      ? assignedRouteV2.pickupPoints.find((p) => p.id === ppIdForNet)
-      : null;
-  const pickupFareForNet = assignedPPForNet?.fare ?? 0;
-  const appliedTransportMonths = transportMonths.filter((m) => {
-    const idx = MONTHS.indexOf(m);
-    return idx >= 0 && idx <= currentAcademicMonthIndex;
-  });
-  const totalTransportFees = pickupFareForNet * appliedTransportMonths.length;
-
-  // C. Other charges: sum from non-deleted receipts' otherCharges
-  const totalOtherCharges = receipts.reduce(
-    (sum, r) =>
-      sum + (r.otherCharges ?? []).reduce((s, c) => s + (c.paidAmount ?? 0), 0),
-    0,
+  // ── Family members ─────────────────────────────────────────────────────────
+  const familyMembers = allStudents.filter(
+    (s) =>
+      s.id !== current.id &&
+      s.fatherMobile &&
+      s.fatherMobile === current.fatherMobile,
   );
 
-  // D. Discount: only months up to current academic month
-  const totalDiscounts = discounts.reduce((sum, d) => {
-    const mIdx = MONTHS.indexOf(d.month);
-    if (mIdx < 0 || mIdx > currentAcademicMonthIndex) return sum;
-    return sum + d.amount;
-  }, 0);
-
-  // E. Old balance: promoted dues + manually entered old fee entries
-  const totalPrevDues = Object.values(studentPrevDues).reduce(
-    (s, a) => s + (a as number),
-    0,
-  );
-  const totalManualOldFees = oldFeeEntries.reduce((s, e) => s + e.amount, 0);
-  const totalOldBalance = totalPrevDues + totalManualOldFees;
-
-  // F. Already paid (paidAmount from non-deleted receipts)
-  const totalPaid = receipts.reduce(
-    (sum, r) => sum + (r.paidAmount ?? r.totalAmount ?? 0),
-    0,
-  );
-
-  // Net Payable = (A + B + C + E) - D - F
-  const netPayable =
-    totalFees +
-    totalTransportFees +
-    totalOtherCharges +
-    totalOldBalance -
-    totalDiscounts -
-    totalPaid;
-
-  return (
-    <>
-      <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-        <div className="bg-card rounded-xl shadow-2xl w-full max-w-4xl max-h-[92vh] overflow-y-auto">
-          {/* Header */}
-          <div className="flex items-start gap-4 p-5 border-b border-border bg-muted/30">
-            <div className="relative group flex-shrink-0">
-              <button
-                type="button"
-                className="w-16 h-16 rounded-full bg-primary/10 border-2 border-primary/30 flex items-center justify-center overflow-hidden cursor-pointer"
-                onClick={() => isAdmin && photoRef.current?.click()}
-                aria-label="Upload student photo"
-              >
-                {form.photo ? (
-                  <img
-                    src={form.photo}
-                    alt={form.fullName}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <span className="text-2xl font-bold text-primary">
-                    {student.fullName.charAt(0).toUpperCase()}
-                  </span>
-                )}
-              </button>
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => photoRef.current?.click()}
-                  className="absolute -bottom-1 -right-1 bg-primary text-primary-foreground rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                  aria-label="Upload photo"
-                >
-                  <Camera className="w-3 h-3" />
-                </button>
-              )}
-              <input
-                ref={photoRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handlePhotoUpload}
-              />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h2 className="text-xl font-bold font-display text-foreground truncate">
-                {student.fullName}
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Adm. No: {student.admNo}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                Class {student.class} – {student.section} &nbsp;|&nbsp;{" "}
-                {student.fatherName}
-              </p>
-              <div className="flex gap-2 mt-1 flex-wrap">
-                <Badge
-                  variant={
-                    student.status === "active" ? "default" : "destructive"
-                  }
-                >
-                  {student.status === "active" ? "Active" : "Discontinued"}
-                </Badge>
-                {student.category && (
-                  <Badge variant="secondary">{student.category}</Badge>
-                )}
-                {assignedRoute && (
-                  <Badge variant="outline" className="text-[10px]">
-                    <Bus className="w-2.5 h-2.5 mr-1" /> Bus{" "}
-                    {assignedRoute.busNo}
-                  </Badge>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {editing ? (
-                <>
-                  <Button size="sm" onClick={saveEdits}>
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditing(false)}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              ) : isAdmin ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setEditing(true)}
-                >
-                  Edit
-                </Button>
-              ) : null}
-              <Button variant="ghost" size="icon" onClick={onClose}>
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-          </div>
-
-          {/* Net Payable Summary Bar */}
-          <div className="flex items-center gap-4 px-5 py-2 bg-primary/5 border-b border-border text-xs flex-wrap">
-            <span className="text-muted-foreground">
-              Total Fees:{" "}
-              <span className="font-semibold text-foreground">
-                {formatCurrency(totalFees)}
-              </span>
-            </span>
-            <span className="text-muted-foreground">
-              Paid:{" "}
-              <span className="font-semibold text-green-600">
-                {formatCurrency(totalPaid)}
-              </span>
-            </span>
-            <span className="text-muted-foreground">
-              Discount:{" "}
-              <span className="font-semibold text-blue-600">
-                {formatCurrency(totalDiscounts)}
-              </span>
-            </span>
-            {totalOldBalance > 0 && (
-              <span className="text-muted-foreground">
-                Old Balance:{" "}
-                <span className="font-semibold text-destructive">
-                  {formatCurrency(totalOldBalance)}
-                </span>
-              </span>
-            )}
-            <span className="ml-auto font-bold text-sm">
-              Net Payable:{" "}
-              <span
-                className={
-                  netPayable > 0 ? "text-destructive" : "text-green-600"
-                }
-              >
-                {formatCurrency(Math.max(0, netPayable))}
-              </span>
-            </span>
-          </div>
-
-          <Tabs defaultValue="personal" className="p-4">
-            <TabsList className="mb-4 flex-wrap h-auto gap-1">
-              <TabsTrigger value="personal" className="text-xs">
-                Personal Info
-              </TabsTrigger>
-              <TabsTrigger value="fees" className="text-xs">
-                Fees Details
-              </TabsTrigger>
-              <TabsTrigger value="transport" className="text-xs">
-                Transport
-              </TabsTrigger>
-              <TabsTrigger value="discounts" className="text-xs">
-                Discounts
-              </TabsTrigger>
-              <TabsTrigger value="oldfees" className="text-xs">
-                Old Fees
-              </TabsTrigger>
-              {isSuperAdmin && (
-                <TabsTrigger value="credentials" className="text-xs">
-                  Credentials
-                </TabsTrigger>
-              )}
-            </TabsList>
-
-            {/* Personal Info Tab */}
-            <TabsContent value="personal" className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Admission No."
-                  value={editing ? form.admNo : student.admNo}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("admNo", v)}
-                />
-                <Field
-                  label="Full Name"
-                  value={editing ? form.fullName : student.fullName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("fullName", v)}
-                />
-              </div>
-              {editing ? (
-                <div className="space-y-1">
-                  <Label>Date of Birth</Label>
-                  <div className="flex gap-2 items-center">
-                    <Input
-                      className="w-16 text-center"
-                      placeholder="DD"
-                      value={dobParts[0]}
-                      maxLength={2}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 2);
-                        setDobParts([v, dobParts[1], dobParts[2]]);
-                        if (v.length === 2) mmRef.current?.focus();
-                      }}
-                    />
-                    <span className="text-muted-foreground">/</span>
-                    <Input
-                      ref={mmRef}
-                      className="w-16 text-center"
-                      placeholder="MM"
-                      value={dobParts[1]}
-                      maxLength={2}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 2);
-                        setDobParts([dobParts[0], v, dobParts[2]]);
-                        if (v.length === 2) yyyyRef.current?.focus();
-                      }}
-                    />
-                    <span className="text-muted-foreground">/</span>
-                    <Input
-                      ref={yyyyRef}
-                      className="w-24 text-center"
-                      placeholder="YYYY"
-                      value={dobParts[2]}
-                      maxLength={4}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 4);
-                        setDobParts([dobParts[0], dobParts[1], v]);
-                      }}
-                    />
-                  </div>
-                </div>
-              ) : (
-                <Field
-                  label="Date of Birth"
-                  value={student.dob}
-                  editing={false}
-                  onChange={() => {}}
-                />
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                {editing ? (
-                  <>
-                    <div className="space-y-1">
-                      <Label>Gender</Label>
-                      <Select
-                        value={form.gender}
-                        onValueChange={(v) => handleFieldChange("gender", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Male">Male</SelectItem>
-                          <SelectItem value="Female">Female</SelectItem>
-                          <SelectItem value="Other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Category</Label>
-                      <Select
-                        value={form.category}
-                        onValueChange={(v) => handleFieldChange("category", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {["General", "OBC", "SC", "ST", "EWS"].map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <Field
-                      label="Gender"
-                      value={student.gender}
-                      editing={false}
-                      onChange={() => {}}
-                    />
-                    <Field
-                      label="Category"
-                      value={student.category}
-                      editing={false}
-                      onChange={() => {}}
-                    />
-                  </>
-                )}
-              </div>
-
-              {editing ? (
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label>Class</Label>
-                    <Select
-                      value={form.class}
-                      onValueChange={(v) => handleFieldChange("class", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {classNamesForEdit.map((c) => (
-                          <SelectItem key={c} value={c}>
-                            {c}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Section</Label>
-                    <Select
-                      value={form.section}
-                      onValueChange={(v) => handleFieldChange("section", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {sectionsForEdit.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <Field
-                    label="Class"
-                    value={student.class}
-                    editing={false}
-                    onChange={() => {}}
-                  />
-                  <Field
-                    label="Section"
-                    value={student.section}
-                    editing={false}
-                    onChange={() => {}}
-                  />
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Father's Name"
-                  value={editing ? form.fatherName : student.fatherName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("fatherName", v)}
-                />
-                <Field
-                  label="Father Mobile"
-                  value={
-                    editing
-                      ? (form.fatherMobile ?? "")
-                      : (student.fatherMobile ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("fatherMobile", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Mother's Name"
-                  value={editing ? form.motherName : student.motherName}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("motherName", v)}
-                />
-                <Field
-                  label="Mother Mobile"
-                  value={
-                    editing
-                      ? (form.motherMobile ?? "")
-                      : (student.motherMobile ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("motherMobile", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Primary Mobile"
-                  value={editing ? form.mobile : student.mobile}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("mobile", v)}
-                />
-                <Field
-                  label="Guardian Mobile"
-                  value={editing ? form.guardianMobile : student.guardianMobile}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("guardianMobile", v)}
-                />
-              </div>
-              <Field
-                label="Address"
-                value={editing ? form.address : student.address}
-                editing={editing}
-                onChange={(v) => handleFieldChange("address", v)}
-              />
-
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Aadhaar No."
-                  value={
-                    editing ? (form.aadhaarNo ?? "") : (student.aadhaarNo ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("aadhaarNo", v)}
-                />
-                <Field
-                  label="S.R. No."
-                  value={editing ? (form.srNo ?? "") : (student.srNo ?? "")}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("srNo", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Pen No."
-                  value={editing ? (form.penNo ?? "") : (student.penNo ?? "")}
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("penNo", v)}
-                />
-                <Field
-                  label="APAAR No."
-                  value={
-                    editing ? (form.apaarNo ?? "") : (student.apaarNo ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("apaarNo", v)}
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Field
-                  label="Previous School"
-                  value={
-                    editing
-                      ? (form.previousSchool ?? "")
-                      : (student.previousSchool ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("previousSchool", v)}
-                />
-                <Field
-                  label="Admission Date"
-                  value={
-                    editing
-                      ? (form.admissionDate ?? "")
-                      : (student.admissionDate ?? "")
-                  }
-                  editing={editing}
-                  onChange={(v) => handleFieldChange("admissionDate", v)}
-                />
-              </div>
-
-              {student.status === "discontinued" && (
-                <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-3 space-y-1">
-                  <p className="text-sm font-medium text-destructive flex items-center gap-1">
-                    <AlertCircle className="w-4 h-4" /> Discontinued
-                  </p>
-                  {student.leavingDate && (
-                    <p className="text-xs text-muted-foreground">
-                      Leaving Date: {student.leavingDate}
-                    </p>
-                  )}
-                  {student.leavingReason && (
-                    <p className="text-xs text-muted-foreground">
-                      Reason: {student.leavingReason}
-                    </p>
-                  )}
-                  {student.leavingRemarks && (
-                    <p className="text-xs text-muted-foreground">
-                      Remarks: {student.leavingRemarks}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("basic")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Basic)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("detailed")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Detailed)
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => printAdmForm("official")}
-                >
-                  <FileText className="w-3 h-3 mr-1" /> Adm. Form (Official)
-                </Button>
-                {canChat && onNavigate && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={handleSendMessage}
-                    data-ocid="student-detail.send_message_button"
-                  >
-                    <MessageCircle className="w-3 h-3 mr-1" /> Send Message
-                  </Button>
-                )}
-                {student.status === "active" ? (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => setShowDiscontinue(true)}
-                    data-ocid="student-detail.discontinue_button"
-                  >
-                    Discontinue
-                  </Button>
-                ) : (
-                  <Button size="sm" variant="outline" onClick={handleReinstate}>
-                    <UserCheck className="w-3 h-3 mr-1" /> Reinstate
-                  </Button>
-                )}
-                {isSuperAdmin && deleteData && (
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          `Delete ${student.fullName}? This cannot be undone.`,
-                        )
-                      ) {
-                        void deleteData("students", student.id).then(() =>
-                          onClose(),
-                        );
-                      }
-                    }}
-                    data-ocid="student-detail.delete_button"
-                  >
-                    <Trash2 className="w-3 h-3 mr-1" /> Delete
-                  </Button>
-                )}
-              </div>
-
-              {/* Family Members (same primary mobile) */}
-              {(() => {
-                const primaryMobile =
-                  student.mobile ||
-                  student.guardianMobile ||
-                  student.fatherMobile;
-                if (!primaryMobile || allStudents.length === 0) return null;
-                const siblings = allStudents.filter(
-                  (s) =>
-                    s.id !== student.id &&
-                    (s.mobile === primaryMobile ||
-                      s.guardianMobile === primaryMobile ||
-                      s.fatherMobile === primaryMobile),
-                );
-                if (siblings.length === 0) return null;
-                return (
-                  <div className="mt-3 border border-primary/20 rounded-lg overflow-hidden">
-                    <div className="bg-primary/5 px-3 py-2 border-b border-primary/20">
-                      <p className="text-xs font-semibold text-primary">
-                        👨‍👩‍👧‍👦 Family Members ({siblings.length})
-                      </p>
-                    </div>
-                    <div className="divide-y divide-border">
-                      {siblings.map((s) => (
-                        <div
-                          key={s.id}
-                          className="px-3 py-2 flex items-center gap-3 text-xs"
-                        >
-                          <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0 overflow-hidden">
-                            {s.photo ? (
-                              <img
-                                src={s.photo}
-                                alt={s.fullName}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              <span className="text-[9px] font-bold text-primary">
-                                {(s.fullName ?? "?").charAt(0).toUpperCase()}
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-foreground truncate">
-                              {s.fullName}
-                            </p>
-                            <p className="text-muted-foreground">
-                              Adm: {s.admNo} · Cl.{s.class}-{s.section}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })()}
-            </TabsContent>
-
-            {/* Fees Details Tab */}
-            <TabsContent value="fees">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/50">
-                      <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                        Fee Heading
-                      </th>
-                      {MONTH_SHORT.map((m) => (
-                        <th
-                          key={m}
-                          className="p-2 text-xs font-medium text-muted-foreground text-center"
-                        >
-                          {m}
-                        </th>
-                      ))}
-                      <th className="p-2 text-xs font-medium text-muted-foreground text-right">
-                        Total
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {feeHeadings.map((h) => {
-                      const plan = getApplicablePlan(h.id);
-                      const paidMonths = getPaidMonthsForHeading(h.id);
-                      const amt = plan?.amount ?? h.amount;
-                      const rowTotal =
-                        MONTHS.filter((m) => h.months.includes(m)).length * amt;
-                      return (
-                        <tr key={h.id} className="border-t border-border">
-                          <td className="p-2 font-medium text-foreground text-xs">
-                            {h.name}
-                          </td>
-                          {MONTHS.map((month) => {
-                            const applicable = h.months.includes(month);
-                            const paid = paidMonths.includes(month);
-                            if (!applicable)
-                              return (
-                                <td
-                                  key={month}
-                                  className="p-2 text-center text-muted-foreground text-xs"
-                                >
-                                  —
-                                </td>
-                              );
-                            return (
-                              <td
-                                key={month}
-                                className="p-2 text-center text-xs"
-                              >
-                                {paid ? (
-                                  <span className="inline-flex items-center justify-center w-5 h-5 bg-green-100 rounded-full">
-                                    <Check className="w-3 h-3 text-green-600" />
-                                  </span>
-                                ) : (
-                                  <span className="text-destructive font-medium">
-                                    {amt}
-                                  </span>
-                                )}
-                              </td>
-                            );
-                          })}
-                          <td className="p-2 text-right text-xs font-semibold">
-                            {formatCurrency(rowTotal)}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {feeHeadings.length === 0 && (
-                      <tr>
-                        <td
-                          colSpan={14}
-                          className="p-4 text-center text-muted-foreground text-sm"
-                        >
-                          No fee headings configured
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr className="border-t-2 border-border bg-muted/30">
-                      <td
-                        colSpan={13}
-                        className="p-2 text-xs font-bold text-right"
-                      >
-                        Net Payable (after discount + old balance):
-                      </td>
-                      <td
-                        className={`p-2 text-right text-xs font-bold ${netPayable > 0 ? "text-destructive" : "text-green-600"}`}
-                      >
-                        {formatCurrency(Math.max(0, netPayable))}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </TabsContent>
-
-            {/* Transport Tab */}
-            <TabsContent value="transport">
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-1">
-                  <Bus className="w-4 h-4" />
-                  {studentTransportV2 || assignedRoute
-                    ? "Auto-populated from Transport module"
-                    : "Student not assigned to any route"}
-                </div>
-                {(() => {
-                  // Resolve pickup point fare
-                  const ppId = (
-                    studentTransportV2 as { pickupPointId?: string } | undefined
-                  )?.pickupPointId;
-                  const assignedPP =
-                    ppId && assignedRouteV2
-                      ? assignedRouteV2.pickupPoints.find((p) => p.id === ppId)
-                      : null;
-                  const pickupFare = assignedPP?.fare ?? 0;
-                  return (
-                    <>
-                      <div className="grid grid-cols-3 gap-3">
-                        <InfoCard
-                          label="Bus No."
-                          value={
-                            studentTransportV2?.busNo ??
-                            (
-                              assignedRoute as
-                                | { busNo?: string }
-                                | null
-                                | undefined
-                            )?.busNo ??
-                            student.transportBusNo ??
-                            "—"
-                          }
-                        />
-                        <InfoCard
-                          label="Route"
-                          value={
-                            studentTransportV2?.routeName ??
-                            (
-                              assignedRoute as
-                                | { routeName?: string }
-                                | null
-                                | undefined
-                            )?.routeName ??
-                            student.transportRoute ??
-                            "—"
-                          }
-                        />
-                        <InfoCard
-                          label="Pickup Point"
-                          value={
-                            studentTransportV2?.pickupPointName ||
-                            student.transportPickup ||
-                            "—"
-                          }
-                          extra={
-                            pickupFare > 0
-                              ? `₹${pickupFare.toLocaleString("en-IN")}/month`
-                              : undefined
-                          }
-                        />
-                      </div>
-                      {pickupFare > 0 && (
-                        <div className="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg px-3 py-2">
-                          <span className="text-lg">🚌</span>
-                          <div>
-                            <p className="text-xs font-semibold text-foreground">
-                              Monthly Transport Fee
-                            </p>
-                            <p className="text-sm font-bold text-primary">
-                              ₹{pickupFare.toLocaleString("en-IN")} / month
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
-
-                {/* ── Transport Months Wizard ── */}
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <div className="bg-muted/40 px-3 py-2 border-b border-border flex items-center justify-between">
-                    <p className="text-xs font-bold text-foreground uppercase tracking-wide">
-                      🗓️ Transport Fee Months
-                    </p>
-                    <span className="text-[10px] text-muted-foreground">
-                      {transportMonths.length} / {MONTHS.length} months selected
-                    </span>
-                  </div>
-                  <div className="p-3">
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Select the months transport fees apply for this student.
-                      Only selected months will appear in fee collection.
-                    </p>
-                    {/* Month checkboxes - 4 per row */}
-                    <div className="grid grid-cols-4 gap-1.5 mb-3">
-                      {MONTHS.map((month, idx) => {
-                        const short = MONTH_SHORT[idx];
-                        const checked = transportMonths.includes(month);
-                        return (
-                          <label
-                            key={month}
-                            className={`flex items-center gap-1.5 px-2 py-1.5 rounded-md border cursor-pointer transition-colors select-none ${
-                              checked
-                                ? "bg-primary/10 border-primary/40 text-primary"
-                                : "bg-muted/20 border-border text-muted-foreground hover:bg-muted/40"
-                            }`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={checked}
-                              onChange={() => toggleTransportMonth(month)}
-                              className="w-3 h-3 accent-primary"
-                              data-ocid={`transport-month-${short.toLowerCase()}`}
-                            />
-                            <span className="text-[11px] font-semibold">
-                              {short}
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                    {/* Select All / Clear */}
-                    <div className="flex gap-2 mb-3">
-                      <button
-                        type="button"
-                        onClick={() => setTransportMonths(MONTHS)}
-                        className="text-[10px] px-2 py-1 rounded border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        Select All
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setTransportMonths([])}
-                        className="text-[10px] px-2 py-1 rounded border border-border hover:bg-muted/50 transition-colors"
-                      >
-                        Clear All
-                      </button>
-                    </div>
-                    {/* Fare summary */}
-                    {(() => {
-                      const ppId = (
-                        studentTransportV2 as
-                          | { pickupPointId?: string }
-                          | undefined
-                      )?.pickupPointId;
-                      const assignedPP =
-                        ppId && assignedRouteV2
-                          ? assignedRouteV2.pickupPoints.find(
-                              (p) => p.id === ppId,
-                            )
-                          : null;
-                      const pickupFare = assignedPP?.fare ?? 0;
-                      const total = pickupFare * transportMonths.length;
-                      if (pickupFare <= 0) return null;
-                      return (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-xs text-blue-800 flex items-center justify-between mb-3">
-                          <span>
-                            Monthly Fare:{" "}
-                            <strong>
-                              ₹{pickupFare.toLocaleString("en-IN")}
-                            </strong>
-                          </span>
-                          <span className="font-bold">
-                            {transportMonths.length} months × ₹
-                            {pickupFare.toLocaleString("en-IN")} ={" "}
-                            <span className="text-blue-900">
-                              ₹{total.toLocaleString("en-IN")}
-                            </span>
-                          </span>
-                        </div>
-                      );
-                    })()}
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        onClick={() => saveTransportMonths(transportMonths)}
-                        className="w-full py-1.5 rounded text-xs font-bold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-                        data-ocid="save-transport-months"
-                      >
-                        {transportMonthsSaved
-                          ? "✓ Saved!"
-                          : "💾 Save Transport Months"}
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {assignedRouteV2 && (
-                  <div className="bg-muted/30 rounded-lg p-3 text-sm space-y-1">
-                    <p className="font-medium text-foreground">
-                      Driver: {assignedRouteV2.driverName || "—"}
-                    </p>
-                    {assignedRouteV2.driverMobile && (
-                      <p className="text-muted-foreground">
-                        Mobile: {assignedRouteV2.driverMobile}
-                      </p>
-                    )}
-                    <p className="text-muted-foreground text-xs">
-                      All Stops:{" "}
-                      {assignedRouteV2.pickupPoints
-                        .sort((a, b) => a.order - b.order)
-                        .map(
-                          (p) =>
-                            `${p.stopName}${p.fare ? ` (₹${p.fare})` : ""}`,
-                        )
-                        .join(" → ")}
-                    </p>
-                  </div>
-                )}
-                {!studentTransportV2 && !assignedRoute && (
-                  <p className="text-xs text-muted-foreground bg-muted/30 rounded-lg p-3">
-                    To assign transport, go to <strong>Transport</strong> module
-                    → Student Assignments tab, search for this student, select a
-                    route and pickup point, then save.
-                  </p>
-                )}
-              </div>
-            </TabsContent>
-
-            {/* Discounts Tab */}
-            <TabsContent value="discounts">
-              <div className="space-y-4">
-                {isAdmin && (
-                  <div className="bg-muted/30 rounded-lg p-3 border border-border space-y-3">
-                    <p className="text-xs font-bold text-foreground">
-                      Add Discount Entry
-                    </p>
-
-                    {/* Month + Amount + Reason row */}
-                    <div className="flex gap-2 flex-wrap items-end">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Month</Label>
-                        <Select
-                          value={newDiscMonth}
-                          onValueChange={setNewDiscMonth}
-                        >
-                          <SelectTrigger className="w-32 h-8 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MONTHS.map((m) => (
-                              <SelectItem key={m} value={m}>
-                                {m}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Amount (₹)</Label>
-                        <input
-                          className="w-24 h-8 px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          value={newDiscAmt}
-                          onChange={(e) =>
-                            setNewDiscAmt(
-                              e.target.value
-                                .replace(/[^0-9.]/g, "")
-                                .replace(/(\..*)\./g, "$1"),
-                            )
-                          }
-                          placeholder="0"
-                          type="text"
-                          inputMode="numeric"
-                        />
-                      </div>
-                      <div className="space-y-1 flex-1 min-w-[120px]">
-                        <Label className="text-xs">Reason</Label>
-                        <input
-                          className="h-8 w-full px-2 text-xs border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                          value={newDiscReason}
-                          onChange={(e) => setNewDiscReason(e.target.value)}
-                          placeholder="e.g. Scholarship"
-                        />
-                      </div>
-                      <Button size="sm" onClick={addDiscount} className="h-8">
-                        <Plus className="w-3 h-3 mr-1" /> Add
-                      </Button>
-                    </div>
-
-                    {/* Discount Scope: which fee types */}
-                    <div className="space-y-1.5">
-                      <p className="text-xs font-semibold text-foreground">
-                        Discount Scope{" "}
-                        <span className="font-normal text-muted-foreground">
-                          (select which fee types get this discount)
-                        </span>
-                      </p>
-                      {/* Select All row */}
-                      {(() => {
-                        const applicableIds = [
-                          ...feeHeadings
-                            .filter(
-                              (h) =>
-                                !h.applicableClasses ||
-                                h.applicableClasses.length === 0 ||
-                                h.applicableClasses.includes(student.class),
-                            )
-                            .map((h) => h.id),
-                          "transport",
-                        ];
-                        const checkedCount = applicableIds.filter((id) =>
-                          newDiscScope.includes(id),
-                        ).length;
-                        const allChecked =
-                          checkedCount === applicableIds.length;
-                        const someChecked =
-                          checkedCount > 0 &&
-                          checkedCount < applicableIds.length;
-                        return (
-                          <label className="flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[11px] font-bold transition-colors bg-primary/5 border-primary/30 text-foreground mb-1 select-none">
-                            <input
-                              type="checkbox"
-                              className="w-3 h-3 accent-primary"
-                              checked={allChecked}
-                              ref={(el) => {
-                                if (el) el.indeterminate = someChecked;
-                              }}
-                              onChange={() => {
-                                if (allChecked) {
-                                  setNewDiscScope([]);
-                                } else {
-                                  setNewDiscScope(applicableIds);
-                                }
-                              }}
-                              data-ocid="disc-scope-select-all"
-                            />
-                            <span>Select All</span>
-                            <span className="ml-auto text-muted-foreground font-normal">
-                              {checkedCount}/{applicableIds.length} selected
-                            </span>
-                          </label>
-                        );
-                      })()}
-                      <div className="flex flex-wrap gap-1.5">
-                        {/* One checkbox per applicable fee heading */}
-                        {feeHeadings
-                          .filter(
-                            (h) =>
-                              !h.applicableClasses ||
-                              h.applicableClasses.length === 0 ||
-                              h.applicableClasses.includes(student.class),
-                          )
-                          .map((h) => {
-                            const checked = newDiscScope.includes(h.id);
-                            return (
-                              <label
-                                key={h.id}
-                                className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[11px] transition-colors ${
-                                  checked
-                                    ? "bg-primary/10 border-primary/40 text-primary"
-                                    : "bg-muted/20 border-border text-muted-foreground"
-                                }`}
-                              >
-                                <input
-                                  type="checkbox"
-                                  className="w-3 h-3 accent-primary"
-                                  checked={checked}
-                                  onChange={() => {
-                                    setNewDiscScope((prev) =>
-                                      prev.includes(h.id)
-                                        ? prev.filter((x) => x !== h.id)
-                                        : [...prev, h.id],
-                                    );
-                                  }}
-                                  data-ocid={`disc-scope-${h.id}`}
-                                />
-                                <span className="font-medium">{h.name}</span>
-                              </label>
-                            );
-                          })}
-                        {/* Transport checkbox */}
-                        {(() => {
-                          const checked = newDiscScope.includes("transport");
-                          return (
-                            <label
-                              className={`flex items-center gap-1.5 px-2 py-1 rounded border cursor-pointer text-[11px] transition-colors ${
-                                checked
-                                  ? "bg-blue-50 border-blue-300 text-blue-700"
-                                  : "bg-muted/20 border-border text-muted-foreground"
-                              }`}
-                            >
-                              <input
-                                type="checkbox"
-                                className="w-3 h-3 accent-blue-600"
-                                checked={checked}
-                                onChange={() => {
-                                  setNewDiscScope((prev) =>
-                                    prev.includes("transport")
-                                      ? prev.filter((x) => x !== "transport")
-                                      : [...prev, "transport"],
-                                  );
-                                }}
-                                data-ocid="disc-scope-transport"
-                              />
-                              <span className="font-medium">
-                                🚌 Transport Fees
-                              </span>
-                            </label>
-                          );
-                        })()}
-                      </div>
-                      {newDiscScope.length > 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          Discount will apply only to:{" "}
-                          <span className="text-foreground font-medium">
-                            {newDiscScope
-                              .map((id) =>
-                                id === "transport"
-                                  ? "Transport"
-                                  : (feeHeadings.find((h) => h.id === id)
-                                      ?.name ?? id),
-                              )
-                              .join(", ")}
-                          </span>
-                        </p>
-                      )}
-                      {newDiscScope.length === 0 && (
-                        <p className="text-[10px] text-muted-foreground">
-                          No scope selected — discount will not apply to any fee
-                          type.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {/* Discount entries table */}
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="bg-muted/50">
-                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                          Month
-                        </th>
-                        <th className="text-right p-2 text-xs font-medium text-muted-foreground">
-                          Discount
-                        </th>
-                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                          Applies To
-                        </th>
-                        <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                          Reason
-                        </th>
-                        {isAdmin && <th className="p-2 w-8" />}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {MONTHS.map((month) => {
-                        const monthDiscounts = discounts.filter(
-                          (d) => d.month === month,
-                        );
-                        const discount = monthDiscounts.reduce(
-                          (s, d) => s + d.amount,
-                          0,
-                        );
-                        return (
-                          <tr key={month} className="border-t border-border">
-                            <td className="p-2 text-xs">{month}</td>
-                            <td className="p-2 text-right text-xs font-medium">
-                              {discount > 0 ? (
-                                <span className="text-green-600">
-                                  {formatCurrency(discount)}
-                                </span>
-                              ) : (
-                                "—"
-                              )}
-                            </td>
-                            <td className="p-2 text-xs text-muted-foreground max-w-[120px]">
-                              {monthDiscounts.length > 0
-                                ? monthDiscounts
-                                    .map((d) => {
-                                      if (
-                                        !d.applicableTo ||
-                                        d.applicableTo.length === 0
-                                      )
-                                        return "All fees";
-                                      return d.applicableTo
-                                        .map((id) =>
-                                          id === "transport"
-                                            ? "Transport"
-                                            : (feeHeadings.find(
-                                                (h) => h.id === id,
-                                              )?.name ?? id),
-                                        )
-                                        .join(", ");
-                                    })
-                                    .join(" | ")
-                                : "—"}
-                            </td>
-                            <td className="p-2 text-xs text-muted-foreground">
-                              {monthDiscounts
-                                .map((d) => d.reason)
-                                .filter(Boolean)
-                                .join(", ") || "—"}
-                            </td>
-                            {isAdmin && (
-                              <td className="p-2">
-                                {monthDiscounts.map((d) => (
-                                  <button
-                                    key={d.id}
-                                    type="button"
-                                    onClick={() => removeDiscount(d.id)}
-                                    className="text-destructive hover:opacity-70 ml-1"
-                                    aria-label="Remove discount"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                ))}
-                              </td>
-                            )}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t-2 border-border bg-muted/30">
-                        <td className="p-2 text-xs font-bold">
-                          Total Discount
-                        </td>
-                        <td className="p-2 text-right text-xs font-bold text-green-600">
-                          {formatCurrency(totalDiscounts)}
-                        </td>
-                        <td colSpan={isAdmin ? 3 : 2} />
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-
-                {/* Net Payable Breakdown */}
-                <div className="bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-1.5">
-                  <p className="text-xs font-bold text-foreground mb-2">
-                    Net Payable Breakdown
-                  </p>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">Total Fees</span>
-                    <span className="font-semibold">
-                      {formatCurrency(totalFees)}
-                    </span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-muted-foreground">
-                      Total Discounts
-                    </span>
-                    <span className="font-semibold text-green-600">
-                      − {formatCurrency(totalDiscounts)}
-                    </span>
-                  </div>
-                  {totalOldBalance > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">Old Balance</span>
-                      <span className="font-semibold text-destructive">
-                        + {formatCurrency(totalOldBalance)}
-                      </span>
-                    </div>
-                  )}
-                  {totalPaid > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-muted-foreground">Paid So Far</span>
-                      <span className="font-semibold text-green-600">
-                        − {formatCurrency(totalPaid)}
-                      </span>
-                    </div>
-                  )}
-                  <div className="flex justify-between text-sm font-bold border-t border-primary/20 pt-1.5">
-                    <span>Net Payable</span>
-                    <span
-                      className={
-                        netPayable > 0 ? "text-destructive" : "text-green-600"
-                      }
-                    >
-                      {formatCurrency(Math.max(0, netPayable))}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Old Fees Tab */}
-            <TabsContent value="oldfees">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-muted-foreground">
-                    Previous session dues carried forward + manually added old
-                    fees
-                  </p>
-                  {isAdmin && (
-                    <Button
-                      size="sm"
-                      onClick={openAddOldFee}
-                      data-ocid="add-old-fee-btn"
-                    >
-                      <Plus className="w-3 h-3 mr-1" /> Add Old Fee Entry
-                    </Button>
-                  )}
-                </div>
-
-                {/* Promoted dues (read-only from session promotion) */}
-                {Object.keys(studentPrevDues).length > 0 && (
-                  <div className="border border-border rounded-lg overflow-hidden">
-                    <div className="bg-muted/40 px-3 py-2 border-b border-border">
-                      <p className="text-xs font-bold text-foreground uppercase tracking-wide">
-                        📋 Promoted Session Dues (read-only)
-                      </p>
-                    </div>
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-muted/30">
-                          <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                            Month
-                          </th>
-                          <th className="text-right p-2 text-xs font-medium text-muted-foreground">
-                            Due Amount
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Object.entries(studentPrevDues).map(
-                          ([month, amount]) => (
-                            <tr key={month} className="border-t border-border">
-                              <td className="p-2 text-xs">{month}</td>
-                              <td className="p-2 text-right text-xs font-medium text-destructive">
-                                {formatCurrency(amount as number)}
-                              </td>
-                            </tr>
-                          ),
-                        )}
-                      </tbody>
-                      <tfoot>
-                        <tr className="border-t-2 border-border bg-muted/30">
-                          <td className="p-2 text-xs font-bold">
-                            Sub-total (Promoted)
-                          </td>
-                          <td className="p-2 text-right text-xs font-bold text-destructive">
-                            {formatCurrency(totalPrevDues)}
-                          </td>
-                        </tr>
-                      </tfoot>
-                    </table>
-                  </div>
-                )}
-
-                {/* Manual old fee entries (add/edit/delete) */}
-                <div className="border border-border rounded-lg overflow-hidden">
-                  <div className="bg-muted/40 px-3 py-2 border-b border-border">
-                    <p className="text-xs font-bold text-foreground uppercase tracking-wide">
-                      ✏️ Manual Old Fee Entries
-                    </p>
-                  </div>
-                  {oldFeeEntries.length === 0 ? (
-                    <div className="py-6 text-center text-muted-foreground text-sm">
-                      No manual old fee entries.{" "}
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={openAddOldFee}
-                          className="text-primary underline hover:opacity-80"
-                        >
-                          Add one
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="bg-muted/30">
-                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                              Session
-                            </th>
-                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                              Month
-                            </th>
-                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                              Heading
-                            </th>
-                            <th className="text-right p-2 text-xs font-medium text-muted-foreground">
-                              Amount
-                            </th>
-                            <th className="text-left p-2 text-xs font-medium text-muted-foreground">
-                              Remarks
-                            </th>
-                            {isAdmin && (
-                              <th className="p-2 w-16 text-xs font-medium text-muted-foreground text-center">
-                                Actions
-                              </th>
-                            )}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {oldFeeEntries.map((entry) => (
-                            <tr
-                              key={entry.id}
-                              className="border-t border-border hover:bg-muted/20"
-                              data-ocid={`old-fee-row-${entry.id}`}
-                            >
-                              <td className="p-2 text-xs font-medium">
-                                {entry.sessionLabel}
-                              </td>
-                              <td className="p-2 text-xs">{entry.month}</td>
-                              <td className="p-2 text-xs">
-                                {entry.headingName}
-                              </td>
-                              <td className="p-2 text-right text-xs font-semibold text-destructive">
-                                {formatCurrency(entry.amount)}
-                              </td>
-                              <td className="p-2 text-xs text-muted-foreground max-w-[120px] truncate">
-                                {entry.remarks || "—"}
-                              </td>
-                              {isAdmin && (
-                                <td className="p-2">
-                                  <div className="flex gap-1 justify-center">
-                                    <button
-                                      type="button"
-                                      onClick={() => openEditOldFee(entry)}
-                                      className="text-primary hover:opacity-70 transition-opacity"
-                                      aria-label="Edit entry"
-                                      data-ocid={`old-fee-edit-${entry.id}`}
-                                    >
-                                      <Pencil className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        deleteOldFeeEntry(entry.id)
-                                      }
-                                      className="text-destructive hover:opacity-70 transition-opacity"
-                                      aria-label="Delete entry"
-                                      data-ocid={`old-fee-delete-${entry.id}`}
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </td>
-                              )}
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr className="border-t-2 border-border bg-muted/30">
-                            <td
-                              colSpan={isAdmin ? 3 : 3}
-                              className="p-2 text-xs font-bold"
-                            >
-                              Sub-total (Manual)
-                            </td>
-                            <td className="p-2 text-right text-xs font-bold text-destructive">
-                              {formatCurrency(totalManualOldFees)}
-                            </td>
-                            <td colSpan={isAdmin ? 2 : 1} />
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  )}
-                </div>
-
-                {/* Grand total */}
-                <div className="bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-3 flex items-center justify-between">
-                  <span className="text-sm font-bold text-foreground">
-                    Total Old Balance (feeds into Net Payable)
-                  </span>
-                  <span className="text-base font-bold text-destructive">
-                    {formatCurrency(totalOldBalance)}
-                  </span>
-                </div>
-              </div>
-            </TabsContent>
-
-            {/* Credentials Tab */}
-            {isSuperAdmin && (
-              <TabsContent value="credentials">
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                    <Lock className="w-4 h-4" />
-                    Auto-generated login credentials for this student
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-muted/40 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Username (Adm. No.)
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student?.credentials?.username ??
-                            student?.admNo ??
-                            "—"}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            copyToClipboard(
-                              student?.credentials?.username ??
-                                student?.admNo ??
-                                "",
-                              "user",
-                            )
-                          }
-                          className="text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedUser ? (
-                            <Check className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="bg-muted/40 rounded-lg p-3">
-                      <p className="text-xs text-muted-foreground mb-1">
-                        Password (DOB ddmmyyyy)
-                      </p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground flex-1 font-mono">
-                          {student?.credentials?.password ?? "—"}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            copyToClipboard(
-                              student?.credentials?.password ?? "",
-                              "pass",
-                            )
-                          }
-                          className="text-muted-foreground hover:text-foreground transition-colors"
-                        >
-                          {copiedPass ? (
-                            <Check className="w-4 h-4 text-green-600" />
-                          ) : (
-                            <Copy className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-                    <p className="text-xs text-amber-800 font-medium">
-                      <CreditCard className="w-3 h-3 inline mr-1" />
-                      Username = Admission Number &nbsp;|&nbsp; Password = Date
-                      of Birth as ddmmyyyy
-                    </p>
-                    <p className="text-xs text-amber-700 mt-1">
-                      e.g. DOB 15/08/2010 → Password: 15082010
-                    </p>
-                  </div>
-                </div>
-              </TabsContent>
-            )}
-          </Tabs>
-        </div>
-      </div>
-
-      {/* Discontinue Modal */}
-      {showDiscontinue && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
-            <h3 className="text-lg font-semibold font-display text-foreground">
-              Discontinue Student
-            </h3>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label>Leaving Date</Label>
-                <Input
-                  type="date"
-                  value={leaveDate}
-                  onChange={(e) => setLeaveDate(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Reason</Label>
-                <Input
-                  value={leaveReason}
-                  onChange={(e) => setLeaveReason(e.target.value)}
-                  placeholder="Reason for leaving"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Remarks</Label>
-                <Input
-                  value={leaveRemarks}
-                  onChange={(e) => setLeaveRemarks(e.target.value)}
-                  placeholder="Additional remarks"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                onClick={() => setShowDiscontinue(false)}
-              >
-                Cancel
-              </Button>
-              <Button variant="destructive" onClick={handleDiscontinue}>
-                Confirm Discontinue
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Old Fee Add/Edit Modal */}
-      {oldFeeFormOpen && (
-        <div className="fixed inset-0 z-[60] bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold font-display text-foreground">
-                {editingOldFeeId ? "Edit Old Fee Entry" : "Add Old Fee Entry"}
-              </h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setOldFeeFormOpen(false)}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  Session Label{" "}
-                  <span className="text-muted-foreground font-normal">
-                    e.g. 2024-25
-                  </span>
-                </Label>
-                <Input
-                  value={oldFeeFormData.sessionLabel}
-                  onChange={(e) =>
-                    setOldFeeFormData((p) => ({
-                      ...p,
-                      sessionLabel: e.target.value,
-                    }))
-                  }
-                  placeholder="2024-25"
-                  data-ocid="old-fee-session-input"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs">Month</Label>
-                  <Select
-                    value={oldFeeFormData.month}
-                    onValueChange={(v) =>
-                      setOldFeeFormData((p) => ({ ...p, month: v }))
-                    }
-                  >
-                    <SelectTrigger data-ocid="old-fee-month-select">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {MONTHS.map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs">Amount (₹)</Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={oldFeeFormData.amount}
-                    onChange={(e) =>
-                      setOldFeeFormData((p) => ({
-                        ...p,
-                        amount: e.target.value
-                          .replace(/[^0-9.]/g, "")
-                          .replace(/(\..*)\./g, "$1"),
-                      }))
-                    }
-                    placeholder="0"
-                    data-ocid="old-fee-amount-input"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  Fee Heading{" "}
-                  <span className="text-muted-foreground font-normal">
-                    (select or type)
-                  </span>
-                </Label>
-                <div className="flex gap-2">
-                  {feeHeadings.length > 0 ? (
-                    <Select
-                      value={
-                        feeHeadings.some(
-                          (h) => h.name === oldFeeFormData.headingName,
-                        )
-                          ? oldFeeFormData.headingName
-                          : "__other__"
-                      }
-                      onValueChange={(v) => {
-                        if (v !== "__other__") {
-                          setOldFeeFormData((p) => ({ ...p, headingName: v }));
-                        } else {
-                          setOldFeeFormData((p) => ({ ...p, headingName: "" }));
-                        }
-                      }}
-                    >
-                      <SelectTrigger
-                        className="flex-1"
-                        data-ocid="old-fee-heading-select"
-                      >
-                        <SelectValue placeholder="Select heading" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {feeHeadings.map((h) => (
-                          <SelectItem key={h.id} value={h.name}>
-                            {h.name}
-                          </SelectItem>
-                        ))}
-                        <SelectItem value="__other__">
-                          Other (type below)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  ) : null}
-                  <Input
-                    value={oldFeeFormData.headingName}
-                    onChange={(e) =>
-                      setOldFeeFormData((p) => ({
-                        ...p,
-                        headingName: e.target.value,
-                      }))
-                    }
-                    placeholder="e.g. Tuition Fee"
-                    className={feeHeadings.length > 0 ? "w-36" : "flex-1"}
-                    data-ocid="old-fee-heading-input"
-                  />
-                </div>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">
-                  Remarks{" "}
-                  <span className="text-muted-foreground font-normal">
-                    (optional)
-                  </span>
-                </Label>
-                <Input
-                  value={oldFeeFormData.remarks}
-                  onChange={(e) =>
-                    setOldFeeFormData((p) => ({
-                      ...p,
-                      remarks: e.target.value,
-                    }))
-                  }
-                  placeholder="Any notes"
-                  data-ocid="old-fee-remarks-input"
-                />
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end pt-1">
-              <Button
-                variant="outline"
-                onClick={() => setOldFeeFormOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button onClick={saveOldFeeEntry} data-ocid="old-fee-save-btn">
-                {editingOldFeeId ? "Update Entry" : "Add Entry"}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Print Template */}
-      {printTemplate && (
-        <div
-          id="print-adm-form"
-          className="hidden print:block fixed inset-0 bg-white z-[100] p-8"
-        >
-          {printTemplate === "basic" && (
-            <BasicAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          {printTemplate === "detailed" && (
-            <DetailedAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          {printTemplate === "official" && (
-            <OfficialAdmForm student={student} schoolProfile={schoolProfile} />
-          )}
-          <style>
-            {
-              "@media print { body > *:not(#print-adm-form) { display: none !important; } #print-adm-form { display: block !important; } }"
-            }
-          </style>
-        </div>
-      )}
-    </>
-  );
-}
-
-function Field({
-  label,
-  value,
-  editing,
-  onChange,
-}: {
-  label: string;
-  value: string | undefined;
-  editing: boolean;
-  onChange: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">{label}</Label>
-      {editing ? (
-        <Input
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-8 text-sm"
-        />
-      ) : (
-        <p className="text-sm text-foreground font-medium min-h-[2rem] leading-8 px-1">
-          {value || "—"}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function InfoCard({
-  label,
-  value,
-  extra,
-}: { label: string; value: string; extra?: string }) {
-  return (
-    <div className="bg-muted/40 rounded-lg p-3">
-      <p className="text-xs text-muted-foreground mb-1">{label}</p>
-      <p className="text-sm font-semibold text-foreground">{value}</p>
-      {extra && (
-        <p className="text-xs font-semibold text-primary mt-0.5">{extra}</p>
-      )}
-    </div>
-  );
-}
-
-type ProfileShape = {
-  name: string;
-  address: string;
-  phone: string;
-  principalName: string;
-  affiliationNo: string;
-};
-
-function BasicAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-sans text-black">
-      <div className="text-center mb-4">
-        <h1 className="text-xl font-bold">{schoolProfile.name}</h1>
-        <p className="text-sm">{schoolProfile.address}</p>
-        <h2 className="text-base font-semibold mt-2 border-b border-black pb-1">
-          ADMISSION FORM
-        </h2>
-      </div>
-      <table className="w-full text-sm border-collapse">
-        <tbody>
-          {[
-            ["Admission No.", student.admNo],
-            ["Student Name", student.fullName],
-            ["Class", `${student.class} – ${student.section}`],
-            ["Father's Name", student.fatherName],
-            ["Date of Birth", student.dob],
-            ["Address", student.address],
-          ].map(([label, value]) => (
-            <tr key={label} className="border border-black">
-              <td className="p-2 font-medium w-1/3">{label}</td>
-              <td className="p-2">{value}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-8 flex justify-between">
-        <div>Principal's Signature: _______________</div>
-        <div>Date: _______________</div>
-      </div>
-    </div>
-  );
-}
-
-function DetailedAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-sans text-black">
-      <div className="text-center mb-4">
-        <h1 className="text-2xl font-bold">{schoolProfile.name}</h1>
-        <p className="text-sm">
-          {schoolProfile.address} &nbsp;|&nbsp; {schoolProfile.phone}
-        </p>
-        <h2 className="text-lg font-semibold mt-2 bg-gray-200 py-1">
-          STUDENT ADMISSION FORM
-        </h2>
-      </div>
-      <div className="flex gap-4">
-        <div className="flex-1">
-          <table className="w-full text-sm border-collapse">
-            <tbody>
-              {[
-                ["Admission No.", student.admNo],
-                ["Full Name", student.fullName],
-                ["Class", student.class],
-                ["Section", student.section],
-                ["Date of Birth", student.dob],
-                ["Gender", student.gender],
-                ["Category", student.category],
-                ["Father's Name", student.fatherName],
-                ["Mother's Name", student.motherName],
-                ["Mobile", student.mobile],
-                ["Guardian Mobile", student.guardianMobile],
-                ["Address", student.address],
-                ["Aadhaar No.", student.aadhaarNo ?? ""],
-                ["Previous School", student.previousSchool ?? ""],
-              ].map(([label, value]) => (
-                <tr key={label} className="border border-black">
-                  <td className="p-1.5 font-medium bg-gray-50 w-2/5 text-xs">
-                    {label}
-                  </td>
-                  <td className="p-1.5 text-xs">{value || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <div className="w-28 flex-shrink-0">
-          {student.photo ? (
+  const content = (
+    <div
+      className="flex flex-col h-full max-h-full"
+      data-ocid="student_detail.panel"
+    >
+      {/* Header */}
+      <div className="flex items-start gap-4 p-5 border-b border-border bg-card">
+        {/* Avatar */}
+        <div className="w-14 h-14 rounded-xl bg-primary/10 flex items-center justify-center text-xl font-bold text-primary flex-shrink-0 overflow-hidden">
+          {current.photo ? (
             <img
-              src={student.photo}
-              alt={student.fullName}
-              className="w-28 h-32 object-cover border-2 border-black"
+              src={current.photo}
+              alt={current.fullName}
+              className="w-full h-full object-cover"
             />
           ) : (
-            <div className="border-2 border-black w-28 h-32 flex items-center justify-center text-xs text-gray-400">
-              Photo
-            </div>
+            current.fullName.charAt(0).toUpperCase()
           )}
         </div>
-      </div>
-      <div className="mt-6 grid grid-cols-3 gap-4 text-sm">
-        <div>Parent's Signature: _______________</div>
-        <div>Principal's Signature: _______________</div>
-        <div>Date: _______________</div>
-      </div>
-    </div>
-  );
-}
 
-function OfficialAdmForm({
-  student,
-  schoolProfile,
-}: { student: Student; schoolProfile: ProfileShape }) {
-  return (
-    <div className="font-serif text-black">
-      <div className="border-4 border-double border-black p-4 mb-4">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold uppercase tracking-widest">
-            {schoolProfile.name}
-          </h1>
-          {schoolProfile.affiliationNo && (
-            <p className="text-xs mt-1">
-              Affiliation No: {schoolProfile.affiliationNo}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="font-display font-bold text-foreground text-lg truncate">
+              {current.fullName}
+            </h2>
+            <Badge
+              variant={current.status === "active" ? "default" : "secondary"}
+              className="text-xs"
+            >
+              {current.status === "active" ? "Active" : "Discontinued"}
+            </Badge>
+          </div>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            {current.class}
+            {current.section ? ` – ${current.section}` : ""} · Adm. No:{" "}
+            {current.admNo}
+          </p>
+          {current.fatherMobile && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+              <Phone className="w-3 h-3" />
+              {current.fatherMobile}
             </p>
           )}
-          <p className="text-sm">{schoolProfile.address}</p>
-          <p className="text-sm">Tel: {schoolProfile.phone}</p>
         </div>
+
+        <div className="flex flex-col items-end gap-1 flex-shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 h-8"
+            onClick={() => setShowEditForm(true)}
+            data-ocid="student_detail.edit_button"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            Edit
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`gap-1.5 h-7 text-xs ${current.status === "active" ? "text-destructive" : "text-green-600"}`}
+            onClick={() => void toggleStatus()}
+            data-ocid="student_detail.toggle_status_button"
+          >
+            {current.status === "active" ? (
+              <UserX className="w-3 h-3" />
+            ) : (
+              <UserCheck className="w-3 h-3" />
+            )}
+            {current.status === "active" ? "Discontinue" : "Re-activate"}
+          </Button>
+        </div>
+
+        {!inline && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 flex-shrink-0 ml-2"
+            onClick={onClose}
+            data-ocid="student_detail.close_button"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        )}
       </div>
-      <h2 className="text-center text-lg font-bold uppercase mb-4 underline">
-        APPLICATION FOR ADMISSION
-      </h2>
-      <p className="text-sm mb-4">
-        This is to certify that <strong>{student.fullName}</strong>, S/D/O of{" "}
-        <strong>{student.fatherName}</strong>, is hereby admitted to Class{" "}
-        <strong>
-          {student.class}-{student.section}
-        </strong>{" "}
-        under Admission No. <strong>{student.admNo}</strong> with effect from
-        the current academic session.
-      </p>
-      <table className="w-full text-sm border-collapse mb-6">
-        <tbody>
-          {[
-            ["Date of Birth", student.dob],
-            ["Gender", student.gender],
-            ["Category", student.category],
-            ["Residential Address", student.address],
-            ["Contact Number", `${student.mobile} / ${student.guardianMobile}`],
-            ["Aadhaar No.", student.aadhaarNo ?? "—"],
-            ["S.R. No.", student.srNo ?? "—"],
-            ["Pen No.", student.penNo ?? "—"],
-            ["APAAR No.", student.apaarNo ?? "—"],
-          ].map(([label, value]) => (
-            <tr key={label} className="border border-black">
-              <td className="p-2 font-medium w-1/3 bg-gray-50">{label}</td>
-              <td className="p-2">{value || "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="mt-8 flex justify-between">
-        <div>
-          <p className="text-sm">
-            Principal: {schoolProfile.principalName || "_____________"}
-          </p>
-          <p className="text-sm mt-4">Signature & Seal</p>
-        </div>
-        <div className="text-right">
-          <p className="text-sm">Date: _______________</p>
-          <p className="text-sm mt-4">Parent/Guardian Signature</p>
-        </div>
+
+      {/* Print actions */}
+      <div className="flex items-center gap-2 px-5 py-2 border-b border-border bg-muted/30 flex-wrap">
+        <span className="text-xs text-muted-foreground mr-1">Print:</span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 h-7 text-xs"
+          onClick={() => handlePrint("admission")}
+          data-ocid="student_detail.print_admission_button"
+        >
+          <Printer className="w-3 h-3" /> Admission Form
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 h-7 text-xs"
+          onClick={() => handlePrint("idcard")}
+          data-ocid="student_detail.print_idcard_button"
+        >
+          <FileText className="w-3 h-3" /> ID Card
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-1.5 h-7 text-xs"
+          onClick={() => handlePrint("admitcard")}
+          data-ocid="student_detail.print_admitcard_button"
+        >
+          <FileText className="w-3 h-3" /> Admit Card
+        </Button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex-1 overflow-auto min-h-0">
+        <Tabs defaultValue="info" className="h-full flex flex-col">
+          <TabsList className="mx-5 mt-3 self-start flex-wrap">
+            <TabsTrigger
+              value="info"
+              className="gap-1.5 text-xs"
+              data-ocid="student_detail.info_tab"
+            >
+              <User className="w-3.5 h-3.5" /> Info
+            </TabsTrigger>
+            <TabsTrigger
+              value="fees"
+              className="gap-1.5 text-xs"
+              onClick={loadFees}
+              data-ocid="student_detail.fees_tab"
+            >
+              <CreditCard className="w-3.5 h-3.5" /> Fees
+            </TabsTrigger>
+            <TabsTrigger
+              value="transport"
+              className="gap-1.5 text-xs"
+              data-ocid="student_detail.transport_tab"
+            >
+              <Bus className="w-3.5 h-3.5" /> Transport
+            </TabsTrigger>
+            <TabsTrigger
+              value="attendance"
+              className="gap-1.5 text-xs"
+              onClick={loadAttendance}
+              data-ocid="student_detail.attendance_tab"
+            >
+              <Calendar className="w-3.5 h-3.5" /> Attendance
+            </TabsTrigger>
+          </TabsList>
+
+          {/* ── Info ── */}
+          <TabsContent
+            value="info"
+            className="flex-1 overflow-auto px-5 pb-5 mt-0"
+          >
+            <SectionHead title="Personal Details" />
+            <InfoRow label="Full Name" value={current.fullName} />
+            <InfoRow label="Adm. Number" value={current.admNo} />
+            <InfoRow
+              label="Class / Section"
+              value={`${current.class}${current.section ? ` – ${current.section}` : ""}`}
+            />
+            <InfoRow
+              label="Roll Number"
+              value={(current as Student & { rollNo?: string }).rollNo}
+            />
+            <InfoRow label="Date of Birth" value={current.dob} />
+            <InfoRow label="Gender" value={current.gender} />
+            <InfoRow label="Category" value={current.category} />
+            <InfoRow label="Religion" value={current.religion} />
+            <InfoRow label="Blood Group" value={current.bloodGroup} />
+            <InfoRow label="Aadhaar No." value={current.aadhaarNo} />
+            <InfoRow label="SR Number" value={current.srNo} />
+            <InfoRow label="Pen Number" value={current.penNo} />
+            <InfoRow label="APAAR Number" value={current.apaarNo} />
+
+            <SectionHead title="Contact" />
+            <InfoRow label="Student Mobile" value={current.mobile} />
+            <InfoRow label="Address" value={current.address} />
+            <InfoRow label="Village / Area" value={current.village} />
+
+            <SectionHead title="Parent / Guardian" />
+            <InfoRow label="Father Name" value={current.fatherName} />
+            <InfoRow label="Father Mobile" value={current.fatherMobile} />
+            <InfoRow label="Mother Name" value={current.motherName} />
+            <InfoRow label="Mother Mobile" value={current.motherMobile} />
+            <InfoRow label="Guardian Name" value={current.guardianName} />
+
+            <SectionHead title="Academic" />
+            <InfoRow label="Previous School" value={current.previousSchool} />
+            <InfoRow label="Admission Date" value={current.admissionDate} />
+            <InfoRow label="Session" value={current.sessionId} />
+
+            {familyMembers.length > 0 && (
+              <>
+                <Separator className="my-4" />
+                <SectionHead title="Family Members" />
+                {familyMembers.map((s) => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-3 py-2 border-b border-border/50 last:border-0"
+                  >
+                    <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                      {s.fullName.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {s.fullName}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {s.class} {s.section}
+                      </p>
+                    </div>
+                    <Badge variant="secondary" className="text-xs">
+                      {s.status === "active" ? "Active" : "Discontinued"}
+                    </Badge>
+                  </div>
+                ))}
+              </>
+            )}
+          </TabsContent>
+
+          {/* ── Fees ── */}
+          <TabsContent
+            value="fees"
+            className="flex-1 overflow-auto px-5 pb-5 mt-3"
+          >
+            {feesLoading ? (
+              <div
+                className="space-y-2"
+                data-ocid="student_detail.fees_loading_state"
+              >
+                {["f1", "f2", "f3"].map((k) => (
+                  <Skeleton key={k} className="h-10 w-full" />
+                ))}
+              </div>
+            ) : fees.length === 0 ? (
+              <div
+                className="py-8 text-center text-muted-foreground"
+                data-ocid="student_detail.fees_empty_state"
+              >
+                <CreditCard className="w-8 h-8 opacity-30 mx-auto mb-2" />
+                <p className="text-sm">No fee receipts found</p>
+                <p className="text-xs mt-1">
+                  Go to Fees → Collect Fees to record a payment
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground mb-3">
+                  {fees.length} receipt{fees.length !== 1 ? "s" : ""} found
+                </p>
+                {fees.map((f, idx) => (
+                  <div
+                    key={f.id ?? `fee-${idx}`}
+                    className="flex items-center gap-3 p-3 bg-muted/40 rounded-lg border border-border/60"
+                    data-ocid={`student_detail.fees.item.${idx + 1}`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">
+                        Receipt #{f.receiptNo}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {f.date} · {f.paymentMode}
+                      </p>
+                    </div>
+                    <span className="font-bold text-foreground text-sm">
+                      {formatCurrency(f.totalAmount)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Transport ── */}
+          <TabsContent
+            value="transport"
+            className="flex-1 overflow-auto px-5 pb-5 mt-3"
+          >
+            {current.transportRoute ||
+            current.transportBusNo ||
+            current.transportPickup ? (
+              <div className="space-y-1">
+                <InfoRow label="Bus Number" value={current.transportBusNo} />
+                <InfoRow label="Route" value={current.transportRoute} />
+                <InfoRow label="Pickup Point" value={current.transportPickup} />
+                {current.transportMonths &&
+                  current.transportMonths.length > 0 && (
+                    <div className="flex gap-3 py-2">
+                      <span className="text-xs text-muted-foreground w-32 flex-shrink-0 mt-0.5">
+                        Transport Months
+                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {current.transportMonths.map((m) => (
+                          <Badge
+                            key={m}
+                            variant="secondary"
+                            className="text-xs"
+                          >
+                            {m}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+              </div>
+            ) : (
+              <div
+                className="py-8 text-center text-muted-foreground"
+                data-ocid="student_detail.transport_empty_state"
+              >
+                <Bus className="w-8 h-8 opacity-30 mx-auto mb-2" />
+                <p className="text-sm">No transport details assigned</p>
+                <p className="text-xs mt-1">
+                  Edit this student to add transport information
+                </p>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* ── Attendance ── */}
+          <TabsContent
+            value="attendance"
+            className="flex-1 overflow-auto px-5 pb-5 mt-3"
+          >
+            {attendanceLoading ? (
+              <div
+                className="space-y-2"
+                data-ocid="student_detail.attendance_loading_state"
+              >
+                {["a1", "a2", "a3"].map((k) => (
+                  <Skeleton key={k} className="h-8 w-full" />
+                ))}
+              </div>
+            ) : attendance.length === 0 ? (
+              <div
+                className="py-8 text-center text-muted-foreground"
+                data-ocid="student_detail.attendance_empty_state"
+              >
+                <Calendar className="w-8 h-8 opacity-30 mx-auto mb-2" />
+                <p className="text-sm">No attendance records found</p>
+              </div>
+            ) : (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground mb-3">
+                  {attendance.length} records
+                </p>
+                {attendance.slice(0, 30).map((a) => (
+                  <div
+                    key={`att-${a.date}-${a.status}`}
+                    className="flex items-center gap-3 py-1.5 border-b border-border/50 last:border-0"
+                    data-ocid="student_detail.attendance.item"
+                  >
+                    <span className="text-xs text-muted-foreground w-24 flex-shrink-0">
+                      {a.date}
+                    </span>
+                    <Badge
+                      variant={
+                        a.status === "Present"
+                          ? "default"
+                          : a.status === "Absent"
+                            ? "destructive"
+                            : "secondary"
+                      }
+                      className="text-xs"
+                    >
+                      {a.status}
+                    </Badge>
+                  </div>
+                ))}
+                {attendance.length > 30 && (
+                  <p className="text-xs text-muted-foreground text-center pt-2">
+                    Showing 30 of {attendance.length} records
+                  </p>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </div>
+
+      {/* Edit Form */}
+      {showEditForm && (
+        <StudentForm
+          student={current}
+          onSave={async (saved) => {
+            setCurrent(saved);
+            onUpdate(saved);
+            setShowEditForm(false);
+          }}
+          onClose={() => setShowEditForm(false)}
+          saveData={async (_col, item) => item}
+          updateData={async (_col, id, changes) => {
+            await effectiveUpdateData(_col, id, changes);
+          }}
+        />
+      )}
+    </div>
+  );
+
+  if (inline) {
+    return <div className="flex flex-col min-h-full">{content}</div>;
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-end bg-background/60 backdrop-blur-sm"
+      data-ocid="student_detail.dialog"
+    >
+      <div
+        className="w-full max-w-lg h-full bg-card border-l border-border shadow-2xl flex flex-col overflow-hidden"
+        style={{ maxWidth: "min(480px, 100vw)" }}
+      >
+        {content}
       </div>
     </div>
   );

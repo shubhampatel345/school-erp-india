@@ -1,6 +1,6 @@
 // ──────────────────────────────────────────────────────────
 // SHUBH SCHOOL ERP — Complete Type Definitions
-// cPanel / MySQL backend — local-first sync
+// cPanel / MySQL backend — online-only, no offline sync
 // ──────────────────────────────────────────────────────────
 
 export type UserRole =
@@ -48,7 +48,7 @@ export interface AppUser {
   isActive?: boolean;
 }
 
-/** Alias used by AppContext and SyncEngine */
+/** Alias used by AppContext */
 export type User = AppUser;
 
 export interface Permission {
@@ -75,15 +75,9 @@ export interface Session {
   description?: string;
 }
 
-/**
- * Class promotion mapping — two-field interface used by the promotion wizard.
- * `sourceClass` and `targetClass` are the canonical field names.
- * `fromClass` / `toClass` are kept as optional aliases for backward compatibility.
- */
 export interface ClassMapping {
   sourceClass: string;
   targetClass: string;
-  /** "Alumni/Discontinued" means terminal (graduate or drop out) */
   isTerminal?: boolean;
   /** @deprecated use sourceClass */
   fromClass?: string;
@@ -91,7 +85,6 @@ export interface ClassMapping {
   toClass?: string;
 }
 
-/** Default class promotion ladder for Indian schools */
 export const DEFAULT_CLASS_MAPPINGS: ClassMapping[] = [
   { sourceClass: "Nursery", targetClass: "LKG" },
   { sourceClass: "LKG", targetClass: "UKG" },
@@ -114,7 +107,6 @@ export const DEFAULT_CLASS_MAPPINGS: ClassMapping[] = [
   },
 ];
 
-/** Build next session label from current: "2025-26" → "2026-27" */
 export function nextSessionLabel(currentLabel: string): string {
   const [startStr] = currentLabel.split("-");
   const startYear = Number.parseInt(startStr, 10);
@@ -249,7 +241,6 @@ export interface FeesPlan {
   amounts?: Record<string, number>;
 }
 
-/** Alias for backward compatibility */
 export type FeePlan = FeesPlan;
 
 export interface OtherCharge {
@@ -358,7 +349,7 @@ export interface Notification {
 }
 
 // ──────────────────────────────────────────────────────────
-// Sync Engine
+// App Config
 // ──────────────────────────────────────────────────────────
 export interface SyncStatus {
   state: "idle" | "loading" | "synced" | "error" | "offline";
@@ -382,9 +373,6 @@ export interface ChangelogEntry {
   after?: Record<string, unknown>;
 }
 
-// ──────────────────────────────────────────────────────────
-// App Config
-// ──────────────────────────────────────────────────────────
 export interface AppConfig {
   schoolId: string;
   defaultSession: string;
@@ -392,9 +380,6 @@ export interface AppConfig {
   offlineMode: boolean;
 }
 
-// ──────────────────────────────────────────────────────────
-// All data loaded from server in one call
-// ──────────────────────────────────────────────────────────
 export interface AllData {
   students: Student[];
   staff: Staff[];
@@ -781,37 +766,6 @@ export interface ChatGroup {
 }
 
 // ──────────────────────────────────────────────────────────
-// Calls
-// ──────────────────────────────────────────────────────────
-export interface Call {
-  id: string;
-  from: string;
-  to: string;
-  duration: number;
-  timestamp: string;
-  status: "completed" | "missed" | "rejected";
-  direction: "inbound" | "outbound";
-}
-
-// ──────────────────────────────────────────────────────────
-// Face Recognition Attendance
-// ──────────────────────────────────────────────────────────
-export interface FaceDescriptor {
-  studentId: string;
-  descriptors: number[][];
-  enrolledAt: string;
-}
-
-export interface FaceAttendanceLog {
-  id: string;
-  studentId: string;
-  timestamp: string;
-  confidence: number;
-  method: "face" | "qr" | "manual";
-  sessionId: string;
-}
-
-// ──────────────────────────────────────────────────────────
 // Library Management
 // ──────────────────────────────────────────────────────────
 export interface LibraryBook {
@@ -903,7 +857,7 @@ export interface TransportTrip {
 }
 
 // ──────────────────────────────────────────────────────────
-// Bulk WhatsApp / SMS Broadcast
+// Broadcast
 // ──────────────────────────────────────────────────────────
 export interface BroadcastRecipientFilter {
   type: "class" | "all" | "route";
@@ -929,31 +883,7 @@ export interface BroadcastCampaign {
 }
 
 // ──────────────────────────────────────────────────────────
-// Parent PWA Push Notifications
-// ──────────────────────────────────────────────────────────
-export interface PushSubscription {
-  id: string;
-  userId: string;
-  endpoint: string;
-  keys: {
-    p256dh: string;
-    auth: string;
-  };
-  role: string;
-  createdAt: string;
-}
-
-export interface PushNotificationPayload {
-  title: string;
-  body: string;
-  icon?: string;
-  url?: string;
-  type: "attendance" | "fees" | "exam" | "homework" | "broadcast";
-  studentId?: string;
-}
-
-// ──────────────────────────────────────────────────────────
-// Student Performance Analytics
+// Analytics
 // ──────────────────────────────────────────────────────────
 export interface MarksHistoryEntry {
   examTitle: string;
@@ -983,10 +913,32 @@ export interface StudentAnalytics {
 }
 
 // ──────────────────────────────────────────────────────────
+// Calls
+// ──────────────────────────────────────────────────────────
+export interface Call {
+  id: string;
+  from: string;
+  to: string;
+  duration: number;
+  timestamp: string;
+  status: "completed" | "missed" | "rejected";
+  direction: "inbound" | "outbound";
+}
+
+// ──────────────────────────────────────────────────────────
+// ApiResponse
+// ──────────────────────────────────────────────────────────
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+}
+
+// ──────────────────────────────────────────────────────────
 // Constants
 // ──────────────────────────────────────────────────────────
 
-/** 10 selectable themes */
 export const THEMES = [
   { id: "default", label: "Navy Blue", description: "Dark navy + cyan" },
   { id: "ocean", label: "Deep Ocean", description: "Deep blue + teal" },
@@ -1040,7 +992,6 @@ export const MONTHS: string[] = [
   "March",
 ];
 
-/** Short month labels */
 export const MONTHS_SHORT: string[] = [
   "Apr",
   "May",
@@ -1056,10 +1007,8 @@ export const MONTHS_SHORT: string[] = [
   "Mar",
 ];
 
-/** Alias for backward compatibility */
 export const MONTHS_FULL = MONTHS;
 
-/** Transport months — 11 months auto-selected (June deselected by default) */
 export const DEFAULT_TRANSPORT_MONTHS = [
   "Apr",
   "May",
@@ -1074,7 +1023,6 @@ export const DEFAULT_TRANSPORT_MONTHS = [
   "Mar",
 ];
 
-/** Format a number as Indian currency: ₹1,23,456 */
 export function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",

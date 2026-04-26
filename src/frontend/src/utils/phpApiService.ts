@@ -1,87 +1,44 @@
 /**
  * SHUBH SCHOOL ERP — PHP API Service
  *
- * Calls the cPanel/PHP/MySQL backend at /api.
- * All data operations go through this service — no canister, no IC.
+ * Single source of truth for all API calls to cPanel/PHP/MySQL backend.
  *
- * Auth: JWT Bearer token stored in localStorage ('erp_token').
- * Token lifecycle:
- *   - isTokenExpired(): reads JWT exp field, returns true if expiring within 30s
- *   - ensureValidToken(): checks expiry, calls silentRefresh() if needed
- *     BUT: skips check if a fresh login happened in the last 10 minutes
- *   - silentRefresh(): tries /auth/refresh first, then re-login with stored creds
- *   - Every authenticated API call calls ensureValidToken() first
- * If all refresh methods fail, emits 'auth:token-expired' DOM event.
- *
- * API URL format: {serverUrl}/index.php?route=ROUTE_NAME
- * Default: 'https://shubh.psmkgs.com/api' (hardcoded for production).
+ * API URL format: {API_BASE}/index.php?route=ROUTE_NAME
+ * Hardcoded base: https://shubh.psmkgs.com/api
  * Override via localStorage 'erp_server_url' for dev/testing.
  *
- * VALID ROUTES (must match backend exactly):
- * auth/login, auth/logout, auth/refresh, auth/me,
- * migrate/run,
- * students/list, students/get, students/add, students/update, students/delete,
- * students/import, students/count,
- * fees/headings, fees/headings/save, fees/headings/delete,
- * fees/plan, fees/plan/save,
- * fees/collect/student, fees/collect/save,
- * fees/receipts, fees/receipt, fees/receipt/delete,
- * fees/due, fees/collection-chart,
- * attendance/daily, attendance/save, attendance/summary, attendance/student,
- * attendance/face,
- * staff/list, staff/get, staff/add, staff/update, staff/delete, staff/import,
- * payroll/list, payroll/save, payroll/payslip,
- * academics/classes, academics/classes/save, academics/classes/delete,
- * academics/sections, academics/sections/save,
- * academics/subjects, academics/subjects/save, academics/subjects/delete,
- * academic-sessions/list, academic-sessions/create,
- * academic-sessions/set-current, academic-sessions/promote,
- * exams/list, exams/save, exams/timetable, exams/timetable/save,
- * exams/results, exams/results/save,
- * transport/routes, transport/routes/save, transport/routes/delete,
- * transport/buses, transport/buses/save,
- * transport/pickup-points, transport/pickup-points/save,
- * transport/driver-students,
- * library/books, library/books/add, library/books/update,
- * library/issue, library/return, library/overdue,
- * inventory/items, inventory/items/add, inventory/items/update,
- * inventory/items/delete, inventory/transactions/add,
- * communication/whatsapp/send, communication/broadcast-history,
- * communication/notification/schedule, communication/notifications,
- * communication/notifications/mark-read,
- * chat/rooms, chat/rooms/create, chat/messages, chat/messages/send,
- * dashboard/stats, dashboard/fee-chart, dashboard/recent-activity,
- * settings/all, settings/save, settings/users, settings/users/create,
- * settings/users/update, settings/users/delete, settings/users/reset-password,
- * reports/students, reports/finance, reports/attendance, reports/fee-register,
- * expenses, expenses/add, expenses/delete,
- * homework, homework/add, homework/delete,
- * backup/export, backup/import,
- * ping
+ * Auth: JWT Bearer token stored in localStorage ('erp_token').
+ * Token grace period: 10 minutes after fresh login (erp_login_time).
+ *
+ * All cPanel routes MUST use POST (not PUT/DELETE — cPanel may block them).
  */
 
-/**
- * Return the API base URL.
- * Hardcoded to https://shubh.psmkgs.com/api for production.
- * Can be overridden via localStorage 'erp_server_url' for dev/testing.
- */
+// ── API Base ──────────────────────────────────────────────────────────────────
+
+const DEFAULT_API_BASE = "https://shubh.psmkgs.com/api";
+
 function getApiBase(): string {
   try {
     const stored = localStorage.getItem("erp_server_url");
-    if (stored) return stored.replace(/\/$/, "");
+    if (stored?.trim()) return stored.trim().replace(/\/$/, "");
   } catch {
     /* noop */
   }
-  return "https://shubh.psmkgs.com/api";
+  return DEFAULT_API_BASE;
 }
 
-interface ApiResponse<T = unknown> {
+// ── Internal types ────────────────────────────────────────────────────────────
+
+interface ApiResponseInternal<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
+  message?: string;
   total?: number;
   page?: number;
 }
+
+// ── Public exported types ─────────────────────────────────────────────────────
 
 export interface StudentListResult {
   data: StudentRecord[];
@@ -125,6 +82,7 @@ export interface ClassRecord extends Record<string, unknown> {
   className: string;
   sections: string[];
   displayOrder?: number;
+  isEnabled?: boolean;
 }
 
 export interface SessionRecord extends Record<string, unknown> {
@@ -196,50 +154,34 @@ export interface StatsResult {
   fees_today: number;
 }
 
-// ── Token helpers ──────────────────────────────────────────────────────────────
+// ── JWT helpers ───────────────────────────────────────────────────────────────
 
-/** Decode JWT payload (base64url) without verifying signature */
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
-    // Base64url → base64 → decode
     const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
     const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    const json = atob(padded);
-    return JSON.parse(json) as Record<string, unknown>;
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
   } catch {
     return null;
   }
 }
 
-// ── PhpApiService ──────────────────────────────────────────────────────────────
+// ── PhpApiService class ───────────────────────────────────────────────────────
 
 class PhpApiService {
-  private token: string | null = null;
-  /** True while a silent re-auth is in progress — prevents re-entrancy */
+  private _token: string | null = null;
   private isRefreshing = false;
-  /** Resolve/reject callbacks queued while refresh is in progress */
   private refreshQueue: Array<{
     resolve: (token: string | null) => void;
     reject: (err: Error) => void;
   }> = [];
 
-  setToken(token: string | null): void {
-    this.token = token;
-    try {
-      if (token) {
-        localStorage.setItem("erp_token", token);
-      } else {
-        localStorage.removeItem("erp_token");
-      }
-    } catch {
-      /* storage unavailable */
-    }
-  }
+  // ── Token management ───────────────────────────────────────────────────────
 
   getToken(): string | null {
-    if (this.token) return this.token;
+    if (this._token) return this._token;
     try {
       return localStorage.getItem("erp_token");
     } catch {
@@ -247,29 +189,45 @@ class PhpApiService {
     }
   }
 
-  clearToken(): void {
-    this.setToken(null);
+  setToken(token: string | null): void {
+    this._token = token;
     try {
+      if (token) {
+        localStorage.setItem("erp_token", token);
+      } else {
+        localStorage.removeItem("erp_token");
+      }
+    } catch {
+      /* noop */
+    }
+  }
+
+  clearToken(): void {
+    this._token = null;
+    try {
+      localStorage.removeItem("erp_token");
       localStorage.removeItem("erp_refresh_token");
     } catch {
       /* noop */
     }
   }
 
-  /** Store credentials for silent re-auth — called by Login on success */
+  isLoggedIn(): boolean {
+    return !!this.getToken();
+  }
+
   storeCredentials(username: string, password: string): void {
     try {
       localStorage.setItem("erp_username", username);
       localStorage.setItem("erp_password", password);
     } catch {
-      /* storage unavailable */
+      /* noop */
     }
   }
 
-  /** Store refresh token — called after successful login */
-  storeRefreshToken(refreshToken: string): void {
+  storeRefreshToken(rt: string): void {
     try {
-      localStorage.setItem("erp_refresh_token", refreshToken);
+      localStorage.setItem("erp_refresh_token", rt);
     } catch {
       /* noop */
     }
@@ -297,16 +255,6 @@ class PhpApiService {
     return null;
   }
 
-  /** Record the time of the last successful token refresh */
-  private recordTokenRefresh(): void {
-    try {
-      localStorage.setItem("lastTokenRefresh", Date.now().toString());
-    } catch {
-      /* noop */
-    }
-  }
-
-  /** Get last token refresh timestamp (ms) or null */
   getLastTokenRefresh(): number | null {
     try {
       const v = localStorage.getItem("lastTokenRefresh");
@@ -316,27 +264,19 @@ class PhpApiService {
     }
   }
 
-  /** Emit 'auth:token-expired' so the UI can prompt re-login */
-  private emitTokenExpired(): void {
+  private recordTokenRefresh(): void {
     try {
-      window.dispatchEvent(new CustomEvent("auth:token-expired"));
+      localStorage.setItem("lastTokenRefresh", Date.now().toString());
     } catch {
       /* noop */
     }
   }
 
-  /** Emit 'auth:token-refreshed' after a successful silent re-auth */
-  private emitTokenRefreshed(): void {
-    try {
-      window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
-    } catch {
-      /* noop */
-    }
-  }
+  // ── Token expiry ───────────────────────────────────────────────────────────
 
   /**
-   * Check whether the current token is expired (or expiring within 30 seconds).
-   * Returns true if the token needs to be refreshed.
+   * Returns true if the token is expired or expiring within 30 seconds.
+   * Tokens without an exp claim are treated as always valid.
    */
   isTokenExpired(): boolean {
     const token = this.getToken();
@@ -344,46 +284,41 @@ class PhpApiService {
     const payload = decodeJwtPayload(token);
     if (!payload) return true;
     const exp = payload.exp as number | undefined;
-    if (!exp) return false; // no expiry claim — treat as valid
-    // Refresh 30 seconds before actual expiry to avoid race conditions
+    if (!exp) return false;
     return exp < Math.floor(Date.now() / 1000) + 30;
   }
 
   /**
-   * Ensure the current token is valid. If expired, attempts a silent refresh.
-   * Returns true if token is valid (or was refreshed), false if all methods failed.
-   * Does NOT throw.
-   *
-   * IMPORTANT: If a fresh login happened within the last 10 minutes, the token
-   * was just issued and is always valid — skip the expiry check entirely.
-   * This prevents false "session expired" errors right after login.
+   * Returns true if a fresh login happened within the last N minutes.
+   * Reads from localStorage 'erp_login_time' (written by login() and AppContext).
+   */
+  private isWithinGracePeriod(minutes = 10): boolean {
+    try {
+      const v = localStorage.getItem("erp_login_time");
+      if (!v) return false;
+      return Date.now() - Number(v) < minutes * 60 * 1000;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Ensure the current token is valid.
+   * Skips expiry check if within the 10-minute grace period after login.
+   * Returns true if valid (or refreshed), false if all refresh attempts failed.
    */
   async ensureValidToken(): Promise<boolean> {
-    try {
-      const loginTimeStr = localStorage.getItem("erp_login_time");
-      if (loginTimeStr) {
-        const loginTime = Number(loginTimeStr);
-        if (Date.now() - loginTime < 10 * 60 * 1000) {
-          // Fresh login within 10 minutes — token is certainly valid
-          return true;
-        }
-      }
-    } catch {
-      /* noop */
-    }
+    if (this.isWithinGracePeriod(10)) return true;
     if (!this.isTokenExpired()) return true;
     return this.silentRefresh();
   }
 
   /**
    * Attempt silent re-authentication.
-   * Strategy: try /auth/refresh with stored refresh_token first (lightweight).
-   * If that fails or no refresh_token, fall back to full re-login with stored credentials.
-   * If a refresh is already in progress, queue the caller.
-   * Returns true on success, false on failure (never throws).
+   * Strategy: try /auth/refresh with refresh_token first, then re-login with stored credentials.
+   * If a refresh is in progress, queue and wait.
    */
   async silentRefresh(): Promise<boolean> {
-    // If already refreshing, queue and wait
     if (this.isRefreshing) {
       return new Promise<boolean>((resolve) => {
         this.refreshQueue.push({
@@ -395,39 +330,36 @@ class PhpApiService {
 
     this.isRefreshing = true;
     try {
-      // Step 1: Try refresh_token endpoint first (lightweight)
-      const storedRefreshToken = this.getStoredRefreshToken();
-      if (storedRefreshToken) {
+      // Step 1: Try refresh token endpoint
+      const storedRt = this.getStoredRefreshToken();
+      if (storedRt) {
         try {
-          const refreshUrl = `${getApiBase()}/?route=auth/refresh`;
-          const refreshResp = await fetch(refreshUrl, {
+          const url = `${getApiBase()}/index.php?route=auth/refresh`;
+          const resp = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: storedRefreshToken }),
+            body: JSON.stringify({ refresh_token: storedRt }),
           });
-          if (refreshResp.ok) {
-            const refreshData =
-              (await refreshResp.json()) as ApiResponse<LoginResult>;
-            if (refreshData.success && refreshData.data?.token) {
-              const newToken = refreshData.data.token;
-              this.setToken(newToken);
-              if (refreshData.data.refresh_token) {
-                this.storeRefreshToken(refreshData.data.refresh_token);
-              }
+          if (resp.ok) {
+            const json =
+              (await resp.json()) as ApiResponseInternal<LoginResult>;
+            if (json.success && json.data?.token) {
+              this.setToken(json.data.token);
+              if (json.data.refresh_token)
+                this.storeRefreshToken(json.data.refresh_token);
               this.recordTokenRefresh();
               this.emitTokenRefreshed();
-              for (const q of this.refreshQueue) q.resolve(newToken);
+              for (const q of this.refreshQueue) q.resolve(json.data.token);
               this.refreshQueue = [];
               return true;
             }
           }
-          // refresh_token invalid/expired — fall through to credential re-login
         } catch {
           /* network error — fall through */
         }
       }
 
-      // Step 2: Fall back to re-login with stored credentials
+      // Step 2: Re-login with stored credentials
       const creds = this.getStoredCredentials();
       if (!creds) {
         this.clearToken();
@@ -438,14 +370,14 @@ class PhpApiService {
         return false;
       }
 
-      const url = `${getApiBase()}/?route=auth/login`;
+      const url = `${getApiBase()}/index.php?route=auth/login`;
       const resp = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(creds),
       });
-      const data = (await resp.json()) as ApiResponse<LoginResult>;
-      if (!resp.ok || !data.success || !data.data?.token) {
+      const json = (await resp.json()) as ApiResponseInternal<LoginResult>;
+      if (!resp.ok || !json.success || !json.data?.token) {
         this.clearToken();
         this.emitTokenExpired();
         for (const q of this.refreshQueue)
@@ -453,14 +385,13 @@ class PhpApiService {
         this.refreshQueue = [];
         return false;
       }
-      const newToken = data.data.token;
+
+      const newToken = json.data.token;
       this.setToken(newToken);
-      if (data.data.refresh_token) {
-        this.storeRefreshToken(data.data.refresh_token);
-      }
+      if (json.data.refresh_token)
+        this.storeRefreshToken(json.data.refresh_token);
       this.recordTokenRefresh();
       this.emitTokenRefreshed();
-
       for (const q of this.refreshQueue) q.resolve(newToken);
       this.refreshQueue = [];
       return true;
@@ -475,70 +406,78 @@ class PhpApiService {
     }
   }
 
-  /**
-   * Internal request method.
-   * Calls ensureValidToken() before every request.
-   * On 401/403: attempt silent re-auth, then retry exactly once.
-   */
+  private emitTokenExpired(): void {
+    try {
+      window.dispatchEvent(new CustomEvent("auth:token-expired"));
+    } catch {
+      /* noop */
+    }
+  }
+
+  private emitTokenRefreshed(): void {
+    try {
+      window.dispatchEvent(new CustomEvent("auth:token-refreshed"));
+    } catch {
+      /* noop */
+    }
+  }
+
+  // ── Core request method ────────────────────────────────────────────────────
+
+  private getAuthHeaders(): Record<string, string> {
+    const token = this.getToken();
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
+  }
+
   private async request<T>(
     route: string,
     options: RequestInit = {},
     isRetry = false,
-  ): Promise<ApiResponse<T>> {
-    // Ensure token is valid before making the request (skip for auth routes)
+  ): Promise<ApiResponseInternal<T>> {
     const isAuthRoute =
       route.startsWith("auth/login") || route.startsWith("auth/refresh");
+
     if (!isAuthRoute && !isRetry) {
-      const tokenOk = await this.ensureValidToken();
-      if (!tokenOk) {
+      const ok = await this.ensureValidToken();
+      if (!ok) {
         this.emitTokenExpired();
         throw new Error("Session expired — please log in again");
       }
     }
 
-    const token = this.getToken();
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+    const url = `${getApiBase()}/index.php?route=${route}`;
+    const headers = {
+      ...this.getAuthHeaders(),
+      ...((options.headers as Record<string, string>) ?? {}),
     };
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    // Use getApiBase() for dynamic server URL support (configurable in Settings)
-    const url = `${getApiBase()}/?route=${route}`;
 
     try {
-      const response = await fetch(url, {
-        ...options,
-        headers: {
-          ...headers,
-          ...((options.headers as Record<string, string>) ?? {}),
-        },
-      });
+      const response = await fetch(url, { ...options, headers });
 
-      // Handle auth errors with silent re-auth (only once)
       if ((response.status === 401 || response.status === 403) && !isRetry) {
         const refreshed = await this.silentRefresh();
-        if (!refreshed) {
+        if (!refreshed)
           throw new Error("Session expired — please log in again");
-        }
-        const newToken = this.getToken();
         return this.request<T>(
           route,
           {
             ...options,
             headers: {
-              ...((options.headers as Record<string, string>) ?? {}),
-              Authorization: `Bearer ${newToken ?? ""}`,
+              ...headers,
+              Authorization: `Bearer ${this.getToken() ?? ""}`,
             },
           },
           true,
         );
       }
 
-      let data: ApiResponse<T>;
+      let data: ApiResponseInternal<T>;
       try {
-        data = (await response.json()) as ApiResponse<T>;
+        data = (await response.json()) as ApiResponseInternal<T>;
       } catch {
         throw new Error(
           `Server returned non-JSON response (HTTP ${response.status})`,
@@ -547,7 +486,9 @@ class PhpApiService {
 
       if (!response.ok || !data.success) {
         throw new Error(
-          data.error ?? `Request failed (HTTP ${response.status})`,
+          data.error ??
+            data.message ??
+            `Request failed (HTTP ${response.status})`,
         );
       }
       return data;
@@ -557,13 +498,18 @@ class PhpApiService {
     }
   }
 
-  async get<T>(route: string, params?: Record<string, string>): Promise<T> {
-    const qs = params ? `&${new URLSearchParams(params).toString()}` : "";
+  // ── Public GET / POST helpers ──────────────────────────────────────────────
+
+  async apiGet<T>(route: string, params?: Record<string, string>): Promise<T> {
+    const qs =
+      params && Object.keys(params).length
+        ? `&${new URLSearchParams(params).toString()}`
+        : "";
     const res = await this.request<T>(`${route}${qs}`);
     return res.data as T;
   }
 
-  async post<T>(route: string, body: unknown): Promise<T> {
+  async apiPost<T>(route: string, body: unknown): Promise<T> {
     const res = await this.request<T>(route, {
       method: "POST",
       body: JSON.stringify(body),
@@ -571,10 +517,17 @@ class PhpApiService {
     return res.data as T;
   }
 
-  /**
-   * POST with ?id= as query parameter (for updates).
-   * Never use PUT or DELETE — cPanel often blocks those HTTP methods.
-   */
+  /** Alias for apiGet — used by some legacy callers */
+  async get<T>(route: string, params?: Record<string, string>): Promise<T> {
+    return this.apiGet<T>(route, params);
+  }
+
+  /** Alias for apiPost — used by some legacy callers */
+  async post<T>(route: string, body: unknown): Promise<T> {
+    return this.apiPost<T>(route, body);
+  }
+
+  /** POST with ?id= appended to route (for updates) */
   async postWithId<T>(route: string, id: string, body: unknown): Promise<T> {
     const res = await this.request<T>(`${route}&id=${encodeURIComponent(id)}`, {
       method: "POST",
@@ -583,7 +536,7 @@ class PhpApiService {
     return res.data as T;
   }
 
-  // ── Auth ──────────────────────────────────────────────────────────────────
+  // ── Auth ───────────────────────────────────────────────────────────────────
 
   async login(username: string, password: string): Promise<LoginResult | null> {
     try {
@@ -594,20 +547,10 @@ class PhpApiService {
       if (res.data?.token) {
         this.setToken(res.data.token);
         this.recordTokenRefresh();
-        const rt = res.data.refresh_token ?? "";
-        if (rt) {
-          this.storeRefreshToken(rt);
-          try {
-            localStorage.setItem("refreshToken", rt);
-          } catch {
-            /* noop */
-          }
-        }
+        if (res.data.refresh_token)
+          this.storeRefreshToken(res.data.refresh_token);
         this.storeCredentials(username, password);
         try {
-          localStorage.setItem("storedUsername", username);
-          localStorage.setItem("storedPassword", password);
-          localStorage.setItem("lastTokenRefresh", Date.now().toString());
           localStorage.setItem("erp_login_time", Date.now().toString());
         } catch {
           /* noop */
@@ -619,20 +562,28 @@ class PhpApiService {
     }
   }
 
-  /** Verify current token with backend — uses auth/me (not auth/verify) */
+  async logout(): Promise<void> {
+    try {
+      await this.apiPost("auth/logout", {});
+    } catch {
+      /* noop */
+    }
+    this.clearToken();
+  }
+
   async verifyToken(): Promise<LoginResult["user"] | null> {
     try {
-      return await this.get<LoginResult["user"]>("auth/me");
+      return await this.apiGet<LoginResult["user"]>("auth/me");
     } catch {
       return null;
     }
   }
 
-  // ── Dashboard Stats ───────────────────────────────────────────────────────
+  // ── Dashboard ──────────────────────────────────────────────────────────────
 
   async getStats(): Promise<StatsResult> {
     try {
-      return await this.get<StatsResult>("dashboard/stats");
+      return await this.apiGet<StatsResult>("dashboard/stats");
     } catch {
       return { students: 0, staff: 0, classes: 0, fees_today: 0 };
     }
@@ -640,7 +591,9 @@ class PhpApiService {
 
   async getDashboardFeeChart(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("dashboard/fee-chart");
+      return await this.apiGet<Record<string, unknown>[]>(
+        "dashboard/fee-chart",
+      );
     } catch {
       return [];
     }
@@ -648,7 +601,7 @@ class PhpApiService {
 
   async getDashboardRecentActivity(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "dashboard/recent-activity",
       );
     } catch {
@@ -656,7 +609,7 @@ class PhpApiService {
     }
   }
 
-  // ── Students ──────────────────────────────────────────────────────────────
+  // ── Students ───────────────────────────────────────────────────────────────
 
   async getStudents(params?: {
     page?: string;
@@ -675,13 +628,9 @@ class PhpApiService {
   }
 
   async addStudent(student: Partial<StudentRecord>): Promise<StudentRecord> {
-    return this.post<StudentRecord>("students/add", student);
+    return this.apiPost<StudentRecord>("students/add", student);
   }
 
-  /**
-   * Update student — uses POST with ?id= query param.
-   * Never use PUT — cPanel often blocks it.
-   */
   async updateStudent(
     student: Partial<StudentRecord> & { id: string },
   ): Promise<StudentRecord> {
@@ -689,39 +638,32 @@ class PhpApiService {
     return this.postWithId<StudentRecord>("students/update", id, body);
   }
 
-  /**
-   * Delete student — uses POST to students/delete with id in body.
-   * Never use DELETE method — cPanel often blocks it.
-   */
   async deleteStudent(id: string): Promise<void> {
-    await this.post("students/delete", { id });
+    await this.apiPost("students/delete", { id });
   }
 
-  /**
-   * Bulk import students — route is students/import (not students/bulk-import).
-   */
   async bulkImportStudents(
     students: Partial<StudentRecord>[],
   ): Promise<{ count: number }> {
-    return this.post<{ count: number }>("students/import", { students });
+    return this.apiPost<{ count: number }>("students/import", { students });
   }
 
   async getStudentCount(): Promise<number> {
     try {
-      const result = await this.get<{ count: number }>("students/count");
+      const result = await this.apiGet<{ count: number }>("students/count");
       return result.count ?? 0;
     } catch {
       return 0;
     }
   }
 
-  // ── Classes ───────────────────────────────────────────────────────────────
+  // ── Classes ────────────────────────────────────────────────────────────────
 
   async getClasses(sessionId?: string): Promise<ClassRecord[]> {
     try {
       const params: Record<string, string> = {};
       if (sessionId) params.session_id = sessionId;
-      const raw = await this.get<
+      const raw = await this.apiGet<
         Array<{
           id: string;
           name: string;
@@ -762,9 +704,8 @@ class PhpApiService {
       name: cls.name ?? cls.className ?? "",
       display_order: cls.display_order ?? 0,
     };
-    if (cls.sessionId ?? currentSessionId) {
-      payload.session_id = cls.sessionId ?? currentSessionId;
-    }
+    const sid = cls.sessionId ?? currentSessionId;
+    if (sid) payload.session_id = sid;
     payload.is_enabled =
       cls.is_enabled !== undefined
         ? cls.is_enabled
@@ -774,7 +715,7 @@ class PhpApiService {
             : 0
           : 1;
     if (cls.sections) payload.sections = cls.sections;
-    return this.post<ClassRecord>("academics/classes/save", payload);
+    return this.apiPost<ClassRecord>("academics/classes/save", payload);
   }
 
   async updateClass(
@@ -800,94 +741,83 @@ class PhpApiService {
             ? 1
             : 0
           : 1;
-    return this.post<ClassRecord>("academics/classes/save", payload);
+    return this.apiPost<ClassRecord>("academics/classes/save", payload);
   }
 
   async deleteClass(id: string): Promise<void> {
-    await this.post("academics/classes/delete", { id });
+    await this.apiPost("academics/classes/delete", { id });
   }
 
   async addSection(section: { classId: string; name: string }): Promise<{
     id: string;
     name: string;
   }> {
-    return this.post<{ id: string; name: string }>("academics/sections/save", {
-      class_id: section.classId,
-      name: section.name,
-    });
+    return this.apiPost<{ id: string; name: string }>(
+      "academics/sections/save",
+      {
+        class_id: section.classId,
+        name: section.name,
+      },
+    );
   }
 
-  async getSectionsByClass(
-    classId: string,
-  ): Promise<Record<string, unknown>[]> {
+  async getSections(classId: string): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("academics/sections", {
-        class_id: classId,
-      });
-    } catch {
-      return [];
-    }
-  }
-
-  // ── Subjects ──────────────────────────────────────────────────────────────
-
-  /**
-   * Get subjects — route is academics/subjects (not subjects/list).
-   */
-  async getSubjects(classId?: string): Promise<Record<string, unknown>[]> {
-    try {
-      const params: Record<string, string> = classId
-        ? { class_id: classId }
-        : {};
-      return await this.get<Record<string, unknown>[]>(
-        "academics/subjects",
-        Object.keys(params).length ? params : undefined,
+      return await this.apiGet<Record<string, unknown>[]>(
+        "academics/sections",
+        { class_id: classId },
       );
     } catch {
       return [];
     }
   }
 
-  /**
-   * Save subject — route is academics/subjects/save (not subjects/add).
-   */
-  async saveSubject(
-    data: Record<string, unknown>,
-  ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("academics/subjects/save", data);
+  async getSectionsByClass(
+    classId: string,
+  ): Promise<Record<string, unknown>[]> {
+    return this.getSections(classId);
   }
 
-  async deleteSubject(id: string): Promise<void> {
-    await this.post("academics/subjects/delete", { id });
-  }
+  // ── Subjects ───────────────────────────────────────────────────────────────
 
-  async getSections(classId: string): Promise<Record<string, unknown>[]> {
+  async getSubjects(classId?: string): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("academics/sections", {
-        class_id: classId,
-      });
+      return await this.apiGet<Record<string, unknown>[]>(
+        "academics/subjects",
+        classId ? { class_id: classId } : undefined,
+      );
     } catch {
       return [];
     }
   }
 
-  // ── Staff ─────────────────────────────────────────────────────────────────
+  async saveSubject(
+    data: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    return this.apiPost<Record<string, unknown>>(
+      "academics/subjects/save",
+      data,
+    );
+  }
+
+  async deleteSubject(id: string): Promise<void> {
+    await this.apiPost("academics/subjects/delete", { id });
+  }
+
+  // ── Staff ──────────────────────────────────────────────────────────────────
 
   async getStaff(): Promise<StaffRecord[]> {
     try {
-      return await this.get<StaffRecord[]>("staff/list");
+      return await this.apiGet<StaffRecord[]>("staff/list");
     } catch {
       return [];
     }
   }
 
   async addStaff(staff: Partial<StaffRecord>): Promise<StaffRecord> {
-    return this.post<StaffRecord>("staff/add", staff);
+    return this.apiPost<StaffRecord>("staff/add", staff);
   }
 
-  /**
-   * Update staff — uses POST with ?id= query param (not PUT).
-   */
   async updateStaff(
     staff: Partial<StaffRecord> & { id: string },
   ): Promise<StaffRecord> {
@@ -895,29 +825,25 @@ class PhpApiService {
     return this.postWithId<StaffRecord>("staff/update", id, body);
   }
 
-  /**
-   * Delete staff — uses POST to staff/delete with id in body (not DELETE).
-   */
   async deleteStaff(id: string): Promise<void> {
-    await this.post("staff/delete", { id });
+    await this.apiPost("staff/delete", { id });
   }
 
-  /**
-   * Bulk import staff — route is staff/import.
-   */
   async bulkImportStaff(
     staffList: Partial<StaffRecord>[],
   ): Promise<{ count: number }> {
-    return this.post<{ count: number }>("staff/import", { staff: staffList });
+    return this.apiPost<{ count: number }>("staff/import", {
+      staff: staffList,
+    });
   }
 
-  // ── Payroll ───────────────────────────────────────────────────────────────
+  // ── Payroll ────────────────────────────────────────────────────────────────
 
   async getPayroll(params?: { month?: string; year?: string }): Promise<
     Record<string, unknown>[]
   > {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "payroll/list",
         params as Record<string, string>,
       );
@@ -927,45 +853,28 @@ class PhpApiService {
   }
 
   async savePayroll(data: Record<string, unknown>): Promise<void> {
-    await this.post("payroll/save", data);
+    await this.apiPost("payroll/save", data);
   }
 
-  /**
-   * Generate payslip — route is payroll/payslip (not payroll/generate-payslip).
-   */
   async generatePayslip(
     staffId: string,
     month: string,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("payroll/payslip", {
+    return this.apiPost<Record<string, unknown>>("payroll/payslip", {
       staffId,
       month,
     });
   }
 
-  // ── Attendance ────────────────────────────────────────────────────────────
+  // ── Attendance ─────────────────────────────────────────────────────────────
 
-  /**
-   * Save face attendance — route is attendance/face (not attendance/face-mark).
-   */
-  async saveFaceAttendance(data: {
-    studentId: string;
-    date: string;
-    time: string;
-  }): Promise<void> {
-    await this.post("attendance/face", data);
-  }
-
-  /**
-   * Get attendance by class — route is attendance/daily (not attendance/list).
-   */
   async getAttendanceByClass(
     classId: string,
     sectionId: string,
     date: string,
   ): Promise<AttendanceRecord[]> {
     try {
-      return await this.get<AttendanceRecord[]>("attendance/daily", {
+      return await this.apiGet<AttendanceRecord[]>("attendance/daily", {
         class: classId,
         section: sectionId,
         date,
@@ -975,22 +884,12 @@ class PhpApiService {
     }
   }
 
-  /**
-   * Save attendance records — route is attendance/save (not attendance/mark).
-   */
-  async markAttendance(records: AttendanceRecord[]): Promise<void> {
-    await this.post("attendance/save", { records });
-  }
-
-  /**
-   * Get attendance records — route is attendance/daily (not attendance/list).
-   */
   async getAttendance(
     className: string,
     date: string,
   ): Promise<AttendanceRecord[]> {
     try {
-      return await this.get<AttendanceRecord[]>("attendance/daily", {
+      return await this.apiGet<AttendanceRecord[]>("attendance/daily", {
         class: className,
         date,
       });
@@ -999,9 +898,21 @@ class PhpApiService {
     }
   }
 
+  async markAttendance(records: AttendanceRecord[]): Promise<void> {
+    await this.apiPost("attendance/save", { records });
+  }
+
+  async saveFaceAttendance(data: {
+    studentId: string;
+    date: string;
+    time: string;
+  }): Promise<void> {
+    await this.apiPost("attendance/face", data);
+  }
+
   async getAttendanceSummary(): Promise<Record<string, unknown>> {
     try {
-      return await this.get<Record<string, unknown>>("attendance/summary");
+      return await this.apiGet<Record<string, unknown>>("attendance/summary");
     } catch {
       return {};
     }
@@ -1014,7 +925,7 @@ class PhpApiService {
     try {
       const params: Record<string, string> = { studentId };
       if (month) params.month = month;
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "attendance/student",
         params,
       );
@@ -1023,11 +934,11 @@ class PhpApiService {
     }
   }
 
-  // ── Sessions ──────────────────────────────────────────────────────────────
+  // ── Sessions ───────────────────────────────────────────────────────────────
 
   async getSessions(): Promise<SessionRecord[]> {
     try {
-      const raw = await this.get<
+      const raw = await this.apiGet<
         Array<{
           id: string;
           name?: string;
@@ -1063,7 +974,7 @@ class PhpApiService {
     startYear: number;
     endYear: number;
   }): Promise<SessionRecord> {
-    return this.post<SessionRecord>("academic-sessions/create", {
+    return this.apiPost<SessionRecord>("academic-sessions/create", {
       name: session.label,
       start_year: session.startYear,
       end_year: session.endYear,
@@ -1071,44 +982,47 @@ class PhpApiService {
   }
 
   async setActiveSession(id: string): Promise<void> {
-    await this.post("academic-sessions/set-current", { session_id: id });
+    await this.apiPost("academic-sessions/set-current", { session_id: id });
   }
 
   async promoteStudents(data: Record<string, unknown>): Promise<void> {
-    await this.post("academic-sessions/promote", data);
+    await this.apiPost("academic-sessions/promote", data);
   }
 
-  // ── Fee headings ──────────────────────────────────────────────────────────
+  // ── Fee Headings ───────────────────────────────────────────────────────────
 
   async getFeeHeadings(): Promise<FeeHeadingRecord[]> {
     try {
-      return await this.get<FeeHeadingRecord[]>("fees/headings");
+      return await this.apiGet<FeeHeadingRecord[]>("fees/headings");
     } catch {
       return [];
     }
   }
 
-  /**
-   * Add/save fee heading — route is fees/headings/save (not fees/headings/add).
-   */
   async addFeeHeading(
     heading: Partial<FeeHeadingRecord>,
   ): Promise<FeeHeadingRecord> {
-    return this.post<FeeHeadingRecord>("fees/headings/save", heading);
+    return this.apiPost<FeeHeadingRecord>("fees/headings/save", heading);
+  }
+
+  async updateFeeHeading(
+    heading: Partial<FeeHeadingRecord>,
+  ): Promise<FeeHeadingRecord> {
+    return this.apiPost<FeeHeadingRecord>("fees/headings/save", heading);
   }
 
   async deleteFeeHeading(id: string): Promise<void> {
-    await this.post("fees/headings/delete", { id });
+    await this.apiPost("fees/headings/delete", { id });
   }
 
-  // ── Fee plan ──────────────────────────────────────────────────────────────
+  // ── Fee Plan ───────────────────────────────────────────────────────────────
 
   async getFeePlan(
     className: string,
     sectionName: string,
   ): Promise<FeePlanRecord[]> {
     try {
-      return await this.get<FeePlanRecord[]>("fees/plan", {
+      return await this.apiGet<FeePlanRecord[]>("fees/plan", {
         class: className,
         section: sectionName,
       });
@@ -1123,33 +1037,28 @@ class PhpApiService {
     items: Array<{ headingId: string; amounts: Record<string, number> }>;
     sessionId?: string;
   }): Promise<void> {
-    await this.post("fees/plan/save", data);
+    await this.apiPost("fees/plan/save", data);
   }
 
-  // ── Fee collection ────────────────────────────────────────────────────────
+  // ── Fee Collection ─────────────────────────────────────────────────────────
 
-  /**
-   * Get student fee details — route is fees/collect/student.
-   */
   async getStudentFeeDetails(
     studentId: string,
   ): Promise<Record<string, unknown>> {
     try {
-      return await this.get<Record<string, unknown>>("fees/collect/student", {
-        studentId,
-      });
+      return await this.apiGet<Record<string, unknown>>(
+        "fees/collect/student",
+        { studentId },
+      );
     } catch {
       return {};
     }
   }
 
-  /**
-   * Save fee collection receipt — route is fees/collect/save.
-   */
   async collectFees(
     receipt: Record<string, unknown>,
   ): Promise<{ receiptNo: string; id: string }> {
-    return this.post<{ receiptNo: string; id: string }>(
+    return this.apiPost<{ receiptNo: string; id: string }>(
       "fees/collect/save",
       receipt,
     );
@@ -1157,19 +1066,21 @@ class PhpApiService {
 
   async getReceipts(studentId: string): Promise<FeeReceiptRecord[]> {
     try {
-      return await this.get<FeeReceiptRecord[]>("fees/receipts", { studentId });
+      return await this.apiGet<FeeReceiptRecord[]>("fees/receipts", {
+        studentId,
+      });
     } catch {
       return [];
     }
   }
 
   async deleteReceipt(id: string): Promise<void> {
-    await this.post("fees/receipt/delete", { id });
+    await this.apiPost("fees/receipt/delete", { id });
   }
 
   async getFeeDue(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("fees/due");
+      return await this.apiGet<Record<string, unknown>[]>("fees/due");
     } catch {
       return [];
     }
@@ -1177,38 +1088,40 @@ class PhpApiService {
 
   async getFeeCollectionChart(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("fees/collection-chart");
+      return await this.apiGet<Record<string, unknown>[]>(
+        "fees/collection-chart",
+      );
     } catch {
       return [];
     }
   }
 
-  // ── Transport ─────────────────────────────────────────────────────────────
+  // ── Transport ──────────────────────────────────────────────────────────────
 
   async getRoutes(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("transport/routes");
+      return await this.apiGet<Record<string, unknown>[]>("transport/routes");
     } catch {
       return [];
     }
   }
 
-  /**
-   * Add/save route — route is transport/routes/save (not transport/routes/add).
-   */
   async addRoute(
     route: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("transport/routes/save", route);
+    return this.apiPost<Record<string, unknown>>(
+      "transport/routes/save",
+      route,
+    );
   }
 
   async deleteRoute(id: string): Promise<void> {
-    await this.post("transport/routes/delete", { id });
+    await this.apiPost("transport/routes/delete", { id });
   }
 
   async getBuses(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("transport/buses");
+      return await this.apiGet<Record<string, unknown>[]>("transport/buses");
     } catch {
       return [];
     }
@@ -1217,29 +1130,24 @@ class PhpApiService {
   async saveBus(
     bus: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("transport/buses/save", bus);
+    return this.apiPost<Record<string, unknown>>("transport/buses/save", bus);
   }
 
   async getPickupPoints(routeId?: string): Promise<Record<string, unknown>[]> {
     try {
-      const params = routeId ? { route_id: routeId } : undefined;
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "transport/pickup-points",
-        params,
+        routeId ? { route_id: routeId } : undefined,
       );
     } catch {
       return [];
     }
   }
 
-  /**
-   * Add/save pickup point — route is transport/pickup-points/save
-   * (not transport/pickup/add).
-   */
   async addPickupPoint(
     point: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
+    return this.apiPost<Record<string, unknown>>(
       "transport/pickup-points/save",
       point,
     );
@@ -1249,21 +1157,20 @@ class PhpApiService {
     driverId?: string,
   ): Promise<Record<string, unknown>[]> {
     try {
-      const params = driverId ? { driver_id: driverId } : undefined;
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "transport/driver-students",
-        params,
+        driverId ? { driver_id: driverId } : undefined,
       );
     } catch {
       return [];
     }
   }
 
-  // ── Library ───────────────────────────────────────────────────────────────
+  // ── Library ────────────────────────────────────────────────────────────────
 
   async getBooks(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("library/books");
+      return await this.apiGet<Record<string, unknown>[]>("library/books");
     } catch {
       return [];
     }
@@ -1272,105 +1179,94 @@ class PhpApiService {
   async addBook(
     book: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("library/books/add", book);
+    return this.apiPost<Record<string, unknown>>("library/books/add", book);
   }
 
   async updateBook(
     book: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("library/books/update", book);
+    return this.apiPost<Record<string, unknown>>("library/books/update", book);
   }
 
   async issueBook(
     issue: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("library/issue", issue);
+    return this.apiPost<Record<string, unknown>>("library/issue", issue);
   }
 
   async returnBook(
     ret: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("library/return", ret);
+    return this.apiPost<Record<string, unknown>>("library/return", ret);
   }
 
   async getOverdueBooks(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("library/overdue");
+      return await this.apiGet<Record<string, unknown>[]>("library/overdue");
     } catch {
       return [];
     }
   }
 
-  // ── Inventory ─────────────────────────────────────────────────────────────
+  // ── Inventory ──────────────────────────────────────────────────────────────
 
-  /**
-   * Get inventory items — route is inventory/items (not inventory/list).
-   */
   async getInventory(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("inventory/items");
+      return await this.apiGet<Record<string, unknown>[]>("inventory/items");
     } catch {
       return [];
     }
   }
 
-  /**
-   * Add inventory item — route is inventory/items/add (not inventory/add).
-   */
   async addInventoryItem(
     item: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("inventory/items/add", item);
+    return this.apiPost<Record<string, unknown>>("inventory/items/add", item);
   }
 
-  /**
-   * Update inventory item — route is inventory/items/update (not inventory/update).
-   * Uses POST (not PUT).
-   */
   async updateInventoryItem(
     item: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("inventory/items/update", item);
+    return this.apiPost<Record<string, unknown>>(
+      "inventory/items/update",
+      item,
+    );
   }
 
   async deleteInventoryItem(id: string): Promise<void> {
-    await this.post("inventory/items/delete", { id });
+    await this.apiPost("inventory/items/delete", { id });
   }
 
   async addInventoryTransaction(
     transaction: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
+    return this.apiPost<Record<string, unknown>>(
       "inventory/transactions/add",
       transaction,
     );
   }
 
-  // ── Exams ─────────────────────────────────────────────────────────────────
+  // ── Exams ──────────────────────────────────────────────────────────────────
 
   async getExams(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("exams/list");
+      return await this.apiGet<Record<string, unknown>[]>("exams/list");
     } catch {
       return [];
     }
   }
 
-  /**
-   * Create/save exam — route is exams/save (not exams/create).
-   */
   async createExam(
     exam: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("exams/save", exam);
+    return this.apiPost<Record<string, unknown>>("exams/save", exam);
   }
 
   async getExamTimetable(examId?: string): Promise<Record<string, unknown>[]> {
     try {
-      const params = examId ? { exam_id: examId } : undefined;
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "exams/timetable",
-        params,
+        examId ? { exam_id: examId } : undefined,
       );
     } catch {
       return [];
@@ -1380,19 +1276,16 @@ class PhpApiService {
   async saveExamTimetable(
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("exams/timetable/save", data);
+    return this.apiPost<Record<string, unknown>>("exams/timetable/save", data);
   }
 
-  /**
-   * Get results — route is exams/results (not results/list).
-   */
   async getResults(params?: {
     studentId?: string;
     class?: string;
     examId?: string;
   }): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "exams/results",
         params as Record<string, string>,
       );
@@ -1401,23 +1294,17 @@ class PhpApiService {
     }
   }
 
-  /**
-   * Save results — route is exams/results/save (not results/add).
-   */
   async addResults(
     results: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("exams/results/save", results);
+    return this.apiPost<Record<string, unknown>>("exams/results/save", results);
   }
 
-  // ── Expenses ──────────────────────────────────────────────────────────────
+  // ── Expenses ───────────────────────────────────────────────────────────────
 
-  /**
-   * Get expenses — route is expenses (not expenses/list).
-   */
   async getExpenses(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("expenses");
+      return await this.apiGet<Record<string, unknown>[]>("expenses");
     } catch {
       return [];
     }
@@ -1426,21 +1313,18 @@ class PhpApiService {
   async addExpense(
     expense: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("expenses/add", expense);
+    return this.apiPost<Record<string, unknown>>("expenses/add", expense);
   }
 
   async deleteExpense(id: string): Promise<void> {
-    await this.post("expenses/delete", { id });
+    await this.apiPost("expenses/delete", { id });
   }
 
-  // ── Homework ──────────────────────────────────────────────────────────────
+  // ── Homework ───────────────────────────────────────────────────────────────
 
-  /**
-   * Get homework — route is homework (not homework/list).
-   */
   async getHomework(className?: string): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "homework",
         className ? { class: className } : undefined,
       );
@@ -1452,19 +1336,19 @@ class PhpApiService {
   async addHomework(
     hw: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("homework/add", hw);
+    return this.apiPost<Record<string, unknown>>("homework/add", hw);
   }
 
   async deleteHomework(id: string): Promise<void> {
-    await this.post("homework/delete", { id });
+    await this.apiPost("homework/delete", { id });
   }
 
-  // ── Communication ─────────────────────────────────────────────────────────
+  // ── Communication ──────────────────────────────────────────────────────────
 
   async sendWhatsApp(
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
+    return this.apiPost<Record<string, unknown>>(
       "communication/whatsapp/send",
       data,
     );
@@ -1472,7 +1356,7 @@ class PhpApiService {
 
   async getBroadcastHistory(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "communication/broadcast-history",
       );
     } catch {
@@ -1483,7 +1367,7 @@ class PhpApiService {
   async scheduleNotification(
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>(
+    return this.apiPost<Record<string, unknown>>(
       "communication/notification/schedule",
       data,
     );
@@ -1491,7 +1375,7 @@ class PhpApiService {
 
   async getNotifications(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "communication/notifications",
       );
     } catch {
@@ -1500,16 +1384,16 @@ class PhpApiService {
   }
 
   async markNotificationsRead(ids?: string[]): Promise<void> {
-    await this.post("communication/notifications/mark-read", {
+    await this.apiPost("communication/notifications/mark-read", {
       ids: ids ?? [],
     });
   }
 
-  // ── Chat ──────────────────────────────────────────────────────────────────
+  // ── Chat ───────────────────────────────────────────────────────────────────
 
   async getChatRooms(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("chat/rooms");
+      return await this.apiGet<Record<string, unknown>[]>("chat/rooms");
     } catch {
       return [];
     }
@@ -1518,12 +1402,12 @@ class PhpApiService {
   async createChatRoom(
     data: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("chat/rooms/create", data);
+    return this.apiPost<Record<string, unknown>>("chat/rooms/create", data);
   }
 
   async getChatMessages(roomId?: string): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "chat/messages",
         roomId ? { room_id: roomId } : undefined,
       );
@@ -1532,84 +1416,63 @@ class PhpApiService {
     }
   }
 
-  /**
-   * Send chat message — route is chat/messages/send (not chat/send).
-   */
   async sendChatMessage(
     msg: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("chat/messages/send", msg);
+    return this.apiPost<Record<string, unknown>>("chat/messages/send", msg);
   }
 
-  // ── Settings ──────────────────────────────────────────────────────────────
+  // ── Settings ───────────────────────────────────────────────────────────────
 
-  /**
-   * Get settings — route is settings/all (not settings/get).
-   */
   async getSettings(): Promise<Record<string, unknown>> {
     try {
-      return await this.get<Record<string, unknown>>("settings/all");
+      return await this.apiGet<Record<string, unknown>>("settings/all");
     } catch {
       return {};
     }
   }
 
   async saveSettings(settings: Record<string, unknown>): Promise<void> {
-    await this.post("settings/save", settings);
+    await this.apiPost("settings/save", settings);
   }
 
-  // ── User Management ───────────────────────────────────────────────────────
+  // ── User Management ────────────────────────────────────────────────────────
 
-  /**
-   * Get users — route is settings/users (not users/list).
-   */
   async getUsers(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("settings/users");
+      return await this.apiGet<Record<string, unknown>[]>("settings/users");
     } catch {
       return [];
     }
   }
 
-  /**
-   * Create user — route is settings/users/create (not users/create).
-   */
   async createUser(
     user: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("settings/users/create", user);
+    return this.apiPost<Record<string, unknown>>("settings/users/create", user);
   }
 
-  /**
-   * Update user — route is settings/users/update (not users/update).
-   */
   async updateUser(
     user: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    return this.post<Record<string, unknown>>("settings/users/update", user);
+    return this.apiPost<Record<string, unknown>>("settings/users/update", user);
   }
 
-  /**
-   * Delete user — route is settings/users/delete (not users/delete).
-   */
   async deleteUser(id: string): Promise<void> {
-    await this.post("settings/users/delete", { id });
+    await this.apiPost("settings/users/delete", { id });
   }
 
-  /**
-   * Reset user password — route is settings/users/reset-password.
-   */
   async resetPassword(id: string, newPassword: string): Promise<void> {
-    await this.post("settings/users/reset-password", { id, newPassword });
+    await this.apiPost("settings/users/reset-password", { id, newPassword });
   }
 
-  // ── Reports ───────────────────────────────────────────────────────────────
+  // ── Reports ────────────────────────────────────────────────────────────────
 
   async getStudentsReport(
     params?: Record<string, string>,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "reports/students",
         params,
       );
@@ -1622,7 +1485,7 @@ class PhpApiService {
     params?: Record<string, string>,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "reports/finance",
         params,
       );
@@ -1635,7 +1498,7 @@ class PhpApiService {
     params?: Record<string, string>,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "reports/attendance",
         params,
       );
@@ -1648,7 +1511,7 @@ class PhpApiService {
     params?: Record<string, string>,
   ): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>(
+      return await this.apiGet<Record<string, unknown>[]>(
         "reports/fee-register",
         params,
       );
@@ -1657,82 +1520,60 @@ class PhpApiService {
     }
   }
 
-  // ── Backup ────────────────────────────────────────────────────────────────
+  // ── Backup ─────────────────────────────────────────────────────────────────
 
   async exportBackup(): Promise<Record<string, unknown>> {
-    return this.get<Record<string, unknown>>("backup/export");
+    return this.apiGet<Record<string, unknown>>("backup/export");
   }
 
   async importBackup(
     data: Record<string, unknown>,
   ): Promise<{ count: number }> {
-    return this.post<{ count: number }>("backup/import", data);
+    return this.apiPost<{ count: number }>("backup/import", data);
   }
 
-  // ── Health / Ping ─────────────────────────────────────────────────────────
+  // ── Health ─────────────────────────────────────────────────────────────────
 
-  /**
-   * Check API health — route is ping (not health).
-   */
   async checkHealth(): Promise<boolean> {
     try {
-      await this.get("ping");
+      await this.apiGet("ping");
       return true;
     } catch {
       return false;
     }
   }
 
-  // ── Changelog ─────────────────────────────────────────────────────────────
+  // ── Changelog ──────────────────────────────────────────────────────────────
 
   async logChange(entry: Record<string, unknown>): Promise<void> {
     try {
-      await this.post("changelog/add", entry);
+      await this.apiPost("changelog/add", entry);
     } catch {
-      /* non-critical — fail silently */
+      /* non-critical */
     }
   }
 
   async getChangelog(): Promise<Record<string, unknown>[]> {
     try {
-      return await this.get<Record<string, unknown>[]>("changelog/list");
+      return await this.apiGet<Record<string, unknown>[]>("changelog/list");
     } catch {
       return [];
     }
   }
 
-  // ── Compatibility shims (legacy callers) ──────────────────────────────────
+  // ── Backward-compat shims ──────────────────────────────────────────────────
 
-  /**
-   * @deprecated Use postWithId() instead of put().
-   * PUT may be blocked by cPanel; use POST with ?id= param.
-   * This shim forwards to POST for backward compatibility.
-   */
+  /** @deprecated Use apiPost() */
   async put<T>(route: string, body: unknown): Promise<T> {
-    const res = await this.request<T>(route, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    return res.data as T;
+    return this.apiPost<T>(route, body);
   }
 
-  /**
-   * @deprecated Use post('route/delete', { id }) instead of del().
-   * DELETE method may be blocked by cPanel.
-   * This shim forwards to POST for backward compatibility.
-   */
+  /** @deprecated Use apiPost('route/delete', { id }) */
   async del<T>(route: string, body?: unknown): Promise<T> {
-    const res = await this.request<T>(route, {
-      method: "POST",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-    return res.data as T;
+    return this.apiPost<T>(route, body ?? {});
   }
 
-  /**
-   * @deprecated sync/all route no longer exists — returns empty data shell.
-   * All data is fetched per-module via individual endpoints.
-   */
+  /** @deprecated No-op — online-only mode */
   async loadAll(): Promise<Record<string, unknown[]>> {
     return {
       students: [],
@@ -1752,11 +1593,9 @@ class PhpApiService {
     };
   }
 
-  /**
-   * @deprecated sync/push route no longer exists — no-op.
-   */
+  /** @deprecated No-op */
   async pushChanges(_changes: Record<string, unknown>[]): Promise<void> {
-    /* no-op: online-only mode, no pending queue */
+    /* no-op */
   }
 }
 

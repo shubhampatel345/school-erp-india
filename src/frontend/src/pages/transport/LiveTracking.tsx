@@ -879,7 +879,7 @@ function InfoCard({
 // ── Main LiveTracking component ────────────────────────────
 
 export default function LiveTracking() {
-  const { currentUser, getData } = useApp();
+  const { currentUser } = useApp();
   const isDriver = currentUser?.role === "driver";
   const isAdminOrAbove =
     currentUser?.role === "superadmin" ||
@@ -888,11 +888,19 @@ export default function LiveTracking() {
 
   const defaultView: SubView = isDriver ? "share" : "track";
   const [subView, setSubView] = useState<SubView>(defaultView);
+  const [routes, setRoutes] = useState<TransportRoute[]>([]);
 
-  // Load routes from AppContext data store
-  const routes: TransportRoute[] = getData(
-    "transport_routes",
-  ) as TransportRoute[];
+  // Load routes from phpApiService (cPanel/MySQL)
+  useEffect(() => {
+    phpApiService
+      .getRoutes()
+      .then((data) => {
+        setRoutes(data as unknown as TransportRoute[]);
+      })
+      .catch(() => {
+        /* non-critical */
+      });
+  }, []);
 
   return (
     <div className="space-y-4 animate-fade-in">

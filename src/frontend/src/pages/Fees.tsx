@@ -16,14 +16,14 @@ type FeeTab =
   | "accounts"
   | "online";
 
-const TABS: { id: FeeTab; label: string }[] = [
-  { id: "collect", label: "Collect Fees" },
-  { id: "heading", label: "Fee Headings" },
-  { id: "plan", label: "Fees Plan" },
-  { id: "due", label: "Due Fees" },
-  { id: "register", label: "Fee Register" },
-  { id: "accounts", label: "Accounts" },
-  { id: "online", label: "Online Fees" },
+const TABS: { id: FeeTab; label: string; icon: string }[] = [
+  { id: "collect", label: "Collect Fees", icon: "💰" },
+  { id: "heading", label: "Fee Headings", icon: "📋" },
+  { id: "plan", label: "Fees Plan", icon: "📊" },
+  { id: "due", label: "Due Fees", icon: "⚠️" },
+  { id: "register", label: "Fee Register", icon: "📒" },
+  { id: "accounts", label: "Accounts", icon: "🏦" },
+  { id: "online", label: "Online Fees", icon: "💳" },
 ];
 
 interface FeesProps {
@@ -38,20 +38,21 @@ export default function Fees({ initialTab }: FeesProps) {
   return (
     <div className="space-y-4">
       {/* Tab Nav */}
-      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto">
+      <div className="bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto scrollbar-none">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setActiveTab(tab.id)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+            className={`px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${
               activeTab === tab.id
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
             }`}
             data-ocid={`fees.tab.${tab.id}`}
           >
-            {tab.label}
+            <span className="text-xs">{tab.icon}</span>
+            <span>{tab.label}</span>
           </button>
         ))}
       </div>

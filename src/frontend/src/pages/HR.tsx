@@ -1,5 +1,5 @@
 /**
- * HR & Payroll — Main module shell for SHUBH SCHOOL ERP
+ * HR — Main module shell
  * Tabs: Staff Directory | Payroll | Payslips | Leave Management | Subject Assignment
  */
 import { BookOpen, Calendar, CreditCard, FileText, Users } from "lucide-react";
@@ -8,7 +8,7 @@ import ErrorBoundary from "../components/ErrorBoundary";
 import LeaveManagement from "./hr/LeaveManagement";
 import Payroll from "./hr/Payroll";
 import Payslips from "./hr/Payslips";
-import Staff from "./hr/Staff";
+import StaffDirectory from "./hr/StaffDirectory";
 import SubjectAssignment from "./hr/SubjectAssignment";
 
 const TABS = [
@@ -42,7 +42,7 @@ export default function HR({ onNavigate, initialTab }: HRProps) {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Tab Bar — sticky top */}
+      {/* Tab bar */}
       <div
         className="bg-card border-b px-4 lg:px-6 flex gap-0 overflow-x-auto sticky top-0 z-10 scrollbar-thin"
         role="tablist"
@@ -83,11 +83,11 @@ export default function HR({ onNavigate, initialTab }: HRProps) {
         })}
       </div>
 
-      {/* Tab Content */}
+      {/* Content */}
       <div className="flex-1 overflow-auto animate-fade-in">
         {activeTab === "staff" && (
           <ErrorBoundary key="staff">
-            <Staff onNavigate={onNavigate} />
+            <StaffDirectory onNavigate={onNavigate} />
           </ErrorBoundary>
         )}
         {activeTab === "payroll" && (

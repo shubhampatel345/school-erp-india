@@ -1,26 +1,12 @@
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Bell, Play, Plus, Save, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { toast } from "sonner";
-import { getApiIndexUrl, getJwt } from "../../utils/api";
-import { generateId, ls } from "../../utils/localStorage";
+import { Bell, Plus, Save, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useApp } from "../../context/AppContext";
+import phpApiService from "../../utils/phpApiService";
 
 interface SchedulerRule {
   id: string;
@@ -28,592 +14,269 @@ interface SchedulerRule {
   description: string;
   enabled: boolean;
   timing: string;
-  timingValue: number;
-  recipient: string;
   channel: string;
+  recipients: string;
 }
 
 const DEFAULT_RULES: SchedulerRule[] = [
   {
-    id: "fee_due",
-    event: "Fee Due Reminder",
-    description: "Remind parents before the 15th of each month fee due date",
-    enabled: false,
-    timing: "days_before",
-    timingValue: 3,
-    recipient: "Parents",
-    channel: "WhatsApp",
+    id: "r1",
+    event: "fee_due",
+    description: "Fee Due Reminder",
+    enabled: true,
+    timing: "3 days before due",
+    channel: "whatsapp",
+    recipients: "parents",
   },
   {
-    id: "absent",
-    event: "Absent Alert",
-    description: "Alert parents when their child is marked absent for the day",
-    enabled: false,
-    timing: "same_day",
-    timingValue: 0,
-    recipient: "Parents",
-    channel: "WhatsApp",
+    id: "r2",
+    event: "attendance_absent",
+    description: "Absent Alert to Parents",
+    enabled: true,
+    timing: "same day 2 PM",
+    channel: "whatsapp",
+    recipients: "parents",
   },
   {
-    id: "birthday",
-    event: "Birthday Wish",
-    description: "Send birthday wishes to students and their parents",
+    id: "r3",
+    event: "exam_reminder",
+    description: "Exam Schedule Reminder",
     enabled: false,
-    timing: "on_day",
-    timingValue: 0,
-    recipient: "Students & Parents",
-    channel: "WhatsApp",
+    timing: "1 day before exam",
+    channel: "sms",
+    recipients: "parents",
   },
   {
-    id: "exam_timetable",
-    event: "Exam Timetable Published",
-    description:
-      "Notify all students and parents when exam schedule is published",
+    id: "r4",
+    event: "daily_summary",
+    description: "Daily Attendance Summary",
     enabled: false,
-    timing: "on_publish",
-    timingValue: 0,
-    recipient: "All",
-    channel: "Both",
-  },
-  {
-    id: "result",
-    event: "Result Published",
-    description: "Notify students and parents when exam results are available",
-    enabled: false,
-    timing: "on_publish",
-    timingValue: 0,
-    recipient: "All",
-    channel: "Both",
-  },
-  {
-    id: "notice",
-    event: "General Notice",
-    description: "Send general school notices and announcements",
-    enabled: false,
-    timing: "on_publish",
-    timingValue: 0,
-    recipient: "All",
-    channel: "Both",
-  },
-  {
-    id: "homework",
-    event: "Homework Deadline Reminder",
-    description:
-      "Remind students and parents about upcoming homework deadlines",
-    enabled: false,
-    timing: "days_before",
-    timingValue: 1,
-    recipient: "Students & Parents",
-    channel: "WhatsApp",
+    timing: "5 PM daily",
+    channel: "email",
+    recipients: "admin",
   },
 ];
-
-const TIMING_LABELS: Record<string, string> = {
-  days_before: "Days Before",
-  hours_before: "Hours Before",
-  same_day: "Same Day",
-  on_publish: "On Publish",
-  on_day: "On the Day",
-};
-
-const RECIPIENT_OPTIONS = [
-  "Parents",
-  "Teachers",
-  "Students",
-  "Students & Parents",
-  "All",
-];
-const CHANNEL_OPTIONS = ["WhatsApp", "RCS", "Both", "In-App"];
-
-const EVENT_ICONS: Record<string, string> = {
-  "Fee Due Reminder": "💰",
-  "Absent Alert": "📋",
-  "Exam Timetable Published": "📅",
-  "Result Published": "📊",
-  "Birthday Wish": "🎂",
-  "General Notice": "📢",
-  "Homework Deadline Reminder": "📚",
-};
-
-async function saveRulesToServer(rules: SchedulerRule[]): Promise<boolean> {
-  try {
-    const token = getJwt();
-    const url = getApiIndexUrl();
-    const res = await fetch(`${url}?route=notifications/save`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ rules }),
-    });
-    const data = (await res.json().catch(() => ({}))) as {
-      status?: string;
-    };
-    return data.status === "success" || res.ok;
-  } catch {
-    return false;
-  }
-}
-
-async function triggerRuleNow(rule: SchedulerRule): Promise<void> {
-  try {
-    const token = getJwt();
-    const url = getApiIndexUrl();
-    await fetch(`${url}?route=notifications/trigger`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ ruleId: rule.id, event: rule.event }),
-    });
-  } catch {
-    // fail silently — trigger is a best-effort operation
-  }
-}
-
-const BLANK_RULE: Omit<SchedulerRule, "id"> = {
-  event: "",
-  description: "",
-  enabled: true,
-  timing: "on_publish",
-  timingValue: 1,
-  recipient: "Parents",
-  channel: "WhatsApp",
-};
 
 export default function NotificationScheduler() {
-  const [rules, setRules] = useState<SchedulerRule[]>(() =>
-    ls.get<SchedulerRule[]>("notification_scheduler", DEFAULT_RULES),
-  );
-  const [saved, setSaved] = useState(false);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newRule, setNewRule] = useState<Omit<SchedulerRule, "id">>({
-    ...BLANK_RULE,
-  });
-  const [triggering, setTriggering] = useState<string | null>(null);
+  const { addNotification } = useApp();
+  const [rules, setRules] = useState<SchedulerRule[]>(DEFAULT_RULES);
+  const [saving, setSaving] = useState(false);
 
-  function update(id: string, field: keyof SchedulerRule, value: unknown) {
-    setRules((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, [field]: value } : r)),
+  useEffect(() => {
+    void phpApiService
+      .getSettings()
+      .then((s) => {
+        if (s.notification_rules) {
+          try {
+            const parsed =
+              typeof s.notification_rules === "string"
+                ? (JSON.parse(s.notification_rules) as SchedulerRule[])
+                : (s.notification_rules as SchedulerRule[]);
+            if (Array.isArray(parsed) && parsed.length) setRules(parsed);
+          } catch {
+            /* noop */
+          }
+        }
+      })
+      .catch(() => {
+        /* noop */
+      });
+  }, []);
+
+  const toggleRule = (id: string) =>
+    setRules((r) =>
+      r.map((x) => (x.id === id ? { ...x, enabled: !x.enabled } : x)),
     );
-    setSaved(false);
-  }
 
-  function deleteRule(id: string) {
-    setRules((prev) => prev.filter((r) => r.id !== id));
-    setSaved(false);
-  }
+  const updateRule = (id: string, field: keyof SchedulerRule, value: string) =>
+    setRules((r) => r.map((x) => (x.id === id ? { ...x, [field]: value } : x)));
 
-  async function handleSave() {
-    ls.set("notification_scheduler", rules);
-    const ok = await saveRulesToServer(rules);
-    setSaved(true);
-    if (ok) {
-      toast.success("Notification rules saved to server ✓");
-    } else {
-      toast.success("Rules saved locally (server sync pending).");
+  const addRule = () => {
+    const id = `r${Date.now()}`;
+    setRules((r) => [
+      ...r,
+      {
+        id,
+        event: "",
+        description: "New Rule",
+        enabled: false,
+        timing: "",
+        channel: "whatsapp",
+        recipients: "parents",
+      },
+    ]);
+  };
+
+  const deleteRule = (id: string) =>
+    setRules((r) => r.filter((x) => x.id !== id));
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await phpApiService.saveSettings({
+        notification_rules: JSON.stringify(rules),
+      });
+      addNotification("Notification rules saved", "success");
+    } catch {
+      addNotification("Failed to save rules", "error");
+    } finally {
+      setSaving(false);
     }
-    setTimeout(() => setSaved(false), 2500);
-  }
-
-  function handleAddRule() {
-    if (!newRule.event.trim()) {
-      toast.error("Please enter an event name.");
-      return;
-    }
-    const rule: SchedulerRule = { id: generateId(), ...newRule };
-    setRules((prev) => [...prev, rule]);
-    setNewRule({ ...BLANK_RULE });
-    setShowAddDialog(false);
-    setSaved(false);
-  }
-
-  async function handleSendNow(rule: SchedulerRule) {
-    setTriggering(rule.id);
-    await triggerRuleNow(rule);
-    toast.success(
-      `"${rule.event}" triggered — notification sent to ${rule.recipient} via ${rule.channel}.`,
-    );
-    setTimeout(() => setTriggering(null), 1500);
-  }
-
-  const enabledCount = rules.filter((r) => r.enabled).length;
+  };
 
   return (
-    <div className="p-4 lg:p-6 space-y-5 max-w-3xl">
-      {/* Header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
+    <div className="p-4 lg:p-6 max-w-2xl space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
-            <Bell className="w-5 h-5 text-primary" />
-          </div>
+          <Bell className="w-5 h-5 text-primary" />
           <div>
             <h2 className="font-display font-semibold text-foreground">
               Notification Scheduler
             </h2>
-            <p className="text-sm text-muted-foreground mt-0.5">
-              {enabledCount === 0
-                ? "No automatic notifications enabled"
-                : `${enabledCount} of ${rules.length} events enabled`}
+            <p className="text-xs text-muted-foreground">
+              Automated rule-based notifications
             </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => setShowAddDialog(true)}
-            data-ocid="scheduler-add-rule-btn"
-          >
-            <Plus className="w-4 h-4 mr-1.5" />
-            Add Rule
-          </Button>
-          <Button
-            onClick={handleSave}
-            className={saved ? "bg-accent text-accent-foreground" : ""}
-            data-ocid="scheduler-save"
-          >
-            <Save className="w-4 h-4 mr-1.5" />
-            {saved ? "✓ Saved!" : "Save All"}
-          </Button>
-        </div>
-      </div>
-
-      {/* Info */}
-      <div className="bg-muted/40 border border-border rounded-lg p-3">
-        <p className="text-xs text-muted-foreground">
-          📱 Enabled notifications will be sent via WhatsApp and/or RCS to the
-          specified recipients. Requires WhatsApp API to be configured in the
-          WhatsApp Settings tab. Use "Send Now" to trigger any rule manually.
-        </p>
-      </div>
-
-      {/* Rule Cards */}
-      <div className="space-y-3">
-        {rules.map((rule) => (
-          <Card
-            key={rule.id}
-            className={`p-5 transition-all duration-200 ${
-              rule.enabled ? "border-primary/30 bg-primary/[0.02]" : "bg-card"
-            }`}
-            data-ocid={`scheduler-rule-${rule.id}`}
-          >
-            <div className="flex items-start gap-4">
-              <span className="text-2xl mt-0.5 flex-shrink-0">
-                {EVENT_ICONS[rule.event] ?? "🔔"}
-              </span>
-              <div className="flex-1 min-w-0 space-y-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-foreground">
-                      {rule.event}
-                    </h3>
-                    {rule.description && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        {rule.description}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-7 text-xs gap-1"
-                      onClick={() => handleSendNow(rule)}
-                      disabled={triggering === rule.id}
-                      data-ocid={`scheduler-sendnow-${rule.id}`}
-                    >
-                      <Play
-                        className={`w-3 h-3 ${triggering === rule.id ? "animate-pulse" : ""}`}
-                      />
-                      {triggering === rule.id ? "Sending…" : "Send Now"}
-                    </Button>
-                    <Switch
-                      data-ocid={`scheduler-toggle-${rule.id}`}
-                      checked={rule.enabled}
-                      onCheckedChange={(v) => update(rule.id, "enabled", v)}
-                    />
-                    {!DEFAULT_RULES.some((d) => d.id === rule.id) && (
-                      <button
-                        type="button"
-                        onClick={() => deleteRule(rule.id)}
-                        className="text-destructive hover:text-destructive/80 p-1"
-                        aria-label="Delete rule"
-                        data-ocid={`scheduler-delete-${rule.id}`}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {rule.enabled && (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-1">
-                    {/* Timing */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        Timing
-                      </Label>
-                      <Select
-                        value={rule.timing}
-                        onValueChange={(v) => update(rule.id, "timing", v)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {Object.entries(TIMING_LABELS).map(([k, v]) => (
-                            <SelectItem key={k} value={k}>
-                              {v}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Days/Hours before value */}
-                    {(rule.timing === "days_before" ||
-                      rule.timing === "hours_before") && (
-                      <div className="space-y-1.5">
-                        <Label
-                          className="text-xs text-muted-foreground"
-                          htmlFor={`timing-val-${rule.id}`}
-                        >
-                          {rule.timing === "hours_before"
-                            ? "Hours Before"
-                            : "Days Before"}
-                        </Label>
-                        <Input
-                          id={`timing-val-${rule.id}`}
-                          type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
-                          value={rule.timingValue}
-                          onChange={(e) =>
-                            update(
-                              rule.id,
-                              "timingValue",
-                              Number(e.target.value.replace(/[^0-9]/g, "")) ||
-                                1,
-                            )
-                          }
-                          className="h-8 text-xs"
-                        />
-                      </div>
-                    )}
-
-                    {/* Recipient */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        Recipients
-                      </Label>
-                      <Select
-                        value={rule.recipient}
-                        onValueChange={(v) => update(rule.id, "recipient", v)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {RECIPIENT_OPTIONS.map((r) => (
-                            <SelectItem key={r} value={r}>
-                              {r}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Channel */}
-                    <div className="space-y-1.5">
-                      <Label className="text-xs text-muted-foreground">
-                        Channel
-                      </Label>
-                      <Select
-                        value={rule.channel}
-                        onValueChange={(v) => update(rule.id, "channel", v)}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {CHANNEL_OPTIONS.map((c) => (
-                            <SelectItem key={c} value={c}>
-                              {c}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                {rule.enabled && (
-                  <div className="text-xs text-muted-foreground bg-muted/40 rounded px-2 py-1.5">
-                    📤 Send to: <strong>{rule.recipient}</strong> ·{" "}
-                    {rule.timing === "days_before"
-                      ? `${rule.timingValue} day${rule.timingValue > 1 ? "s" : ""} before`
-                      : rule.timing === "hours_before"
-                        ? `${rule.timingValue} hour${rule.timingValue > 1 ? "s" : ""} before`
-                        : (TIMING_LABELS[rule.timing] ?? rule.timing)}{" "}
-                    · via <strong>{rule.channel}</strong>
-                  </div>
-                )}
-              </div>
-            </div>
-          </Card>
-        ))}
-      </div>
-
-      {/* Add Rule Dialog */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent
-          className="sm:max-w-md"
-          data-ocid="scheduler-add-rule.dialog"
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={addRule}
+          data-ocid="notif-scheduler.add_button"
         >
-          <DialogHeader>
-            <DialogTitle>Add Notification Rule</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="new-event">Event Name *</Label>
-              <Input
-                id="new-event"
-                data-ocid="scheduler-new-event-input"
-                placeholder="e.g. Monthly Fee Reminder"
-                value={newRule.event}
-                onChange={(e) =>
-                  setNewRule((r) => ({ ...r, event: e.target.value }))
-                }
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="new-desc">Description</Label>
-              <Input
-                id="new-desc"
-                data-ocid="scheduler-new-desc-input"
-                placeholder="Brief description of when this fires"
-                value={newRule.description}
-                onChange={(e) =>
-                  setNewRule((r) => ({ ...r, description: e.target.value }))
-                }
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Timing</Label>
-                <Select
-                  value={newRule.timing}
-                  onValueChange={(v) =>
-                    setNewRule((r) => ({ ...r, timing: v }))
-                  }
+          <Plus className="w-4 h-4 mr-1" /> Add Rule
+        </Button>
+      </div>
+
+      <div className="space-y-3">
+        {rules.map((rule, idx) => (
+          <div
+            key={rule.id}
+            className={`bg-card border rounded-xl p-4 space-y-3 ${
+              rule.enabled ? "border-primary/30" : "border-border"
+            }`}
+            data-ocid={`notif-scheduler.rule.${idx + 1}`}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <Switch
+                  checked={rule.enabled}
+                  onCheckedChange={() => toggleRule(rule.id)}
+                  data-ocid={`notif-scheduler.toggle.${idx + 1}`}
+                />
+                <p className="text-sm font-medium text-foreground truncate">
+                  {rule.description}
+                </p>
+                <Badge
+                  variant="secondary"
+                  className="text-[10px] flex-shrink-0"
                 >
-                  <SelectTrigger
-                    className="text-sm"
-                    data-ocid="scheduler-new-timing-select"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(TIMING_LABELS).map(([k, v]) => (
-                      <SelectItem key={k} value={k}>
-                        {v}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  {rule.channel}
+                </Badge>
               </div>
-              {(newRule.timing === "days_before" ||
-                newRule.timing === "hours_before") && (
-                <div className="space-y-1.5">
-                  <Label>
-                    {newRule.timing === "hours_before" ? "Hours" : "Days"}{" "}
-                    Before
-                  </Label>
-                  <Input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={newRule.timingValue}
-                    onChange={(e) =>
-                      setNewRule((r) => ({
-                        ...r,
-                        timingValue:
-                          Number(e.target.value.replace(/[^0-9]/g, "")) || 1,
-                      }))
-                    }
-                    data-ocid="scheduler-new-timing-value-input"
-                  />
-                </div>
-              )}
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Recipients</Label>
-                <Select
-                  value={newRule.recipient}
-                  onValueChange={(v) =>
-                    setNewRule((r) => ({ ...r, recipient: v }))
-                  }
-                >
-                  <SelectTrigger
-                    className="text-sm"
-                    data-ocid="scheduler-new-recipient-select"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RECIPIENT_OPTIONS.map((rr) => (
-                      <SelectItem key={rr} value={rr}>
-                        {rr}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Channel</Label>
-                <Select
-                  value={newRule.channel}
-                  onValueChange={(v) =>
-                    setNewRule((r) => ({ ...r, channel: v }))
-                  }
-                >
-                  <SelectTrigger
-                    className="text-sm"
-                    data-ocid="scheduler-new-channel-select"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {CHANNEL_OPTIONS.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
               <Button
-                variant="outline"
-                onClick={() => setShowAddDialog(false)}
-                data-ocid="scheduler-add-cancel-btn"
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-destructive flex-shrink-0"
+                onClick={() => deleteRule(rule.id)}
+                data-ocid={`notif-scheduler.delete_button.${idx + 1}`}
               >
-                Cancel
+                <Trash2 className="w-3.5 h-3.5" />
               </Button>
-              <Button
-                onClick={handleAddRule}
-                data-ocid="scheduler-add-submit-btn"
-              >
-                Add Rule
-              </Button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div>
+                <Label className="text-[10px] text-muted-foreground mb-1 block">
+                  Description
+                </Label>
+                <Input
+                  value={rule.description}
+                  onChange={(e) =>
+                    updateRule(rule.id, "description", e.target.value)
+                  }
+                  className="text-xs h-8"
+                  data-ocid={`notif-scheduler.desc.${idx + 1}`}
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground mb-1 block">
+                  Timing
+                </Label>
+                <Input
+                  value={rule.timing}
+                  onChange={(e) =>
+                    updateRule(rule.id, "timing", e.target.value)
+                  }
+                  placeholder="e.g. 3 days before"
+                  className="text-xs h-8"
+                  data-ocid={`notif-scheduler.timing.${idx + 1}`}
+                />
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground mb-1 block">
+                  Channel
+                </Label>
+                <select
+                  value={rule.channel}
+                  onChange={(e) =>
+                    updateRule(rule.id, "channel", e.target.value)
+                  }
+                  className="w-full border border-input bg-background text-foreground rounded-md px-2 py-1 text-xs"
+                  data-ocid={`notif-scheduler.channel.${idx + 1}`}
+                >
+                  <option value="whatsapp">WhatsApp</option>
+                  <option value="sms">SMS</option>
+                  <option value="email">Email</option>
+                  <option value="inapp">In-App</option>
+                </select>
+              </div>
+              <div>
+                <Label className="text-[10px] text-muted-foreground mb-1 block">
+                  Recipients
+                </Label>
+                <select
+                  value={rule.recipients}
+                  onChange={(e) =>
+                    updateRule(rule.id, "recipients", e.target.value)
+                  }
+                  className="w-full border border-input bg-background text-foreground rounded-md px-2 py-1 text-xs"
+                  data-ocid={`notif-scheduler.recipients.${idx + 1}`}
+                >
+                  <option value="parents">Parents</option>
+                  <option value="admin">Admin</option>
+                  <option value="teachers">Teachers</option>
+                  <option value="all">All Users</option>
+                </select>
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        ))}
+
+        {rules.length === 0 && (
+          <div
+            className="text-center py-12 bg-card rounded-xl border border-border"
+            data-ocid="notif-scheduler.empty_state"
+          >
+            <Bell className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+            <p className="text-sm text-muted-foreground">No rules configured</p>
+            <Button size="sm" className="mt-3" onClick={addRule}>
+              Add First Rule
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {rules.length > 0 && (
+        <Button
+          onClick={handleSave}
+          disabled={saving}
+          data-ocid="notif-scheduler.submit_button"
+        >
+          <Save className="w-4 h-4 mr-2" />
+          {saving ? "Saving…" : "Save All Rules"}
+        </Button>
+      )}
     </div>
   );
 }

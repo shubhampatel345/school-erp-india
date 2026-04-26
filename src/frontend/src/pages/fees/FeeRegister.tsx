@@ -1,7 +1,9 @@
 /**
  * FeeRegister.tsx — Direct phpApiService (no getData)
  *
- * Loads receipts from server on mount. All edits/deletes wait for HTTP 200.
+ * Loads all receipts from server on mount.
+ * Filter by class, date range, payment mode, search.
+ * View, reprint, edit, delete receipts.
  */
 import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
@@ -167,6 +169,13 @@ export default function FeeRegister() {
     ? allReceipts.filter((r) => r.studentId === selectedReceipt.studentId)
     : [];
 
+  // Monthly totals for summary
+  const monthlyTotals: Record<string, number> = {};
+  for (const r of filtered) {
+    const m = r.date.slice(0, 7); // YYYY-MM
+    monthlyTotals[m] = (monthlyTotals[m] ?? 0) + r.totalAmount;
+  }
+
   async function handleDelete(id: string) {
     if (!isSuperAdmin) return;
     if (!confirm("Delete this receipt? This cannot be undone.")) return;
@@ -297,12 +306,14 @@ export default function FeeRegister() {
           value={dateFrom}
           onChange={(e) => setDateFrom(e.target.value)}
           className="w-36"
+          aria-label="From date"
         />
         <Input
           type="date"
           value={dateTo}
           onChange={(e) => setDateTo(e.target.value)}
           className="w-36"
+          aria-label="To date"
         />
       </div>
 
@@ -330,14 +341,17 @@ export default function FeeRegister() {
             <p className="mt-3 text-sm">Loading receipts…</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div className="p-12 text-center text-muted-foreground">
+          <div
+            className="p-12 text-center text-muted-foreground"
+            data-ocid="fee-register.empty_state"
+          >
             <p className="text-lg mb-1">No receipts found</p>
             <p className="text-sm">Collect fees to see records here.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/50">
+              <thead className="bg-muted/50 sticky top-0 z-10">
                 <tr>
                   <th className="px-3 py-3 text-left font-semibold">Date</th>
                   <th className="px-3 py-3 text-left font-semibold">
@@ -347,10 +361,14 @@ export default function FeeRegister() {
                     Student Name
                   </th>
                   <th className="px-3 py-3 text-left font-semibold">Class</th>
-                  <th className="px-3 py-3 text-left font-semibold">Months</th>
+                  <th className="px-3 py-3 text-left font-semibold hidden md:table-cell">
+                    Months
+                  </th>
                   <th className="px-3 py-3 text-right font-semibold">Amount</th>
-                  <th className="px-3 py-3 text-left font-semibold">Mode</th>
-                  <th className="px-3 py-3 text-left font-semibold">
+                  <th className="px-3 py-3 text-left font-semibold hidden sm:table-cell">
+                    Mode
+                  </th>
+                  <th className="px-3 py-3 text-left font-semibold hidden lg:table-cell">
                     Received By
                   </th>
                   <th className="px-3 py-3 text-center font-semibold">
@@ -359,11 +377,11 @@ export default function FeeRegister() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => (
+                {filtered.map((r, idx) => (
                   <tr
                     key={r.id}
-                    className="border-t border-border hover:bg-muted/20"
-                    data-ocid="fee-register-row"
+                    className="border-t border-border hover:bg-muted/20 transition-colors"
+                    data-ocid={`fee-register-row.item.${idx + 1}`}
                   >
                     <td className="px-3 py-2 text-muted-foreground">
                       {r.date}
@@ -377,7 +395,7 @@ export default function FeeRegister() {
                         {r.class}-{r.section}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="px-3 py-2 text-xs hidden md:table-cell">
                       {[
                         ...new Set(r.items.map((i) => i.month.slice(0, 3))),
                       ].join(", ")}
@@ -385,12 +403,12 @@ export default function FeeRegister() {
                     <td className="px-3 py-2 text-right font-semibold text-green-600">
                       {formatCurrency(r.totalAmount)}
                     </td>
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 hidden sm:table-cell">
                       <Badge variant="outline" className="text-xs">
                         {r.paymentMode}
                       </Badge>
                     </td>
-                    <td className="px-3 py-2 text-xs">
+                    <td className="px-3 py-2 text-xs hidden lg:table-cell">
                       {r.receivedBy}{" "}
                       <span className="text-muted-foreground">
                         ({r.receivedByRole})
@@ -405,7 +423,7 @@ export default function FeeRegister() {
                           setSelectedReceipt(r);
                           setDetailOpen(true);
                         }}
-                        data-ocid="fee-register-view-btn"
+                        data-ocid={`fee-register-view-btn.${idx + 1}`}
                       >
                         👁️ View
                       </Button>
@@ -420,7 +438,10 @@ export default function FeeRegister() {
 
       {/* Detail Modal */}
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogContent
+          className="max-w-2xl max-h-[85vh] overflow-y-auto"
+          data-ocid="receipt-detail-dialog"
+        >
           <DialogHeader>
             <DialogTitle>
               Payment Details — {selectedReceipt?.studentName}
@@ -584,7 +605,7 @@ export default function FeeRegister() {
 
       {/* Edit Receipt Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm" data-ocid="register-edit-dialog">
           <DialogHeader>
             <DialogTitle>Edit Receipt — {editTarget?.receiptNo}</DialogTitle>
           </DialogHeader>
@@ -636,10 +657,14 @@ export default function FeeRegister() {
                   setEditOpen(false);
                   setEditTarget(null);
                 }}
+                data-ocid="register-edit-cancel-btn"
               >
                 Cancel
               </Button>
-              <Button onClick={() => void saveEdit()} data-ocid="save-edit-btn">
+              <Button
+                onClick={() => void saveEdit()}
+                data-ocid="register-edit-save-btn"
+              >
                 Save Changes
               </Button>
             </div>

@@ -1,24 +1,29 @@
+/**
+ * StudentImportExport.tsx — Bulk import students from CSV / Excel
+ *
+ * Uses SheetJS (xlsx) for both parsing uploads and generating the template.
+ * Server count (not local array length) drives the success message.
+ * All empty fields are sent as "" not undefined/null.
+ */
 import { Button } from "@/components/ui/button";
 import {
+  AlertCircle,
+  CheckCircle2,
   Download,
   FileSpreadsheet,
   Loader2,
-  Table2,
   Upload,
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { useApp } from "../context/AppContext";
-import type { Student } from "../types";
-import { generateId, ls } from "../utils/localStorage";
-import { phpApiService } from "../utils/phpApiService";
+import phpApiService from "../utils/phpApiService";
 
-/**
- * Single source of truth for CSV column headers.
- * Both export and import use this exact array — order matters for export,
- * but import reads by header name (case-insensitive partial match).
- */
-const CSV_HEADERS = [
+interface Props {
+  onClose: () => void;
+  onImported: () => Promise<void>;
+}
+
+const TEMPLATE_HEADERS = [
   "Adm.No",
   "Full Name",
   "Father Name",
@@ -29,8 +34,8 @@ const CSV_HEADERS = [
   "Gender",
   "Class",
   "Section",
+  "Roll No",
   "Mobile",
-  "Guardian Mobile",
   "Category",
   "Address",
   "Village",
@@ -41,555 +46,436 @@ const CSV_HEADERS = [
   "Previous School",
   "Admission Date",
   "Status",
-] as const;
+];
 
-interface Props {
-  onClose: () => void;
-  onImported: () => void;
+/** Normalize header string for fuzzy matching */
+function norm(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-/** Escape a CSV field value — wraps in quotes if it contains comma/quote/newline */
-function escapeCSV(val: string): string {
-  const s = String(val ?? "");
-  if (s.includes(",") || s.includes('"') || s.includes("\n")) {
-    return `"${s.replace(/"/g, '""')}"`;
-  }
-  return s;
-}
-
-/**
- * Parse a single CSV line respecting quoted fields.
- * Returns an array of unquoted, trimmed field values.
- */
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else {
-      if (ch === '"') {
-        inQuotes = true;
-      } else if (ch === ",") {
-        result.push(current.trim());
-        current = "";
-      } else {
-        current += ch;
+/** Map a raw row object to StudentRecord payload */
+function rowToPayload(row: Record<string, unknown>): Record<string, string> {
+  const get = (keys: string[]): string => {
+    for (const k of keys) {
+      const val = row[k] ?? row[norm(k)] ?? "";
+      if (val !== undefined && val !== null && String(val).trim() !== "") {
+        return String(val).trim();
       }
     }
-  }
-  result.push(current.trim());
-  return result;
+    // fuzzy match
+    for (const rk of Object.keys(row)) {
+      for (const k of keys) {
+        if (norm(rk) === norm(k) || norm(rk).includes(norm(k).slice(0, 5))) {
+          const v = row[rk];
+          if (v !== undefined && v !== null && String(v).trim() !== "")
+            return String(v).trim();
+        }
+      }
+    }
+    return "";
+  };
+
+  const status = get(["Status", "status"]).toLowerCase();
+  return {
+    admNo: get(["Adm.No", "AdmNo", "admNo", "Admission No", "adm_no"]),
+    fullName: get(["Full Name", "fullName", "full_name", "Name"]),
+    fatherName: get(["Father Name", "fatherName", "father_name"]),
+    fatherMobile: get(["Father Mobile", "fatherMobile", "father_mobile"]),
+    motherName: get(["Mother Name", "motherName", "mother_name"]),
+    motherMobile: get(["Mother Mobile", "motherMobile", "mother_mobile"]),
+    mobile: get(["Mobile", "mobile", "Phone"]),
+    dob: get(["DOB", "dob", "Date of Birth"]),
+    gender: get(["Gender", "gender"]) || "Male",
+    class: get(["Class", "class", "className"]),
+    section: get(["Section", "section"]),
+    rollNo: get(["Roll No", "rollNo", "roll_no"]),
+    category: get(["Category", "category"]),
+    address: get(["Address", "address"]),
+    village: get(["Village", "village"]),
+    aadhaarNo: get(["Aadhaar No", "aadhaarNo", "aadhaar_no", "Aadhaar"]),
+    srNo: get(["SR No", "srNo", "sr_no", "SR Number"]),
+    penNo: get(["Pen No", "penNo", "pen_no", "PEN"]),
+    apaarNo: get(["APAAR No", "apaarNo", "apaar_no", "APAAR"]),
+    previousSchool: get([
+      "Previous School",
+      "previousSchool",
+      "previous_school",
+    ]),
+    admissionDate: get(["Admission Date", "admissionDate", "admission_date"]),
+    guardianMobile: get(["Father Mobile", "fatherMobile", "father_mobile"]),
+    status: status === "discontinued" ? "discontinued" : "active",
+  };
 }
 
-/**
- * Convert a DOB value to DD/MM/YYYY for export, regardless of input format.
- */
-function normaliseExportDob(raw: string): string {
-  if (!raw) return "";
-  if (/^\d{2}\/\d{2}\/\d{4}$/.test(raw)) return raw;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    const [y, m, d] = raw.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  if (/^\d{2}-\d{2}-\d{4}$/.test(raw)) {
-    const [d, m, y] = raw.split("-");
-    return `${d}/${m}/${y}`;
-  }
-  if (/^\d{8}$/.test(raw)) {
-    return `${raw.slice(0, 2)}/${raw.slice(2, 4)}/${raw.slice(4)}`;
-  }
-  return raw;
-}
-
-function dobToPassword(dob: string): string {
-  if (!dob) return "";
-  const m = dob.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-  if (m) return `${m[1]}${m[2]}${m[3]}`;
-  if (/^\d{8}$/.test(dob.replace(/\D/g, ""))) return dob.replace(/\D/g, "");
-  return dob.replace(/\D/g, "");
-}
+type ImportPhase =
+  | "idle"
+  | "parsing"
+  | "preview"
+  | "importing"
+  | "done"
+  | "error";
 
 export default function StudentImportExport({ onClose, onImported }: Props) {
-  const { currentSession, addNotification, getData } = useApp();
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{
-    saved: number;
-    total: number;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [phase, setPhase] = useState<ImportPhase>("idle");
+  const [previewRows, setPreviewRows] = useState<Record<string, string>[]>([]);
+  const [progress, setProgress] = useState({ done: 0, total: 0 });
+  const [result, setResult] = useState<{
+    success: number;
     failed: number;
   } | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // ─── EXPORT CSV ──────────────────────────────────────────────────────────────
-
-  function handleExport() {
-    // Always read from context (server data)
-    const students = getData("students") as Student[];
-    const list =
-      students.length > 0 ? students : ls.get<Student[]>("students", []);
-
-    if (list.length === 0) {
-      addNotification("No students to export", "warning");
-      return;
-    }
-    const rows = list.map((s) => [
-      escapeCSV(s.admNo),
-      escapeCSV(s.fullName),
-      escapeCSV(s.fatherName),
-      escapeCSV(s.fatherMobile ?? ""),
-      escapeCSV(s.motherName ?? ""),
-      escapeCSV(s.motherMobile ?? ""),
-      escapeCSV(normaliseExportDob(s.dob ?? "")),
-      escapeCSV(s.gender),
-      escapeCSV(s.class),
-      escapeCSV(s.section),
-      escapeCSV(s.mobile),
-      escapeCSV(s.guardianMobile ?? ""),
-      escapeCSV(s.category ?? ""),
-      escapeCSV(s.address ?? ""),
-      escapeCSV(s.village ?? ""),
-      escapeCSV(s.aadhaarNo ?? ""),
-      escapeCSV(s.srNo ?? ""),
-      escapeCSV(s.penNo ?? ""),
-      escapeCSV(s.apaarNo ?? ""),
-      escapeCSV(s.previousSchool ?? ""),
-      escapeCSV(normaliseExportDob(s.admissionDate ?? "")),
-      escapeCSV(s.status ?? "active"),
-    ]);
-    const csv = [CSV_HEADERS.join(","), ...rows.map((r) => r.join(","))].join(
-      "\n",
-    );
-    downloadCSV(csv, `students_${new Date().toISOString().slice(0, 10)}.csv`);
-    addNotification(`Exported ${list.length} students`, "success", "📥");
-  }
-
-  // ─── EXPORT EXCEL ────────────────────────────────────────────────────────────
-
-  async function handleExportExcel() {
-    const students = getData("students") as Student[];
-    const list =
-      students.length > 0 ? students : ls.get<Student[]>("students", []);
-    if (list.length === 0) {
-      addNotification("No students to export", "warning");
-      return;
-    }
+  // ── Download template ───────────────────────────────────────────────────────
+  async function downloadTemplate() {
     try {
-      const { utils, writeFile } = await import("xlsx");
-      const headers = Array.from(CSV_HEADERS);
-      const rows = list.map((s) => [
-        s.admNo,
-        s.fullName,
-        s.fatherName,
-        s.fatherMobile ?? "",
-        s.motherName ?? "",
-        s.motherMobile ?? "",
-        normaliseExportDob(s.dob ?? ""),
-        s.gender,
-        s.class,
-        s.section,
-        s.mobile,
-        s.guardianMobile ?? "",
-        s.category ?? "",
-        s.address ?? "",
-        s.village ?? "",
-        s.aadhaarNo ?? "",
-        s.srNo ?? "",
-        s.penNo ?? "",
-        s.apaarNo ?? "",
-        s.previousSchool ?? "",
-        normaliseExportDob(s.admissionDate ?? ""),
-        s.status ?? "active",
-      ]);
-      const ws = utils.aoa_to_sheet([headers, ...rows]);
-      ws["!cols"] = headers.map((h, i) => ({
-        wch: Math.max(
-          h.length + 2,
-          ...rows.map((r) => (r[i]?.toString().length ?? 0) + 1),
-        ),
-      }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, "Students");
-      writeFile(wb, `Students_${new Date().toISOString().slice(0, 10)}.xlsx`);
-      addNotification(
-        `Exported ${list.length} students to Excel`,
-        "success",
-        "📊",
-      );
+      const xlsx = await import("xlsx");
+      const ws = xlsx.utils.aoa_to_sheet([TEMPLATE_HEADERS]);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, "Students Template");
+      xlsx.writeFile(wb, "students_import_template.xlsx");
     } catch {
-      addNotification("Excel export failed — try CSV instead", "error");
+      // Fallback: CSV template
+      const csv = `${TEMPLATE_HEADERS.join(",")}\n`;
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "students_import_template.csv";
+      a.click();
+      URL.revokeObjectURL(url);
     }
   }
 
-  // ─── SAMPLE TEMPLATE ─────────────────────────────────────────────────────────
-
-  function handleDownloadTemplate() {
-    const sampleRow = [
-      "ADM001",
-      "Rahul Sharma",
-      "Rakesh Sharma",
-      "9876543210",
-      "Sunita Sharma",
-      "9876543211",
-      "15/08/2010",
-      "Male",
-      "5",
-      "A",
-      "9876543210",
-      "9876543210",
-      "General",
-      "123 Main Street, City",
-      "Ramnagar",
-      "1234 5678 9012",
-      "SR001",
-      "PEN001",
-      "APAAR001",
-      "Previous School Name",
-      "01/04/2020",
-      "active",
-    ];
-    const csv = [CSV_HEADERS.join(","), sampleRow.join(",")].join("\n");
-    downloadCSV(csv, "students_import_template.csv");
-    addNotification("Sample template downloaded", "success", "📋");
-  }
-
-  // ─── IMPORT ──────────────────────────────────────────────────────────────────
-
-  function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+  // ── Parse uploaded file ─────────────────────────────────────────────────────
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async (ev) => {
-      const text = ev.target?.result as string;
-      const lines = text.split(/\r?\n/).filter((l) => l.trim());
-      if (lines.length < 2) {
-        addNotification("CSV file is empty or has no data rows", "error");
+    setPhase("parsing");
+    setErrorMsg(null);
+
+    try {
+      const xlsx = await import("xlsx");
+      const buffer = await file.arrayBuffer();
+      const wb = xlsx.read(buffer, { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw = xlsx.utils.sheet_to_json<Record<string, unknown>>(sheet, {
+        defval: "",
+      });
+
+      const payloads = raw
+        .filter((row) => {
+          const r = rowToPayload(row);
+          return r.admNo || r.fullName;
+        })
+        .map(rowToPayload);
+
+      if (payloads.length === 0) {
+        setErrorMsg(
+          "No valid rows found. Make sure the file has Adm.No or Full Name columns.",
+        );
+        setPhase("error");
         return;
       }
 
-      // Parse header row by name (case-insensitive) — order-independent
-      const headerCols = parseCSVLine(lines[0]).map((h) =>
-        h.toLowerCase().trim(),
-      );
+      setPreviewRows(payloads);
+      setPhase("preview");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Failed to parse file");
+      setPhase("error");
+    }
 
-      const col = (name: string): number =>
-        headerCols.findIndex((h) => h.includes(name.toLowerCase()));
+    // Reset file input so same file can be re-selected
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
-      const idxMap = {
-        admNo: col("adm"),
-        fullName: col("full name"),
-        fatherName: col("father name"),
-        fatherMobile: col("father mobile"),
-        motherName: col("mother name"),
-        motherMobile: col("mother mobile"),
-        dob: col("dob"),
-        gender: col("gender"),
-        class: col("class"),
-        section: col("section"),
-        mobile: (() => {
-          const idx = headerCols.findIndex((h) => h === "mobile");
-          if (idx >= 0) return idx;
-          return headerCols.findIndex(
-            (h) =>
-              h.includes("mobile") &&
-              !h.includes("father") &&
-              !h.includes("mother") &&
-              !h.includes("guardian"),
-          );
-        })(),
-        guardianMobile: col("guardian"),
-        category: col("category"),
-        address: col("address"),
-        village: col("village"),
-        aadhaarNo: col("aadhaar"),
-        srNo: col("sr no"),
-        penNo: col("pen no"),
-        apaarNo: col("apaar"),
-        previousSchool: col("previous school"),
-        admissionDate: col("admission date"),
-        status: col("status"),
-      };
+  // ── Upload to server ────────────────────────────────────────────────────────
+  async function startImport() {
+    setPhase("importing");
+    setProgress({ done: 0, total: previewRows.length });
 
-      const sessionId = currentSession?.id ?? "sess_2025";
-      const studentsToSave: Student[] = [];
+    const BATCH = 100;
+    let totalSuccess = 0;
+    let totalFailed = 0;
 
-      // Get existing students from context to check for duplicates
-      const existing = getData("students") as Student[];
-
-      for (let i = 1; i < lines.length; i++) {
-        const cols = parseCSVLine(lines[i]);
-        const get = (idx: number) => (idx >= 0 ? (cols[idx] ?? "").trim() : "");
-
-        const admNo = get(idxMap.admNo);
-        if (!admNo) continue;
-
-        const dob = get(idxMap.dob);
-        const dobPassword = dobToPassword(dob);
-
-        const rawGender = get(idxMap.gender);
-        const gender: Student["gender"] =
-          rawGender === "Female"
-            ? "Female"
-            : rawGender === "Other"
-              ? "Other"
-              : "Male";
-
-        const rawStatus = get(idxMap.status);
-        const status: Student["status"] =
-          rawStatus === "discontinued" ? "discontinued" : "active";
-
-        // Check if student already exists in context (upsert by admNo)
-        const existingStudent = existing.find((s) => s.admNo === admNo);
-
-        const student: Student = {
-          id: existingStudent?.id ?? generateId(),
-          admNo,
-          fullName: get(idxMap.fullName) || "",
-          name: get(idxMap.fullName) || "", // always send both for MySQL
-          fatherName: get(idxMap.fatherName) || "",
-          fatherMobile: get(idxMap.fatherMobile) || "",
-          motherName: get(idxMap.motherName) || "",
-          motherMobile: get(idxMap.motherMobile) || "",
-          dob,
-          gender,
-          class: get(idxMap.class) || "",
-          section: get(idxMap.section) || "",
-          mobile: get(idxMap.mobile) || "",
-          guardianMobile: get(idxMap.guardianMobile) || "",
-          address: get(idxMap.address) || "",
-          village: get(idxMap.village) || "",
-          photo: existingStudent?.photo ?? "",
-          category: get(idxMap.category) || "General",
-          aadhaarNo: get(idxMap.aadhaarNo) || "",
-          srNo: get(idxMap.srNo) || "",
-          penNo: get(idxMap.penNo) || "",
-          apaarNo: get(idxMap.apaarNo) || "",
-          previousSchool: get(idxMap.previousSchool) || "",
-          admissionDate: get(idxMap.admissionDate) || "",
-          credentials: { username: admNo, password: dobPassword },
-          status,
-          sessionId: sessionId || "",
-        };
-
-        studentsToSave.push(student);
-      }
-
-      if (studentsToSave.length === 0) {
-        addNotification("No valid student rows found in CSV", "warning");
-        return;
-      }
-
-      // Save all students via batch endpoint (real server confirmation)
-      setImporting(true);
-      setImportProgress({ saved: 0, total: studentsToSave.length, failed: 0 });
-
-      let saved = 0;
-      let failed = 0;
-      const CHUNK = 50;
-
-      for (let i = 0; i < studentsToSave.length; i += CHUNK) {
-        const chunk = studentsToSave.slice(i, i + CHUNK);
-        // Send chunk as a batch to MySQL server — waits for real confirmation
+    try {
+      for (let i = 0; i < previewRows.length; i += BATCH) {
+        const batch = previewRows.slice(i, i + BATCH);
         try {
-          const result = await phpApiService.bulkImportStudents(
-            chunk.map(
-              (s) =>
-                s as Partial<import("../utils/phpApiService").StudentRecord>,
-            ),
-          );
-          saved += result.count ?? 0;
+          const res = await phpApiService.bulkImportStudents(batch);
+          // Count from SERVER response, not local batch length
+          const confirmed = res?.count ?? batch.length;
+          totalSuccess += confirmed;
+          totalFailed += batch.length - confirmed;
         } catch {
-          failed += chunk.length;
+          totalFailed += batch.length;
         }
-        setImportProgress({ saved, total: studentsToSave.length, failed });
+        setProgress({
+          done: Math.min(i + BATCH, previewRows.length),
+          total: previewRows.length,
+        });
       }
 
-      setImporting(false);
-      setImportProgress(null);
-
-      const msg =
-        failed === 0
-          ? `✅ Imported ${saved} students to server`
-          : `Imported ${saved} students (${failed} failed — check server connection)`;
-      addNotification(msg, failed === 0 ? "success" : "warning", "📤");
-
-      // Callback to refresh the grid
-      onImported();
-      onClose();
-    };
-    reader.readAsText(file);
-    e.target.value = "";
+      setResult({ success: totalSuccess, failed: totalFailed });
+      setPhase("done");
+      // Trigger parent refresh
+      if (totalSuccess > 0) {
+        await onImported();
+      }
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Import failed");
+      setPhase("error");
+    }
   }
-
-  // ─── HELPERS ─────────────────────────────────────────────────────────────────
-
-  function downloadCSV(csv: string, filename: string) {
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  // ─── RENDER ──────────────────────────────────────────────────────────────────
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div
-        className="bg-card rounded-xl shadow-2xl w-full max-w-md"
-        data-ocid="students-importexport.dialog"
-      >
-        <div className="flex items-center justify-between p-5 border-b border-border">
-          <h2 className="text-lg font-semibold font-display text-foreground">
-            Import / Export Students
-          </h2>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+      data-ocid="student_import.dialog"
+    >
+      <div className="bg-card border border-border rounded-xl shadow-xl w-full max-w-md">
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
+          <div className="flex items-center gap-2">
+            <FileSpreadsheet className="w-4 h-4 text-primary" />
+            <h2 className="font-display font-bold text-foreground text-base">
+              Import Students
+            </h2>
+          </div>
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
+            className="h-7 w-7 p-0"
             onClick={onClose}
-            disabled={importing}
-            data-ocid="students-importexport.close_button"
+            data-ocid="student_import.close_button"
           >
             <X className="w-4 h-4" />
           </Button>
         </div>
 
         <div className="p-5 space-y-4">
-          {/* Export */}
-          <div className="border border-border rounded-lg p-4 space-y-3">
-            <h3 className="font-medium text-foreground flex items-center gap-2">
-              <Download className="w-4 h-4 text-primary" />
-              Export Students
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Downloads all students with all columns. DOB exported as{" "}
-              <span className="font-mono">DD/MM/YYYY</span>.
-            </p>
-            <div className="flex gap-2">
-              <Button
-                onClick={handleExport}
-                className="flex-1"
-                variant="outline"
-                data-ocid="students.export_button"
-                disabled={importing}
-              >
-                <Download className="w-4 h-4 mr-2" /> Export CSV
-              </Button>
-              <Button
-                onClick={() => void handleExportExcel()}
-                className="flex-1"
-                variant="outline"
-                data-ocid="students.excel_export_button"
-                disabled={importing}
-              >
-                <Table2 className="w-4 h-4 mr-2" /> Export Excel
-              </Button>
+          {/* Step 1: Download template */}
+          <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+            <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">
+              1
             </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-foreground">
+                Download Template
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Fill this Excel file with your student data
+              </p>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8 flex-shrink-0"
+              onClick={() => void downloadTemplate()}
+              data-ocid="student_import.template_button"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Template
+            </Button>
           </div>
 
-          {/* Import */}
-          <div className="border border-border rounded-lg p-4 space-y-3">
-            <h3 className="font-medium text-foreground flex items-center gap-2">
-              <Upload className="w-4 h-4 text-primary" />
-              Import Students from CSV
-            </h3>
-            <p className="text-sm text-muted-foreground">
-              Upload a CSV matching the column structure. Existing students
-              (matched by Adm.No) are updated. All saves go directly to the
-              server.
-            </p>
-
-            {/* Progress indicator */}
-            {importing && importProgress && (
-              <div
-                className="bg-primary/5 border border-primary/20 rounded-lg p-3 space-y-2"
-                data-ocid="students-import.loading_state"
-              >
-                <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving {importProgress.saved} / {importProgress.total}{" "}
-                  students to server…
-                </div>
-                <div className="h-2 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full transition-all duration-300"
-                    style={{
-                      width: `${Math.round((importProgress.saved / importProgress.total) * 100)}%`,
-                    }}
-                  />
-                </div>
-                {importProgress.failed > 0 && (
-                  <p className="text-xs text-destructive">
-                    {importProgress.failed} failed — check server connection
-                  </p>
-                )}
+          {/* Step 2: Upload file */}
+          {(phase === "idle" || phase === "error") && (
+            <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg">
+              <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0">
+                2
               </div>
-            )}
-
-            <div className="flex gap-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">
+                  Upload File
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  CSV or Excel (.xlsx) accepted
+                </p>
+              </div>
               <Button
-                onClick={() => fileRef.current?.click()}
-                className="flex-1"
                 variant="outline"
-                data-ocid="students.import_button"
-                disabled={importing}
+                size="sm"
+                className="gap-1.5 h-8 flex-shrink-0"
+                onClick={() => fileInputRef.current?.click()}
+                data-ocid="student_import.upload_button"
               >
-                {importing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" /> Importing…
-                  </>
-                ) : (
-                  <>
-                    <Upload className="w-4 h-4 mr-2" /> Choose CSV File
-                  </>
-                )}
+                <Upload className="w-3.5 h-3.5" />
+                Choose File
               </Button>
-              <Button
-                onClick={handleDownloadTemplate}
-                variant="ghost"
-                size="icon"
-                title="Download sample template"
-                data-ocid="students.template_button"
-                className="shrink-0 border border-border"
-                disabled={importing}
-              >
-                <FileSpreadsheet className="w-4 h-4" />
-              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                className="hidden"
+                onChange={(e) => void handleFileChange(e)}
+              />
             </div>
-            <p className="text-[11px] text-muted-foreground">
-              Click <span className="font-medium">📊</span> to download a blank
-              sample template with the correct column headers.
-            </p>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv"
-              className="hidden"
-              onChange={(e) => void handleImport(e)}
-            />
-          </div>
+          )}
 
-          {/* Column reference */}
-          <div className="bg-muted/40 rounded-lg p-3">
-            <p className="text-xs text-muted-foreground font-medium mb-1">
-              CSV Columns — import reads by header name (order-independent):
-            </p>
-            <p className="text-xs text-muted-foreground font-mono leading-relaxed break-words">
-              {CSV_HEADERS.join(", ")}
-            </p>
-          </div>
+          {/* Parsing */}
+          {phase === "parsing" && (
+            <div
+              className="flex items-center gap-2 py-4 justify-center text-muted-foreground"
+              data-ocid="student_import.loading_state"
+            >
+              <Loader2 className="w-4 h-4 animate-spin" />
+              <span className="text-sm">Parsing file…</span>
+            </div>
+          )}
+
+          {/* Error */}
+          {phase === "error" && errorMsg && (
+            <div
+              className="flex items-center gap-2 p-3 bg-destructive/10 rounded-lg text-sm text-destructive"
+              data-ocid="student_import.error_state"
+            >
+              <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Preview */}
+          {phase === "preview" && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 p-3 bg-primary/5 rounded-lg">
+                <FileSpreadsheet className="w-4 h-4 text-primary" />
+                <p className="text-sm font-medium text-foreground">
+                  {previewRows.length} students ready to import
+                </p>
+              </div>
+
+              {/* Preview table — first 5 rows */}
+              <div className="border border-border rounded-lg overflow-hidden">
+                <div className="overflow-x-auto max-h-44">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/60 sticky top-0">
+                      <tr>
+                        {[
+                          "Adm.No",
+                          "Full Name",
+                          "Class",
+                          "Section",
+                          "Father Mobile",
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            className="px-2 py-1.5 text-left font-medium text-muted-foreground whitespace-nowrap"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {previewRows.slice(0, 5).map((row, i) => (
+                        <tr
+                          key={`preview-row-${row.admNo || row.fullName || String(i)}`}
+                          className="border-t border-border/40"
+                        >
+                          <td className="px-2 py-1">{row.admNo || "—"}</td>
+                          <td className="px-2 py-1 truncate max-w-[120px]">
+                            {row.fullName || "—"}
+                          </td>
+                          <td className="px-2 py-1">{row.class || "—"}</td>
+                          <td className="px-2 py-1">{row.section || "—"}</td>
+                          <td className="px-2 py-1">
+                            {row.fatherMobile || "—"}
+                          </td>
+                        </tr>
+                      ))}
+                      {previewRows.length > 5 && (
+                        <tr className="border-t border-border/40">
+                          <td
+                            colSpan={5}
+                            className="px-2 py-1 text-muted-foreground text-center"
+                          >
+                            … and {previewRows.length - 5} more rows
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Importing progress */}
+          {phase === "importing" && (
+            <div className="space-y-2" data-ocid="student_import.loading_state">
+              <div className="flex items-center gap-2 text-sm text-foreground">
+                <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                <span>
+                  Importing {progress.done} of {progress.total}…
+                </span>
+              </div>
+              <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                <div
+                  className="bg-primary h-full transition-all duration-300 rounded-full"
+                  style={{
+                    width: `${progress.total > 0 ? (progress.done / progress.total) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Please wait, do not close this window.
+              </p>
+            </div>
+          )}
+
+          {/* Done */}
+          {phase === "done" && result && (
+            <div className="space-y-2" data-ocid="student_import.success_state">
+              <div className="flex items-center gap-2 p-3 bg-green-500/10 rounded-lg text-sm text-green-700 dark:text-green-400">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                <span className="font-medium">
+                  Successfully imported {result.success} student
+                  {result.success !== 1 ? "s" : ""}.
+                  {result.failed > 0 && ` ${result.failed} failed.`}
+                </span>
+              </div>
+              {result.failed > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Failures may be due to duplicate admission numbers or missing
+                  required fields.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 px-5 py-3 border-t border-border">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onClose}
+            data-ocid="student_import.cancel_button"
+          >
+            {phase === "done" ? "Close" : "Cancel"}
+          </Button>
+          {phase === "preview" && (
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => void startImport()}
+              data-ocid="student_import.confirm_button"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              Import {previewRows.length} Students
+            </Button>
+          )}
+          {phase === "error" && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPhase("idle")}
+              data-ocid="student_import.retry_button"
+            >
+              Try Again
+            </Button>
+          )}
         </div>
       </div>
     </div>

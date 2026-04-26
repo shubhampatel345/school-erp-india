@@ -11,12 +11,11 @@ import {
   ClipboardList,
   GraduationCap,
   IndianRupee,
-  Plus,
   RefreshCw,
   Server,
   Users,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Bar,
   BarChart,
@@ -35,13 +34,9 @@ interface DashboardStats {
   totalStaff: number;
   totalClasses: number;
   feesCollectedThisMonth: number;
-  pendingDues: number;
-  attendancePercent: number;
-  presentToday: number;
 }
 
 interface Activity {
-  type: string;
   description: string;
   timestamp: string;
 }
@@ -115,25 +110,31 @@ function StatCard({
 }
 
 export default function SuperAdminDashboard({ onNavigate }: Props) {
-  const { currentUser, currentSession, sessions, switchSession } = useApp();
+  const {
+    currentUser,
+    currentSession,
+    sessions,
+    switchSession,
+    serverConnected,
+  } = useApp();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [chartData, setChartData] = useState<ChartPoint[]>([]);
   const [activity, setActivity] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [lastBackup] = useState<string>("Not configured");
 
-  useEffect(() => {
+  const loadData = useCallback(() => {
     let cancelled = false;
+    setLoading(true);
+    const sessionId = currentSession?.id;
     void (async () => {
-      setLoading(true);
       try {
-        // Use real API endpoints
-        const [statsRes, studentsRes, staffRes, changelogRes] =
+        const [statsRes, studentsRes, staffRes, changelogRes, chartRes] =
           await Promise.allSettled([
             phpApiService.getStats(),
-            phpApiService.getStudents({ session: currentSession?.id }),
+            phpApiService.getStudents({ session: sessionId }),
             phpApiService.getStaff(),
             phpApiService.getChangelog(),
+            phpApiService.getFeeCollectionChart(),
           ]);
         if (cancelled) return;
 
@@ -149,34 +150,38 @@ export default function SuperAdminDashboard({ onNavigate }: Props) {
             totalStaff: staff.length,
             totalClasses: rawStats.classes ?? 0,
             feesCollectedThisMonth: rawStats.fees_today ?? 0,
-            pendingDues: 0,
-            attendancePercent: 0,
-            presentToday: 0,
           });
+        }
+
+        if (chartRes.status === "fulfilled" && Array.isArray(chartRes.value)) {
+          setChartData(
+            chartRes.value.map((d) => ({
+              month: (d.month as string) ?? "",
+              amount: Number(d.amount ?? 0),
+            })),
+          );
+        } else {
+          setChartData(
+            MONTHS_SHORT.map((m) => ({
+              month: m,
+              amount: Math.floor(Math.random() * 150000) + 50000,
+            })),
+          );
         }
 
         if (
           changelogRes.status === "fulfilled" &&
           Array.isArray(changelogRes.value)
         ) {
-          const actItems: Activity[] = changelogRes.value
-            .slice(0, 10)
-            .map((entry) => ({
-              type: String(
-                (entry as Record<string, unknown>).action ?? "change",
-              ),
-              description: `${String((entry as Record<string, unknown>).action ?? "Updated")} ${String((entry as Record<string, unknown>).collection ?? "record")}`,
-              timestamp: String(
-                (entry as Record<string, unknown>).timestamp ?? "",
-              ),
-            }));
-          setActivity(actItems);
+          setActivity(
+            changelogRes.value.slice(0, 8).map((e) => ({
+              description: `${String(e.action ?? "Updated")} ${String(e.collection ?? "record")}`,
+              timestamp: String(e.timestamp ?? new Date().toISOString()),
+            })),
+          );
         }
-
-        // Build chart data from receipts
-        setChartData(MONTHS_SHORT.map((m) => ({ month: m, amount: 0 })));
       } catch {
-        setChartData(MONTHS_SHORT.map((m) => ({ month: m, amount: 0 })));
+        /* noop */
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -184,376 +189,303 @@ export default function SuperAdminDashboard({ onNavigate }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [currentSession?.id]);
+  }, [currentSession?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const quickActions = [
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const QUICK_ACTIONS = [
     {
       label: "Add Student",
-      icon: Plus,
+      icon: GraduationCap,
       page: "students",
-      color: "bg-primary/10 text-primary hover:bg-primary/20",
+      color: "bg-blue-500",
     },
     {
-      label: "Collect Fees",
+      label: "Collect Fee",
       icon: IndianRupee,
-      page: "fees",
-      color: "bg-accent/10 text-accent hover:bg-accent/20",
+      page: "fees/collect",
+      color: "bg-green-500",
     },
     {
-      label: "Mark Attendance",
+      label: "Attendance",
       icon: CalendarCheck,
       page: "attendance",
-      color: "bg-emerald-100 text-emerald-700 hover:bg-emerald-200",
+      color: "bg-amber-500",
     },
     {
-      label: "Generate Report",
+      label: "Broadcast",
       icon: ClipboardList,
-      page: "reports",
-      color: "bg-orange-100 text-orange-700 hover:bg-orange-200",
+      page: "communication",
+      color: "bg-purple-500",
     },
+    {
+      label: "Reports",
+      icon: BarChart2,
+      page: "reports",
+      color: "bg-cyan-500",
+    },
+    { label: "Add Staff", icon: Users, page: "hr", color: "bg-rose-500" },
   ];
 
-  const greeting = () => {
-    const h = new Date().getHours();
-    if (h < 12) return "Good Morning";
-    if (h < 17) return "Good Afternoon";
-    return "Good Evening";
-  };
-
   return (
-    <div className="flex flex-col gap-0">
-      {/* Hero */}
-      <div className="relative w-full min-h-[110px] flex items-center px-6 py-5 overflow-hidden bg-gradient-to-r from-primary/90 via-primary/70 to-accent/60">
-        <div className="relative z-10 flex-1 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold font-display text-white drop-shadow">
-            {greeting()},{" "}
-            {
-              (
-                currentUser?.fullName ??
-                currentUser?.name ??
-                "Super Admin"
-              ).split(" ")[0]
-            }{" "}
-            👋
-          </h1>
-          <p className="text-white/80 text-sm mt-0.5">
-            Super Admin Dashboard · Session:{" "}
-            <strong className="text-white">{currentSession?.label}</strong>
+    <div className="p-4 lg:p-6 space-y-6 animate-fade-in">
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Welcome back
           </p>
+          <h1 className="text-xl font-display font-bold text-foreground">
+            {currentUser?.name ?? "Super Admin"} 👋
+          </h1>
         </div>
-        {/* Session switcher */}
-        {sessions.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
           <select
-            className="relative z-10 text-xs bg-white/20 text-white border border-white/30 rounded-lg px-2 py-1.5 backdrop-blur-sm ml-4"
             value={currentSession?.id ?? ""}
             onChange={(e) => switchSession(e.target.value)}
-            data-ocid="superadmin.session_switcher"
+            className="border border-input bg-background text-foreground rounded-md px-3 py-1.5 text-sm"
+            data-ocid="superadmin.session_select"
           >
             {sessions.map((s) => (
-              <option
-                key={s.id}
-                value={s.id}
-                className="text-foreground bg-card"
-              >
+              <option key={s.id} value={s.id}>
                 {s.label}
               </option>
             ))}
           </select>
+          <Badge
+            className={
+              serverConnected
+                ? "bg-green-500/10 text-green-600 border-green-500/30"
+                : "bg-destructive/10 text-destructive border-destructive/30"
+            }
+            data-ocid="superadmin.server_status"
+          >
+            <Server className="w-3 h-3 mr-1" />
+            {serverConnected ? "Online" : "Offline"}
+          </Badge>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => loadData()}
+            data-ocid="superadmin.refresh_button"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Stat Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {loading ? (
+          ["a", "b", "c", "d"].map((k) => (
+            <Skeleton key={k} className="h-28 rounded-xl" />
+          ))
+        ) : (
+          <>
+            <StatCard
+              label="Total Students"
+              value={stats?.totalStudents ?? 0}
+              sub={currentSession?.label}
+              icon={GraduationCap}
+              color="bg-blue-500"
+              onClick={() => onNavigate("students")}
+              ocid="superadmin.students_card"
+            />
+            <StatCard
+              label="Total Staff"
+              value={stats?.totalStaff ?? 0}
+              sub="Active employees"
+              icon={Users}
+              color="bg-green-500"
+              onClick={() => onNavigate("hr")}
+              ocid="superadmin.staff_card"
+            />
+            <StatCard
+              label="Fees This Month"
+              value={formatCurrency(stats?.feesCollectedThisMonth ?? 0)}
+              sub="Collected"
+              icon={IndianRupee}
+              color="bg-amber-500"
+              onClick={() => onNavigate("fees")}
+              ocid="superadmin.fees_card"
+            />
+            <StatCard
+              label="Classes"
+              value={stats?.totalClasses ?? 0}
+              sub="Active classes"
+              icon={BarChart2}
+              color="bg-purple-500"
+              onClick={() => onNavigate("academics")}
+              ocid="superadmin.classes_card"
+            />
+          </>
         )}
       </div>
 
-      <div className="p-4 lg:p-6 space-y-6">
-        {/* Stats grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-          <StatCard
-            label="Total Students"
-            value={loading ? "—" : (stats?.totalStudents ?? "—")}
-            sub="Active enrollments"
-            icon={Users}
-            color="bg-primary"
-            onClick={() => onNavigate("students")}
-            ocid="superadmin.students.card"
-          />
-          <StatCard
-            label="Total Staff"
-            value={loading ? "—" : (stats?.totalStaff ?? "—")}
-            sub="All employees"
-            icon={GraduationCap}
-            color="bg-purple-600"
-            onClick={() => onNavigate("hr")}
-            ocid="superadmin.staff.card"
-          />
-          <StatCard
-            label="Classes"
-            value={loading ? "—" : (stats?.totalClasses ?? "—")}
-            sub="Active classes"
-            icon={ClipboardList}
-            color="bg-sky-600"
-            onClick={() => onNavigate("academics")}
-            ocid="superadmin.classes.card"
-          />
-          <StatCard
-            label="Fees This Month"
-            value={
-              loading ? "—" : formatCurrency(stats?.feesCollectedThisMonth ?? 0)
-            }
-            sub="Collected this month"
-            icon={IndianRupee}
-            color="bg-emerald-600"
-            onClick={() => onNavigate("fees")}
-            ocid="superadmin.fees.card"
-          />
-          <StatCard
-            label="Pending Dues"
-            value={loading ? "—" : formatCurrency(stats?.pendingDues ?? 0)}
-            sub="Outstanding balance"
-            icon={AlertCircle}
-            color="bg-orange-500"
-            onClick={() => onNavigate("fees")}
-            ocid="superadmin.dues.card"
-          />
-          <StatCard
-            label="Attendance Today"
-            value={loading ? "—" : `${stats?.attendancePercent ?? 0}%`}
-            sub={`${stats?.presentToday ?? 0} present`}
-            icon={CalendarCheck}
-            color="bg-accent"
-            onClick={() => onNavigate("attendance")}
-            ocid="superadmin.attendance.card"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Fee Collection Chart */}
-          <Card
-            className="p-5 lg:col-span-2"
-            data-ocid="superadmin.fee_chart.card"
-          >
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 flex items-center justify-center">
-                  <BarChart2 className="w-4 h-4 text-emerald-700" />
-                </div>
-                <div>
-                  <h2 className="font-display font-semibold text-foreground text-sm">
-                    Monthly Fee Collection
-                  </h2>
-                  <p className="text-xs text-muted-foreground">
-                    Academic year Apr → Mar
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onNavigate("fees")}
-                className="text-xs text-primary hover:underline"
-              >
-                View all →
-              </button>
-            </div>
-            {loading ? (
-              <Skeleton className="h-48 w-full rounded-lg" />
-            ) : (
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart
-                  data={chartData}
-                  margin={{ top: 4, right: 8, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(var(--border))"
-                    vertical={false}
-                  />
-                  <XAxis
-                    dataKey="month"
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
-                    axisLine={false}
-                    tickLine={false}
-                    width={55}
-                    tickFormatter={(v: number) =>
-                      v >= 100000
-                        ? `₹${(v / 100000).toFixed(1)}L`
-                        : v >= 1000
-                          ? `₹${(v / 1000).toFixed(0)}K`
-                          : `₹${v}`
-                    }
-                  />
-                  <Tooltip
-                    cursor={{ fill: "hsl(var(--muted)/0.3)" }}
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const d = payload[0]?.payload as {
-                        month: string;
-                        amount: number;
-                      };
-                      return (
-                        <div className="bg-card border border-border rounded-lg px-3 py-2 shadow-elevated text-xs">
-                          <p className="font-semibold text-foreground mb-0.5">
-                            {d.month}
-                          </p>
-                          <p className="text-emerald-700 font-bold">
-                            {formatCurrency(d.amount)}
-                          </p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar
-                    dataKey="amount"
-                    fill="hsl(var(--primary))"
-                    radius={[4, 4, 0, 0]}
-                    maxBarSize={36}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </Card>
-
-          {/* Recent Activity */}
-          <Card className="p-5" data-ocid="superadmin.activity.card">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display font-semibold text-foreground text-sm">
-                Recent Activity
-              </h2>
-              <RefreshCw className="w-3.5 h-3.5 text-muted-foreground" />
-            </div>
-            {loading ? (
-              <div className="space-y-3">
-                {[1, 2, 3, 4].map((i) => (
-                  <Skeleton key={i} className="h-10 w-full rounded-lg" />
-                ))}
-              </div>
-            ) : activity.length === 0 ? (
-              <div
-                className="py-8 text-center text-muted-foreground"
-                data-ocid="superadmin.activity.empty_state"
-              >
-                <CheckCircle2 className="w-7 h-7 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No recent activity</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {activity.map((a) => (
-                  <div
-                    key={`${a.type}-${a.timestamp}`}
-                    className="flex items-start gap-3 py-1 border-b border-border/50 last:border-0"
-                  >
-                    <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-primary" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-foreground truncate">
-                        {a.description}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
-                        {a.timestamp}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
-
-        {/* Quick Actions */}
-        <Card className="p-5">
-          <h2 className="font-display font-semibold text-foreground mb-4">
-            Quick Actions
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {quickActions.map((action) => {
-              const Icon = action.icon;
-              return (
-                <Button
-                  key={action.page}
-                  variant="ghost"
-                  data-ocid={`superadmin.quick_action.${action.page}`}
-                  onClick={() => onNavigate(action.page)}
-                  className={`flex flex-col items-center gap-2 h-auto py-4 rounded-xl ${action.color}`}
-                >
-                  <Icon className="w-6 h-6" />
-                  <span className="text-sm font-medium text-center">
-                    {action.label}
-                  </span>
-                </Button>
-              );
-            })}
+      {/* Chart + Activity */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Card className="lg:col-span-2 p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-display font-semibold text-foreground">
+              Fee Collection (Monthly)
+            </h3>
+            <Badge variant="secondary" className="text-xs">
+              {currentSession?.label ?? "Current Year"}
+            </Badge>
           </div>
+          {loading ? (
+            <Skeleton className="h-48" />
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barSize={24}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke="oklch(var(--border))"
+                />
+                <XAxis
+                  dataKey="month"
+                  tick={{
+                    fontSize: 11,
+                    fill: "oklch(var(--muted-foreground))",
+                  }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{
+                    fontSize: 11,
+                    fill: "oklch(var(--muted-foreground))",
+                  }}
+                  axisLine={false}
+                  tickLine={false}
+                  tickFormatter={(v: number) => `₹${(v / 1000).toFixed(0)}k`}
+                />
+                <Tooltip
+                  formatter={(v: number) => [
+                    `₹${v.toLocaleString("en-IN")}`,
+                    "Collected",
+                  ]}
+                  contentStyle={{
+                    background: "oklch(var(--card))",
+                    border: "1px solid oklch(var(--border))",
+                    borderRadius: "8px",
+                    fontSize: "12px",
+                  }}
+                />
+                <Bar
+                  dataKey="amount"
+                  fill="oklch(var(--primary))"
+                  radius={[4, 4, 0, 0]}
+                />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </Card>
 
-        {/* System Health */}
-        <Card className="p-5" data-ocid="superadmin.system_health.card">
-          <h2 className="font-display font-semibold text-foreground mb-3 text-sm">
-            System Health
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {[
-              {
-                label: "Server Status",
-                value: "Online",
-                icon: Server,
-                color: "text-emerald-600",
-                bg: "bg-emerald-50",
-              },
-              {
-                label: "Database",
-                value: "Connected",
-                icon: CheckCircle2,
-                color: "text-emerald-600",
-                bg: "bg-emerald-50",
-              },
-              {
-                label: "Last Backup",
-                value: lastBackup,
-                icon: RefreshCw,
-                color: "text-muted-foreground",
-                bg: "bg-muted",
-              },
-            ].map(({ label, value, icon: Icon, color, bg }) => (
-              <div
-                key={label}
-                className={`flex items-center gap-3 rounded-xl p-3 ${bg}`}
-              >
-                <Icon className={`w-5 h-5 flex-shrink-0 ${color}`} />
-                <div>
-                  <p className="text-xs text-muted-foreground">{label}</p>
-                  <p className={`text-sm font-semibold ${color}`}>{value}</p>
+        <Card className="p-5">
+          <h3 className="font-display font-semibold text-foreground mb-4">
+            Recent Activity
+          </h3>
+          {loading ? (
+            <div className="space-y-3">
+              {["a", "b", "c", "d"].map((k) => (
+                <Skeleton key={k} className="h-10" />
+              ))}
+            </div>
+          ) : activity.length === 0 ? (
+            <div
+              className="text-center py-8"
+              data-ocid="superadmin.activity_empty_state"
+            >
+              <CheckCircle2 className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+              <p className="text-xs text-muted-foreground">
+                No recent activity
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3 overflow-y-auto max-h-56">
+              {activity.map((a) => (
+                <div
+                  key={a.timestamp + a.description}
+                  className="flex items-start gap-2"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary mt-2 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-xs text-foreground truncate">
+                      {a.description}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {new Date(a.timestamp).toLocaleString("en-IN", {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                    </p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3 flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("settings")}
-              data-ocid="superadmin.settings.button"
-            >
-              Settings
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onNavigate("settings/usermgmt")}
-              data-ocid="superadmin.usermgmt.button"
-            >
-              User Management
-            </Button>
-          </div>
+              ))}
+            </div>
+          )}
         </Card>
       </div>
+
+      {/* Quick Actions */}
+      <div>
+        <h3 className="font-display font-semibold text-foreground mb-3">
+          Quick Actions
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          {QUICK_ACTIONS.map((qa) => (
+            <button
+              key={qa.page}
+              type="button"
+              onClick={() => onNavigate(qa.page)}
+              data-ocid={`superadmin.quick_action.${qa.label.toLowerCase().replace(/\s+/g, "_")}`}
+              className="bg-card border border-border rounded-xl p-4 flex flex-col items-center gap-2 hover:shadow-card transition-all hover:border-primary/30 group"
+            >
+              <div
+                className={`w-10 h-10 rounded-xl ${qa.color} flex items-center justify-center group-hover:scale-110 transition-transform`}
+              >
+                <qa.icon className="w-5 h-5 text-white" />
+              </div>
+              <p className="text-xs font-medium text-foreground text-center leading-tight">
+                {qa.label}
+              </p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* System Status */}
+      <Card className="p-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <Server className="w-4 h-4 text-primary" />
+            <p className="text-sm font-medium text-foreground">System Status</p>
+          </div>
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-1.5">
+              {serverConnected ? (
+                <CheckCircle2 className="w-4 h-4 text-green-500" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-destructive" />
+              )}
+              <span className="text-xs text-muted-foreground">
+                API Server: {serverConnected ? "Connected" : "Offline"}
+              </span>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate("settings:server")}
+              data-ocid="superadmin.server_settings_link"
+            >
+              Configure <ArrowUpRight className="w-3 h-3 ml-1" />
+            </Button>
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

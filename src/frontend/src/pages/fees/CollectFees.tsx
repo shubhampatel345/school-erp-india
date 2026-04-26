@@ -2,10 +2,13 @@
  * CollectFees.tsx — Direct phpApiService (no getData, no context data cache)
  *
  * - Student search via server (debounced)
- * - Fee plan loaded from server on student select
+ * - SELECT student → dropdown closes immediately
+ * - Auto-select April through current month on student select
+ * - Fee plan loaded from server, receipts from server
+ * - Zero-amount validation
+ * - UPI QR payment support
  * - Receipt saved to server, wait for HTTP 200
- * - Dropdown closes after student select
- * - No local pending queue, no IndexedDB
+ * - Payment history with reprint/edit/delete
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../components/ui/badge";
@@ -52,12 +55,6 @@ interface ReceiptRow {
   amount: number;
   paidMonths: string[];
   checked: boolean;
-}
-
-interface OtherChargeRow {
-  label: string;
-  paidAmount: number;
-  dueAmount: number;
 }
 
 interface EditReceiptState {
@@ -128,14 +125,13 @@ function buildUpiLink(
   amount: number,
   studentName: string,
 ): string {
-  const params = new URLSearchParams({
+  return `upi://pay?${new URLSearchParams({
     pa: vpa,
     pn: schoolName,
     am: amount.toFixed(2),
     cu: "INR",
     tn: `Fees ${studentName}`,
-  });
-  return `upi://pay?${params.toString()}`;
+  }).toString()}`;
 }
 
 function printReceiptHTML(receipt: FeeReceipt) {
@@ -175,7 +171,6 @@ function printReceiptHTML(receipt: FeeReceipt) {
         `<tr><td>${idx + 1}</td><td>${g.headingName}</td><td>${g.months.map((m) => m.slice(0, 3)).join(",")}</td><td style="text-align:right">₹${(g.amount * g.months.length).toLocaleString("en-IN")}</td></tr>`,
     )
     .join("");
-
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Fee Receipt - ${receipt.receiptNo}</title>
   <style>@page{size:105mm 145mm;margin:0}*{box-sizing:border-box;margin:0;padding:0}body{font-family:Arial,sans-serif;font-size:9px;padding:4mm;background:#fff}.header{text-align:center;border-bottom:1.5px solid #000;padding-bottom:3px;margin-bottom:3px}.school-name{font-size:13px;font-weight:bold}.receipt-title{text-align:center;font-weight:bold;font-size:10px;letter-spacing:1px;margin:3px 0;border-top:1px solid #ccc;border-bottom:1px solid #ccc;padding:2px 0}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px 8px;margin:3px 0;font-size:8.5px}.lbl{color:#555}table{width:100%;border-collapse:collapse;margin:3px 0;font-size:8px}th,td{border:.5px solid #aaa;padding:1.5px 3px}th{background:#f2f2f2;font-weight:bold}.total-row td{font-weight:bold;font-size:9px;background:#f8f8f8}.qr-row{display:flex;justify-content:space-between;align-items:flex-end;margin-top:4px}</style>
   </head><body>
@@ -185,7 +180,6 @@ function printReceiptHTML(receipt: FeeReceipt) {
   <table><thead><tr><th>#</th><th>Particulars</th><th>Months</th><th>Amount</th></tr></thead><tbody>${itemRows}<tr class="total-row"><td colspan="3">Net Fees</td><td style="text-align:right">₹${receipt.totalAmount.toLocaleString("en-IN")}</td></tr></tbody></table>
   <div class="qr-row"><div><div style="font-size:8px;">Received By: <b>${receipt.receivedBy}</b> (${receipt.receivedByRole})</div><div style="margin-top:10px;font-size:8px;">Signature: _______________</div></div><img src="${qrUrl}" width="60" height="60" alt="QR"/></div>
   </body></html>`;
-
   const existing = document.getElementById(
     "shubh-print-frame",
   ) as HTMLIFrameElement | null;
@@ -224,7 +218,7 @@ function printReceiptHTML(receipt: FeeReceipt) {
   }, 400);
 }
 
-// ── UPI QR ─────────────────────────────────────────────────────────────────────
+// ── UPI QR Section ────────────────────────────────────────────────────────────
 function UpiQrSection({
   netPayable,
   studentName,
@@ -418,6 +412,7 @@ function UpiQrSection({
   );
 }
 
+// ── LabelValue ────────────────────────────────────────────────────────────────
 function LabelValue({
   label,
   value,
@@ -455,7 +450,7 @@ export default function CollectFees() {
   const [cellAmounts, setCellAmounts] = useState<
     Record<string, Record<string, number>>
   >({});
-  const [otherCharge, setOtherCharge] = useState<OtherChargeRow>({
+  const [otherCharge, setOtherCharge] = useState({
     label: "",
     paidAmount: 0,
     dueAmount: 0,
@@ -492,7 +487,7 @@ export default function CollectFees() {
     currentUser?.role === "admin" ||
     currentUser?.role === "accountant";
 
-  // Stable handlers — never recreated, prevents focus loss
+  // Stable handlers — never recreated, prevents focus loss on re-render
   const handleLateFeesChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) =>
       setLateFees(
@@ -613,18 +608,17 @@ export default function CollectFees() {
 
   function calcOldBalance(receipts: FeeReceipt[]): number {
     const sessionId = currentSession?.id ?? "";
-    const remaining = receipts
+    const sorted = receipts
       .filter((r) => r.sessionId === sessionId && !r.isDeleted)
       .sort((a, b) => a.date.localeCompare(b.date));
-    if (remaining.length === 0) return 0;
-    return remaining[remaining.length - 1].balance ?? 0;
+    if (sorted.length === 0) return 0;
+    return sorted[sorted.length - 1].balance ?? 0;
   }
 
   async function loadStudentFees(student: Student) {
     if (!currentSession) return;
     setFeeLoadState("loading");
     try {
-      // Load receipts from server
       const rawReceipts = await phpApiService.getReceipts(student.id);
       const receipts = rawReceipts as unknown as FeeReceipt[];
       setReceiptHistory(
@@ -633,19 +627,15 @@ export default function CollectFees() {
           .sort((a, b) => b.date.localeCompare(a.date)),
       );
 
-      // Load fee plan from server
-      const planItems = await phpApiService.getFeePlan(
-        student.class,
-        student.section,
-      );
-      // Load fee headings
-      const headings = await phpApiService.getFeeHeadings();
+      const [planItems, allHeadings] = await Promise.all([
+        phpApiService.getFeePlan(student.class, student.section),
+        phpApiService.getFeeHeadings(),
+      ]);
 
       const newRows: ReceiptRow[] = [];
       for (const plan of planItems) {
-        const heading = headings.find((h) => h.id === plan.headingId);
-        if (!heading) continue;
-        if (!plan.amount || plan.amount === 0) continue;
+        const heading = allHeadings.find((h) => h.id === plan.headingId);
+        if (!heading || !plan.amount || plan.amount === 0) continue;
         const months = safeMonths(
           heading.months as string[] | string | undefined,
         );
@@ -662,8 +652,9 @@ export default function CollectFees() {
 
       setRows(newRows);
 
-      // Auto-select April through current month (not already paid)
-      const jsMonth = new Date().getMonth();
+      // Auto-select April through current month (Indian academic year: April = index 0)
+      const jsMonth = new Date().getMonth(); // 0=Jan … 11=Dec
+      // currentAcademicIdx: April=0, May=1 … March=11
       const currentAcademicIdx = jsMonth >= 3 ? jsMonth - 3 : jsMonth + 9;
       const applicableSet = new Set(newRows.flatMap((r) => r.applicableMonths));
       const autoSelected = MONTHS.slice(0, currentAcademicIdx + 1).filter((m) =>
@@ -676,12 +667,10 @@ export default function CollectFees() {
       );
       setCellAmounts({});
 
-      const bal = calcOldBalance(receipts);
-      setOldBalance(bal);
+      setOldBalance(calcOldBalance(receipts));
       setLateFees(0);
       setConcessionAmt(0);
       setRemarks("");
-
       setFeeLoadState(newRows.length === 0 ? "empty" : "loaded");
     } catch {
       setFeeLoadState("empty");
@@ -689,7 +678,7 @@ export default function CollectFees() {
   }
 
   function selectStudent(student: Student) {
-    // IMPORTANT: close dropdown before anything else — prevents stale UI
+    // IMPORTANT: close dropdown immediately before any async work
     setShowDropdown(false);
     setAdmNoInput("");
     setSearchResults([]);
@@ -698,7 +687,7 @@ export default function CollectFees() {
     setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
     setFamilyMembers([]);
     void loadStudentFees(student);
-    // Load family (same guardian mobile)
+    // Load family members (same guardian mobile)
     const pm =
       student.fatherMobile?.trim() || student.guardianMobile?.trim() || "";
     if (pm) {
@@ -744,6 +733,7 @@ export default function CollectFees() {
   const applicableMonths = MONTHS.filter((m) =>
     rows.some((r) => r.applicableMonths.includes(m)),
   );
+
   function isMonthFullyPaid(month: string): boolean {
     const applicable = rows.filter((r) => r.applicableMonths.includes(month));
     return (
@@ -751,12 +741,14 @@ export default function CollectFees() {
       applicable.every((r) => r.paidMonths.includes(month))
     );
   }
+
   function togglePanelMonth(month: string) {
     if (isMonthFullyPaid(month)) return;
     setPanelMonths((prev) =>
       prev.includes(month) ? prev.filter((m) => m !== month) : [...prev, month],
     );
   }
+
   const unpaidApplicable = applicableMonths.filter((m) => !isMonthFullyPaid(m));
   const allSelected =
     unpaidApplicable.length > 0 &&
@@ -789,7 +781,6 @@ export default function CollectFees() {
     setReceiptAmt(netFees);
   }, [netFees]);
 
-  // Receipt number
   function nextReceiptNo(): string {
     const yy = String(new Date().getFullYear()).slice(-2);
     const seq = (receiptHistory.length + 1).toString().padStart(4, "0");
@@ -868,7 +859,6 @@ export default function CollectFees() {
       setWaDone(false);
       setShowDialog(true);
       setOtherCharge({ label: "", paidAmount: 0, dueAmount: 0 });
-      // Reload fees to reflect new payment
       void loadStudentFees(selectedStudent);
     } catch (err) {
       setErrorMsg(
@@ -983,8 +973,6 @@ export default function CollectFees() {
     panelMonths.length > 0
       ? panelMonths
       : MONTHS.filter((m) => applicableMonths.includes(m));
-  const isCredit = balanceAmt < 0;
-  const isDue = balanceAmt > 0;
   const isOldCredit = oldBalance < 0;
   const isOldDue = oldBalance > 0;
 
@@ -1151,10 +1139,10 @@ export default function CollectFees() {
         <div className="flex border border-border border-t-0 bg-card shadow-sm">
           <div
             className="flex flex-col"
-            style={{ minWidth: 360, maxWidth: 480 }}
+            style={{ minWidth: 320, maxWidth: 420 }}
           >
             <div className="flex gap-3 p-3 border-b border-border bg-muted/20">
-              <div className="w-[64px] h-[72px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
+              <div className="w-[56px] h-[64px] rounded border-2 border-border bg-muted flex-shrink-0 overflow-hidden flex items-center justify-center">
                 {selectedStudent.photo ? (
                   <img
                     src={selectedStudent.photo}
@@ -1162,7 +1150,7 @@ export default function CollectFees() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <span className="text-3xl">👤</span>
+                  <span className="text-2xl">👤</span>
                 )}
               </div>
               <div className="flex flex-col justify-center gap-0.5 min-w-0">
@@ -1229,7 +1217,7 @@ export default function CollectFees() {
           </div>
           <div className="w-px bg-border flex-shrink-0" />
           {/* Month Selector */}
-          <div className="flex flex-col flex-shrink-0 w-[148px] bg-muted/20">
+          <div className="flex flex-col flex-shrink-0 w-[140px] bg-muted/20">
             <div className="px-2.5 py-2 bg-primary/10 border-b border-border">
               <p className="text-[10px] font-bold text-primary uppercase tracking-wider">
                 Select Month ({panelMonths.length})
@@ -1338,29 +1326,29 @@ export default function CollectFees() {
               {familyMembers.length !== 1 ? "s" : ""}
             </span>
             <span className="text-xs text-violet-600 ml-auto">
-              {familyOpen ? "▲ Collapse" : "▼ Expand"}
+              {familyOpen ? "▲" : "▼"}
             </span>
           </button>
           {familyOpen && (
-            <div className="p-3 flex flex-wrap gap-3">
+            <div className="p-3 flex flex-wrap gap-2">
               {familyMembers.map((member) => (
                 <button
                   key={member.id}
                   type="button"
                   data-ocid="family-member-card"
                   onClick={() => selectStudent(member)}
-                  className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all group min-w-[200px] max-w-[280px] bg-background"
+                  className="flex items-center gap-2 p-2.5 rounded-xl border border-border hover:border-violet-300 hover:bg-violet-50 transition-all bg-background"
                 >
-                  <div className="w-10 h-10 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-base flex-shrink-0">
+                  <div className="w-8 h-8 rounded-full bg-violet-100 flex items-center justify-center text-violet-700 font-bold text-sm flex-shrink-0">
                     {member.fullName[0]}
                   </div>
-                  <div className="flex-1 min-w-0 text-left">
-                    <div className="text-sm font-semibold text-foreground truncate group-hover:text-violet-700">
+                  <div className="text-left min-w-0">
+                    <p className="text-xs font-semibold truncate">
                       {member.fullName}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      Class {member.class}-{member.section} · #{member.admNo}
-                    </div>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      {member.class}-{member.section}
+                    </p>
                   </div>
                 </button>
               ))}
@@ -1370,78 +1358,75 @@ export default function CollectFees() {
       )}
 
       {/* FEE GRID */}
-      {selectedStudent && (
-        <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
-          {feeLoadState === "loading" && (
-            <div
-              className="p-8 flex flex-col items-center justify-center gap-3 text-muted-foreground"
-              data-ocid="fee-grid-loading"
-            >
-              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm font-medium">Loading fee data…</p>
-            </div>
-          )}
-          {feeLoadState === "empty" && (
-            <div
-              className="p-8 text-center text-muted-foreground"
-              data-ocid="fee-grid-empty"
-            >
-              <div className="text-3xl mb-2">📋</div>
-              <p className="text-sm font-medium mb-1">
-                No fee plan configured for Class {selectedStudent.class}-
-                {selectedStudent.section}
-              </p>
-              <p className="text-xs opacity-70">
-                Go to Fees → Fees Plan and set up a plan for this class first.
-              </p>
-            </div>
-          )}
-          {feeLoadState === "loaded" && rows.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="bg-muted/70">
-                    <th className="border border-border px-2 py-1.5 text-center font-bold sticky left-0 bg-muted/70 w-8">
-                      #
+      {selectedStudent && feeLoadState === "loading" && (
+        <div className="bg-card border border-border border-t-0 p-6 text-center">
+          <div className="flex items-center gap-1.5 justify-center">
+            {[0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="w-2 h-2 rounded-full bg-primary animate-pulse"
+                style={{ animationDelay: `${i * 200}ms` }}
+              />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Loading fee details…
+          </p>
+        </div>
+      )}
+
+      {selectedStudent && feeLoadState === "empty" && (
+        <div
+          className="bg-card border border-border border-t-0 p-8 text-center text-muted-foreground"
+          data-ocid="collect-fees.empty_state"
+        >
+          <p className="text-2xl mb-2">📋</p>
+          <p className="font-medium">
+            No fee plan found for {selectedStudent.class} -{" "}
+            {selectedStudent.section}
+          </p>
+          <p className="text-sm mt-1">
+            Add a fee plan in Fees → Fees Plan tab.
+          </p>
+        </div>
+      )}
+
+      {selectedStudent && (feeLoadState === "loaded" || rows.length > 0) && (
+        <>
+          {/* Fee table */}
+          <div className="bg-card border border-border border-t-0 overflow-x-auto shadow-sm">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/50">
+                <tr>
+                  <th className="px-3 py-2 text-left font-semibold">
+                    Fee Heading
+                  </th>
+                  {displayMonths.map((m) => (
+                    <th
+                      key={m}
+                      className="px-2 py-2 text-center font-semibold min-w-[64px]"
+                    >
+                      {m.slice(0, 3)}
                     </th>
-                    <th className="border border-border px-3 py-1.5 text-left font-bold sticky left-8 bg-muted/70 min-w-[140px]">
-                      Fees Head
-                    </th>
-                    <th className="border border-border px-2 py-1.5 font-bold text-center bg-muted/70 w-16">
-                      Rate/Mo
-                    </th>
-                    {displayMonths.map((m) => (
-                      <th
-                        key={m}
-                        className="border border-border px-1.5 py-1.5 font-bold min-w-[44px] text-center bg-muted/70"
-                      >
-                        {MONTH_SHORT[MONTHS.indexOf(m)] ?? m.slice(0, 3)}
-                      </th>
-                    ))}
-                    <th className="border border-border px-2 py-1.5 font-bold text-right bg-muted/70 sticky right-0 w-20">
-                      Total
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, rowIdx) => {
-                    const rowTotal = displayMonths.reduce((sum, m) => {
-                      if (
-                        !row.applicableMonths.includes(m) ||
-                        row.paidMonths.includes(m) ||
-                        !row.checked
-                      )
-                        return sum;
-                      return (
-                        sum + (cellAmounts[row.headingId]?.[m] ?? row.amount)
-                      );
-                    }, 0);
-                    return (
-                      <tr
-                        key={row.headingId}
-                        className={`hover:bg-muted/10 ${!row.checked ? "opacity-50" : ""}`}
-                      >
-                        <td className="border border-border px-2 py-1 text-center sticky left-0 bg-card">
+                  ))}
+                  <th className="px-2 py-2 text-right font-semibold">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => {
+                  const rowMonths = getRowSelectedMonths(row);
+                  const rowTotal = rowMonths.reduce(
+                    (s, m) =>
+                      s + (cellAmounts[row.headingId]?.[m] ?? row.amount),
+                    0,
+                  );
+                  return (
+                    <tr
+                      key={row.headingId}
+                      className="border-t border-border hover:bg-muted/10"
+                    >
+                      <td className="px-3 py-1.5 font-medium">
+                        <div className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             checked={row.checked}
@@ -1456,561 +1441,169 @@ export default function CollectFees() {
                             }
                             className="w-3 h-3 accent-primary"
                           />
-                        </td>
-                        <td className="border border-border px-3 py-1 font-medium sticky left-8 bg-card text-[11px]">
-                          {rowIdx + 1}. {row.headingName}
-                        </td>
-                        <td className="border border-border px-2 py-1 text-center text-muted-foreground text-[11px]">
-                          ₹{row.amount}
-                        </td>
-                        {displayMonths.map((month) => {
-                          const isApplicable =
-                            row.applicableMonths.includes(month);
-                          const isPaid = row.paidMonths.includes(month);
-                          if (!isApplicable)
-                            return (
-                              <td
-                                key={month}
-                                className="border border-border px-1.5 py-1 text-center bg-muted/20"
-                              >
-                                <span className="text-muted-foreground/30 text-xs">
-                                  —
-                                </span>
-                              </td>
-                            );
-                          if (isPaid)
-                            return (
-                              <td
-                                key={month}
-                                className="border border-border px-1.5 py-1 text-center bg-green-50"
-                              >
-                                <span className="text-green-600 text-[11px] font-bold">
-                                  ✓
-                                </span>
-                              </td>
-                            );
-                          if (!panelMonths.includes(month))
-                            return (
-                              <td
-                                key={month}
-                                className="border border-border px-1.5 py-1 text-center bg-muted/10"
-                              >
-                                <span className="text-muted-foreground/50 text-[10px]">
-                                  —
-                                </span>
-                              </td>
-                            );
-                          const amt =
-                            cellAmounts[row.headingId]?.[month] ?? row.amount;
+                          <span>{row.headingName}</span>
+                        </div>
+                      </td>
+                      {displayMonths.map((m) => {
+                        const isPaid = row.paidMonths.includes(m);
+                        const isApplicable = row.applicableMonths.includes(m);
+                        if (!isApplicable)
                           return (
                             <td
-                              key={month}
-                              className="border border-border px-1 py-0.5 text-center bg-primary/5"
+                              key={m}
+                              className="px-2 py-1.5 text-center text-muted-foreground/30"
                             >
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                pattern="[0-9]*"
-                                value={amt}
-                                onChange={(e) => {
-                                  const val = Math.max(
-                                    0,
-                                    Number(
-                                      e.target.value
-                                        .replace(/[^0-9.]/g, "")
-                                        .replace(/(\..*)\./g, "$1"),
-                                    ) || 0,
-                                  );
-                                  setCellAmounts((prev) => ({
-                                    ...prev,
-                                    [row.headingId]: {
-                                      ...prev[row.headingId],
-                                      [month]: val,
-                                    },
-                                  }));
-                                }}
-                                className="w-[48px] h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
-                                disabled={!row.checked}
-                              />
+                              —
                             </td>
                           );
-                        })}
-                        <td className="border border-border px-2 py-1 text-right font-semibold sticky right-0 bg-card text-[11px]">
-                          {rowTotal > 0
-                            ? `₹${rowTotal.toLocaleString("en-IN")}`
-                            : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {/* Other Charges */}
-                  <tr className="bg-amber-50/40">
-                    <td className="border border-border px-2 py-1 text-center sticky left-0 bg-amber-50/40">
-                      <span className="text-amber-600 text-xs">+</span>
-                    </td>
-                    <td className="border border-border px-2 py-1 sticky left-8 bg-amber-50/40">
-                      <input
-                        type="text"
-                        placeholder="Other fee label..."
-                        value={otherCharge.label}
-                        onChange={handleOtherLabelChange}
-                        className="w-full h-5 px-2 text-[11px] border border-input rounded bg-background focus:outline-none italic"
-                        data-ocid="other-charge-label"
-                      />
-                    </td>
-                    <td className="border border-border px-1 py-1 text-center">
+                        if (isPaid)
+                          return (
+                            <td key={m} className="px-2 py-1.5 text-center">
+                              <span className="text-green-600 font-bold text-[10px]">
+                                ✓ Paid
+                              </span>
+                            </td>
+                          );
+                        const amt =
+                          cellAmounts[row.headingId]?.[m] ?? row.amount;
+                        return (
+                          <td key={m} className="px-1 py-1.5 text-center">
+                            {row.checked && panelMonths.includes(m) ? (
+                              <div className="flex items-center gap-0.5 justify-center">
+                                <span className="text-muted-foreground text-[9px]">
+                                  ₹
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  value={String(amt)}
+                                  onChange={(e) => {
+                                    const v =
+                                      Number(
+                                        e.target.value.replace(/[^0-9.]/g, ""),
+                                      ) || 0;
+                                    setCellAmounts((prev) => ({
+                                      ...prev,
+                                      [row.headingId]: {
+                                        ...(prev[row.headingId] ?? {}),
+                                        [m]: v,
+                                      },
+                                    }));
+                                  }}
+                                  className="h-6 w-14 text-center text-[11px] px-1 rounded border border-input bg-background focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                                />
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground/40 text-[11px]">
+                                —
+                              </span>
+                            )}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1.5 text-right font-semibold text-primary">
+                        {rowTotal > 0
+                          ? `₹${rowTotal.toLocaleString("en-IN")}`
+                          : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+                {/* Other charges */}
+                <tr className="border-t border-border bg-muted/10">
+                  <td className="px-3 py-1.5">
+                    <input
+                      type="text"
+                      placeholder="Other charges (label)"
+                      value={otherCharge.label}
+                      onChange={handleOtherLabelChange}
+                      className="h-6 w-36 text-xs px-2 rounded border border-input bg-background focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none"
+                    />
+                  </td>
+                  <td
+                    colSpan={displayMonths.length}
+                    className="px-2 py-1.5 text-right"
+                  >
+                    <div className="flex items-center gap-0.5 justify-end">
+                      <span className="text-muted-foreground text-[9px]">
+                        ₹
+                      </span>
                       <input
                         type="text"
                         inputMode="numeric"
-                        pattern="[0-9]*"
                         placeholder="0"
                         value={otherCharge.paidAmount || ""}
                         onChange={handleOtherAmountChange}
-                        className="w-14 h-5 px-1 text-center text-[11px] border border-input rounded bg-background focus:outline-none"
-                        data-ocid="other-charge-paid"
+                        className="h-6 w-20 text-right text-xs px-1 rounded border border-input bg-background focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                    </td>
-                    <td
-                      colSpan={displayMonths.length}
-                      className="border border-border px-2 py-1 text-[10px] text-muted-foreground italic"
-                    >
-                      Other / miscellaneous
-                    </td>
-                    <td className="border border-border px-2 py-1 text-right font-semibold sticky right-0 bg-amber-50/40 text-[11px]">
-                      {otherCharge.paidAmount > 0
-                        ? `₹${otherCharge.paidAmount.toLocaleString("en-IN")}`
-                        : "—"}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* TOTALS + PAYMENT */}
-      {selectedStudent && rows.length > 0 && (
-        <div className="bg-card border border-border border-t-0 shadow-sm overflow-hidden">
-          <div className="flex flex-wrap divide-y sm:divide-y-0 sm:divide-x divide-border">
-            <div className="p-3 flex flex-col gap-1 min-w-[170px]">
-              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                Fee Summary
-              </p>
-              <div className="flex justify-between text-[11px]">
-                <span className="text-muted-foreground">Fee Installments</span>
-                <span className="font-semibold">
-                  ₹{feesSubtotal.toLocaleString("en-IN")}
-                </span>
-              </div>
-              {otherTotal > 0 && (
-                <div className="flex justify-between text-[11px]">
-                  <span className="text-muted-foreground">
-                    {otherCharge.label || "Other"}
-                  </span>
-                  <span className="font-semibold">
-                    ₹{otherTotal.toLocaleString("en-IN")}
-                  </span>
-                </div>
-              )}
-              {isOldDue && (
-                <div className="flex justify-between text-[11px] text-red-600">
-                  <span>Old Balance</span>
-                  <span className="font-bold">
-                    + ₹{oldBalance.toLocaleString("en-IN")}
-                  </span>
-                </div>
-              )}
-              {isOldCredit && (
-                <div className="flex justify-between text-[11px] text-green-600">
-                  <span>Credit Balance</span>
-                  <span className="font-bold">
-                    -₹{Math.abs(oldBalance).toLocaleString("en-IN")}
-                  </span>
-                </div>
-              )}
-              <div className="flex justify-between text-[11px] font-bold border-t border-border pt-1">
-                <span>Total Fees</span>
-                <span>₹{(totalFees + oldBalance).toLocaleString("en-IN")}</span>
-              </div>
-            </div>
-            <div className="p-3 flex flex-col gap-1.5 min-w-[180px]">
-              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                Adjustments
-              </p>
-              <div className="flex items-center gap-2">
-                <label
-                  htmlFor="late-fees-input"
-                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                >
-                  Late Fees ₹
-                </label>
-                <input
-                  id="late-fees-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={lateFees || ""}
-                  placeholder="0"
-                  onChange={handleLateFeesChange}
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none"
-                  data-ocid="late-fees-input"
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <label
-                  htmlFor="concession-amt-input"
-                  className="text-[11px] text-muted-foreground w-20 flex-shrink-0"
-                >
-                  Concession ₹
-                </label>
-                <input
-                  id="concession-amt-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={concessionAmt || ""}
-                  placeholder="0"
-                  onChange={handleConcessionChange}
-                  className="w-20 h-5 px-1.5 text-[11px] text-right border border-input rounded bg-background focus:outline-none"
-                  data-ocid="concession-amt-input"
-                />
-              </div>
-            </div>
-            <div className="p-3 flex flex-col gap-1.5 min-w-[200px]">
-              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                Net Fees
-              </p>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[11px] text-muted-foreground">
-                  Net Fees
-                </span>
-                <span className="text-base font-extrabold text-primary">
-                  ₹{netFees.toLocaleString("en-IN")}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <label
-                  htmlFor="receipt-amt-input"
-                  className="text-[11px] text-muted-foreground flex-shrink-0 w-20"
-                >
-                  Receipt Amt ₹
-                </label>
-                <input
-                  id="receipt-amt-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={receiptAmt || ""}
-                  placeholder="0"
-                  onChange={handleReceiptAmtChange}
-                  className="w-24 h-6 px-2 text-[11px] text-right border border-input rounded bg-background font-bold focus:outline-none focus:ring-2 focus:ring-primary/40"
-                  data-ocid="receipt-amt-input"
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 pt-0.5">
-                <span
-                  className={`text-[11px] font-semibold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
-                >
-                  {isCredit ? "Credit Balance" : "Balance Amt"}
-                </span>
-                <span
-                  className={`text-sm font-extrabold ${isDue ? "text-red-600" : isCredit ? "text-green-600" : "text-muted-foreground"}`}
-                >
-                  {isCredit
-                    ? `-₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`
-                    : `₹${balanceAmt.toLocaleString("en-IN")}`}
-                </span>
-              </div>
-            </div>
-            <div className="p-3 flex flex-col gap-2 min-w-[220px]">
-              <div>
-                <label
-                  htmlFor="remarks-input"
-                  className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider block mb-0.5"
-                >
-                  Remarks
-                </label>
-                <input
-                  id="remarks-input"
-                  type="text"
-                  value={remarks}
-                  onChange={handleRemarksChange}
-                  placeholder="Any notes..."
-                  className="w-full h-6 px-2 text-[11px] border border-input rounded bg-background focus:outline-none"
-                  data-ocid="remarks-input"
-                />
-              </div>
-              <div>
-                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider mb-1">
-                  Payment Mode
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
-                    (mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => setPaymentMode(mode)}
-                        className={`px-2 py-0.5 text-[10px] rounded-full border font-semibold transition-colors ${paymentMode === mode ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/60 text-foreground"}`}
-                        data-ocid={`payment-mode-${mode.toLowerCase()}`}
-                      >
-                        {mode}
-                      </button>
-                    ),
-                  )}
-                </div>
-              </div>
-              {errorMsg && (
-                <div
-                  className="bg-red-50 border border-red-200 text-red-700 rounded px-2 py-1.5 text-[10px]"
-                  data-ocid="fee-error-msg"
-                >
-                  ⚠️ {errorMsg}
-                </div>
-              )}
-              {canEdit && (
-                <button
-                  type="button"
-                  onClick={() => void handleSave()}
-                  disabled={isReadOnly || netFees === 0}
-                  className="mt-auto w-full h-8 rounded font-bold text-sm bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  data-ocid="collect-fees-save-bottom"
-                >
-                  💾 Save Receipt
-                </button>
-              )}
-            </div>
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">
+                    {otherCharge.paidAmount > 0
+                      ? `₹${otherCharge.paidAmount.toLocaleString("en-IN")}`
+                      : "—"}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
           </div>
-        </div>
-      )}
 
-      {/* UPI QR */}
-      {selectedStudent && !isReadOnly && canEdit && (
-        <UpiQrSection
-          netPayable={netFees}
-          studentName={selectedStudent.fullName}
-          onPaymentDone={(utr) => void handleSave(utr)}
-        />
-      )}
-
-      {/* PAYMENT HISTORY */}
-      {selectedStudent && (
-        <div className="bg-card border border-border border-t-0 rounded-b-xl shadow-sm overflow-hidden">
-          <div className="px-3 py-2 border-b border-border bg-muted/30 flex items-center gap-2">
-            <h3 className="text-xs font-bold text-foreground uppercase tracking-wide">
-              Payment History
-            </h3>
-            {receiptHistory.length > 0 && (
-              <Badge variant="secondary" className="text-[10px] h-4 px-1.5">
-                {receiptHistory.length}
-              </Badge>
-            )}
-          </div>
-          {receiptHistory.length === 0 ? (
-            <div
-              className="p-6 text-center text-muted-foreground"
-              data-ocid="payment-history-empty"
-            >
-              <p className="text-sm">No payment history for this student.</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="bg-muted/50">
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Sr.
-                    </th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Date
-                    </th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Receipt No
-                    </th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Months
-                    </th>
-                    <th className="px-2.5 py-1.5 text-right font-semibold">
-                      Amount
-                    </th>
-                    <th className="px-2.5 py-1.5 text-left font-semibold">
-                      Mode
-                    </th>
-                    <th className="px-2.5 py-1.5 text-center font-semibold">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {receiptHistory.map((r, idx) => (
-                    <tr
-                      key={r.id}
-                      className="border-t border-border hover:bg-muted/20"
-                      data-ocid={`receipt-history-row.item.${idx + 1}`}
-                    >
-                      <td className="px-2.5 py-1.5 text-muted-foreground">
-                        {idx + 1}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-muted-foreground whitespace-nowrap">
-                        {r.date}
-                      </td>
-                      <td className="px-2.5 py-1.5 font-mono font-bold text-primary whitespace-nowrap">
-                        <button
-                          type="button"
-                          className="hover:underline"
-                          onClick={() => printReceiptHTML(r)}
-                        >
-                          {r.receiptNo}
-                        </button>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        {[
-                          ...new Set(r.items.map((i) => i.month.slice(0, 3))),
-                        ].join(", ")}
-                      </td>
-                      <td className="px-2.5 py-1.5 text-right font-bold text-green-600 whitespace-nowrap">
-                        {formatCurrency(r.paidAmount ?? r.totalAmount)}
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] h-4 px-1"
-                        >
-                          {r.paymentMode}
-                        </Badge>
-                      </td>
-                      <td className="px-2.5 py-1.5">
-                        <div className="flex gap-1 justify-center flex-wrap">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-5 text-[9px] px-1.5"
-                            onClick={() => printReceiptHTML(r)}
-                            data-ocid={`reprint-receipt-btn.${idx + 1}`}
-                          >
-                            🖨️ Reprint
-                          </Button>
-                          {(isSuperAdmin || currentUser?.role === "admin") && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-5 text-[9px] px-1.5 text-amber-600 border-amber-200 hover:bg-amber-50"
-                              onClick={() => openEditReceipt(r)}
-                              data-ocid={`edit-receipt-btn.${idx + 1}`}
-                            >
-                              ✏️ Edit
-                            </Button>
-                          )}
-                          {isSuperAdmin && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-5 text-[9px] px-1.5 text-red-600 border-red-200 hover:bg-red-50"
-                              onClick={() => void handleDeleteReceipt(r.id)}
-                              data-ocid={`delete-receipt-btn.${idx + 1}`}
-                            >
-                              🗑️ Del
-                            </Button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Post-save Dialog */}
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
-        <DialogContent className="max-w-sm" data-ocid="receipt-saved-dialog">
-          <DialogHeader>
-            <DialogTitle>✅ Receipt Saved Successfully</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3 pt-1">
-            <div className="bg-green-50 border border-green-200 rounded-xl p-3 text-sm text-green-800">
-              <p className="font-bold text-base font-mono">
-                {savedReceipt?.receiptNo}
-              </p>
-              <p className="text-green-700">
-                {savedReceipt?.studentName} —{" "}
-                {formatCurrency(
-                  savedReceipt?.paidAmount ?? savedReceipt?.totalAmount ?? 0,
-                )}
-              </p>
-            </div>
-            <div className="flex gap-2 flex-wrap justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => savedReceipt && printReceiptHTML(savedReceipt)}
-                data-ocid="receipt-print-btn"
-              >
-                {printDone ? "✓ Printed" : "🖨️ Print Receipt"}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void handleWhatsApp()}
-                disabled={waSending || waDone}
-                data-ocid="receipt-whatsapp-btn"
-              >
-                {waSending ? "Sending…" : waDone ? "✓ Sent" : "💬 WhatsApp"}
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => setShowDialog(false)}
-                data-ocid="receipt-close-btn"
-              >
-                Close
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Edit Receipt Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-w-md" data-ocid="edit-receipt-dialog">
-          <DialogHeader>
-            <DialogTitle>Edit Receipt</DialogTitle>
-          </DialogHeader>
-          {editState && (
-            <div className="space-y-4 pt-1">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
+          {/* Summary + Payment Mode */}
+          <div className="bg-card border border-border border-t-0 shadow-sm">
+            <div className="p-3 flex flex-wrap gap-4 items-start justify-between">
+              {/* Left: modifiers */}
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="flex flex-col gap-0.5">
                   <label
-                    htmlFor="edit-date"
-                    className="text-sm font-medium block mb-1"
+                    htmlFor="late-fees-input"
+                    className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
                   >
-                    Date
+                    Late Fees (₹)
                   </label>
                   <input
-                    id="edit-date"
-                    type="date"
-                    value={editState.date}
-                    onChange={(e) =>
-                      setEditState((s) =>
-                        s ? { ...s, date: e.target.value } : s,
-                      )
-                    }
-                    className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none"
+                    id="late-fees-input"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={lateFees || ""}
+                    onChange={handleLateFeesChange}
+                    className="h-7 w-20 px-2 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   />
                 </div>
-                <div>
-                  <p className="text-sm font-medium mb-1">Mode</p>
-                  <div className="flex flex-wrap gap-1">
-                    {(["Cash", "Cheque", "Online", "DD", "UPI"] as const).map(
+                <div className="flex flex-col gap-0.5">
+                  <label
+                    htmlFor="concession-input"
+                    className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
+                  >
+                    Concession (₹)
+                  </label>
+                  <input
+                    id="concession-input"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    value={concessionAmt || ""}
+                    onChange={handleConcessionChange}
+                    className="h-7 w-20 px-2 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 text-right [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Payment Mode
+                  </span>
+                  <div className="flex gap-1 flex-wrap">
+                    {(["Cash", "Cheque", "Online", "UPI", "DD"] as const).map(
                       (mode) => (
                         <button
                           key={mode}
                           type="button"
-                          onClick={() =>
-                            setEditState((s) =>
-                              s ? { ...s, paymentMode: mode } : s,
-                            )
-                          }
-                          className={`px-2 py-0.5 text-xs rounded-full border transition-colors ${editState.paymentMode === mode ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
+                          onClick={() => setPaymentMode(mode)}
+                          className={`px-2 py-1 text-[11px] rounded border transition-colors font-medium ${
+                            paymentMode === mode
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "border-border hover:bg-muted/50 text-muted-foreground"
+                          }`}
+                          data-ocid={`payment-mode-${mode.toLowerCase()}`}
                         >
                           {mode}
                         </button>
@@ -2018,45 +1611,383 @@ export default function CollectFees() {
                     )}
                   </div>
                 </div>
+                <div className="flex flex-col gap-0.5">
+                  <label
+                    htmlFor="remarks-input"
+                    className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider"
+                  >
+                    Remarks
+                  </label>
+                  <input
+                    id="remarks-input"
+                    type="text"
+                    placeholder="Optional remarks"
+                    value={remarks}
+                    onChange={handleRemarksChange}
+                    className="h-7 w-40 px-2 text-xs border border-input rounded bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  />
+                </div>
               </div>
+
+              {/* Right: totals */}
+              <div className="bg-muted/30 rounded-xl px-4 py-3 min-w-[200px]">
+                <div className="flex justify-between text-xs gap-6 mb-1">
+                  <span className="text-muted-foreground">Fees Subtotal</span>
+                  <span className="font-semibold">
+                    ₹{feesSubtotal.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                {otherTotal > 0 && (
+                  <div className="flex justify-between text-xs gap-6 mb-1">
+                    <span className="text-muted-foreground">Other Charges</span>
+                    <span className="font-semibold">
+                      ₹{otherTotal.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                )}
+                {oldBalance !== 0 && (
+                  <div className="flex justify-between text-xs gap-6 mb-1">
+                    <span
+                      className={isOldDue ? "text-red-600" : "text-green-600"}
+                    >
+                      Old Balance
+                    </span>
+                    <span
+                      className={`font-semibold ${isOldDue ? "text-red-600" : "text-green-600"}`}
+                    >
+                      {isOldDue ? "+" : "-"}₹
+                      {Math.abs(oldBalance).toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                )}
+                {lateFees > 0 && (
+                  <div className="flex justify-between text-xs gap-6 mb-1">
+                    <span className="text-muted-foreground">Late Fees</span>
+                    <span className="font-semibold">
+                      ₹{lateFees.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                )}
+                {concessionAmt > 0 && (
+                  <div className="flex justify-between text-xs gap-6 mb-1">
+                    <span className="text-green-600">Concession</span>
+                    <span className="font-semibold text-green-600">
+                      -₹{concessionAmt.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                )}
+                <div className="border-t border-border mt-2 pt-2 flex justify-between gap-6">
+                  <span className="text-sm font-bold text-foreground">
+                    Net Payable
+                  </span>
+                  <span className="text-sm font-bold text-primary">
+                    ₹{netFees.toLocaleString("en-IN")}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">
+                    Receipt Amt (₹)
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={receiptAmt || ""}
+                    onChange={handleReceiptAmtChange}
+                    className="h-6 w-24 px-2 text-xs border border-input rounded bg-background text-right font-semibold focus:outline-none focus:ring-1 focus:ring-primary/40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  />
+                </div>
+                {balanceAmt !== 0 && (
+                  <div
+                    className={`text-xs mt-1 font-semibold ${balanceAmt > 0 ? "text-red-600" : "text-green-600"}`}
+                  >
+                    {balanceAmt > 0
+                      ? `Balance Due: ₹${balanceAmt.toLocaleString("en-IN")}`
+                      : `Credit: ₹${Math.abs(balanceAmt).toLocaleString("en-IN")}`}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {errorMsg && (
+              <div className="px-3 pb-2">
+                <p
+                  className="text-xs text-red-600 font-medium"
+                  data-ocid="collect-fees.error_state"
+                >
+                  {errorMsg}
+                </p>
+              </div>
+            )}
+          </div>
+
+          {/* UPI QR */}
+          {paymentMode === "UPI" && (
+            <UpiQrSection
+              netPayable={netFees}
+              studentName={selectedStudent.fullName}
+              onPaymentDone={(utr) => void handleSave(utr)}
+            />
+          )}
+
+          {/* Payment History */}
+          {receiptHistory.length > 0 && (
+            <div className="bg-card border border-border border-t-0 rounded-b-xl overflow-hidden">
+              <div className="px-3 py-2 bg-muted/30 border-b border-border">
+                <p className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
+                  Payment History — {selectedStudent.fullName} (
+                  {receiptHistory.length} receipt
+                  {receiptHistory.length !== 1 ? "s" : ""})
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Date
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Receipt No
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Months
+                      </th>
+                      <th className="px-3 py-2 text-right font-semibold">
+                        Amount
+                      </th>
+                      <th className="px-3 py-2 text-left font-semibold">
+                        Mode
+                      </th>
+                      <th className="px-3 py-2 text-center font-semibold">
+                        Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {receiptHistory.map((r, idx) => (
+                      <tr
+                        key={r.id}
+                        className="border-t border-border hover:bg-muted/10"
+                        data-ocid={`receipt-history.item.${idx + 1}`}
+                      >
+                        <td className="px-3 py-1.5 text-muted-foreground">
+                          {r.date}
+                        </td>
+                        <td className="px-3 py-1.5 font-mono font-medium">
+                          {r.receiptNo}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          {[
+                            ...new Set(r.items.map((i) => i.month.slice(0, 3))),
+                          ].join(", ")}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-semibold text-green-600">
+                          ₹{r.totalAmount.toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <Badge variant="outline" className="text-[10px]">
+                            {r.paymentMode}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-1.5 text-center">
+                          <div className="flex gap-1 justify-center">
+                            <button
+                              type="button"
+                              onClick={() => printReceiptHTML(r)}
+                              className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted/50 transition-colors"
+                              data-ocid={`receipt-history.reprint-btn.${idx + 1}`}
+                            >
+                              🖨️ Print
+                            </button>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                onClick={() => openEditReceipt(r)}
+                                className="text-[10px] px-2 py-0.5 rounded border border-border hover:bg-muted/50 transition-colors text-amber-700"
+                                data-ocid={`receipt-history.edit-btn.${idx + 1}`}
+                              >
+                                ✏️ Edit
+                              </button>
+                            )}
+                            {isSuperAdmin && (
+                              <button
+                                type="button"
+                                onClick={() => void handleDeleteReceipt(r.id)}
+                                className="text-[10px] px-2 py-0.5 rounded border border-red-200 hover:bg-red-50 transition-colors text-red-600"
+                                data-ocid={`receipt-history.delete-btn.${idx + 1}`}
+                              >
+                                🗑️
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Receipt saved dialog */}
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-w-sm" data-ocid="receipt-saved-dialog">
+          <DialogHeader>
+            <DialogTitle>✅ Receipt Saved!</DialogTitle>
+          </DialogHeader>
+          {savedReceipt && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+                <div className="text-3xl mb-2">🧾</div>
+                <p className="font-bold text-lg text-green-700">
+                  ₹{savedReceipt.totalAmount.toLocaleString("en-IN")}
+                </p>
+                <p className="text-sm text-green-600 font-mono">
+                  {savedReceipt.receiptNo}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {savedReceipt.studentName} · {savedReceipt.date}
+                </p>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => {
+                    printReceiptHTML(savedReceipt);
+                    setPrintDone(true);
+                  }}
+                  data-ocid="receipt-print-btn"
+                >
+                  {printDone ? "✓ Printed" : "🖨️ Print Receipt"}
+                </Button>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => void handleWhatsApp()}
+                  disabled={waSending || waDone}
+                  data-ocid="receipt-whatsapp-btn"
+                >
+                  {waSending ? "Sending…" : waDone ? "✓ Sent" : "💬 WhatsApp"}
+                </Button>
+              </div>
+              <Button
+                className="w-full"
+                onClick={() => setShowDialog(false)}
+                data-ocid="receipt-done-btn"
+              >
+                Done
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit receipt dialog */}
+      <Dialog
+        open={editOpen}
+        onOpenChange={(v) => {
+          if (!v) {
+            setEditOpen(false);
+            setEditState(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm" data-ocid="edit-receipt-dialog">
+          <DialogHeader>
+            <DialogTitle>Edit Receipt</DialogTitle>
+          </DialogHeader>
+          {editState && (
+            <div className="space-y-3 pt-1">
               <div>
                 <label
-                  htmlFor="edit-paid-amt"
+                  htmlFor="edit-receipt-date"
                   className="text-sm font-medium block mb-1"
                 >
-                  Amount Paid (₹)
+                  Date
                 </label>
                 <input
-                  id="edit-paid-amt"
-                  type="text"
-                  inputMode="numeric"
-                  value={editState.paidAmount}
+                  id="edit-receipt-date"
+                  type="date"
+                  value={editState.date}
                   onChange={(e) =>
                     setEditState((s) =>
-                      s
-                        ? {
-                            ...s,
-                            paidAmount:
-                              Number(e.target.value.replace(/[^0-9.]/g, "")) ||
-                              0,
-                          }
-                        : s,
+                      s ? { ...s, date: e.target.value } : s,
                     )
                   }
-                  className="w-full h-8 px-2 text-sm border border-input rounded bg-background focus:outline-none"
+                  className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
                 />
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-1">Payment Mode</p>
+                <div className="flex gap-2 flex-wrap">
+                  {(["Cash", "Cheque", "Online", "UPI", "DD"] as const).map(
+                    (mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() =>
+                          setEditState((s) =>
+                            s ? { ...s, paymentMode: mode } : s,
+                          )
+                        }
+                        className={`px-2.5 py-1 text-xs rounded border transition-colors ${editState.paymentMode === mode ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-muted/50"}`}
+                      >
+                        {mode}
+                      </button>
+                    ),
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium mb-1">Months Covered</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {MONTHS.map((m) => (
+                    <label
+                      key={m}
+                      className="flex items-center gap-1.5 text-xs cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={editState.selectedMonths.includes(m)}
+                        onChange={() =>
+                          setEditState((s) =>
+                            s
+                              ? {
+                                  ...s,
+                                  selectedMonths: s.selectedMonths.includes(m)
+                                    ? s.selectedMonths.filter((x) => x !== m)
+                                    : [...s.selectedMonths, m],
+                                }
+                              : s,
+                          )
+                        }
+                        className="w-3 h-3 accent-primary"
+                      />
+                      {m.slice(0, 3)}
+                    </label>
+                  ))}
+                </div>
               </div>
               <div className="flex gap-2 justify-end pt-1">
                 <Button
                   variant="outline"
+                  size="sm"
                   onClick={() => {
                     setEditOpen(false);
                     setEditState(null);
                   }}
+                  data-ocid="edit-receipt-cancel-btn"
                 >
                   Cancel
                 </Button>
-                <Button onClick={() => void saveEditReceipt()}>
+                <Button
+                  size="sm"
+                  onClick={() => void saveEditReceipt()}
+                  data-ocid="edit-receipt-save-btn"
+                >
                   Save Changes
                 </Button>
               </div>

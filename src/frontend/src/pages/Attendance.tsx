@@ -1,11 +1,12 @@
 /**
  * Attendance — Main module shell for SHUBH SCHOOL ERP
- * Tabs: Daily Attendance | QR/RFID Scanner | Face Recognition | Welcome Display | Summary | Settings
+ * Tabs: Daily | QR Scanner | Face Recognition | Welcome Display | Summary | Biometric | Settings
  */
 import { Badge } from "@/components/ui/badge";
 import {
   Brain,
   CalendarCheck,
+  Fingerprint,
   Monitor,
   PieChart,
   QrCode,
@@ -15,9 +16,10 @@ import { useState } from "react";
 import ErrorBoundary from "../components/ErrorBoundary";
 import AttendanceSettings from "./attendance/AttendanceSettings";
 import AttendanceSummary from "./attendance/AttendanceSummary";
+import BiometricDevices from "./attendance/BiometricDevices";
 import DailyAttendance from "./attendance/DailyAttendance";
-import FaceRecognition from "./attendance/FaceRecognition";
-import QRScanner from "./attendance/QRScanner";
+import FaceAttendance from "./attendance/FaceAttendance";
+import QRAttendance from "./attendance/QRAttendance";
 import WelcomeDisplay from "./attendance/WelcomeDisplay";
 
 const TABS = [
@@ -43,6 +45,7 @@ const TABS = [
     badge: "TV",
   },
   { id: "summary", label: "Reports", short: "Reports", icon: PieChart },
+  { id: "biometric", label: "Biometric", short: "Bio", icon: Fingerprint },
   { id: "settings", label: "Settings", short: "Settings", icon: Settings },
 ] as const;
 
@@ -63,7 +66,7 @@ export default function Attendance() {
             Attendance
           </h1>
           <p className="text-muted-foreground text-sm mt-0.5">
-            Daily entry, QR scanning, and AI face recognition
+            Daily entry, QR scanning, AI face recognition and biometric sync
           </p>
         </div>
 
@@ -108,7 +111,7 @@ export default function Attendance() {
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-auto animate-fade-in">
+      <div className="flex-1 overflow-auto p-4 lg:p-6 animate-fade-in">
         {activeTab === "daily" && (
           <ErrorBoundary key="daily">
             <DailyAttendance date={date} onDateChange={setDate} />
@@ -116,12 +119,12 @@ export default function Attendance() {
         )}
         {activeTab === "qr" && (
           <ErrorBoundary key="qr">
-            <QRScanner date={date} />
+            <QRAttendance date={date} />
           </ErrorBoundary>
         )}
         {activeTab === "face" && (
           <ErrorBoundary key="face">
-            <FaceRecognition date={date} />
+            <FaceAttendance date={date} />
           </ErrorBoundary>
         )}
         {activeTab === "display" && (
@@ -132,6 +135,11 @@ export default function Attendance() {
         {activeTab === "summary" && (
           <ErrorBoundary key="summary">
             <AttendanceSummary date={date} onDateChange={setDate} />
+          </ErrorBoundary>
+        )}
+        {activeTab === "biometric" && (
+          <ErrorBoundary key="biometric">
+            <BiometricDevices />
           </ErrorBoundary>
         )}
         {activeTab === "settings" && (

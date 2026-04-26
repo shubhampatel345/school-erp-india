@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useApp } from "../context/AppContext";
+import { setLoginTime } from "../context/AppContext";
 import phpApiService from "../utils/phpApiService";
 
 const ROLE_LABELS: Record<string, string> = {
@@ -27,6 +28,9 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 export default function Login() {
+  // IMPORTANT: No token checks here. NEVER call verifyToken(), NEVER check expiry.
+  // This component only displays a login form. Token logic lives in AppContext.
+
   const { login } = useApp();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -39,7 +43,12 @@ export default function Login() {
     role: string;
   } | null>(null);
 
-  // Clear welcome badge after 2.5s
+  // Clear stale auth errors on mount
+  useEffect(() => {
+    setError("");
+  }, []);
+
+  // Welcome badge auto-dismiss
   useEffect(() => {
     if (!welcomeBadge) return;
     const t = setTimeout(() => setWelcomeBadge(null), 2500);
@@ -53,12 +62,19 @@ export default function Login() {
     try {
       const trimmedUser = username.trim();
       const trimmedPass = password.trim();
+
+      // Store credentials for silent re-auth (non-superadmin only)
+      if (trimmedUser !== "superadmin") {
+        phpApiService.storeCredentials(trimmedUser, trimmedPass);
+      }
+
+      // setLoginTime FIRST — before login() call — ensures grace period starts
+      // even if AppContext.login() has any async delay before setting it internally
+      setLoginTime(Date.now());
+
       const ok = await login(trimmedUser, trimmedPass);
       if (ok) {
-        if (trimmedUser !== "superadmin") {
-          phpApiService.storeCredentials(trimmedUser, trimmedPass);
-        }
-        // Welcome badge — read role from sessionStorage written by AppContext.login()
+        // Show welcome badge using data from sessionStorage (written by AppContext)
         try {
           const stored = sessionStorage.getItem("shubh_current_user");
           if (stored) {
@@ -77,11 +93,14 @@ export default function Login() {
           /* ignore */
         }
       } else {
+        // Reset loginTime on failed login
+        setLoginTime(null);
         setError(
           "Invalid username or password. Please check your credentials and try again.",
         );
       }
     } catch {
+      setLoginTime(null);
       setError("Login failed. Please try again.");
     } finally {
       setLoading(false);
@@ -125,7 +144,7 @@ export default function Login() {
           </p>
         </div>
 
-        {/* Welcome badge — shows briefly after successful login */}
+        {/* Welcome badge */}
         {welcomeBadge && (
           <div
             className="mb-4 flex items-center gap-3 rounded-xl px-4 py-3 animate-slide-up"
@@ -182,10 +201,13 @@ export default function Login() {
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="p-6 space-y-5">
+          <form
+            onSubmit={(e) => void handleSubmit(e)}
+            className="p-6 space-y-5"
+          >
             <div className="space-y-1.5">
               <Label
-                htmlFor="username"
+                htmlFor="login-username"
                 className="text-sm font-medium"
                 style={{ color: "oklch(1 0 0 / 0.80)" }}
               >
@@ -197,7 +219,7 @@ export default function Login() {
                   style={{ color: "oklch(1 0 0 / 0.40)" }}
                 />
                 <Input
-                  id="username"
+                  id="login-username"
                   data-ocid="login.username"
                   placeholder="Enter your username"
                   value={username}
@@ -217,7 +239,7 @@ export default function Login() {
 
             <div className="space-y-1.5">
               <Label
-                htmlFor="password"
+                htmlFor="login-password"
                 className="text-sm font-medium"
                 style={{ color: "oklch(1 0 0 / 0.80)" }}
               >
@@ -229,7 +251,7 @@ export default function Login() {
                   style={{ color: "oklch(1 0 0 / 0.40)" }}
                 />
                 <Input
-                  id="password"
+                  id="login-password"
                   data-ocid="login.password"
                   type={showPassword ? "text" : "password"}
                   placeholder="Enter your password"
@@ -290,7 +312,6 @@ export default function Login() {
               )}
             </Button>
 
-            {/* Forgot Password */}
             <button
               type="button"
               data-ocid="login.forgot_password"
@@ -318,11 +339,11 @@ export default function Login() {
                   Password Recovery
                 </p>
                 <p>
-                  Please contact your{" "}
+                  Contact your{" "}
                   <strong style={{ color: "oklch(0.82 0.14 200)" }}>
                     Super Admin
                   </strong>{" "}
-                  to reset your password. They can do this from{" "}
+                  to reset your password from{" "}
                   <em>Settings → User Management → Reset Password</em>.
                 </p>
               </div>

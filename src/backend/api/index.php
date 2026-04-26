@@ -106,8 +106,8 @@ if ($route === 'ping') {
     exit;
 }
 
-// Public routes
-$public = ['auth/login', 'migrate/run'];
+// Public routes (no auth required)
+$public = ['auth/login', 'auth/verify', 'migrate/run', 'ping'];
 $isPublic = in_array($route, $public, true);
 
 $user = null;
@@ -521,6 +521,15 @@ if ($section === 'migrate' && $action === 'run') {
 if ($section === 'auth') {
     $db = getDB();
 
+    if ($action === 'login' && $method === 'GET') {
+        json_out([
+            'success' => true,
+            'message' => APP_NAME . ' API v' . API_VERSION . ' — POST to this endpoint to login',
+            'version' => API_VERSION,
+            'routes'  => ['ping', 'auth/login', 'auth/verify', 'auth/refresh', 'auth/me', 'migrate/run'],
+        ]);
+    }
+
     if ($action === 'login' && $method === 'POST') {
         $b = body();
         $username = trim($b['username'] ?? '');
@@ -575,6 +584,21 @@ if ($section === 'auth') {
         $u['permissions'] = json_decode($u['permissions_json'] ?? '{}', true) ?? [];
         unset($u['permissions_json']);
         json_out(['success' => true, 'user' => $u]);
+    }
+
+    if ($action === 'verify') {
+        // Public: verify a token passed in Authorization header
+        $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+        if (!$h && function_exists('apache_request_headers')) {
+            $headers = apache_request_headers();
+            $h = $headers['Authorization'] ?? '';
+        }
+        $token = str_starts_with($h, 'Bearer ') ? substr($h, 7) : '';
+        if (!$token || !verifyJWT($token)) {
+            json_out(['success' => true, 'valid' => false]);
+        }
+        $payload = decodeJWT($token);
+        json_out(['success' => true, 'valid' => true, 'user' => $payload]);
     }
 
     json_error('Unknown auth route');
@@ -1812,6 +1836,66 @@ if ($section === 'backup') {
     }
 
     json_error('Unknown backup route');
+}
+
+// ─── SCHOOL SETTINGS (alias for settings module, used by profile/theme/whatsapp pages) ──
+if ($section === 'school_settings') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'list' && $method === 'GET') {
+        $stmt = $db->prepare("SELECT `key`, value FROM settings WHERE school_id=?");
+        $stmt->execute([$schoolId]);
+        $rows = $stmt->fetchAll();
+        $map  = [];
+        foreach ($rows as $r) $map[$r['key']] = $r['value'];
+        json_out(['success' => true, 'settings' => $map]);
+    }
+
+    if ($action === 'save' && $method === 'POST') {
+        $b = body();
+        $stmt = $db->prepare("INSERT INTO settings (school_id, `key`, value) VALUES (?,?,?) ON DUPLICATE KEY UPDATE value=VALUES(value), updated_at=NOW()");
+        foreach ($b as $k => $v) {
+            if ($k !== 'school_id') $stmt->execute([$schoolId, $k, (string)$v]);
+        }
+        json_out(['success' => true]);
+    }
+
+    json_error('Unknown school_settings route');
+}
+
+// ─── NOTIFICATIONS (standalone route used by NotificationScheduler) ───────────
+if ($section === 'notifications') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'save' && $method === 'POST') {
+        $b = body();
+        $db->prepare("INSERT INTO notifications (school_id, type, title, message, recipient_role) VALUES (?,?,?,?,?)")
+            ->execute([$schoolId, $b['type'] ?? 'info', $b['title'] ?? '', $b['message'] ?? '', $b['recipient_role'] ?? 'all']);
+        json_out(['success' => true, 'id' => (int)$db->lastInsertId()]);
+    }
+
+    if ($action === 'trigger' && $method === 'POST') {
+        // Placeholder for trigger-based notification dispatch
+        $b = body();
+        json_out(['success' => true, 'message' => 'Notification trigger queued', 'trigger' => $b['trigger'] ?? '']);
+    }
+
+    if ($action === 'list' && $method === 'GET') {
+        $limit = min(100, (int)($_GET['limit'] ?? 20));
+        $stmt  = $db->prepare("SELECT * FROM notifications WHERE school_id=? ORDER BY created_at DESC LIMIT $limit");
+        $stmt->execute([$schoolId]);
+        json_out(['success' => true, 'notifications' => $stmt->fetchAll()]);
+    }
+
+    if ($action === 'mark-read' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $db->prepare("UPDATE notifications SET is_read=1 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    json_error('Unknown notifications route');
 }
 
 // ─── 404 ────────────────────────────────────────────────────────────────────

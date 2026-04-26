@@ -1,6 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useApp } from "../../context/AppContext";
-import type { Staff, Student } from "../../types";
+/**
+ * WelcomeDisplay — Full-screen entrance display for school lobby
+ * Students scan QR/RFID → animated welcome card shows with name + photo
+ * Listens for attendance_scan CustomEvents dispatched by QR/Face tabs
+ * Also supports physical kiosk mode via keyboard input (USB scanner)
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import phpApiService from "../../utils/phpApiService";
 
 interface CheckIn {
   id: string;
@@ -41,63 +46,24 @@ function Clock() {
 }
 
 export default function WelcomeDisplay() {
-  const { getData } = useApp();
   const containerRef = useRef<HTMLDivElement>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
-
-  const students = useMemo(() => getData("students") as Student[], [getData]);
-  const staff = useMemo(() => getData("staff") as Staff[], [getData]);
-
-  const schoolName = useMemo(() => {
-    try {
-      const profile = localStorage.getItem("school_profile");
-      if (profile) {
-        const parsed = JSON.parse(profile) as { name?: string };
-        return parsed.name ?? "SCHOOL LEDGER ERP";
-      }
-    } catch {}
-    return "SCHOOL LEDGER ERP";
-  }, []);
-
   const [activeCard, setActiveCard] = useState<CheckIn | null>(null);
   const [recentCheckins, setRecentCheckins] = useState<CheckIn[]>([]);
   const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const buildCheckIn = useCallback(
-    (
-      personId: string,
-      personType: "student" | "staff",
-      timeIn: string,
-    ): CheckIn | null => {
-      if (personType === "student") {
-        const s = students.find((x) => x.id === personId);
-        if (!s) return null;
-        return {
-          id: personId,
-          name: s.fullName,
-          subtitle: s.fatherName ? `Father: ${s.fatherName}` : "",
-          cls: `Class ${s.class}${s.section ? ` - ${s.section}` : ""}`,
-          photo: s.photo ?? "",
-          timeIn,
-          type: "student",
-          scannedAt: Date.now(),
-        };
+  const schoolName = (() => {
+    try {
+      const profile = localStorage.getItem("school_profile");
+      if (profile) {
+        const parsed = JSON.parse(profile) as { name?: string };
+        return parsed.name ?? "SHUBH SCHOOL";
       }
-      const m = staff.find((x) => x.id === personId);
-      if (!m) return null;
-      return {
-        id: personId,
-        name: m.name ?? m.fullName ?? "",
-        subtitle: m.designation,
-        cls: m.department ?? "Staff",
-        photo: m.photo ?? "",
-        timeIn,
-        type: "staff",
-        scannedAt: Date.now(),
-      };
-    },
-    [students, staff],
-  );
+    } catch {
+      // ignore
+    }
+    return "SHUBH SCHOOL";
+  })();
 
   const showCard = useCallback((checkin: CheckIn) => {
     setActiveCard(checkin);
@@ -106,7 +72,7 @@ export default function WelcomeDisplay() {
     dismissTimerRef.current = setTimeout(() => setActiveCard(null), 6000);
   }, []);
 
-  // Listen for real-time CustomEvents dispatched by QR/RFID tabs (same tab)
+  // Listen for scan events from QR/Face tabs (same browser tab)
   useEffect(() => {
     function handleScan(e: Event) {
       const { personId, personType, record } = (e as CustomEvent).detail as {
@@ -114,22 +80,63 @@ export default function WelcomeDisplay() {
         personType: "student" | "staff";
         record: { timeIn?: string };
       };
-      const checkin = buildCheckIn(
-        personId,
-        personType,
+      const timeIn =
         record.timeIn ??
-          new Date().toLocaleTimeString("en-IN", {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
-      );
-      if (checkin) showCard(checkin);
+        new Date().toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+      // Fetch student name from server to display
+      phpApiService
+        .getStudents({ search: personId, status: "active" })
+        .then((r) => {
+          const student = r.data.find((s) => s.id === personId);
+          if (student) {
+            showCard({
+              id: personId,
+              name: student.fullName,
+              subtitle: student.fatherName
+                ? `Father: ${student.fatherName}`
+                : "",
+              cls: `Class ${student.class}${student.section ? ` - ${student.section}` : ""}`,
+              photo: "",
+              timeIn,
+              type: personType,
+              scannedAt: Date.now(),
+            });
+          } else if (personType === "staff") {
+            showCard({
+              id: personId,
+              name: "Staff Member",
+              subtitle: "",
+              cls: "Staff",
+              photo: "",
+              timeIn,
+              type: "staff",
+              scannedAt: Date.now(),
+            });
+          }
+        })
+        .catch(() => {
+          // Show minimal card if lookup fails
+          showCard({
+            id: personId,
+            name: personId,
+            subtitle: "",
+            cls: personType,
+            photo: "",
+            timeIn,
+            type: personType,
+            scannedAt: Date.now(),
+          });
+        });
     }
     window.addEventListener("attendance_scan", handleScan);
     return () => window.removeEventListener("attendance_scan", handleScan);
-  }, [buildCheckIn, showCard]);
+  }, [showCard]);
 
-  // Kiosk mode input: hidden input captures scanner/keyboard input
+  // Kiosk mode — physical USB scanner input
   const kioskInputRef = useRef<HTMLInputElement>(null);
   const kioskTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [kioskValue, setKioskValue] = useState("");
@@ -137,26 +144,35 @@ export default function WelcomeDisplay() {
   function processKioskScan(raw: string) {
     const admNo = raw.trim();
     if (!admNo) return;
-    const student = students.find(
-      (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
-    );
-    if (student) {
-      const timeIn = new Date().toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
+
+    const timeIn = new Date().toLocaleTimeString("en-IN", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    phpApiService
+      .getStudents({ search: admNo, status: "active" })
+      .then((r) => {
+        const student = r.data.find(
+          (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
+        );
+        if (student) {
+          showCard({
+            id: student.id,
+            name: student.fullName,
+            subtitle: student.fatherName ? `Father: ${student.fatherName}` : "",
+            cls: `Class ${student.class}${student.section ? ` - ${student.section}` : ""}`,
+            photo: "",
+            timeIn,
+            type: "student",
+            scannedAt: Date.now(),
+          });
+        }
+      })
+      .catch(() => {
+        // ignore — display shows nothing
       });
-      const checkin: CheckIn = {
-        id: student.id,
-        name: student.fullName,
-        subtitle: student.fatherName ? `Father: ${student.fatherName}` : "",
-        cls: `Class ${student.class}${student.section ? ` - ${student.section}` : ""}`,
-        photo: student.photo ?? "",
-        timeIn,
-        type: "student",
-        scannedAt: Date.now(),
-      };
-      showCard(checkin);
-    }
+
     setKioskValue("");
   }
 
@@ -176,16 +192,14 @@ export default function WelcomeDisplay() {
     }
   }
 
-  // Fullscreen API
+  // Fullscreen
   const toggleFullscreen = useCallback(() => {
     if (!document.fullscreenElement) {
       containerRef.current
         ?.requestFullscreen()
-        .then(() => {
-          setIsFullscreen(true);
-        })
+        .then(() => setIsFullscreen(true))
         .catch(() => {
-          // ignore — browser may block
+          /* blocked by browser */
         });
     } else {
       void document.exitFullscreen().then(() => setIsFullscreen(false));
@@ -200,26 +214,6 @@ export default function WelcomeDisplay() {
     return () => document.removeEventListener("fullscreenchange", onFsChange);
   }, []);
 
-  // Demo: simulate a scan for preview purposes
-  function simulateScan() {
-    const sample = students[Math.floor(Math.random() * students.length)];
-    if (!sample) return;
-    const checkin: CheckIn = {
-      id: sample.id,
-      name: sample.fullName,
-      subtitle: sample.fatherName ? `Father: ${sample.fatherName}` : "",
-      cls: `Class ${sample.class}${sample.section ? ` - ${sample.section}` : ""}`,
-      photo: sample.photo ?? "",
-      timeIn: new Date().toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      type: "student",
-      scannedAt: Date.now(),
-    };
-    showCard(checkin);
-  }
-
   const today = new Date().toLocaleDateString("en-IN", {
     weekday: "long",
     day: "numeric",
@@ -229,23 +223,13 @@ export default function WelcomeDisplay() {
 
   return (
     <div className="space-y-3">
-      {/* Control bar outside fullscreen container */}
+      {/* Control bar */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <p className="text-sm text-muted-foreground">
-          This display is intended for the school entrance. Students scan their
-          QR/RFID card — their welcome card will appear here.
+          Full-screen entrance display — students scan QR/RFID card or type
+          their Admission Number below.
         </p>
         <div className="flex gap-2">
-          {students.length > 0 && (
-            <button
-              type="button"
-              onClick={simulateScan}
-              className="px-3 py-1.5 text-xs rounded-md border border-border bg-card text-foreground hover:bg-muted transition-colors"
-              data-ocid="welcome-display.simulate.button"
-            >
-              🎯 Simulate Scan
-            </button>
-          )}
           <button
             type="button"
             onClick={toggleFullscreen}
@@ -257,10 +241,32 @@ export default function WelcomeDisplay() {
         </div>
       </div>
 
+      {/* Kiosk input (visible on small screens, useful for manual testing) */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Type Admission No. and press Enter (or use USB scanner)…"
+          value={kioskValue}
+          onChange={handleKioskChange}
+          onKeyDown={handleKioskKeyDown}
+          className="flex-1 h-9 px-3 rounded-md border border-input bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          aria-label="Kiosk admission number input"
+          data-ocid="welcome-display.kiosk.input"
+        />
+        <button
+          type="button"
+          onClick={() => processKioskScan(kioskValue)}
+          className="px-4 py-1.5 text-sm rounded-md bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+          data-ocid="welcome-display.kiosk.button"
+        >
+          Check In
+        </button>
+      </div>
+
       {/* Main display */}
       <div
         ref={containerRef}
-        className="relative w-full min-h-[calc(100vh-200px)] flex flex-col items-center justify-center overflow-hidden rounded-2xl select-none"
+        className="relative w-full min-h-[calc(100vh-280px)] flex flex-col items-center justify-center overflow-hidden rounded-2xl select-none cursor-pointer"
         style={{ background: "oklch(0.13 0.04 260)" }}
         data-ocid="welcome-display.screen"
         onClick={() => kioskInputRef.current?.focus()}
@@ -268,8 +274,9 @@ export default function WelcomeDisplay() {
           if (e.key === "Enter" || e.key === " ")
             kioskInputRef.current?.focus();
         }}
+        role="presentation"
       >
-        {/* Background grid pattern */}
+        {/* Background grid */}
         <div
           className="absolute inset-0 opacity-10"
           style={{
@@ -289,18 +296,18 @@ export default function WelcomeDisplay() {
           style={{ background: "oklch(0.35 0.14 200 / 0.25)" }}
         />
 
-        {/* Hidden kiosk input */}
+        {/* Hidden kiosk input for fullscreen mode */}
         <input
           ref={kioskInputRef}
           value={kioskValue}
           onChange={handleKioskChange}
           onKeyDown={handleKioskKeyDown}
           className="absolute opacity-0 w-0 h-0 pointer-events-none"
-          aria-label="Kiosk scan input"
+          aria-label="Kiosk scan input fullscreen"
           autoComplete="off"
         />
 
-        {/* School name header */}
+        {/* School name */}
         <div className="absolute top-6 text-center z-10 px-4">
           <p
             className="text-xs tracking-[0.3em] uppercase font-semibold"
@@ -352,7 +359,7 @@ export default function WelcomeDisplay() {
           </div>
         )}
 
-        {/* Welcome Card — animated entrance */}
+        {/* Welcome Card */}
         {activeCard && (
           <div
             key={activeCard.scannedAt}
@@ -360,6 +367,7 @@ export default function WelcomeDisplay() {
             style={{
               animation: "welcomeIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1)",
             }}
+            data-ocid="welcome-display.welcome-card.success_state"
           >
             {/* Avatar */}
             <div

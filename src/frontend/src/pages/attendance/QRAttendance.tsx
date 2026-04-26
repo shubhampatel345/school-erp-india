@@ -1,3 +1,8 @@
+/**
+ * QRAttendance — Camera QR scanner + USB scanner device mode
+ * All saves go directly to MySQL via phpApiService.markAttendance().
+ * NO local storage, NO context getData/saveData.
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,11 +16,10 @@ import {
   ShieldOff,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { AttendanceRecord, Student } from "../../types";
-import { generateId } from "../../utils/localStorage";
+import phpApiService from "../../utils/phpApiService";
 
 interface QRAttendanceProps {
   date: string;
@@ -25,15 +29,22 @@ type ScanMode = "camera" | "device";
 
 const ALLOWED_ROLES = new Set(["superadmin", "admin", "teacher", "driver"]);
 
+interface ScanEntry {
+  name: string;
+  admNo: string;
+  cls: string;
+  time: string;
+}
+
 /** Broadcast scan event for WelcomeDisplay (same tab) */
 function broadcastScan(
   personId: string,
   personType: "student" | "staff",
-  record: AttendanceRecord,
+  timeIn: string,
 ) {
   window.dispatchEvent(
     new CustomEvent("attendance_scan", {
-      detail: { personId, personType, record },
+      detail: { personId, personType, record: { timeIn } },
     }),
   );
 }
@@ -50,8 +61,7 @@ function parseAdmNo(raw: string): string {
 }
 
 export default function QRAttendance({ date }: QRAttendanceProps) {
-  const { getData, saveData, addNotification, currentSession, currentUser } =
-    useApp();
+  const { currentUser } = useApp();
   const [mode, setMode] = useState<ScanMode>("camera");
 
   // Camera state
@@ -82,91 +92,96 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
   } | null>(null);
   const deviceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [scanLog, setScanLog] = useState<
-    Array<{ name: string; admNo: string; cls: string; time: string }>
-  >([]);
+  const [scanLog, setScanLog] = useState<ScanEntry[]>([]);
+  // Track already-scanned admNos today to prevent duplicates
+  const scannedTodayRef = useRef<Set<string>>(new Set());
 
-  const activeStudents = useMemo(
-    () =>
-      (getData("students") as Student[]).filter(
-        (s) =>
-          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-      ),
-    [getData, currentSession],
-  );
-
-  // Role gate
   const canAccess = currentUser ? ALLOWED_ROLES.has(currentUser.role) : false;
 
-  const markStudent = useCallback(
-    async (student: Student) => {
-      // Check if already marked today
-      const existing = (getData("attendance") as AttendanceRecord[]).find(
-        (r) => r.date === date && r.studentId === student.id,
-      );
-      if (existing) {
-        toast.info(`${student.fullName} already marked present`);
+  const markStudentByAdmNo = useCallback(
+    async (admNo: string): Promise<boolean> => {
+      const key = admNo.toLowerCase();
+      if (scannedTodayRef.current.has(key)) {
+        toast.info("Already marked present today");
         return false;
       }
+
+      // Fetch student record from server
+      let studentId = "";
+      let studentName = "";
+      let studentClass = "";
+      let studentSection = "";
+
+      try {
+        const result = await phpApiService.getStudents({
+          search: admNo,
+          status: "active",
+        });
+        const match = result.data.find((s) => s.admNo.toLowerCase() === key);
+        if (!match) {
+          toast.error(`Student not found: "${admNo}"`);
+          return false;
+        }
+        studentId = match.id;
+        studentName = match.fullName;
+        studentClass = match.class;
+        studentSection = match.section;
+      } catch {
+        toast.error("Failed to look up student — check server connection");
+        return false;
+      }
+
       const now = new Date();
       const timeIn = now.toLocaleTimeString("en-IN", {
         hour: "2-digit",
         minute: "2-digit",
       });
-      const rec: AttendanceRecord = {
-        id: generateId(),
-        studentId: student.id,
-        date,
-        status: "Present",
-        timeIn,
-        markedBy: currentUser?.username ?? currentUser?.name ?? "System",
-        type: "student",
-        method: "qr",
-        class: student.class,
-        section: student.section,
-        sessionId: currentSession?.id,
-      };
 
       try {
-        await saveData("attendance", rec as unknown as Record<string, unknown>);
+        await phpApiService.markAttendance([
+          {
+            id: crypto.randomUUID(),
+            studentId,
+            date,
+            status: "Present",
+            timeIn,
+            markedBy: currentUser?.name ?? currentUser?.username ?? "System",
+            type: "student",
+            method: "qr",
+            class: studentClass,
+            section: studentSection,
+          },
+        ]);
+
+        scannedTodayRef.current.add(key);
         setScanLog((prev) =>
           [
             {
-              name: student.fullName,
-              admNo: student.admNo,
-              cls: `${student.class}-${student.section}`,
+              name: studentName,
+              admNo,
+              cls: `${studentClass}-${studentSection}`,
               time: timeIn,
             },
             ...prev,
           ].slice(0, 50),
         );
-        toast.success(`✅ ${student.fullName} marked Present`);
-        addNotification(
-          `📷 QR Scan: ${student.fullName} checked in`,
-          "success",
-          "📷",
-        );
-        broadcastScan(student.id, "student", rec);
+        toast.success(`✅ ${studentName} marked Present`);
+        broadcastScan(studentId, "student", timeIn);
         return true;
       } catch {
-        toast.error(`Failed to save attendance for ${student.fullName}`);
+        toast.error(`Failed to save attendance for ${studentName}`);
         return false;
       }
     },
-    [date, currentUser, currentSession, getData, saveData, addNotification],
+    [date, currentUser],
   );
 
-  // ── Camera helpers ──────────────────────────────────────
+  // ── Camera helpers ───────────────────────────────────────────────────────────
 
   function handleManualCamera() {
-    const q = manualAdm.trim().toLowerCase();
+    const q = manualAdm.trim();
     if (!q) return;
-    const student = activeStudents.find((s) => s.admNo.toLowerCase() === q);
-    if (!student) {
-      toast.error("Student not found");
-      return;
-    }
-    void markStudent(student);
+    void markStudentByAdmNo(q);
     setManualAdm("");
   }
 
@@ -191,20 +206,12 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
       if (
         decoded === lastDecodedRef.current &&
         now - lastDecodeTimeRef.current < 2000
-      ) {
+      )
         return;
-      }
       lastDecodedRef.current = decoded;
       lastDecodeTimeRef.current = now;
       const admNo = parseAdmNo(decoded);
-      const student = activeStudents.find(
-        (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
-      );
-      if (student) {
-        void markStudent(student);
-      } else {
-        toast.error(`QR decoded: "${admNo}" — student not found`);
-      }
+      void markStudentByAdmNo(admNo);
     }
   }
 
@@ -222,9 +229,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
         height: number,
       ) => { data: string } | null;
       const globalJsQR = (window as Window & { jsQR?: JsQRFn }).jsQR;
-      if (typeof globalJsQR === "function") {
-        jsQRRef.current = globalJsQR;
-      }
+      if (typeof globalJsQR === "function") jsQRRef.current = globalJsQR;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -260,8 +265,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
   useEffect(() => {
     if (mode === "device") {
       stopCamera();
-      const cb = (el: HTMLInputElement | null) => el?.focus();
-      setTimeout(() => cb(deviceInputRef.current), 100);
+      setTimeout(() => deviceInputRef.current?.focus(), 100);
     }
   }, [mode]);
 
@@ -269,23 +273,16 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
     const value = raw.trim();
     if (!value) return;
     const admNo = parseAdmNo(value);
-    const student = activeStudents.find(
-      (s) => s.admNo.toLowerCase() === admNo.toLowerCase(),
-    );
-    if (!student) {
-      toast.error(`Not found: "${admNo}"`);
-    } else {
-      const now = new Date().toLocaleTimeString("en-IN", {
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      void markStudent(student).then((ok) => {
-        if (ok !== false) {
-          setLastScanFeedback({ name: student.fullName, time: now });
-          setTimeout(() => setLastScanFeedback(null), 3000);
-        }
-      });
-    }
+    void markStudentByAdmNo(admNo).then((ok) => {
+      if (ok) {
+        const time = new Date().toLocaleTimeString("en-IN", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+        setLastScanFeedback({ name: admNo, time });
+        setTimeout(() => setLastScanFeedback(null), 3000);
+      }
+    });
     setDeviceInputValue("");
     setTimeout(() => deviceInputRef.current?.focus(), 50);
   }
@@ -304,18 +301,15 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
     if (deviceTimerRef.current) clearTimeout(deviceTimerRef.current);
     if (val.length > 0) {
       deviceTimerRef.current = setTimeout(() => {
-        if (val.trim().length >= 3) {
-          processDeviceScan(val);
-        }
+        if (val.trim().length >= 3) processDeviceScan(val);
       }, 150);
     }
   }
 
   function exportCSV() {
     const rows = [["Adm No", "Name", "Class", "Time"]];
-    for (const entry of scanLog) {
+    for (const entry of scanLog)
       rows.push([entry.admNo, entry.name, entry.cls, entry.time]);
-    }
     const csv = rows.map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
     const a = document.createElement("a");
     a.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
@@ -325,7 +319,10 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
 
   if (!canAccess) {
     return (
-      <Card className="p-10 flex flex-col items-center gap-4 border-dashed">
+      <Card
+        className="p-10 flex flex-col items-center gap-4 border-dashed"
+        data-ocid="qr.access-denied.error_state"
+      >
         <div className="w-16 h-16 rounded-2xl bg-destructive/10 flex items-center justify-center">
           <ShieldOff className="w-8 h-8 text-destructive/60" />
         </div>
@@ -428,9 +425,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 {!scanning ? (
                   <Button
                     className="flex-1"
-                    onClick={() => {
-                      void startCamera();
-                    }}
+                    onClick={() => void startCamera()}
                     data-ocid="qr.start-camera.button"
                   >
                     <Camera className="w-4 h-4 mr-2" /> Start Camera
@@ -514,6 +509,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
                 <label
                   htmlFor="device-scan-input"
                   className="text-xs text-muted-foreground font-semibold uppercase tracking-wide"
+                  aria-label="Scan Input"
                 >
                   Scan Input (auto-focused)
                 </label>
@@ -574,7 +570,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
             {scanLog.length === 0 ? (
               <div
                 className="py-10 text-center text-muted-foreground"
-                data-ocid="qr.scan-log.empty-state"
+                data-ocid="qr.scan-log.empty_state"
               >
                 <QrCode className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No scans yet today</p>
@@ -619,8 +615,7 @@ export default function QRAttendance({ date }: QRAttendanceProps) {
           camera and point it at a student's admit card QR code.{" "}
           <span className="font-semibold ml-2">⌨️ Scanner Device mode:</span>{" "}
           Connect a USB/Bluetooth barcode scanner — it will type the code into
-          the input and auto-submit on Enter. All scans save directly to the
-          canister — available on every device instantly.
+          the input and auto-submit on Enter. All scans save directly to MySQL.
         </p>
       </Card>
     </div>

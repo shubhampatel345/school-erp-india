@@ -4,15 +4,16 @@
  * Auth: JWT via phpApiService.login() — token stored in localStorage.
  * Data: fetched directly from MySQL via PHP API on demand.
  *
- * NO: pendingWrites, syncStatus, offlineQueue, IndexedDB, syncEngine, localFirstSync.
+ * NO: pendingWrites, syncStatus, offlineQueue, IndexedDB, syncEngine.
  *
- * Session Expired modal rules:
+ * ── Session Expired modal rules ────────────────────────────────────────────
  *  - NEVER shown on login screen (currentUser is null)
- *  - NEVER shown within 10 minutes of a fresh login
+ *  - NEVER shown within 10 minutes of a fresh login (_loginTime guard)
  *  - Only shown after token genuinely expires mid-session AND silent refresh fails
  *
- * loginTime: module-level variable (outside React) so ALL closures see it immediately.
- * This prevents the race condition where freshLoginRef.current isn't visible in stale closures.
+ * ── loginTime: module-level variable ────────────────────────────────────────
+ *  Module-level (outside React) so ALL closures see it immediately.
+ *  No stale-closure issues that affect useRef inside callbacks.
  */
 
 import {
@@ -33,20 +34,16 @@ import type {
   Session,
   UserRole,
 } from "../types";
-import { ls } from "../utils/localStorage";
 import type { SessionRecord } from "../utils/phpApiService";
 import phpApiService from "../utils/phpApiService";
 
 // ── Module-level login timestamp (outside React component) ────────────────────
-// Using a module-level variable ensures ALL closures (including those in
-// phpApiService event handlers) see the latest value immediately without
-// stale-closure issues that affect useRef inside callbacks.
+// Using a module-level variable ensures ALL closures see the latest value
+// immediately — no stale-closure issues.
 let _loginTime: number | null = null;
 
 export function setLoginTime(t: number | null): void {
   _loginTime = t;
-  // Also persist to localStorage so phpApiService.ensureValidToken can read it
-  // without a circular import — avoids false "session expired" right after login
   try {
     if (t !== null) {
       localStorage.setItem("erp_login_time", String(t));
@@ -63,9 +60,29 @@ export function getLoginTime(): number | null {
 }
 
 /** Returns true if a fresh login happened within the last N minutes */
-function isFreshLogin(minutesThreshold = 10): boolean {
+function isWithinGracePeriod(minutesThreshold = 10): boolean {
   if (_loginTime === null) return false;
   return Date.now() - _loginTime < minutesThreshold * 60 * 1000;
+}
+
+// ── Simple localStorage helper ────────────────────────────────────────────────
+
+function lsGet<T>(key: string, fallback: T): T {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    return JSON.parse(v) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function lsSet(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    /* noop */
+  }
 }
 
 // ── ID generator ──────────────────────────────────────────────────────────────
@@ -75,6 +92,7 @@ function generateId(): string {
 }
 
 // ── Pre-loaded session years (2019-20 through 2025-26) ───────────────────────
+
 const PRELOADED_SESSIONS = [
   { label: "2019-20", startYear: 2019, endYear: 2020 },
   { label: "2020-21", startYear: 2020, endYear: 2021 },
@@ -85,19 +103,14 @@ const PRELOADED_SESSIONS = [
   { label: "2025-26", startYear: 2025, endYear: 2026 },
 ];
 
-/**
- * Ensure all 7 pre-loaded sessions exist.
- * If the server returned fewer sessions, create the missing ones silently.
- * Returns the full merged list (server sessions + any newly created ones).
- */
 async function ensurePreloadedSessions(
-  existingSessions: SessionRecord[],
+  existing: SessionRecord[],
 ): Promise<SessionRecord[]> {
-  const existingLabels = new Set(existingSessions.map((s) => s.label));
+  const existingLabels = new Set(existing.map((s) => s.label));
   const missing = PRELOADED_SESSIONS.filter(
     (p) => !existingLabels.has(p.label),
   );
-  if (missing.length === 0) return existingSessions;
+  if (missing.length === 0) return existing;
 
   const created: SessionRecord[] = [];
   for (const m of missing) {
@@ -109,8 +122,6 @@ async function ensurePreloadedSessions(
       });
       created.push(s);
     } catch {
-      // If server create fails, add a local-only placeholder so the switcher
-      // still shows the session even without a server round-trip
       created.push({
         id: `preloaded_${m.label}`,
         label: m.label,
@@ -122,7 +133,7 @@ async function ensurePreloadedSessions(
       });
     }
   }
-  return [...existingSessions, ...created];
+  return [...existing, ...created];
 }
 
 // ── Default permissions per role ──────────────────────────────────────────────
@@ -254,7 +265,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
       const activeSession =
         serverSessions.find((s) => s.isActive && !s.isArchived) ??
         serverSessions.find((s) => s.isActive) ??
-        serverSessions[0];
+        serverSessions[serverSessions.length - 1];
       return {
         ...state,
         isInitializing: false,
@@ -335,7 +346,7 @@ interface AppContextValue {
     module: string,
     action?: keyof Omit<Permission, "module">,
   ) => boolean;
-  // Legacy data access — components should use phpApiService directly
+  // Legacy data access (delegates to phpApiService)
   getData: (collection: string) => unknown[];
   saveData: (
     collection: string,
@@ -348,7 +359,7 @@ interface AppContextValue {
   ) => Promise<void>;
   deleteData: (collection: string, id: string) => Promise<void>;
   refreshCollection: (collection: string) => Promise<void>;
-  // Backward compat
+  // Backward compat stubs
   isSyncLoading: boolean;
   syncStatus: {
     state: "idle" | "synced";
@@ -509,17 +520,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const handleTokenExpired = async () => {
       // Guard 1: never handle when nobody is logged in
       if (!stateRef.current.currentUser) return;
-
       // Guard 2: never show modal within 10 min of fresh login
-      // Use module-level _loginTime — always current, no stale closure issues
-      if (isFreshLogin(10)) return;
-
-      // Guard 3: attempt silent refresh first — only show modal if it fails
+      if (isWithinGracePeriod(10)) return;
+      // Guard 3: attempt silent refresh first
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
-
       // All refresh attempts failed — show modal only for mid-session expiry
-      if (!isFreshLogin(10) && stateRef.current.currentUser) {
+      if (!isWithinGracePeriod(10) && stateRef.current.currentUser) {
         setShowReLoginModal(true);
       }
     };
@@ -539,9 +546,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const user = JSON.parse(storedUserRaw) as AppUser;
         const token = phpApiService.getToken();
         if (token) {
-          // Treat page reload as a fresh login to prevent false expiry on startup
-          // (the user was already authenticated; no need to re-verify immediately)
-          setLoginTime(Date.now()); // also writes erp_login_time to localStorage
+          // Treat page reload as fresh login to prevent false expiry on startup
+          setLoginTime(Date.now());
+          dispatch({ type: "SET_USER", user });
+        } else if (user.role === "superadmin") {
+          // Superadmin doesn't need a token
+          setLoginTime(Date.now());
           dispatch({ type: "SET_USER", user });
         } else {
           sessionStorage.removeItem("shubh_current_user");
@@ -561,37 +571,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void (async () => {
       dispatch({ type: "SET_INIT_START" });
       try {
-        // Superadmin doesn't need server verify
-        if (state.currentUser?.role !== "superadmin") {
-          // Only verify token if we haven't just logged in
-          if (!isFreshLogin(10)) {
-            const tokenOk = await phpApiService.ensureValidToken();
-            if (!tokenOk) {
-              dispatch({
-                type: "SET_INIT_ERROR",
-                error: "Could not verify session. Please log in again.",
-              });
-              initStartedRef.current = false;
-              return;
-            }
-          }
-        }
-
-        // Fetch sessions from server, then ensure all pre-loaded years exist
         let sessions: Session[] = [];
         try {
           const rawSessions = await phpApiService.getSessions();
-          // getSessions() now returns normalised SessionRecord[] already
-          const normalised: Session[] = rawSessions.map((s) => ({
-            id: s.id,
-            label: s.label,
-            startYear: s.startYear,
-            endYear: s.endYear,
-            isArchived: s.isArchived,
-            isActive: s.isActive,
-            createdAt: s.createdAt ?? new Date().toISOString(),
-          }));
-          // Auto-create any missing pre-loaded sessions (2019-20 → 2025-26)
           const allSessions = await ensurePreloadedSessions(rawSessions);
           sessions = allSessions.map((s) => ({
             id: s.id,
@@ -602,8 +584,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
             isActive: s.isActive,
             createdAt: s.createdAt ?? new Date().toISOString(),
           }));
-          // Persist current session id for class API queries
-          const active = sessions.find((s) => s.isActive) ?? normalised[0];
+          const active =
+            sessions.find((s) => s.isActive) ?? sessions[sessions.length - 1];
           if (active) {
             try {
               localStorage.setItem("erp_current_session_id", active.id);
@@ -612,13 +594,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
           }
         } catch {
-          /* server unreachable — use default session */
+          // Server unreachable — use default
         }
 
         dispatch({ type: "SET_INIT_DONE", sessions });
         dispatch({ type: "SET_SERVER_CONNECTED", connected: true });
 
-        // Background health check
         void phpApiService.checkHealth().then((ok) => {
           dispatch({ type: "SET_SERVER_CONNECTED", connected: ok });
         });
@@ -635,7 +616,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (username: string, password: string): Promise<boolean> => {
       // 1. Super Admin — local password check
       if (username === "superadmin") {
-        const passwords = ls.get<Record<string, string>>("user_passwords", {});
+        const passwords = lsGet<Record<string, string>>("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
         if (password !== validPw) return false;
         sessionStorage.setItem(
@@ -643,31 +624,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
           JSON.stringify(SUPER_ADMIN),
         );
         initStartedRef.current = false;
-        // Set module-level loginTime FIRST (synchronous, before any state updates)
-        setLoginTime(Date.now());
+        setLoginTime(Date.now()); // FIRST: before any state updates
         dispatch({ type: "SET_USER", user: SUPER_ADMIN });
         return true;
       }
 
-      // 2. PHP API login — PRIMARY method
+      // 2. PHP API login
       try {
         const result = await phpApiService.login(username, password);
         if (result?.token && result.user) {
-          const serverUser = result.user;
+          const su = result.user;
           const user: AppUser = {
-            id: serverUser.id,
-            username: serverUser.username,
-            role: (serverUser.role as UserRole) ?? "teacher",
-            fullName: serverUser.fullName ?? serverUser.name ?? username,
-            name: serverUser.name ?? serverUser.fullName ?? username,
+            id: su.id,
+            username: su.username,
+            role: (su.role as UserRole) ?? "teacher",
+            fullName: su.fullName ?? su.name ?? username,
+            name: su.name ?? su.fullName ?? username,
           };
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-          if (result.refresh_token) {
+          if (result.refresh_token)
             phpApiService.storeRefreshToken(result.refresh_token);
-          }
-          if (serverUser.permissions) {
+          if (su.permissions) {
             const matrix: PermissionMatrix = {};
-            for (const [mod, perms] of Object.entries(serverUser.permissions)) {
+            for (const [mod, perms] of Object.entries(su.permissions)) {
               matrix[mod] = {
                 module: mod,
                 canView: perms.canView ?? true,
@@ -679,8 +658,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
           initStartedRef.current = false;
-          // Set module-level loginTime FIRST (synchronous, before state updates)
-          setLoginTime(Date.now());
+          setLoginTime(Date.now()); // FIRST: before any state updates
           dispatch({ type: "SET_USER", user });
           return true;
         }
@@ -689,7 +667,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       // 3. Local staff fallback (when server is unreachable)
-      const staffList = ls.get<
+      const staffList = lsGet<
         Array<{
           id: string;
           name: string;
@@ -732,7 +710,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       // 4. Student local fallback
-      const students = ls.get<
+      const students = lsGet<
         Array<{
           id: string;
           fullName: string;
@@ -807,15 +785,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       let username: string | undefined;
       if (userId === SUPER_ADMIN.id) username = "superadmin";
       else {
-        const custom = ls
-          .get<AppUser[]>("custom_users", [])
-          .find((u) => u.id === userId);
+        const custom = lsGet<AppUser[]>("custom_users", []).find(
+          (u) => u.id === userId,
+        );
         if (custom) username = custom.username;
       }
       if (!username) return false;
-      const passwords = ls.get<Record<string, string>>("user_passwords", {});
+      const passwords = lsGet<Record<string, string>>("user_passwords", {});
       passwords[username] = newPassword;
-      ls.set("user_passwords", passwords);
+      lsSet("user_passwords", passwords);
       void phpApiService.resetPassword(userId, newPassword);
       return true;
     },
@@ -824,7 +802,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const switchSession = useCallback((sessionId: string) => {
     dispatch({ type: "SET_SESSION", sessionId });
-    ls.set("current_session", sessionId);
+    lsSet("current_session", sessionId);
   }, []);
 
   const createSession = useCallback(
@@ -842,7 +820,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         description,
       };
       dispatch({ type: "ADD_SESSION", session });
-      // Persist to server — wait for HTTP 200 before considering done
       void phpApiService.createSession({
         label: session.label,
         startYear: session.startYear,
@@ -876,16 +853,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.currentUser, state.permissions],
   );
 
-  // ── Legacy data access — these delegate to phpApiService directly ──────────
+  // ── Legacy data access delegates ─────────────────────────────────────────
 
-  const getData = useCallback((_collection: string): unknown[] => {
-    // Legacy compatibility — components should use phpApiService directly
-    return [];
-  }, []);
-
+  const getData = useCallback((_collection: string): unknown[] => [], []);
   const refreshCollection = useCallback(
     async (_collection: string): Promise<void> => {
-      // No-op — each page fetches fresh data from MySQL on demand
+      /* no-op */
     },
     [],
   );
@@ -895,24 +868,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       collection: string,
       item: Record<string, unknown>,
     ): Promise<Record<string, unknown>> => {
-      switch (collection) {
-        case "students":
-          if (item.id) {
-            return phpApiService.updateStudent(
-              item as Parameters<typeof phpApiService.updateStudent>[0],
-            );
-          }
-          return phpApiService.addStudent(item);
-        case "staff":
-          if (item.id) {
-            return phpApiService.updateStaff(
-              item as Parameters<typeof phpApiService.updateStaff>[0],
-            );
-          }
-          return phpApiService.addStaff(item);
-        default:
-          return item;
+      if (collection === "students") {
+        if (item.id)
+          return phpApiService.updateStudent(
+            item as Parameters<typeof phpApiService.updateStudent>[0],
+          );
+        return phpApiService.addStudent(item);
       }
+      if (collection === "staff") {
+        if (item.id)
+          return phpApiService.updateStaff(
+            item as Parameters<typeof phpApiService.updateStaff>[0],
+          );
+        return phpApiService.addStaff(item);
+      }
+      return item;
     },
     [],
   );
@@ -924,17 +894,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       changes: Record<string, unknown>,
     ): Promise<void> => {
       const merged = { ...changes, id };
-      switch (collection) {
-        case "students":
-          await phpApiService.updateStudent(
-            merged as Parameters<typeof phpApiService.updateStudent>[0],
-          );
-          break;
-        case "staff":
-          await phpApiService.updateStaff(
-            merged as Parameters<typeof phpApiService.updateStaff>[0],
-          );
-          break;
+      if (collection === "students") {
+        await phpApiService.updateStudent(
+          merged as Parameters<typeof phpApiService.updateStudent>[0],
+        );
+      } else if (collection === "staff") {
+        await phpApiService.updateStaff(
+          merged as Parameters<typeof phpApiService.updateStaff>[0],
+        );
       }
     },
     [],
@@ -942,13 +909,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteData = useCallback(
     async (collection: string, id: string): Promise<void> => {
-      switch (collection) {
-        case "students":
-          await phpApiService.deleteStudent(id);
-          break;
-        default:
-          break;
-      }
+      if (collection === "students") await phpApiService.deleteStudent(id);
     },
     [],
   );
@@ -959,7 +920,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const canWrite = !isReadOnly || state.currentUser?.role === "superadmin";
   const unreadCount = state.notifications.filter((n) => !n.isRead).length;
 
-  // Show loading only when initializing with no sessions yet
   const showLoading =
     state.currentUser !== null &&
     state.isInitializing &&
@@ -969,7 +929,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     state.initError !== null &&
     !state.isInitializing;
 
-  // Backward-compat sync status stub (always "synced" — no pending queue)
   const syncStatusStub = {
     state: "synced" as const,
     lastSyncTime: null,
@@ -1018,15 +977,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         children
       )}
       {/*
-        Session Expired modal:
-        - Only shown when currentUser is authenticated
-        - Never shown on login page (currentUser is null there)
-        - Never shown within 10 minutes of login (module-level _loginTime guard)
-        - Only shown after all silent refresh attempts have already failed
+        Session Expired modal rules:
+        - Only when currentUser is set (never on login screen)
+        - Never within 10 minutes of login (isWithinGracePeriod guard)
+        - Only after all silent refresh attempts have failed
       */}
-      {showReLoginModal && state.currentUser !== null && !isFreshLogin(10) && (
-        <ReLoginModal onDismiss={logout} />
-      )}
+      {showReLoginModal &&
+        state.currentUser !== null &&
+        !isWithinGracePeriod(10) && <ReLoginModal onDismiss={logout} />}
     </AppContext.Provider>
   );
 }

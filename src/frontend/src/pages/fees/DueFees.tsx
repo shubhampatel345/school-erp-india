@@ -2,8 +2,9 @@
  * DueFees.tsx — Direct phpApiService (no getData)
  *
  * Loads students and receipts from server, calculates dues.
+ * Filter by class/section. WhatsApp bulk reminder. Export CSV.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { useApp } from "../../context/AppContext";
@@ -45,9 +46,29 @@ function toStudent(r: StudentRecord): Student {
   } as Student;
 }
 
+const CLASSES = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
 export default function DueFees() {
   const { currentSession } = useApp();
   const [classFilter, setClassFilter] = useState("");
+  const [sectionFilter, setSectionFilter] = useState("");
+  const [availableSections, setAvailableSections] = useState<string[]>([]);
   const [dueRows, setDueRows] = useState<DueRow[]>([]);
   const [generated, setGenerated] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -57,25 +78,47 @@ export default function DueFees() {
   const currentAcademicIdx = getCurrentAcademicMonthIdx();
   const dueTillMonths = MONTHS.slice(0, currentAcademicIdx + 1);
 
+  // Load sections when class changes
+  useEffect(() => {
+    if (!classFilter) {
+      setAvailableSections([]);
+      setSectionFilter("");
+      return;
+    }
+    phpApiService
+      .getClasses()
+      .then((cls) => {
+        const found = cls.find((c) => c.className === classFilter);
+        if (found) {
+          const sections = Array.isArray(found.sections)
+            ? found.sections.map(String)
+            : [];
+          setAvailableSections(sections);
+        } else {
+          setAvailableSections([]);
+        }
+        setSectionFilter("");
+      })
+      .catch(() => setAvailableSections([]));
+  }, [classFilter]);
+
   const generate = useCallback(async () => {
     if (!currentSession) return;
     setGenerating(true);
     try {
-      // Fetch students from server
       const params: Record<string, string> = { limit: "500" };
       if (classFilter) params.class = classFilter;
+      if (sectionFilter) params.section = sectionFilter;
       const studentResult = await phpApiService.getStudents(params);
       const students = (studentResult.data ?? [])
         .map(toStudent)
         .filter((s) => s.status === "active");
 
-      // Fetch receipts from server for this session
       const receipts = await phpApiService.get<FeeReceipt[]>(
         "fees/receipts/all",
         { sessionId: currentSession.id },
       );
 
-      // Fetch fee plans from server
       const allPlans: FeesPlan[] = [];
       const uniqueClasses = [...new Set(students.map((s) => s.class))];
       for (const cls of uniqueClasses) {
@@ -95,12 +138,9 @@ export default function DueFees() {
         }
         const studentPlans = allPlans.filter(
           (p) =>
-            (p.classId ??
-              (p as unknown as Record<string, string>).class ??
-              "") === student.class &&
-            (p.sectionId ??
-              (p as unknown as Record<string, string>).section ??
-              "") === student.section,
+            ((p as unknown as Record<string, string>).class ??
+              p.classId ??
+              "") === student.class,
         );
         const dueMonths = dueTillMonths.filter((m) => !paidMonths.includes(m));
         if (dueMonths.length === 0) continue;
@@ -111,7 +151,7 @@ export default function DueFees() {
         if (dueAmount === 0) continue;
         rows.push({ student, dueMonths, dueAmount });
       }
-      setDueRows(rows);
+      setDueRows(rows.sort((a, b) => b.dueAmount - a.dueAmount));
       setGenerated(true);
     } catch {
       setDueRows([]);
@@ -119,7 +159,7 @@ export default function DueFees() {
     } finally {
       setGenerating(false);
     }
-  }, [currentSession, classFilter, dueTillMonths]);
+  }, [currentSession, classFilter, sectionFilter, dueTillMonths]);
 
   function handleExport() {
     const header = [
@@ -191,15 +231,16 @@ export default function DueFees() {
     }, 400);
   }
 
-  async function handleWhatsAppReminder() {
+  async function handleWhatsAppReminder(single?: DueRow) {
     setWaSending(true);
     setWaStatus(null);
     const school = ls.get<{ name: string }>("school_profile", {
       name: "School",
     });
+    const targets = single ? [single] : dueRows;
     let sent = 0;
     let failed = 0;
-    for (const row of dueRows) {
+    for (const row of targets) {
       const phone = row.student.guardianMobile || row.student.mobile;
       if (!phone) {
         failed++;
@@ -246,29 +287,33 @@ export default function DueFees() {
             data-ocid="due-fees-class-filter"
           >
             <option value="">All Classes</option>
-            {[
-              "Nursery",
-              "LKG",
-              "UKG",
-              "Class 1",
-              "Class 2",
-              "Class 3",
-              "Class 4",
-              "Class 5",
-              "Class 6",
-              "Class 7",
-              "Class 8",
-              "Class 9",
-              "Class 10",
-              "Class 11",
-              "Class 12",
-            ].map((c) => (
+            {CLASSES.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
             ))}
           </select>
         </div>
+        {availableSections.length > 0 && (
+          <div>
+            <p className="text-xs font-medium text-muted-foreground mb-1">
+              Filter by Section
+            </p>
+            <select
+              value={sectionFilter}
+              onChange={(e) => setSectionFilter(e.target.value)}
+              className="border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground"
+              data-ocid="due-fees-section-filter"
+            >
+              <option value="">All Sections</option>
+              {availableSections.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-1">
             Months covered
@@ -326,7 +371,7 @@ export default function DueFees() {
                 size="sm"
                 variant="outline"
                 onClick={() => void handleWhatsAppReminder()}
-                disabled={waSending}
+                disabled={waSending || dueRows.length === 0}
                 data-ocid="dues-whatsapp-btn"
               >
                 {waSending ? "Sending..." : "💬 WhatsApp All"}
@@ -363,6 +408,7 @@ export default function DueFees() {
                     <th className="px-3 py-2 text-left">Class</th>
                     <th className="px-3 py-2 text-left">Months Due</th>
                     <th className="px-3 py-2 text-right">Amount Due</th>
+                    <th className="px-3 py-2 text-center">Remind</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -390,6 +436,17 @@ export default function DueFees() {
                       <td className="px-3 py-2 text-right font-semibold text-red-600">
                         {formatCurrency(row.dueAmount)}
                       </td>
+                      <td className="px-3 py-2 text-center">
+                        <button
+                          type="button"
+                          onClick={() => void handleWhatsAppReminder(row)}
+                          disabled={waSending}
+                          className="text-xs px-2 py-0.5 rounded border border-border hover:bg-muted/50 transition-colors"
+                          data-ocid={`dues-whatsapp-single.${i + 1}`}
+                        >
+                          💬
+                        </button>
+                      </td>
                     </tr>
                   ))}
                   <tr className="border-t-2 border-border bg-muted/30 font-bold">
@@ -399,6 +456,7 @@ export default function DueFees() {
                     <td className="px-3 py-2 text-right text-red-600">
                       {formatCurrency(grandTotal)}
                     </td>
+                    <td />
                   </tr>
                 </tbody>
               </table>

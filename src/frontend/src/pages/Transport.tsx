@@ -1,9 +1,10 @@
 /**
- * Transport Module — Direct API rebuild
- * All data via phpApiService; no local sync, no getData().
+ * Transport Module — cPanel/MySQL direct API version
+ * Tabs: Routes & Buses | Student Assignment | GPS Tracking
+ * All data via phpApiService. No offline sync.
  */
 
-import { Bus, MapPin, Navigation, Users } from "lucide-react";
+import { Bus, Navigation, Users } from "lucide-react";
 import { useState } from "react";
 import GPSTracking from "./transport/GPSTracking";
 import RoutesAPI from "./transport/RoutesAPI";
@@ -12,7 +13,6 @@ import StudentTransportAPI from "./transport/StudentTransportAPI";
 const TABS = [
   { id: "routes", label: "Routes & Buses", icon: Bus },
   { id: "students", label: "Student Assignment", icon: Users },
-  { id: "pickup", label: "Pickup Points", icon: MapPin },
   { id: "gps", label: "GPS Tracking", icon: Navigation },
 ] as const;
 
@@ -28,8 +28,8 @@ export default function Transport() {
           Transport
         </h1>
         <p className="text-muted-foreground text-sm mt-0.5">
-          Manage bus routes, pickup points, student transport assignments and
-          GPS tracking
+          Manage bus routes, pickup points with monthly fares, student transport
+          assignments and GPS live tracking
         </p>
       </div>
 
@@ -64,7 +64,6 @@ export default function Transport() {
       <div>
         {activeTab === "routes" && <RoutesAPI />}
         {activeTab === "students" && <StudentTransportAPI />}
-        {activeTab === "pickup" && <RoutesAPI showPickupOnly />}
         {activeTab === "gps" && <GPSTracking />}
       </div>
     </div>

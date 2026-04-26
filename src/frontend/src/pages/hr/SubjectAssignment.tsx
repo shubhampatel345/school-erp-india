@@ -1,11 +1,13 @@
 /**
  * SubjectAssignment — HR module
- * Assign subjects to teachers with class/section matrix.
- * Saves via useApp() context (IndexedDB first, canister in background).
+ * Assign subjects to teachers with class range.
+ * Uses direct API: getStaff + getSubjects + getClasses.
+ * Saves via phpApiService.apiPost("academics/subject-assignments/save").
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -15,23 +17,23 @@ import {
 } from "@/components/ui/select";
 import {
   BookOpen,
-  CheckCircle2,
   Loader2,
+  Plus,
+  RefreshCw,
   Save,
-  UserCheck,
+  Trash2,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
-import type { ClassSection, Staff, Subject } from "../../types";
 import { CLASS_ORDER } from "../../types";
-import { generateId } from "../../utils/localStorage";
+import type { ClassRecord, StaffRecord } from "../../utils/phpApiService";
+import phpApiService from "../../utils/phpApiService";
 
-interface SubjectMatrix {
-  [subjectId: string]: {
-    [classSection: string]: boolean;
-  };
+interface SubjectItem {
+  id: string;
+  name: string;
 }
 
 interface Assignment {
@@ -40,509 +42,419 @@ interface Assignment {
   staffName: string;
   subjectId: string;
   subjectName: string;
-  classes: string[]; // "ClassName-Section" or just "ClassName"
-  sessionId?: string;
+  classFrom: string;
+  classTo: string;
 }
 
-function sortedClasses(classList: ClassSection[]): ClassSection[] {
-  return [...classList].sort((a, b) => {
-    const nameA = a.name ?? a.className ?? "";
-    const nameB = b.name ?? b.className ?? "";
-    const ai = CLASS_ORDER.indexOf(nameA);
-    const bi = CLASS_ORDER.indexOf(nameB);
-    if (ai === -1 && bi === -1) return nameA.localeCompare(nameB);
-    if (ai === -1) return 1;
-    if (bi === -1) return -1;
-    return ai - bi;
-  });
+function dispClass(raw: string): string {
+  if (["Nursery", "LKG", "UKG"].includes(raw)) return raw;
+  if (raw.startsWith("Class ")) return raw;
+  if (/^\d+$/.test(raw)) return `Class ${raw}`;
+  return raw;
 }
+
+function makeId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+const EMPTY_ASSIGNMENT: Omit<Assignment, "id"> = {
+  staffId: "",
+  staffName: "",
+  subjectId: "",
+  subjectName: "",
+  classFrom: "",
+  classTo: "",
+};
 
 export default function SubjectAssignment() {
-  const {
-    getData,
-    saveData,
-    updateData,
-    currentUser,
-    currentSession,
-    addNotification,
-  } = useApp();
-
-  const [selectedStaffId, setSelectedStaffId] = useState<string>("");
-  const [matrix, setMatrix] = useState<SubjectMatrix>({});
-  const [saving, setSaving] = useState(false);
-  const [hasChanges, setHasChanges] = useState(false);
-
+  const { currentUser } = useApp();
   const canWrite =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  // Load data from context
-  const allStaff = (getData("staff") as Staff[]).filter(
-    (s) => (s.status ?? "active") === "active",
+  const [staff, setStaff] = useState<StaffRecord[]>([]);
+  const [subjects, setSubjects] = useState<SubjectItem[]>([]);
+  const [classes, setClasses] = useState<ClassRecord[]>([]);
+  const [assignments, setAssignments] = useState<Assignment[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  // Filter
+  const [filterStaff, setFilterStaff] = useState("");
+  const [search, setSearch] = useState("");
+
+  // New assignment row
+  const [showAdd, setShowAdd] = useState(false);
+  const [newAssign, setNewAssign] = useState({ ...EMPTY_ASSIGNMENT });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [rawStaff, rawSubjects, rawClasses, rawAssignments] =
+        await Promise.all([
+          phpApiService.getStaff(),
+          phpApiService.getSubjects(),
+          phpApiService.getClasses(),
+          phpApiService
+            .apiGet<Assignment[]>("academics/subject-assignments")
+            .catch(() => []),
+        ]);
+      setStaff(rawStaff.filter((s) => s.status !== "inactive"));
+      setSubjects(
+        (rawSubjects as Record<string, unknown>[]).map((s) => ({
+          id: String(s.id ?? ""),
+          name: String(s.name ?? ""),
+        })),
+      );
+      setClasses(rawClasses);
+      setAssignments(rawAssignments ?? []);
+    } catch {
+      toast.error("Failed to load data");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  // All class names in order
+  const allClassNames = [...new Set(classes.map((c) => c.className))].sort(
+    (a, b) => {
+      const ka = a.startsWith("Class ") ? a.replace("Class ", "") : a;
+      const kb = b.startsWith("Class ") ? b.replace("Class ", "") : b;
+      const ai = CLASS_ORDER.indexOf(ka);
+      const bi = CLASS_ORDER.indexOf(kb);
+      if (ai === -1 && bi === -1) return a.localeCompare(b);
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    },
   );
-  const teachers = allStaff.filter(
-    (s) => s.designation === "Teacher" || s.designation === "Principal",
+
+  // Teachers only
+  const teachers = staff.filter((s) =>
+    ["Teacher", "Principal", "Vice Principal", "HOD"].includes(
+      s.designation ?? "",
+    ),
   );
-  const subjects = getData("subjects") as Subject[];
-  const classesRaw = getData("classes") as ClassSection[];
-  const classes = sortedClasses(classesRaw);
-  const assignments = getData("subject_assignments") as Assignment[];
 
-  // Selected teacher
-  const selectedStaff = teachers.find((t) => t.id === selectedStaffId);
-
-  // Load existing assignments for selected teacher into matrix
-  function loadTeacherAssignments(staffId: string) {
-    const existing = assignments.filter((a) => a.staffId === staffId);
-    const newMatrix: SubjectMatrix = {};
-    for (const a of existing) {
-      newMatrix[a.subjectId] = {};
-      for (const cls of a.classes) {
-        newMatrix[a.subjectId][cls] = true;
-      }
-    }
-    setMatrix(newMatrix);
-    setHasChanges(false);
-  }
-
-  function handleTeacherChange(staffId: string) {
-    setSelectedStaffId(staffId);
-    if (staffId) loadTeacherAssignments(staffId);
-    else {
-      setMatrix({});
-      setHasChanges(false);
-    }
-  }
-
-  // Get all class-section combos for a subject (based on subject.classes)
-  function getClassSectionsForSubject(subject: Subject): string[] {
-    const result: string[] = [];
-    for (const cls of classes) {
-      const name = cls.name ?? cls.className ?? "";
-      if (!subject.classes.includes(name)) continue;
-      const secs = Array.isArray(cls.sections)
-        ? (cls.sections as string[])
-        : [];
-      if (secs.length === 0) {
-        result.push(name);
-      } else {
-        for (const sec of secs) {
-          result.push(`${name}-${sec}`);
-        }
-      }
-    }
-    return result;
-  }
-
-  function toggleCell(subjectId: string, classSection: string) {
-    if (!canWrite) return;
-    setMatrix((prev) => {
-      const subj = { ...(prev[subjectId] ?? {}) };
-      subj[classSection] = !subj[classSection];
-      return { ...prev, [subjectId]: subj };
-    });
-    setHasChanges(true);
-  }
-
-  function toggleAllForSubject(subjectId: string, cells: string[]) {
-    if (!canWrite) return;
-    setMatrix((prev) => {
-      const subj = prev[subjectId] ?? {};
-      const allOn = cells.every((c) => subj[c]);
-      const newSubj: Record<string, boolean> = {};
-      for (const c of cells) newSubj[c] = !allOn;
-      return { ...prev, [subjectId]: newSubj };
-    });
-    setHasChanges(true);
-  }
-
-  async function handleSave() {
-    if (!selectedStaffId || !selectedStaff) return;
+  async function saveAll(updated: Assignment[]) {
     setSaving(true);
     try {
-      // Build assignment records from matrix
-      const newAssignments: Assignment[] = [];
-      for (const [subjectId, classCells] of Object.entries(matrix)) {
-        const subj = subjects.find((s) => s.id === subjectId);
-        if (!subj) continue;
-        const assignedClasses = Object.entries(classCells)
-          .filter(([, v]) => v)
-          .map(([k]) => k);
-        if (assignedClasses.length === 0) continue;
-        newAssignments.push({
-          id: generateId(),
-          staffId: selectedStaffId,
-          staffName: selectedStaff.name ?? selectedStaff.fullName ?? "",
-          subjectId,
-          subjectName: subj.name,
-          classes: assignedClasses,
-          sessionId: currentSession?.id,
-        });
-      }
-
-      // Remove existing assignments for this teacher
-      const existingForTeacher = assignments.filter(
-        (a) => a.staffId === selectedStaffId,
-      );
-      // Delete old ones (via updateData to empty or deleteData)
-      for (const old of existingForTeacher) {
-        try {
-          await updateData("subject_assignments", old.id, {
-            ...old,
-            classes: [],
-            _deleted: true,
-          });
-        } catch {
-          // ignore
-        }
-      }
-
-      // Save new assignments
-      for (const a of newAssignments) {
-        await saveData(
-          "subject_assignments",
-          a as unknown as Record<string, unknown>,
-        );
-      }
-
-      setHasChanges(false);
-      addNotification(
-        `Subject assignments saved for ${selectedStaff.name ?? "teacher"}`,
-        "success",
-      );
-      toast.success("Assignments saved successfully");
+      await phpApiService.apiPost("academics/subject-assignments/save", {
+        assignments: updated,
+      });
+      setAssignments(updated);
+      toast.success("Assignments saved");
     } catch {
-      toast.error("Failed to save assignments. Please try again.");
+      toast.error("Failed to save — shown locally");
+      setAssignments(updated);
     } finally {
       setSaving(false);
     }
   }
 
-  // Summary counts
-  const assignedSubjectCount = useMemo(() => {
-    return Object.values(matrix).filter((cells) =>
-      Object.values(cells).some(Boolean),
-    ).length;
-  }, [matrix]);
-
-  const assignedClassCount = useMemo(() => {
-    const set = new Set<string>();
-    for (const cells of Object.values(matrix)) {
-      for (const [k, v] of Object.entries(cells)) {
-        if (v) set.add(k);
-      }
+  function addAssignment() {
+    if (!newAssign.staffId || !newAssign.subjectId) {
+      toast.error("Select teacher and subject");
+      return;
     }
-    return set.size;
-  }, [matrix]);
+    const sf = staff.find((s) => s.id === newAssign.staffId);
+    const subj = subjects.find((s) => s.id === newAssign.subjectId);
+    const assignment: Assignment = {
+      id: makeId(),
+      staffId: newAssign.staffId,
+      staffName: sf?.name ?? "",
+      subjectId: newAssign.subjectId,
+      subjectName: subj?.name ?? "",
+      classFrom: newAssign.classFrom,
+      classTo: newAssign.classTo,
+    };
+    void saveAll([...assignments, assignment]);
+    setNewAssign({ ...EMPTY_ASSIGNMENT });
+    setShowAdd(false);
+  }
+
+  function removeAssignment(id: string) {
+    void saveAll(assignments.filter((a) => a.id !== id));
+  }
+
+  // Filtered assignments
+  const filteredAssignments = assignments.filter((a) => {
+    const matchStaff = !filterStaff || a.staffId === filterStaff;
+    const matchSearch =
+      !search ||
+      a.staffName.toLowerCase().includes(search.toLowerCase()) ||
+      a.subjectName.toLowerCase().includes(search.toLowerCase());
+    return matchStaff && matchSearch;
+  });
+
+  // Group by staff
+  const byStaff: Record<string, Assignment[]> = {};
+  for (const a of filteredAssignments) {
+    if (!byStaff[a.staffName]) byStaff[a.staffName] = [];
+    byStaff[a.staffName].push(a);
+  }
 
   return (
-    <div className="p-4 lg:p-6 space-y-5">
+    <div className="space-y-4 p-4 lg:p-6">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-display font-bold text-foreground">
             Subject Assignment
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Assign subjects and class–sections to teachers
+          <p className="text-sm text-muted-foreground">
+            {assignments.length} assignment{assignments.length !== 1 ? "s" : ""}{" "}
+            configured
           </p>
         </div>
-        {canWrite && selectedStaffId && hasChanges && (
+        <div className="flex gap-2">
           <Button
-            onClick={handleSave}
-            disabled={saving}
-            data-ocid="subject-assignment.save_button"
+            variant="outline"
+            size="icon"
+            onClick={() => void load()}
+            aria-label="Refresh"
+            data-ocid="subjects_assign.refresh_button"
           >
-            {saving ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save Assignments
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
           </Button>
-        )}
-      </div>
-
-      {/* Teacher selector */}
-      <Card className="p-4">
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-          <div className="space-y-1.5 flex-1 max-w-xs">
-            <label
-              htmlFor="teacher-select"
-              className="text-sm font-medium text-foreground"
+          {saving && (
+            <Loader2 className="w-4 h-4 animate-spin text-muted-foreground self-center" />
+          )}
+          {canWrite && (
+            <Button
+              size="sm"
+              onClick={() => setShowAdd(!showAdd)}
+              data-ocid="subjects_assign.add_button"
             >
-              Select Teacher
-            </label>
-            <Select value={selectedStaffId} onValueChange={handleTeacherChange}>
-              <SelectTrigger
-                id="teacher-select"
-                data-ocid="subject-assignment.teacher_select"
-              >
-                <SelectValue placeholder="Choose a teacher…" />
-              </SelectTrigger>
-              <SelectContent>
-                {teachers.length === 0 && (
-                  <SelectItem value="__none__" disabled>
-                    No teachers found — add staff first
-                  </SelectItem>
-                )}
-                {teachers.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name ?? t.fullName ?? "—"} ({t.designation})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selectedStaff && (
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2">
-                <UserCheck className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium text-foreground">
-                  {selectedStaff.name ?? selectedStaff.fullName}
-                </span>
-                <Badge variant="secondary" className="text-xs">
-                  {selectedStaff.designation}
-                </Badge>
-              </div>
-              {assignedSubjectCount > 0 && (
-                <div className="flex gap-2 text-xs text-muted-foreground">
-                  <span className="text-primary font-medium">
-                    {assignedSubjectCount} subject
-                    {assignedSubjectCount !== 1 ? "s" : ""}
-                  </span>
-                  <span>·</span>
-                  <span>
-                    {assignedClassCount} class–section
-                    {assignedClassCount !== 1 ? "s" : ""}
-                  </span>
-                </div>
-              )}
-            </div>
+              <Plus className="w-4 h-4 mr-1.5" /> Add Assignment
+            </Button>
           )}
         </div>
-      </Card>
+      </div>
 
-      {/* No teacher selected */}
-      {!selectedStaffId && (
-        <Card
-          className="p-14 text-center"
-          data-ocid="subject-assignment.empty_state"
-        >
-          <BookOpen className="w-12 h-12 mx-auto text-muted-foreground opacity-40 mb-4" />
-          <p className="font-semibold text-foreground">No teacher selected</p>
-          <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-            Select a teacher above to view and edit their subject assignments.
-          </p>
-        </Card>
-      )}
-
-      {/* No subjects */}
-      {selectedStaffId && subjects.length === 0 && (
-        <Card className="p-10 text-center">
-          <BookOpen className="w-10 h-10 mx-auto text-muted-foreground mb-3" />
-          <p className="text-muted-foreground font-medium">No subjects found</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Add subjects first in Academics → Subjects.
-          </p>
-        </Card>
-      )}
-
-      {/* Matrix */}
-      {selectedStaffId && subjects.length > 0 && (
-        <Card className="overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground min-w-[160px] sticky left-0 bg-muted/50">
-                    Subject
-                  </th>
-                  <th className="text-center px-3 py-3 font-semibold text-muted-foreground w-20">
-                    All
-                  </th>
-                  {/* Class headers — show unique class names */}
-                  {classes
-                    .filter((cls) => {
-                      const name = cls.name ?? cls.className ?? "";
-                      return subjects.some((s) => s.classes.includes(name));
-                    })
-                    .map((cls) => {
-                      const name = cls.name ?? cls.className ?? "";
-                      const secs = Array.isArray(cls.sections)
-                        ? (cls.sections as string[])
-                        : [];
-                      return secs.length === 0 ? (
-                        <th
-                          key={cls.id}
-                          className="text-center px-3 py-3 font-semibold text-muted-foreground text-xs whitespace-nowrap"
-                        >
-                          {name}
-                        </th>
-                      ) : (
-                        secs.map((sec) => (
-                          <th
-                            key={`${cls.id}-${sec}`}
-                            className="text-center px-3 py-3 font-semibold text-muted-foreground text-xs whitespace-nowrap"
-                          >
-                            {name}-{sec}
-                          </th>
-                        ))
-                      );
-                    })}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {subjects.map((subj, idx) => {
-                  const cells = getClassSectionsForSubject(subj);
-                  if (cells.length === 0) return null;
-                  const subjMatrix = matrix[subj.id] ?? {};
-                  const checkedCount = cells.filter(
-                    (c) => subjMatrix[c],
-                  ).length;
-                  const allChecked = checkedCount === cells.length;
-
-                  return (
-                    <tr
-                      key={subj.id}
-                      className={
-                        idx % 2 === 0
-                          ? "bg-card hover:bg-muted/20"
-                          : "bg-muted/10 hover:bg-muted/20"
-                      }
-                      data-ocid={`subject-assignment.row.${idx + 1}`}
-                    >
-                      {/* Subject name — sticky */}
-                      <td className="px-4 py-3 sticky left-0 bg-inherit">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-foreground truncate max-w-[140px]">
-                            {subj.name}
-                          </span>
-                          {subj.code && (
-                            <Badge
-                              variant="secondary"
-                              className="text-xs font-mono shrink-0"
-                            >
-                              {subj.code}
-                            </Badge>
-                          )}
-                        </div>
-                        {checkedCount > 0 && (
-                          <p className="text-xs text-primary mt-0.5">
-                            {checkedCount} assigned
-                          </p>
-                        )}
-                      </td>
-
-                      {/* Select All toggle */}
-                      <td className="px-3 py-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => toggleAllForSubject(subj.id, cells)}
-                          disabled={!canWrite}
-                          className={`w-6 h-6 rounded border-2 flex items-center justify-center mx-auto transition-colors ${
-                            allChecked
-                              ? "bg-primary border-primary text-primary-foreground"
-                              : checkedCount > 0
-                                ? "bg-primary/30 border-primary"
-                                : "border-border hover:border-primary"
-                          } disabled:opacity-40 disabled:cursor-not-allowed`}
-                          aria-label={
-                            allChecked ? "Deselect all" : "Select all"
-                          }
-                          data-ocid={`subject-assignment.select-all.${idx + 1}`}
-                        >
-                          {allChecked && (
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                          )}
-                          {!allChecked && checkedCount > 0 && (
-                            <span className="w-2 h-2 rounded-sm bg-primary block" />
-                          )}
-                        </button>
-                      </td>
-
-                      {/* Class-section checkboxes */}
-                      {cells.map((cell) => (
-                        <td key={cell} className="px-3 py-3 text-center">
-                          <button
-                            type="button"
-                            onClick={() => toggleCell(subj.id, cell)}
-                            disabled={!canWrite}
-                            className={`w-6 h-6 rounded border-2 flex items-center justify-center mx-auto transition-colors ${
-                              subjMatrix[cell]
-                                ? "bg-primary border-primary text-primary-foreground"
-                                : "border-border hover:border-primary"
-                            } disabled:opacity-40 disabled:cursor-not-allowed`}
-                            aria-label={`${subj.name} — ${cell}`}
-                            data-ocid={`subject-assignment.cell.${idx + 1}.${cell.replace(/-/g, "_")}`}
-                          >
-                            {subjMatrix[cell] && <X className="w-3 h-3" />}
-                          </button>
-                        </td>
-                      ))}
-
-                      {/* Pad empty columns for subjects that don't cover all classes */}
-                      {/* (handled naturally — cells only contains valid class-sections) */}
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      )}
-
-      {/* Current assignments summary */}
-      {selectedStaffId &&
-        assignments.filter(
-          (a) => a.staffId === selectedStaffId && a.classes.length > 0,
-        ).length > 0 && (
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Current Saved Assignments
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {assignments
-                .filter(
-                  (a) =>
-                    a.staffId === selectedStaffId &&
-                    !(a as unknown as { _deleted?: boolean })._deleted &&
-                    a.classes.length > 0,
-                )
-                .map((a) => (
-                  <Badge
-                    key={a.id}
-                    variant="secondary"
-                    className="text-xs flex items-center gap-1"
-                  >
-                    <BookOpen className="w-3 h-3" />
-                    {a.subjectName}: {a.classes.slice(0, 3).join(", ")}
-                    {a.classes.length > 3 && ` +${a.classes.length - 3}`}
-                  </Badge>
-                ))}
+      {/* Add form */}
+      {showAdd && canWrite && (
+        <Card className="p-4 space-y-3 border-primary/20">
+          <h3 className="font-semibold text-sm text-foreground">
+            New Subject Assignment
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Teacher *</p>
+              <Select
+                value={newAssign.staffId}
+                onValueChange={(v) =>
+                  setNewAssign((p) => ({ ...p, staffId: v }))
+                }
+              >
+                <SelectTrigger data-ocid="subjects_assign.teacher.select">
+                  <SelectValue placeholder="Select teacher" />
+                </SelectTrigger>
+                <SelectContent>
+                  {teachers.map((sf) => (
+                    <SelectItem key={sf.id} value={sf.id}>
+                      {sf.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Subject *</p>
+              <Select
+                value={newAssign.subjectId}
+                onValueChange={(v) =>
+                  setNewAssign((p) => ({ ...p, subjectId: v }))
+                }
+              >
+                <SelectTrigger data-ocid="subjects_assign.subject.select">
+                  <SelectValue placeholder="Select subject" />
+                </SelectTrigger>
+                <SelectContent>
+                  {subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Class From</p>
+              <Select
+                value={newAssign.classFrom}
+                onValueChange={(v) =>
+                  setNewAssign((p) => ({ ...p, classFrom: v }))
+                }
+              >
+                <SelectTrigger data-ocid="subjects_assign.class_from.select">
+                  <SelectValue placeholder="From class" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Any</SelectItem>
+                  {allClassNames.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {dispClass(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">Class To</p>
+              <Select
+                value={newAssign.classTo}
+                onValueChange={(v) =>
+                  setNewAssign((p) => ({ ...p, classTo: v }))
+                }
+              >
+                <SelectTrigger data-ocid="subjects_assign.class_to.select">
+                  <SelectValue placeholder="To class" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Any</SelectItem>
+                  {allClassNames.map((c) => (
+                    <SelectItem key={c} value={c}>
+                      {dispClass(c)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
-        )}
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={addAssignment}
+              disabled={!newAssign.staffId || !newAssign.subjectId}
+              data-ocid="subjects_assign.save_button"
+            >
+              <Save className="w-4 h-4 mr-1.5" /> Add
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setShowAdd(false);
+                setNewAssign({ ...EMPTY_ASSIGNMENT });
+              }}
+              data-ocid="subjects_assign.cancel_button"
+            >
+              Cancel
+            </Button>
+          </div>
+        </Card>
+      )}
 
-      {/* Save footer */}
-      {canWrite && selectedStaffId && hasChanges && (
-        <div className="flex items-center gap-3 p-4 rounded-xl border border-primary/30 bg-primary/5">
-          <p className="text-sm text-foreground flex-1">
-            You have unsaved changes.
-          </p>
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            data-ocid="subject-assignment.save_footer_button"
+      {/* Filters */}
+      <div className="flex gap-2 flex-wrap">
+        <Input
+          placeholder="Search teacher or subject…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 max-w-xs"
+          data-ocid="subjects_assign.search.input"
+        />
+        <Select value={filterStaff} onValueChange={setFilterStaff}>
+          <SelectTrigger
+            className="w-44"
+            data-ocid="subjects_assign.filter_teacher.select"
           >
-            {saving ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save Assignments
-          </Button>
+            <SelectValue placeholder="All teachers" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">All Teachers</SelectItem>
+            {teachers.map((sf) => (
+              <SelectItem key={sf.id} value={sf.id}>
+                {sf.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* List */}
+      {loading ? (
+        <div
+          className="flex items-center justify-center py-20"
+          data-ocid="subjects_assign.loading_state"
+        >
+          <Loader2 className="w-8 h-8 animate-spin text-primary" />
+        </div>
+      ) : filteredAssignments.length === 0 ? (
+        <Card
+          className="p-12 text-center border-dashed"
+          data-ocid="subjects_assign.empty_state"
+        >
+          <BookOpen className="w-12 h-12 mx-auto mb-3 opacity-20" />
+          <p className="font-semibold text-foreground">No assignments yet</p>
+          {canWrite && (
+            <Button
+              size="sm"
+              className="mt-4"
+              onClick={() => setShowAdd(true)}
+              data-ocid="subjects_assign.add-first_button"
+            >
+              <Plus className="w-4 h-4 mr-1.5" /> Add First Assignment
+            </Button>
+          )}
+        </Card>
+      ) : (
+        <div className="space-y-3">
+          {Object.entries(byStaff).map(([staffName, staffAssigns], idx) => (
+            <Card
+              key={staffName}
+              className="overflow-hidden"
+              data-ocid={`subjects_assign.teacher.${idx + 1}`}
+            >
+              <div className="flex items-center justify-between px-4 py-3 bg-muted/30 border-b border-border">
+                <p className="font-semibold text-foreground text-sm">
+                  {staffName}
+                </p>
+                <Badge variant="secondary" className="text-xs">
+                  {staffAssigns.length} subject
+                  {staffAssigns.length !== 1 ? "s" : ""}
+                </Badge>
+              </div>
+              <div className="divide-y divide-border/50">
+                {staffAssigns.map((a, aIdx) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/10"
+                    data-ocid={`subjects_assign.item.${aIdx + 1}`}
+                  >
+                    <BookOpen className="w-4 h-4 text-primary/60 flex-shrink-0" />
+                    <span className="flex-1 font-medium text-sm text-foreground">
+                      {a.subjectName}
+                    </span>
+                    {(a.classFrom || a.classTo) && (
+                      <span className="text-xs text-muted-foreground">
+                        {a.classFrom ? dispClass(a.classFrom) : "All"}
+                        {a.classTo && a.classTo !== a.classFrom
+                          ? ` → ${dispClass(a.classTo)}`
+                          : ""}
+                      </span>
+                    )}
+                    {canWrite && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive hover:text-destructive flex-shrink-0"
+                        onClick={() => removeAssignment(a.id)}
+                        aria-label="Remove assignment"
+                        data-ocid={`subjects_assign.delete_button.${aIdx + 1}`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
         </div>
       )}
     </div>

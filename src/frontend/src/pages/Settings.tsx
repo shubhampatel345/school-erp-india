@@ -32,8 +32,9 @@ import WhatsAppSettings from "./settings/WhatsAppSettings";
 
 const TABS = [
   { id: "profile", label: "School Profile", icon: School },
-  { id: "sessions", label: "Session Management", icon: Clock },
+  { id: "themes", label: "Themes", icon: Palette },
   { id: "users", label: "User Management", icon: Users, superAdminOnly: true },
+  { id: "sessions", label: "Sessions", icon: Clock },
   {
     id: "permissions",
     label: "Permissions",
@@ -53,12 +54,17 @@ const TABS = [
     superAdminOnly: true,
   },
   { id: "payment", label: "Online Payment", icon: CreditCard },
+  {
+    id: "server",
+    label: "Server & Sync",
+    icon: Server,
+    superAdminOnly: true,
+  },
   { id: "notifications", label: "Notification Scheduler", icon: Bell },
   { id: "push", label: "Push Notifications", icon: BellRing },
-  { id: "themes", label: "Themes", icon: Palette },
   {
     id: "data",
-    label: "Data Management",
+    label: "Backup & Restore",
     icon: Database,
     superAdminOnly: true,
   },
@@ -66,12 +72,6 @@ const TABS = [
     id: "update",
     label: "System Update",
     icon: Sparkles,
-    superAdminOnly: true,
-  },
-  {
-    id: "server",
-    label: "Server & Sync",
-    icon: Server,
     superAdminOnly: true,
   },
 ];
@@ -83,6 +83,7 @@ interface SettingsProps {
 
 const SETTINGS_TAB_MAP: Record<string, string> = {
   profile: "profile",
+  themes: "themes",
   sessions: "sessions",
   whatsapp: "whatsapp",
   "online-payment": "payment",
@@ -113,7 +114,6 @@ export default function Settings({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="bg-card border-b px-4 lg:px-6 py-4 flex items-center gap-3">
         <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center">
           <SettingsIcon className="w-5 h-5 text-primary" />
@@ -128,7 +128,6 @@ export default function Settings({
         </div>
       </div>
 
-      {/* Tab Bar */}
       <div className="bg-card border-b px-4 lg:px-6 flex gap-1 overflow-x-auto scrollbar-thin">
         {visibleTabs.map((tab) => {
           const Icon = tab.icon;
@@ -151,23 +150,22 @@ export default function Settings({
         })}
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-auto bg-background">
         {activeTab === "profile" && <SchoolProfile />}
-        {activeTab === "sessions" && <SessionManagement />}
+        {activeTab === "themes" && <ThemeSettings />}
         {activeTab === "users" && isSuperAdmin && <UserManagement />}
+        {activeTab === "sessions" && <SessionManagement />}
         {activeTab === "permissions" && isSuperAdmin && (
           <PermissionManagement />
         )}
         {activeTab === "whatsapp" && isSuperAdmin && <WhatsAppSettings />}
         {activeTab === "whatsapp-bot" && isSuperAdmin && <WhatsAppAutoReply />}
         {activeTab === "payment" && <OnlinePaymentSettings />}
+        {activeTab === "server" && isSuperAdmin && <ServerOnlineSync />}
         {activeTab === "notifications" && <NotificationScheduler />}
         {activeTab === "push" && <PushNotifications />}
-        {activeTab === "themes" && <ThemeSettings />}
         {activeTab === "data" && isSuperAdmin && <DataManagement />}
         {activeTab === "update" && isSuperAdmin && <SystemUpdate />}
-        {activeTab === "server" && isSuperAdmin && <ServerOnlineSync />}
       </div>
     </div>
   );

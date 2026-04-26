@@ -30,8 +30,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { useApp } from "../../context/AppContext";
 import { generateId } from "../../utils/localStorage";
+import { phpApiService } from "../../utils/phpApiService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -334,10 +334,7 @@ function PropertiesPanel({
 // ── Main Component ────────────────────────────────────────────────────────────
 
 export default function ResultTemplateDesigner() {
-  const { getData, saveData } = useApp();
-
-  // Load saved templates from canister
-  const rawTemplates = getData("examResultsTemplate") as ResultTemplate[];
+  // Load saved templates from server or localStorage
   const [templates, setTemplates] = useState<ResultTemplate[]>([]);
   const [activeTemplate, setActiveTemplate] = useState<ResultTemplate | null>(
     null,
@@ -350,10 +347,28 @@ export default function ResultTemplateDesigner() {
   const canvasRef = useRef<HTMLDivElement>(null);
   const bgRef = useRef<HTMLInputElement>(null);
 
-  // Sync templates from canister
+  // Load templates from server on mount
   useEffect(() => {
-    if (rawTemplates.length > 0) setTemplates(rawTemplates);
-  }, [rawTemplates]);
+    phpApiService
+      .get<Record<string, unknown>[]>("settings/get&key=exam_result_templates")
+      .then((rows) => {
+        if (Array.isArray(rows) && rows.length > 0 && rows[0]?.value) {
+          try {
+            const parsed = JSON.parse(
+              String(rows[0].value),
+            ) as ResultTemplate[];
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setTemplates(parsed);
+            }
+          } catch {
+            /* noop */
+          }
+        }
+      })
+      .catch(() => {
+        /* noop */
+      });
+  }, []);
 
   // Start with a new blank template (run once on mount)
   const initializedRef = useRef(false);
@@ -580,18 +595,42 @@ export default function ResultTemplateDesigner() {
         name: templateName,
         createdAt: new Date().toISOString(),
       };
-      await saveData(
-        "examResultsTemplate",
-        toSave as unknown as Record<string, unknown>,
-      );
+      const updatedList = templates.find((t) => t.id === toSave.id)
+        ? templates.map((t) => (t.id === toSave.id ? toSave : t))
+        : [toSave, ...templates];
+
+      // Save to server
+      await phpApiService.post("settings/save", {
+        key: "exam_result_templates",
+        value: JSON.stringify(updatedList),
+      });
+
+      // Also save active template for ExamResults to use
+      await phpApiService
+        .post("settings/save", {
+          key: "exam_result_template",
+          value: JSON.stringify(toSave),
+        })
+        .catch(() => {});
+
+      // Fallback: save to localStorage
+      localStorage.setItem("exam_result_template", JSON.stringify(toSave));
+
+      setTemplates(updatedList);
+    } catch {
+      // Silently handle — save to localStorage as fallback
+      const toSave = {
+        ...activeTemplate,
+        name: templateName,
+        createdAt: new Date().toISOString(),
+      };
+      localStorage.setItem("exam_result_template", JSON.stringify(toSave));
       setTemplates((prev) => {
         const exists = prev.find((t) => t.id === toSave.id);
         return exists
           ? prev.map((t) => (t.id === toSave.id ? toSave : t))
           : [toSave, ...prev];
       });
-    } catch {
-      // silently handle
     } finally {
       setSaving(false);
     }

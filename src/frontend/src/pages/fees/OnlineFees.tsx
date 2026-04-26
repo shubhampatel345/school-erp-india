@@ -1,3 +1,10 @@
+/**
+ * OnlineFees.tsx — Online payment gateway settings + UPI QR + transaction history
+ *
+ * Uses phpApiService to load students for QR tab.
+ * Gateway settings saved to localStorage.
+ * Transaction history from server.
+ */
 import { useEffect, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -16,6 +23,7 @@ import {
   generateId,
   ls,
 } from "../../utils/localStorage";
+import phpApiService, { type StudentRecord } from "../../utils/phpApiService";
 
 interface GatewaySettings {
   gpayEnabled: boolean;
@@ -59,18 +67,26 @@ function buildUpiLink(
   amount: number,
   studentName: string,
 ): string {
-  const params = new URLSearchParams({
-    pa: vpa,
-    pn: schoolName,
-    am: amount.toFixed(2),
-    cu: "INR",
-    tn: `Fees ${studentName}`,
-  });
-  return `upi://pay?${params.toString()}`;
+  return `upi://pay?${new URLSearchParams({ pa: vpa, pn: schoolName, am: amount.toFixed(2), cu: "INR", tn: `Fees ${studentName}` }).toString()}`;
 }
 
-function getQrUrl(data: string): string {
-  return `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(data)}&margin=10&bgcolor=ffffff`;
+function toStudent(r: StudentRecord): Student {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    admNo: r.admNo ?? "",
+    fullName: r.fullName ?? "",
+    fatherName: (s.fatherName as string) ?? "",
+    motherName: (s.motherName as string) ?? "",
+    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
+    mobile: r.mobile ?? "",
+    dob: r.dob ?? "",
+    gender: (r.gender as Student["gender"]) ?? "Male",
+    class: r.class ?? "",
+    section: r.section ?? "",
+    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
+    sessionId: r.sessionId ?? "",
+  } as Student;
 }
 
 // ── UPI QR Tab ─────────────────────────────────────────────────────────────────
@@ -87,7 +103,9 @@ function UpiQrTab({ students }: { students: Student[] }) {
   const studentName = selectedStudent?.fullName ?? "Student";
   const upiLink =
     amount > 0 ? buildUpiLink(vpa, school.name, amount, studentName) : "";
-  const qrUrl = upiLink ? getQrUrl(upiLink) : "";
+  const qrUrl = upiLink
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(upiLink)}&margin=10&bgcolor=ffffff`
+    : "";
 
   useEffect(() => {
     if (!searchQ) {
@@ -107,7 +125,6 @@ function UpiQrTab({ students }: { students: Student[] }) {
 
   return (
     <div className="space-y-5">
-      {/* How it works */}
       <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4">
         <p className="text-sm font-semibold text-indigo-800 mb-3">
           How UPI payment works:
@@ -117,13 +134,13 @@ function UpiQrTab({ students }: { students: Student[] }) {
             {
               step: "1",
               icon: "📱",
-              text: "Scan the QR code below with any UPI app",
+              text: "Scan the QR code with any UPI app",
             },
             { step: "2", icon: "✅", text: "Complete payment in your UPI app" },
             {
               step: "3",
               icon: "🔙",
-              text: "Return here and click 'I\u2019ve Paid'",
+              text: "Return here and click 'I've Paid'",
             },
             {
               step: "4",
@@ -148,9 +165,7 @@ function UpiQrTab({ students }: { students: Student[] }) {
       </div>
 
       <div className="flex flex-wrap gap-6 items-start">
-        {/* Left: Inputs */}
         <div className="flex flex-col gap-4 min-w-[240px] flex-1">
-          {/* Student search */}
           <div className="relative">
             <label
               htmlFor="upi-student-search"
@@ -191,7 +206,6 @@ function UpiQrTab({ students }: { students: Student[] }) {
             )}
           </div>
 
-          {/* Amount */}
           <div>
             <label
               htmlFor="upi-custom-amount"
@@ -213,12 +227,11 @@ function UpiQrTab({ students }: { students: Student[] }) {
                     .replace(/(\..*)\./g, "$1"),
                 )
               }
-              className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+              className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
               data-ocid="upi-custom-amount-input"
             />
           </div>
 
-          {/* UPI ID display */}
           <div className="bg-muted/40 rounded-lg p-3 text-sm">
             <p className="text-muted-foreground text-xs font-medium mb-0.5">
               School UPI ID
@@ -229,38 +242,33 @@ function UpiQrTab({ students }: { students: Student[] }) {
             </p>
           </div>
 
-          {/* Action buttons */}
           {amount > 0 && (
-            <div className="flex gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => {
-                  window.location.href = upiLink;
-                }}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors"
-                data-ocid="upi-tab-open-gpay-btn"
-              >
-                📲 Open GPay
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                window.location.href = upiLink;
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors"
+              data-ocid="upi-tab-open-gpay-btn"
+            >
+              📲 Open GPay
+            </button>
           )}
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs text-amber-800">
             <p className="font-semibold mb-1">📋 Manual Confirmation Note</p>
             <p>
               After the parent pays via UPI, the accountant confirms the payment
-              in the <strong>Collect Fees</strong> screen and generates the
-              official receipt. This ensures the fee register is always
-              accurate.
+              in <strong>Collect Fees</strong> and generates the official
+              receipt.
             </p>
           </div>
         </div>
 
-        {/* Right: QR Code */}
         <div className="flex flex-col items-center gap-3">
           {amount > 0 ? (
             <>
-              <div className="border-2 border-indigo-200 rounded-xl p-3 bg-white shadow-sm">
+              <div className="border-2 border-indigo-200 rounded-xl p-3 bg-card shadow-sm">
                 <img
                   src={qrUrl}
                   alt="UPI QR Code"
@@ -294,7 +302,7 @@ function UpiQrTab({ students }: { students: Student[] }) {
   );
 }
 
-// ── Razorpay/API Tab ───────────────────────────────────────────────────────────
+// ── Razorpay / PayU Tab ────────────────────────────────────────────────────────
 function ApiGatewayTab({
   settings,
   onSave,
@@ -316,19 +324,14 @@ function ApiGatewayTab({
       return;
     }
     setTestStatus("testing");
-    // Simulate connection test
-    setTimeout(() => {
-      setTestStatus(razorpayKey.startsWith("rzp_") ? "ok" : "fail");
-    }, 1500);
-  }
-
-  function handleSave() {
-    onSave({ razorpayKey, razorpaySecret });
+    setTimeout(
+      () => setTestStatus(razorpayKey.startsWith("rzp_") ? "ok" : "fail"),
+      1500,
+    );
   }
 
   return (
     <div className="space-y-5">
-      {/* Razorpay Config */}
       <div className="bg-card border border-border rounded-xl p-4">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 bg-[#072654] rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">
@@ -353,7 +356,6 @@ function ApiGatewayTab({
             />
           </label>
         </div>
-
         <div className="space-y-3">
           <div>
             <label
@@ -399,7 +401,7 @@ function ApiGatewayTab({
             </Button>
             <Button
               size="sm"
-              onClick={handleSave}
+              onClick={() => onSave({ razorpayKey, razorpaySecret })}
               data-ocid="razorpay-save-btn"
             >
               Save
@@ -418,7 +420,6 @@ function ApiGatewayTab({
         </div>
       </div>
 
-      {/* PayU Config */}
       <div className="bg-card border border-border rounded-xl p-4">
         <div className="flex items-center gap-3 mb-3">
           <div className="w-10 h-10 bg-[#FF7E00] rounded-lg flex items-center justify-center text-white font-bold text-sm shadow-sm">
@@ -470,6 +471,7 @@ function ApiGatewayTab({
   );
 }
 
+// ── Main Component ─────────────────────────────────────────────────────────────
 export default function OnlineFees() {
   const { currentUser, currentSession, addNotification } = useApp();
   const [settings, setSettings] = useState<GatewaySettings>(getGatewaySettings);
@@ -489,10 +491,16 @@ export default function OnlineFees() {
 
   const isSuperAdmin = currentUser?.role === "superadmin";
 
+  // Load students from server
   useEffect(() => {
-    setStudents(
-      ls.get<Student[]>("students", []).filter((s) => s.status === "active"),
-    );
+    phpApiService
+      .getStudents({ limit: "1000", status: "active" })
+      .then((r) =>
+        setStudents(
+          (r.data ?? []).map(toStudent).filter((s) => s.status === "active"),
+        ),
+      )
+      .catch(() => setStudents([]));
     setPayments(ls.get<OnlinePayment[]>("online_payments", []));
   }, []);
 
@@ -548,8 +556,12 @@ export default function OnlineFees() {
         receivedByRole: "system",
         sessionId: currentSession.id,
       };
-      const allReceipts = ls.get<FeeReceipt[]>("fee_receipts", []);
-      ls.set("fee_receipts", [...allReceipts, receipt]);
+      // Also save to server
+      phpApiService
+        .collectFees(receipt as unknown as Record<string, unknown>)
+        .catch(() => {
+          /* noop */
+        });
 
       const payment: OnlinePayment = {
         id: generateId(),
@@ -569,13 +581,10 @@ export default function OnlineFees() {
       const updatedPayments = [payment, ...allPayments];
       ls.set("online_payments", updatedPayments);
       setPayments(updatedPayments);
-
       addNotification(
         `Online payment received: ₹${amount} from ${selectedStudent.fullName}`,
         "success",
-        "💳",
       );
-
       setPayStep("success");
     }, 2000);
   }
@@ -619,7 +628,6 @@ export default function OnlineFees() {
         ))}
       </div>
 
-      {/* Tab Content */}
       <div className="bg-card border border-border rounded-xl p-4">
         {activeTab === "upi" && <UpiQrTab students={students} />}
         {activeTab === "api" && (
@@ -657,8 +665,12 @@ export default function OnlineFees() {
                       <th className="px-3 py-2 text-left">Date</th>
                       <th className="px-3 py-2 text-left">Student</th>
                       <th className="px-3 py-2 text-left">Class</th>
-                      <th className="px-3 py-2 text-left">Gateway</th>
-                      <th className="px-3 py-2 text-left">Txn ID</th>
+                      <th className="px-3 py-2 text-left hidden md:table-cell">
+                        Gateway
+                      </th>
+                      <th className="px-3 py-2 text-left hidden lg:table-cell">
+                        Txn ID
+                      </th>
                       <th className="px-3 py-2 text-right">Amount</th>
                       <th className="px-3 py-2 text-center">Status</th>
                     </tr>
@@ -681,8 +693,10 @@ export default function OnlineFees() {
                             {p.class}-{p.section}
                           </Badge>
                         </td>
-                        <td className="px-3 py-2 capitalize">{p.gateway}</td>
-                        <td className="px-3 py-2 font-mono text-xs">
+                        <td className="px-3 py-2 capitalize hidden md:table-cell">
+                          {p.gateway}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs hidden lg:table-cell">
                           {p.txnId}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-green-600">
@@ -712,7 +726,7 @@ export default function OnlineFees() {
         )}
       </div>
 
-      {/* Gateway Config (Super Admin) — GPay toggle */}
+      {/* Gateway visibility (Super Admin) */}
       {isSuperAdmin && (
         <div className="bg-card border border-border rounded-xl p-4">
           <h4 className="font-semibold mb-3 text-sm">
@@ -783,7 +797,7 @@ export default function OnlineFees() {
           }
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-sm" data-ocid="online-pay-dialog">
           <DialogHeader>
             <DialogTitle>
               {payStep === "success"
@@ -854,7 +868,7 @@ export default function OnlineFees() {
                         .replace(/(\..*)\./g, "$1"),
                     )
                   }
-                  className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40"
+                  className="w-full h-9 px-3 text-sm border border-input rounded bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   data-ocid="online-pay-amount"
                 />
               </div>
@@ -924,6 +938,7 @@ export default function OnlineFees() {
                   setSearchQ("");
                   setPayAmount("");
                 }}
+                data-ocid="online-pay-done-btn"
               >
                 Done
               </Button>

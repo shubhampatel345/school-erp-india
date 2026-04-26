@@ -1,11 +1,14 @@
 /**
  * FeesPlan.tsx — Class/section fee plan via phpApiService
  *
- * CRITICAL: Amount inputs use self-contained AmountCell (memo) that owns local
+ * CRITICAL: Amount inputs use self-contained FeeCell (memo) that owns local
  * state and only reports to parent on blur. NO parent re-render on keystroke.
- * type="text" (NOT type="number") to prevent cursor-jump bugs.
+ * type="text" inputMode="numeric" — NEVER type="number" (prevents cursor-jump).
  *
- * All reads/writes go through phpApiService directly.
+ * Each FeeCell:
+ *   - Has its own local useState
+ *   - Parent only gets value on blur
+ *   - Parent never re-renders while typing
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../components/ui/button";
@@ -105,82 +108,83 @@ function classOrderIdx(name: string): number {
   return idx !== -1 ? idx : 99;
 }
 
-// ── AmountCell — self-contained to prevent cursor-jump ────────────────────────
+// ── FeeCell — fully self-contained, NO parent re-render on keystroke ──────────
 
-interface AmountCellProps {
+interface FeeCellProps {
   headingId: string;
   monthShort: string;
   initialValue: string;
   disabled: boolean;
-  onBlurSave: (headingId: string, monthShort: string, value: string) => void;
+  onBlur: (headingId: string, monthShort: string, value: string) => void;
 }
 
-const AmountCell = memo(function AmountCell({
+const FeeCell = memo(function FeeCell({
   headingId,
   monthShort,
   initialValue,
   disabled,
-  onBlurSave,
-}: AmountCellProps) {
-  const [localValue, setLocalValue] = useState(initialValue);
-  const [saved, setSaved] = useState(false);
+  onBlur,
+}: FeeCellProps) {
+  // Local state — NEVER tied to parent. Parent is only updated on blur.
+  const [value, setValue] = useState(initialValue);
   const prevInitRef = useRef(initialValue);
+  const [saved, setSaved] = useState(false);
 
+  // Only re-sync from parent when the key (class+section) changes
   useEffect(() => {
     if (prevInitRef.current !== initialValue) {
       prevInitRef.current = initialValue;
-      setLocalValue(initialValue);
+      setValue(initialValue);
       setSaved(false);
     }
   }, [initialValue]);
-
-  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
-    if (disabled) return;
-    const cleaned = e.target.value
-      .replace(/[^0-9.]/g, "")
-      .replace(/(\..*)\./g, "$1");
-    setLocalValue(cleaned);
-    setSaved(false);
-  }
-
-  function handleBlur() {
-    if (disabled) return;
-    onBlurSave(headingId, monthShort, localValue);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
-  }
-
-  function handleFocus(e: React.FocusEvent<HTMLInputElement>) {
-    if (e.target.value === "0") e.target.select();
-  }
 
   return (
     <div className="relative flex items-center justify-center">
       <input
         type="text"
-        inputMode="decimal"
-        value={localValue}
-        onChange={handleChange}
-        onBlur={handleBlur}
-        onFocus={handleFocus}
+        inputMode="numeric"
+        value={value}
         disabled={disabled}
         placeholder="0"
+        onChange={(e) => {
+          if (disabled) return;
+          // Only update local state — no parent notification on keystroke
+          const cleaned = e.target.value
+            .replace(/[^0-9.]/g, "")
+            .replace(/(\..*)\./g, "$1");
+          setValue(cleaned);
+          setSaved(false);
+        }}
+        onBlur={() => {
+          if (disabled) return;
+          // Parent only learns the value here
+          onBlur(headingId, monthShort, value);
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        }}
+        onFocus={(e) => {
+          if (e.target.value === "0") e.target.select();
+        }}
         className={[
           "h-7 w-16 text-center text-xs px-1 rounded border",
           "bg-background text-foreground",
           "border-input focus:border-primary focus:ring-1 focus:ring-primary/30",
           "outline-none transition-colors",
-          "[appearance:textfield] [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden",
+          // Explicitly hide spinner arrows
+          "[appearance:textfield]",
+          "[&::-webkit-inner-spin-button]:appearance-none",
+          "[&::-webkit-outer-spin-button]:appearance-none",
           disabled
             ? "opacity-50 cursor-not-allowed bg-muted"
-            : "hover:border-primary/40",
+            : "hover:border-primary/50",
         ]
           .filter(Boolean)
           .join(" ")}
         data-ocid="fees-plan.amount-input"
       />
       {saved && (
-        <span className="absolute -top-2 -right-1.5 text-[9px] text-green-600 font-bold pointer-events-none">
+        <span className="absolute -top-2 -right-1.5 text-[9px] text-green-600 font-bold pointer-events-none select-none">
           ✓
         </span>
       )}
@@ -202,7 +206,7 @@ export default function FeesPlanPage() {
   const [savedMsg, setSavedMsg] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
-  // Accumulator for cell values — keyed by headingId+month, no parent re-render
+  // Ref accumulates cell edits — never causes re-render on keystroke
   const pendingAmountsRef = useRef<Record<string, Record<string, string>>>({});
 
   const canEdit = useMemo(
@@ -213,25 +217,26 @@ export default function FeesPlanPage() {
     [currentUser?.role],
   );
 
-  // Fetch headings and classes once on mount
+  // Load headings and classes once
   useEffect(() => {
     setIsLoading(true);
     Promise.all([phpApiService.getFeeHeadings(), phpApiService.getClasses()])
       .then(([h, c]) => {
-        const activeHeadings = h.filter((x) => x.isActive !== false);
-        setHeadings(activeHeadings);
+        setHeadings(h.filter((x) => x.isActive !== false));
         const sorted = [...c].sort(
           (a, b) => classOrderIdx(a.className) - classOrderIdx(b.className),
         );
         setClasses(sorted);
       })
       .catch(() => {
-        /* silently fail */
+        /* noop */
       })
       .finally(() => setIsLoading(false));
   }, []);
 
-  // Fetch fee plan whenever class+section changes
+  // Load plan when class+section changes
+  // headings intentionally excluded — it's stable after first load and including it would
+  // cause infinite re-fetches. The biome ignore comment suppresses the lint warning.
   // biome-ignore lint/correctness/useExhaustiveDependencies: headings is stable after mount
   useEffect(() => {
     if (!selectedClass || !selectedSection) {
@@ -242,7 +247,7 @@ export default function FeesPlanPage() {
       .getFeePlan(selectedClass, selectedSection)
       .then((p) => {
         setPlans(p);
-        // Seed pending amounts from loaded plan
+        // Seed pending amounts from loaded plan so save picks them up immediately
         const vals: Record<string, Record<string, string>> = {};
         for (const heading of headings) {
           vals[heading.id] = {};
@@ -263,15 +268,14 @@ export default function FeesPlanPage() {
           }
         }
         pendingAmountsRef.current = vals;
-        // Force AmountCell re-init via key change (see initialValuesRef below)
-        initialValuesRef.current = {
+        // Bump the init key so FeeCell re-syncs
+        initRef.current = {
           key: `${selectedClass}|${selectedSection}`,
           values: vals,
         };
       })
       .catch(() => setPlans([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClass, selectedSection]);
+  }, [selectedClass, selectedSection]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-select first section when class changes
   const activeSections = useMemo(() => {
@@ -304,18 +308,16 @@ export default function FeesPlanPage() {
     });
   }, [headings, selectedClass]);
 
-  // initialValuesRef — tracks which class+section's values are loaded
-  const initialValuesKey = `${selectedClass}|${selectedSection}`;
-  const initialValuesRef = useRef<{
+  // initRef tracks which class+section's initial values are loaded
+  const initKey = `${selectedClass}|${selectedSection}`;
+  const initRef = useRef<{
     key: string;
     values: Record<string, Record<string, string>>;
-  }>({
-    key: "",
-    values: {},
-  });
+  }>({ key: "", values: {} });
 
-  if (initialValuesRef.current.key !== initialValuesKey) {
-    // Seed from plans on first render for this class+section
+  // Recompute initRef whenever the key, plans, or active headings change.
+  // Wrapped in useEffect so we never mutate a ref during render.
+  useEffect(() => {
     const vals: Record<string, Record<string, string>> = {};
     for (const heading of activeHeadings) {
       vals[heading.id] = {};
@@ -335,18 +337,20 @@ export default function FeesPlanPage() {
         vals[heading.id][short] = val;
       }
     }
-    initialValuesRef.current = { key: initialValuesKey, values: vals };
+    initRef.current = { key: initKey, values: vals };
     pendingAmountsRef.current = JSON.parse(JSON.stringify(vals)) as Record<
       string,
       Record<string, string>
     >;
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initKey, plans, activeHeadings]);
 
-  // Stable blur handler — empty deps = stable ref = AmountCell never remounts
+  // Stable blur handler — empty dep array ensures FeeCell never remounts
   const handleCellBlur = useCallback(
     (headingId: string, monthShort: string, value: string) => {
-      if (!pendingAmountsRef.current[headingId])
+      if (!pendingAmountsRef.current[headingId]) {
         pendingAmountsRef.current[headingId] = {};
+      }
       pendingAmountsRef.current[headingId][monthShort] = value;
     },
     [],
@@ -380,7 +384,6 @@ export default function FeesPlanPage() {
         items,
         sessionId: currentSession?.id,
       });
-      // Reload plans from server to confirm save
       const updated = await phpApiService.getFeePlan(
         selectedClass,
         selectedSection,
@@ -404,18 +407,18 @@ export default function FeesPlanPage() {
 
   async function copyToAllSections() {
     if (!selectedClass || !selectedSection || !canEdit) return;
-    const otherSections = activeSections.filter((s) => s !== selectedSection);
-    if (otherSections.length === 0) return;
+    const others = activeSections.filter((s) => s !== selectedSection);
+    if (others.length === 0) return;
     if (
       !confirm(
-        `Copy amounts from Section ${selectedSection} to: ${otherSections.join(", ")}?`,
+        `Copy amounts from Section ${selectedSection} to: ${others.join(", ")}?`,
       )
     )
       return;
 
     setSaving(true);
     try {
-      for (const section of otherSections) {
+      for (const section of others) {
         const items: Array<{
           headingId: string;
           amounts: Record<string, number>;
@@ -475,7 +478,8 @@ export default function FeesPlanPage() {
         <div>
           <h3 className="font-semibold text-foreground">Fees Plan</h3>
           <p className="text-sm text-muted-foreground">
-            Set month-wise fee amounts per class, section, and heading
+            Set month-wise fee amounts per class and section. Click a cell, type
+            the amount, then Tab/click away.
           </p>
         </div>
       </div>
@@ -504,7 +508,11 @@ export default function FeesPlanPage() {
                   key={cls}
                   type="button"
                   onClick={() => setSelectedClass(cls)}
-                  className={`px-3 py-1.5 text-sm rounded-lg border transition-colors font-medium ${selectedClass === cls ? "bg-primary text-primary-foreground border-primary shadow-sm" : "border-border bg-card hover:bg-muted/50"}`}
+                  className={`px-3 py-1.5 text-sm rounded-lg border transition-colors font-medium ${
+                    selectedClass === cls
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "border-border bg-card hover:bg-muted/50"
+                  }`}
                   data-ocid="fees-plan.class-btn"
                 >
                   {cls}
@@ -524,7 +532,11 @@ export default function FeesPlanPage() {
                     key={sec}
                     type="button"
                     onClick={() => setSelectedSection(sec)}
-                    className={`px-4 py-1.5 text-sm rounded-lg border transition-colors font-medium ${selectedSection === sec ? "bg-primary/10 text-primary border-primary/30" : "border-border bg-card hover:bg-muted/50"}`}
+                    className={`px-4 py-1.5 text-sm rounded-lg border transition-colors font-medium ${
+                      selectedSection === sec
+                        ? "bg-primary/10 text-primary border-primary/30"
+                        : "border-border bg-card hover:bg-muted/50"
+                    }`}
                     data-ocid="fees-plan.section-btn"
                   >
                     {selectedClass} - {sec}
@@ -537,12 +549,11 @@ export default function FeesPlanPage() {
                   <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-2 flex-wrap">
                     <div>
                       <h4 className="font-semibold text-foreground">
-                        Class {selectedClass} — Section {selectedSection} —
-                        Monthly Fee Plan
+                        {selectedClass} — {selectedSection} — Monthly Fee Plan
                       </h4>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Click any cell, type the amount, then press Tab/Enter or
-                        click away.
+                        Click any cell and type the amount, then press Tab or
+                        click away to save.
                         {savedMsg && (
                           <span className="ml-2 text-green-600 font-semibold">
                             {savedMsg}
@@ -586,7 +597,7 @@ export default function FeesPlanPage() {
                             return (
                               <th
                                 key={m}
-                                className="px-2 py-2.5 text-center font-semibold min-w-[72px]"
+                                className="px-1 py-2.5 text-center font-semibold min-w-[72px]"
                               >
                                 {short}
                               </th>
@@ -600,7 +611,7 @@ export default function FeesPlanPage() {
                       <tbody>
                         {activeHeadings.map((heading) => {
                           const initVals =
-                            initialValuesRef.current.values[heading.id] ?? {};
+                            initRef.current.values[heading.id] ?? {};
                           const yearTotal = Object.values(initVals).reduce(
                             (s, v) => s + (Number(v) || 0),
                             0,
@@ -618,7 +629,8 @@ export default function FeesPlanPage() {
                                   {heading.name}
                                 </div>
                                 <div className="text-[10px] text-muted-foreground">
-                                  {months.length} months
+                                  {months.length} month
+                                  {months.length !== 1 ? "s" : ""}
                                 </div>
                               </td>
                               {MONTHS.map((m) => {
@@ -635,12 +647,12 @@ export default function FeesPlanPage() {
                                         <span className="text-muted-foreground text-[10px]">
                                           ₹
                                         </span>
-                                        <AmountCell
+                                        <FeeCell
                                           headingId={heading.id}
                                           monthShort={short}
                                           initialValue={initVals[short] ?? ""}
                                           disabled={isReadOnly || !canEdit}
-                                          onBlurSave={handleCellBlur}
+                                          onBlur={handleCellBlur}
                                         />
                                       </div>
                                     ) : (

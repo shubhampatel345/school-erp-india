@@ -34,7 +34,6 @@ import StudentDashboard from "./pages/dashboards/StudentDashboard";
 import SuperAdminDashboard from "./pages/dashboards/SuperAdminDashboard";
 import TeacherDashboard from "./pages/dashboards/TeacherDashboard";
 
-/** Return the role-specific landing page key for a given role */
 function getRoleDashboard(role: string): string {
   switch (role) {
     case "superadmin":
@@ -59,7 +58,6 @@ function getRoleDashboard(role: string): string {
 function AppRoutes() {
   const { currentUser } = useApp();
 
-  // After login, start on the role-specific dashboard
   const [activePage, setActivePage] = useState(() => {
     const stored = sessionStorage.getItem("shubh_current_user");
     if (stored) {
@@ -73,9 +71,9 @@ function AppRoutes() {
     return "dashboard";
   });
 
+  // Not logged in — show login screen (no Layout, no sidebar)
   if (!currentUser) return <Login />;
 
-  // When currentUser changes (after login), navigate to role dashboard
   const effectivePage =
     activePage === "dashboard"
       ? getRoleDashboard(currentUser.role)
@@ -99,8 +97,6 @@ function AppRoutes() {
       return <StudentDashboard onNavigate={navigate} />;
     if (effectivePage === "dashboard/driver")
       return <DriverDashboard onNavigate={navigate} />;
-
-    // Generic dashboard fallback (also used by receptionist/librarian)
     if (effectivePage === "dashboard" || effectivePage.startsWith("dashboard"))
       return <Dashboard onNavigate={navigate} />;
 

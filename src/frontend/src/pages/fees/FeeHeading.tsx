@@ -1,8 +1,8 @@
 /**
- * FeeHeading.tsx — Fee Headings CRUD via phpApiService (direct server calls)
+ * FeeHeading.tsx — Fee Headings CRUD via phpApiService
  *
  * All reads/writes go through phpApiService directly.
- * Wait for HTTP 200 before showing success.
+ * Up/Down buttons for display order reordering.
  * No canister, no IndexedDB, no local cache.
  */
 import { useCallback, useEffect, useState } from "react";
@@ -85,6 +85,7 @@ const HEAD_TYPE_LABELS: Record<string, string> = {
   transport: "Transport",
   other: "Other",
 };
+
 const HEAD_TYPE_COLORS: Record<string, string> = {
   tuition: "bg-blue-100 text-blue-700 border-blue-200",
   transport: "bg-orange-100 text-orange-700 border-orange-200",
@@ -109,6 +110,7 @@ export default function FeeHeadingPage() {
   const [selectedMonths, setSelectedMonths] = useState<string[]>([...MONTHS]);
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [reordering, setReordering] = useState(false);
 
   const canEdit =
     currentUser?.role === "superadmin" ||
@@ -159,7 +161,7 @@ export default function FeeHeadingPage() {
         display_order: Number(displayOrder) || headings.length + 1,
         isActive,
         is_active: isActive ? 1 : 0,
-        months: months,
+        months,
         applicableClasses:
           selectedClasses.length > 0 ? JSON.stringify(selectedClasses) : null,
         applicable_classes:
@@ -187,6 +189,54 @@ export default function FeeHeadingPage() {
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleActive(h: FeeHeading) {
+    try {
+      await phpApiService.post("fees/headings/update", {
+        id: h.id,
+        isActive: !h.isActive,
+        is_active: !h.isActive ? 1 : 0,
+      });
+      addNotification(
+        `"${h.name}" ${!h.isActive ? "activated" : "deactivated"}`,
+        "info",
+      );
+      await fetchHeadings();
+    } catch (err) {
+      addNotification(
+        `Update failed: ${err instanceof Error ? err.message : "Unknown"}`,
+        "error",
+      );
+    }
+  }
+
+  async function moveOrder(h: FeeHeading, direction: "up" | "down") {
+    if (reordering) return;
+    const idx = headings.findIndex((x) => x.id === h.id);
+    const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+    if (swapIdx < 0 || swapIdx >= headings.length) return;
+    const swap = headings[swapIdx];
+    setReordering(true);
+    try {
+      await Promise.all([
+        phpApiService.post("fees/headings/update", {
+          id: h.id,
+          displayOrder: swap.displayOrder ?? swapIdx + 1,
+          display_order: swap.displayOrder ?? swapIdx + 1,
+        }),
+        phpApiService.post("fees/headings/update", {
+          id: swap.id,
+          displayOrder: h.displayOrder ?? idx + 1,
+          display_order: h.displayOrder ?? idx + 1,
+        }),
+      ]);
+      await fetchHeadings();
+    } catch {
+      /* noop */
+    } finally {
+      setReordering(false);
     }
   }
 
@@ -358,28 +408,64 @@ export default function FeeHeadingPage() {
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
-                <th className="px-4 py-3 text-left font-semibold text-muted-foreground w-10">
+                <th className="px-3 py-3 text-left font-semibold text-muted-foreground w-8">
                   #
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">
                   Heading Name
                 </th>
                 <th className="px-4 py-3 text-left font-semibold">Type</th>
-                <th className="px-4 py-3 text-left font-semibold">Account</th>
-                <th className="px-4 py-3 text-left font-semibold">Months</th>
+                <th className="px-4 py-3 text-left font-semibold hidden sm:table-cell">
+                  Account
+                </th>
+                <th className="px-4 py-3 text-left font-semibold hidden md:table-cell">
+                  Months
+                </th>
                 <th className="px-4 py-3 text-center font-semibold">Active</th>
-                <th className="px-4 py-3 text-center font-semibold">Actions</th>
+                {canEdit && !isReadOnly && (
+                  <th className="px-4 py-3 text-center font-semibold">
+                    Actions
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody>
               {headings.map((h, idx) => (
                 <tr
                   key={h.id}
-                  className={`border-t border-border hover:bg-muted/20 ${h.isActive === false ? "opacity-50" : ""}`}
+                  className={`border-t border-border hover:bg-muted/20 transition-colors ${h.isActive === false ? "opacity-60" : ""}`}
                   data-ocid={`fee-heading.item.${idx + 1}`}
                 >
-                  <td className="px-4 py-3 text-muted-foreground text-xs">
-                    {h.displayOrder ?? idx + 1}
+                  <td className="px-3 py-3">
+                    {canEdit && !isReadOnly ? (
+                      <div className="flex flex-col gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => void moveOrder(h, "up")}
+                          disabled={idx === 0 || reordering}
+                          className="text-[9px] text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none"
+                          aria-label="Move up"
+                        >
+                          ▲
+                        </button>
+                        <span className="text-[10px] text-muted-foreground text-center">
+                          {idx + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => void moveOrder(h, "down")}
+                          disabled={idx === headings.length - 1 || reordering}
+                          className="text-[9px] text-muted-foreground hover:text-foreground disabled:opacity-20 leading-none"
+                          aria-label="Move down"
+                        >
+                          ▼
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">
+                        {idx + 1}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 font-medium">{h.name}</td>
                   <td className="px-4 py-3">
@@ -389,10 +475,10 @@ export default function FeeHeadingPage() {
                       {HEAD_TYPE_LABELS[h.headType ?? "other"]}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-muted-foreground">
+                  <td className="px-4 py-3 text-sm text-muted-foreground hidden sm:table-cell">
                     {h.accountName || "Main Account"}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 hidden md:table-cell">
                     <div className="flex flex-wrap gap-1">
                       {safeArray<string>(
                         h.months as string[] | string | undefined,
@@ -404,7 +490,7 @@ export default function FeeHeadingPage() {
                         safeArray<string>(
                           h.months as string[] | string | undefined,
                         )
-                          .slice(0, 6)
+                          .slice(0, 4)
                           .map((m) => (
                             <Badge
                               key={m}
@@ -417,7 +503,7 @@ export default function FeeHeadingPage() {
                       )}
                       {safeArray<string>(
                         h.months as string[] | string | undefined,
-                      ).length > 6 &&
+                      ).length > 4 &&
                         safeArray<string>(
                           h.months as string[] | string | undefined,
                         ).length < 12 && (
@@ -425,20 +511,35 @@ export default function FeeHeadingPage() {
                             +
                             {safeArray<string>(
                               h.months as string[] | string | undefined,
-                            ).length - 6}
+                            ).length - 4}
                           </Badge>
                         )}
                     </div>
                   </td>
                   <td className="px-4 py-3 text-center">
-                    <span
-                      className={`text-xs font-semibold ${h.isActive !== false ? "text-green-600" : "text-muted-foreground"}`}
-                    >
-                      {h.isActive !== false ? "✓ Yes" : "No"}
-                    </span>
+                    {canEdit && !isReadOnly ? (
+                      <button
+                        type="button"
+                        onClick={() => void toggleActive(h)}
+                        className={`text-xs font-semibold px-2 py-1 rounded-full transition-colors ${
+                          h.isActive !== false
+                            ? "text-green-700 bg-green-50 hover:bg-green-100"
+                            : "text-muted-foreground bg-muted/50 hover:bg-muted"
+                        }`}
+                        data-ocid={`fee-heading.active-toggle.${idx + 1}`}
+                      >
+                        {h.isActive !== false ? "✓ Active" : "Inactive"}
+                      </button>
+                    ) : (
+                      <span
+                        className={`text-xs font-semibold ${h.isActive !== false ? "text-green-600" : "text-muted-foreground"}`}
+                      >
+                        {h.isActive !== false ? "✓ Yes" : "No"}
+                      </span>
+                    )}
                   </td>
-                  <td className="px-4 py-3 text-center">
-                    {canEdit && !isReadOnly && (
+                  {canEdit && !isReadOnly && (
+                    <td className="px-4 py-3 text-center">
                       <div className="flex gap-2 justify-center">
                         <Button
                           size="sm"
@@ -458,8 +559,8 @@ export default function FeeHeadingPage() {
                           Delete
                         </Button>
                       </div>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

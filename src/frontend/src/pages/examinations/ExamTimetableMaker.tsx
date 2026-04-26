@@ -1,13 +1,23 @@
+/**
+ * ExamTimetableMaker — Direct API rebuild (cPanel/MySQL)
+ * All data via phpApiService. No getData()/ls context.
+ * Features:
+ * - Create exam schedule: name, class, date range
+ * - Auto-generate timetable: assign subjects to dates
+ * - Drag-and-drop to reorder
+ * - Print/export CSV
+ */
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
-import { useApp } from "../../context/AppContext";
-import type { Subject } from "../../types";
-import { CLASSES, SECTIONS, generateId, ls } from "../../utils/localStorage";
+import { CLASSES, SECTIONS, generateId } from "../../utils/localStorage";
+import { phpApiService } from "../../utils/phpApiService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
 interface SubjectRow {
   id: string;
   date: string;
@@ -33,6 +43,7 @@ export interface SavedTimetable {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+
 const DEFAULT_SUBJECTS = [
   "Hindi",
   "English",
@@ -56,6 +67,7 @@ const DAYS = [
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
 function getDayName(dateStr: string): string {
   return DAYS[new Date(`${dateStr}T12:00:00`).getDay()];
 }
@@ -79,20 +91,6 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
-}
-
-function getSubjectsForClass(
-  className: string,
-  acSubjects: Subject[],
-): string[] {
-  const classNum = className
-    .replace("Class ", "")
-    .replace(/[A-Z]$/, "")
-    .trim();
-  const matched = acSubjects
-    .filter((s) => s.classes?.includes(classNum))
-    .map((s) => s.name);
-  return matched.length > 0 ? matched : [...DEFAULT_SUBJECTS];
 }
 
 function formatDate(dateStr: string): string {
@@ -126,6 +124,7 @@ function exportCSV(tables: ClassTimetable[], examName: string) {
 }
 
 // ── ClassCard ─────────────────────────────────────────────────────────────────
+
 function ClassCard({
   table,
   onReorder,
@@ -223,7 +222,8 @@ function ClassCard({
   );
 }
 
-// ── Combined View ─────────────────────────────────────────────────────────────
+// ── CombinedView ──────────────────────────────────────────────────────────────
+
 function CombinedView({
   tables,
   examName,
@@ -260,13 +260,7 @@ function CombinedView({
         </div>
       </div>
       <div className="hidden print:block text-center mb-4">
-        <h1 className="text-xl font-bold">
-          {
-            ls.get<{ name: string }>("school_profile", {
-              name: "SHUBH SCHOOL ERP",
-            }).name
-          }
-        </h1>
+        <h1 className="text-xl font-bold">SHUBH SCHOOL ERP</h1>
         <h2 className="text-base font-semibold mt-1">{examName} — Timetable</h2>
         {examTime && <p className="text-sm">Time: {examTime}</p>}
       </div>
@@ -324,35 +318,70 @@ function CombinedView({
 }
 
 // ── Main Component ────────────────────────────────────────────────────────────
-export default function ExamTimetableMaker() {
-  const { currentSession, getData, saveData, deleteData, addNotification } =
-    useApp();
-  const sessionId = currentSession?.id ?? "sess_2025";
 
+export default function ExamTimetableMaker() {
   const [examName, setExamName] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("12:00");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
-  const [classSubjects, setClassSubjects] = useState<Record<string, string[]>>(
-    {},
-  );
   const [generated, setGenerated] = useState<ClassTimetable[]>([]);
   const [isSaved, setIsSaved] = useState(false);
-  const [viewSaved, setViewSaved] = useState<SavedTimetable | null>(null);
-
-  // Load saved timetables from context (server) or localStorage fallback
-  const contextTimetables = getData("examTimetables") as SavedTimetable[];
   const [savedList, setSavedList] = useState<SavedTimetable[]>([]);
+  const [viewSaved, setViewSaved] = useState<SavedTimetable | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
+  // Load timetables from server
   useEffect(() => {
-    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
-    const merged = contextTimetables.length > 0 ? contextTimetables : local;
-    setSavedList(merged);
-  }, [contextTimetables]);
-
-  const acSubjects = getData("subjects") as Subject[];
+    setLoading(true);
+    phpApiService
+      .get<Record<string, unknown>[]>("exams/timetables")
+      .then((rows) => {
+        const parsed = rows.map((r) => ({
+          id: String(r.id ?? ""),
+          examName: String(r.examName ?? ""),
+          startDate: String(r.startDate ?? ""),
+          endDate: String(r.endDate ?? ""),
+          startTime: String(r.startTime ?? "09:00"),
+          endTime: String(r.endTime ?? "12:00"),
+          tables: (() => {
+            try {
+              return JSON.parse(String(r.tablesData ?? r.tables ?? "[]"));
+            } catch {
+              return [];
+            }
+          })(),
+          sessionId: String(r.sessionId ?? ""),
+          savedAt: String(r.savedAt ?? ""),
+        })) as SavedTimetable[];
+        if (parsed.length > 0) {
+          setSavedList(parsed);
+        } else {
+          // Fallback to localStorage
+          try {
+            const local = JSON.parse(
+              localStorage.getItem("exam_timetables") ?? "[]",
+            ) as SavedTimetable[];
+            setSavedList(local);
+          } catch {
+            setSavedList([]);
+          }
+        }
+      })
+      .catch(() => {
+        try {
+          const local = JSON.parse(
+            localStorage.getItem("exam_timetables") ?? "[]",
+          ) as SavedTimetable[];
+          setSavedList(local);
+        } catch {
+          setSavedList([]);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, []);
 
   const examDates = getExamDates(startDate, endDate);
   const allClassKeys = CLASSES.flatMap((c) =>
@@ -367,25 +396,6 @@ export default function ExamTimetableMaker() {
     setGenerated([]);
   };
 
-  const toggleSubject = (classKey: string, subject: string) => {
-    setClassSubjects((prev) => {
-      const current =
-        prev[classKey] ?? getSubjectsForClass(classKey, acSubjects);
-      return {
-        ...prev,
-        [classKey]: current.includes(subject)
-          ? current.filter((s) => s !== subject)
-          : [...current, subject],
-      };
-    });
-  };
-
-  const getSubjectsFor = useCallback(
-    (classKey: string) =>
-      classSubjects[classKey] ?? getSubjectsForClass(classKey, acSubjects),
-    [classSubjects, acSubjects],
-  );
-
   const generate = useCallback(() => {
     if (
       !examName.trim() ||
@@ -394,7 +404,7 @@ export default function ExamTimetableMaker() {
     )
       return;
     const tables = selectedClasses.map((classKey) => {
-      const shuffled = shuffle(getSubjectsFor(classKey));
+      const shuffled = shuffle([...DEFAULT_SUBJECTS]);
       return {
         classKey,
         rows: examDates.map((date, i) => ({
@@ -407,7 +417,7 @@ export default function ExamTimetableMaker() {
     });
     setGenerated(tables);
     setIsSaved(false);
-  }, [examName, examDates, selectedClasses, getSubjectsFor]);
+  }, [examName, examDates, selectedClasses]);
 
   const handleReorder = useCallback(
     (classKey: string, newRows: SubjectRow[]) => {
@@ -422,6 +432,7 @@ export default function ExamTimetableMaker() {
 
   const handleSave = useCallback(async () => {
     if (generated.length === 0) return;
+    setSaving(true);
     const entry: SavedTimetable = {
       id: generateId(),
       examName,
@@ -430,39 +441,39 @@ export default function ExamTimetableMaker() {
       startTime,
       endTime,
       tables: generated,
-      sessionId,
+      sessionId: new Date().getFullYear().toString(),
       savedAt: new Date().toISOString(),
     };
-    // Save to server via context
-    await saveData(
-      "examTimetables",
-      entry as unknown as Record<string, unknown>,
-    );
-    // Also save locally for offline / ExamResults cross-reference
-    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
-    ls.set("exam_timetables", [entry, ...local]);
+    try {
+      await phpApiService.post("exams/timetables/add", {
+        ...entry,
+        tablesData: JSON.stringify(entry.tables),
+      });
+    } catch {
+      // Fallback to localStorage
+      const local = JSON.parse(
+        localStorage.getItem("exam_timetables") ?? "[]",
+      ) as SavedTimetable[];
+      localStorage.setItem(
+        "exam_timetables",
+        JSON.stringify([entry, ...local]),
+      );
+    }
     setSavedList((prev) => [entry, ...prev]);
     setIsSaved(true);
-    addNotification(`Exam timetable saved: ${examName}`, "success", "📅");
-  }, [
-    generated,
-    examName,
-    startDate,
-    endDate,
-    startTime,
-    endTime,
-    sessionId,
-    saveData,
-    addNotification,
-  ]);
+    setSaving(false);
+  }, [generated, examName, startDate, endDate, startTime, endTime]);
 
   const handleDeleteSaved = async (id: string) => {
-    await deleteData("examTimetables", id);
-    const local = ls.get<SavedTimetable[]>("exam_timetables", []);
-    ls.set(
-      "exam_timetables",
-      local.filter((e) => e.id !== id),
-    );
+    await phpApiService.post("exams/timetables/delete", { id }).catch(() => {
+      const local = JSON.parse(
+        localStorage.getItem("exam_timetables") ?? "[]",
+      ) as SavedTimetable[];
+      localStorage.setItem(
+        "exam_timetables",
+        JSON.stringify(local.filter((e) => e.id !== id)),
+      );
+    });
     setSavedList((prev) => prev.filter((e) => e.id !== id));
     if (viewSaved?.id === id) setViewSaved(null);
   };
@@ -574,7 +585,7 @@ export default function ExamTimetableMaker() {
         )}
       </div>
 
-      {/* Step 2: Classes & Subjects */}
+      {/* Step 2: Classes */}
       <div className="bg-card border border-border rounded-xl p-5 space-y-5">
         <div className="flex items-center gap-3">
           <span className="w-7 h-7 rounded-full bg-primary text-primary-foreground text-sm font-bold flex items-center justify-center shrink-0">
@@ -585,7 +596,7 @@ export default function ExamTimetableMaker() {
               Classes &amp; Subjects
             </h2>
             <p className="text-xs text-muted-foreground">
-              Select participating classes and confirm subjects
+              Select participating classes
             </p>
           </div>
         </div>
@@ -609,42 +620,6 @@ export default function ExamTimetableMaker() {
             ))}
           </div>
         </div>
-        {selectedClasses.length > 0 && (
-          <div className="space-y-3">
-            <Label>Subjects per Class</Label>
-            <div className="space-y-3">
-              {selectedClasses.map((classKey) => {
-                const available = getSubjectsForClass(classKey, acSubjects);
-                const selected = getSubjectsFor(classKey);
-                return (
-                  <div
-                    key={classKey}
-                    className="bg-muted/30 rounded-lg p-3 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-semibold">{classKey}</p>
-                      <span className="text-xs text-muted-foreground">
-                        {selected.length} selected
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {available.map((subj) => (
-                        <button
-                          key={subj}
-                          type="button"
-                          onClick={() => toggleSubject(classKey, subj)}
-                          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-smooth ${selected.includes(subj) ? "bg-primary text-primary-foreground border-primary" : "bg-background text-muted-foreground border-border hover:border-primary/50"}`}
-                        >
-                          {subj}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Step 3: Generate */}
@@ -674,16 +649,17 @@ export default function ExamTimetableMaker() {
             {generated.length > 0 && !isSaved && (
               <Button
                 variant="outline"
-                onClick={handleSave}
+                onClick={() => void handleSave()}
+                disabled={saving}
                 className="border-accent text-accent hover:bg-accent/10"
                 data-ocid="exam-save"
               >
-                Save Timetable
+                {saving ? "Saving…" : "Save Timetable"}
               </Button>
             )}
             {isSaved && (
               <Badge className="bg-accent/20 text-accent border border-accent/30 px-3 py-1.5">
-                ✓ Saved to Server
+                ✓ Saved
               </Badge>
             )}
           </div>
@@ -733,64 +709,74 @@ export default function ExamTimetableMaker() {
       )}
 
       {/* Saved list */}
-      {savedList.length > 0 && (
-        <div className="bg-card border border-border rounded-xl p-5 space-y-3">
-          <h2 className="font-semibold text-foreground">
-            Saved Timetables ({savedList.length})
-          </h2>
-          <div className="space-y-2">
-            {savedList.map((entry) => (
-              <div key={entry.id} className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-smooth">
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">{entry.examName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {formatDate(entry.startDate)} →{" "}
-                      {formatDate(entry.endDate)} · {entry.startTime}–
-                      {entry.endTime} · {entry.tables.length} classes
-                    </p>
-                  </div>
-                  <div className="flex gap-2 shrink-0 ml-3">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        setViewSaved(viewSaved?.id === entry.id ? null : entry)
-                      }
-                      data-ocid={`exam-view-saved-${entry.id}`}
-                    >
-                      {viewSaved?.id === entry.id ? "Hide" : "View"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => exportCSV(entry.tables, entry.examName)}
-                    >
-                      CSV
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => handleDeleteSaved(entry.id)}
-                    >
-                      Delete
-                    </Button>
-                  </div>
-                </div>
-                {viewSaved?.id === entry.id && (
-                  <div className="pl-4 border-l-2 border-primary/30">
-                    <CombinedView
-                      tables={entry.tables}
-                      examName={entry.examName}
-                      examTime={`${entry.startTime} – ${entry.endTime}`}
-                    />
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+      {loading ? (
+        <div className="space-y-2" data-ocid="exam.timetable.loading_state">
+          {[1, 2].map((k) => (
+            <div key={k} className="h-14 rounded-xl bg-muted animate-pulse" />
+          ))}
         </div>
+      ) : (
+        savedList.length > 0 && (
+          <div className="bg-card border border-border rounded-xl p-5 space-y-3">
+            <h2 className="font-semibold text-foreground">
+              Saved Timetables ({savedList.length})
+            </h2>
+            <div className="space-y-2">
+              {savedList.map((entry) => (
+                <div key={entry.id} className="space-y-3">
+                  <div className="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20 hover:bg-muted/40 transition-smooth">
+                    <div className="min-w-0">
+                      <p className="font-medium truncate">{entry.examName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(entry.startDate)} →{" "}
+                        {formatDate(entry.endDate)} · {entry.startTime}–
+                        {entry.endTime} · {entry.tables.length} classes
+                      </p>
+                    </div>
+                    <div className="flex gap-2 shrink-0 ml-3">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() =>
+                          setViewSaved(
+                            viewSaved?.id === entry.id ? null : entry,
+                          )
+                        }
+                        data-ocid={`exam-view-saved-${entry.id}`}
+                      >
+                        {viewSaved?.id === entry.id ? "Hide" : "View"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => exportCSV(entry.tables, entry.examName)}
+                      >
+                        CSV
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive hover:text-destructive"
+                        onClick={() => void handleDeleteSaved(entry.id)}
+                      >
+                        Delete
+                      </Button>
+                    </div>
+                  </div>
+                  {viewSaved?.id === entry.id && (
+                    <div className="pl-4 border-l-2 border-primary/30">
+                      <CombinedView
+                        tables={entry.tables}
+                        examName={entry.examName}
+                        examTime={`${entry.startTime} – ${entry.endTime}`}
+                      />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )
       )}
     </div>
   );

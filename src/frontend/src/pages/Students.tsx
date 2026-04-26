@@ -1,9 +1,8 @@
 /**
- * Students.tsx — Direct PHP/MySQL (no canister, no IndexedDB)
+ * Students.tsx — PHP/MySQL direct (no IndexedDB, no offline sync)
  *
- * All reads/writes go through phpApiService directly.
- * Data is fetched from server on mount and after every mutation.
- * No localFirstSync, no syncEngine, no pending queues.
+ * Fetch-first: all reads come from the server. Mutations wait for server
+ * confirmation before showing success and refreshing the list.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertCircle,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -30,9 +30,9 @@ import {
   ChevronRight,
   Columns3,
   Download,
-  List,
   MessageCircle,
   Plus,
+  RefreshCw,
   Search,
   Trash2,
   Upload,
@@ -40,41 +40,68 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 import { SkeletonTableRows } from "../components/SkeletonComponents";
 import StudentDetailModal from "../components/StudentDetailModal";
 import StudentForm from "../components/StudentForm";
 import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
+import { CLASSES_ORDER } from "../types";
 import { ls } from "../utils/localStorage";
 import phpApiService, { type StudentRecord } from "../utils/phpApiService";
 
 const ITEMS_PER_PAGE = 50;
-
-const CLASS_ORDER = [
-  "Nursery",
-  "LKG",
-  "UKG",
-  "Class 1",
-  "Class 2",
-  "Class 3",
-  "Class 4",
-  "Class 5",
-  "Class 6",
-  "Class 7",
-  "Class 8",
-  "Class 9",
-  "Class 10",
-  "Class 11",
-  "Class 12",
-];
+const LS_COL_KEY = "student_grid_columns_v2";
 
 function classOrder(name: string): number {
-  let idx = CLASS_ORDER.indexOf(name);
+  let idx = CLASSES_ORDER.indexOf(name);
   if (idx !== -1) return idx;
-  idx = CLASS_ORDER.indexOf(`Class ${name}`);
-  if (idx !== -1) return idx;
-  return 99;
+  idx = CLASSES_ORDER.indexOf(`Class ${name}`);
+  return idx !== -1 ? idx : 99;
+}
+
+/** Map raw server record → Student shape */
+function toStudent(r: StudentRecord): Student {
+  const s = r as unknown as Record<string, unknown>;
+  return {
+    id: r.id,
+    admNo: r.admNo ?? (s.adm_no as string) ?? "",
+    fullName: r.fullName ?? (s.full_name as string) ?? "",
+    fatherName: (s.fatherName as string) ?? (s.father_name as string) ?? "",
+    motherName: (s.motherName as string) ?? (s.mother_name as string) ?? "",
+    fatherMobile:
+      r.fatherMobile ?? (s.father_mobile as string) ?? r.fatherMobile ?? "",
+    motherMobile:
+      (s.motherMobile as string) ?? (s.mother_mobile as string) ?? "",
+    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
+    mobile: r.mobile ?? "",
+    dob: r.dob ?? "",
+    gender: (r.gender as Student["gender"]) ?? "Male",
+    class: r.class ?? "",
+    section: r.section ?? "",
+    rollNo: (s.rollNo as string) ?? "",
+    category: (s.category as string) ?? "",
+    religion: (s.religion as string) ?? "",
+    bloodGroup: (s.bloodGroup as string) ?? "",
+    address: r.address ?? "",
+    village: (s.village as string) ?? "",
+    aadhaarNo: (s.aadhaarNo as string) ?? (s.aadhaar_no as string) ?? "",
+    srNo: (s.srNo as string) ?? (s.sr_no as string) ?? "",
+    penNo: (s.penNo as string) ?? (s.pen_no as string) ?? "",
+    apaarNo: (s.apaarNo as string) ?? (s.apaar_no as string) ?? "",
+    previousSchool:
+      (s.previousSchool as string) ?? (s.previous_school as string) ?? "",
+    admissionDate:
+      (s.admissionDate as string) ?? (s.admission_date as string) ?? "",
+    photo: (s.photo as string) ?? "",
+    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
+    sessionId: r.sessionId ?? "",
+    transportRoute: (s.transportRoute as string) ?? "",
+    transportBusNo: (s.transportBusNo as string) ?? "",
+    transportPickup: (s.transportPickup as string) ?? "",
+    createdAt: r.createdAt ?? "",
+  } as Student;
 }
 
 interface ColDef {
@@ -93,7 +120,7 @@ const ALL_COLUMNS: ColDef[] = [
     width: 80,
     sortable: true,
   },
-  { key: "photo", label: "Photo", defaultVisible: true, width: 50 },
+  { key: "photo", label: "Photo", defaultVisible: true, width: 44 },
   {
     key: "fullName",
     label: "Full Name",
@@ -105,20 +132,25 @@ const ALL_COLUMNS: ColDef[] = [
     key: "class",
     label: "Class",
     defaultVisible: true,
-    width: 60,
+    width: 70,
     sortable: true,
   },
-  { key: "section", label: "Section", defaultVisible: true, width: 60 },
+  { key: "section", label: "Section", defaultVisible: true, width: 70 },
   { key: "gender", label: "Gender", defaultVisible: false, width: 80 },
   { key: "dob", label: "DOB", defaultVisible: false, width: 100 },
   { key: "fatherName", label: "Father Name", defaultVisible: true, width: 140 },
   {
     key: "fatherMobile",
     label: "Father Mobile",
-    defaultVisible: false,
+    defaultVisible: true,
     width: 120,
   },
-  { key: "motherName", label: "Mother Name", defaultVisible: true, width: 140 },
+  {
+    key: "motherName",
+    label: "Mother Name",
+    defaultVisible: false,
+    width: 140,
+  },
   {
     key: "motherMobile",
     label: "Mother Mobile",
@@ -132,111 +164,54 @@ const ALL_COLUMNS: ColDef[] = [
   { key: "aadhaarNo", label: "Aadhaar No.", defaultVisible: false, width: 130 },
   { key: "srNo", label: "S.R. No.", defaultVisible: false, width: 100 },
   { key: "penNo", label: "Pen No.", defaultVisible: false, width: 100 },
-  { key: "apaarNo", label: "Apaar No.", defaultVisible: false, width: 100 },
+  { key: "apaarNo", label: "APAAR No.", defaultVisible: false, width: 100 },
   {
     key: "previousSchool",
-    label: "Previous School",
-    defaultVisible: true,
+    label: "Prev. School",
+    defaultVisible: false,
     width: 160,
   },
   {
     key: "admissionDate",
-    label: "Admission Date",
+    label: "Adm. Date",
     defaultVisible: false,
-    width: 120,
+    width: 110,
   },
-  { key: "transportRoute", label: "Route", defaultVisible: false, width: 120 },
-  { key: "transportBusNo", label: "Bus No.", defaultVisible: false, width: 90 },
-  {
-    key: "transportPickup",
-    label: "Pickup Point",
-    defaultVisible: false,
-    width: 120,
-  },
-  { key: "status", label: "Status", defaultVisible: true, width: 100 },
+  { key: "transportRoute", label: "Route", defaultVisible: false, width: 110 },
+  { key: "transportBusNo", label: "Bus No.", defaultVisible: false, width: 80 },
+  { key: "status", label: "Status", defaultVisible: true, width: 90 },
 ];
 
 const DEFAULT_VISIBLE = ALL_COLUMNS.filter((c) => c.defaultVisible).map(
   (c) => c.key,
 );
-const LS_COL_KEY = "student_grid_columns";
 
-const PRINT_COLS = [
-  { key: "admNo", label: "Adm.No" },
-  { key: "fullName", label: "Name" },
-  { key: "class", label: "Class" },
-  { key: "section", label: "Section" },
-  { key: "fatherName", label: "Father Name" },
-  { key: "motherName", label: "Mother Name" },
-  { key: "dob", label: "DOB" },
-  { key: "gender", label: "Gender" },
-  { key: "mobile", label: "Mobile" },
-  { key: "fatherMobile", label: "Father Mobile" },
-  { key: "category", label: "Category" },
-  { key: "address", label: "Address" },
-  { key: "previousSchool", label: "Previous School" },
-  { key: "aadhaarNo", label: "Aadhaar No." },
-  { key: "srNo", label: "S.R. No." },
-  { key: "penNo", label: "Pen No." },
-  { key: "apaarNo", label: "Apaar No." },
-  { key: "admissionDate", label: "Admission Date" },
-  { key: "transportRoute", label: "Route" },
-  { key: "transportBusNo", label: "Bus No." },
-  { key: "status", label: "Status" },
-];
-
-/** Map a raw StudentRecord to the Student shape used by the rest of the app */
-function toStudent(r: StudentRecord): Student {
-  const s = r as unknown as Record<string, unknown>;
-  return {
-    id: r.id,
-    admNo: r.admNo ?? (s.adm_no as string) ?? "",
-    fullName: r.fullName ?? (s.full_name as string) ?? "",
-    fatherName: (s.fatherName as string) ?? (s.father_name as string) ?? "",
-    motherName: (s.motherName as string) ?? (s.mother_name as string) ?? "",
-    fatherMobile: r.fatherMobile ?? (s.father_mobile as string) ?? "",
-    motherMobile:
-      (s.motherMobile as string) ?? (s.mother_mobile as string) ?? "",
-    guardianMobile: (s.guardianMobile as string) ?? r.fatherMobile ?? "",
-    mobile: r.mobile ?? "",
-    dob: r.dob ?? "",
-    gender: (r.gender as Student["gender"]) ?? "Male",
-    class: r.class ?? "",
-    section: r.section ?? "",
-    category: (s.category as string) ?? "",
-    address: r.address ?? "",
-    village: (s.village as string) ?? "",
-    aadhaarNo: (s.aadhaarNo as string) ?? (s.aadhaar_no as string) ?? "",
-    srNo: (s.srNo as string) ?? (s.sr_no as string) ?? "",
-    penNo: (s.penNo as string) ?? (s.pen_no as string) ?? "",
-    apaarNo: (s.apaarNo as string) ?? (s.apaar_no as string) ?? "",
-    previousSchool:
-      (s.previousSchool as string) ?? (s.previous_school as string) ?? "",
-    admissionDate:
-      (s.admissionDate as string) ?? (s.admission_date as string) ?? "",
-    photo: (s.photo as string) ?? (s.photo_url as string) ?? "",
-    status: (s.status as string) === "discontinued" ? "discontinued" : "active",
-    sessionId: r.sessionId ?? "",
-    transportRoute: (s.transportRoute as string) ?? "",
-    transportBusNo: (s.transportBusNo as string) ?? "",
-    transportPickup: (s.transportPickup as string) ?? "",
-    createdAt: r.createdAt ?? "",
-  } as Student;
+function getCellValue(s: Student, key: string): string {
+  const r = s as unknown as Record<string, string | undefined>;
+  return r[key] ?? "";
 }
 
-function getCellValue(student: Student, key: string): string {
-  const s = student as unknown as Record<string, string | undefined>;
-  return s[key] ?? "";
+/** Upcoming birthdays (next 30 days) */
+function upcomingBirthdays(students: Student[]): Student[] {
+  const today = new Date();
+  const todayMD = today.getMonth() * 100 + today.getDate();
+  return students.filter((s) => {
+    if (!s.dob) return false;
+    const [dd, mm] = s.dob.split("/");
+    if (!dd || !mm) return false;
+    const bd = (Number(mm) - 1) * 100 + Number(dd);
+    const diff = bd - todayMD;
+    return diff >= 0 && diff <= 30;
+  });
 }
 
 interface StudentsProps {
   onNavigate?: (page: string) => void;
 }
 
-export default function Students({ onNavigate }: StudentsProps) {
+export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
   const {
     currentSession,
-    canWrite,
     currentUser,
     saveData,
     updateData,
@@ -244,20 +219,15 @@ export default function Students({ onNavigate }: StudentsProps) {
     addNotification,
   } = useApp();
 
-  // ── Server data ────────────────────────────────────────────────────────────
+  // ── Server state ───────────────────────────────────────────────────────────
   const [students, setStudents] = useState<Student[]>([]);
   const [totalCount, setTotalCount] = useState(0);
-  void totalCount;
   const [classes, setClasses] = useState<
     Array<{ className: string; sections: string[] }>
   >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  const canManage =
-    currentUser?.role === "superadmin" ||
-    currentUser?.role === "admin" ||
-    currentUser?.role === "receptionist";
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // ── UI state ───────────────────────────────────────────────────────────────
   const [search, setSearch] = useState("");
@@ -265,8 +235,6 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [filterSection, setFilterSection] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterGender, setFilterGender] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
-  const [filterRoute, setFilterRoute] = useState("all");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [visibleCols, setVisibleCols] = useState<string[]>(() =>
@@ -277,68 +245,51 @@ export default function Students({ onNavigate }: StudentsProps) {
   const [editStudent, setEditStudent] = useState<Student | null>(null);
   const [showImportExport, setShowImportExport] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(null);
-  const [showPrintDialog, setShowPrintDialog] = useState(false);
-  const [printCols, setPrintCols] = useState<string[]>([
-    "admNo",
-    "fullName",
-    "class",
-    "section",
-    "fatherName",
-    "gender",
-    "mobile",
-  ]);
-  const [showBirthdays, setShowBirthdays] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<Student | null>(null);
   const [bulkDeleteConfirm, setBulkDeleteConfirm] = useState(false);
+  const [showBirthdays, setShowBirthdays] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [familyGrouping, setFamilyGrouping] = useState(false);
+  const [colPickerOpen, setColPickerOpen] = useState(false);
 
-  // ── Fetch from server ──────────────────────────────────────────────────────
+  const canManage =
+    currentUser?.role === "superadmin" ||
+    currentUser?.role === "admin" ||
+    currentUser?.role === "receptionist";
+
+  // ── Fetch ──────────────────────────────────────────────────────────────────
+  const currentSessionId = currentSession?.id;
   const fetchStudents = useCallback(
-    async (resetPage = false) => {
-      setIsLoading(true);
+    async (silent = false) => {
+      if (!silent) setIsLoading(true);
+      else setIsRefreshing(true);
       setError(null);
       try {
-        const params: Record<string, string> = {
-          page: String(resetPage ? 1 : currentPage),
-          limit: "500", // load all for client-side filter+sort
-        };
-        if (filterClass !== "all") params.class = filterClass;
-        if (filterSection !== "all") params.section = filterSection;
-        if (filterStatus !== "all") params.status = filterStatus;
-        if (search.trim()) params.search = search.trim();
+        const params: Record<string, string> = { page: "1", limit: "1000" };
+        if (currentSessionId) params.session = currentSessionId;
         const result = await phpApiService.getStudents(params);
         const mapped = (result.data ?? []).map(toStudent);
         setStudents(mapped);
         setTotalCount(result.total ?? mapped.length);
-        if (resetPage) setCurrentPage(1);
+        setCurrentPage(1);
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Failed to load students";
-        // Super Admin uses local auth — never show token/session errors inline
-        const isTokenError =
+        const isTokenErr =
           msg.toLowerCase().includes("session expired") ||
-          msg.toLowerCase().includes("please log in again") ||
           msg.toLowerCase().includes("token");
-        if (isTokenError && currentUser?.role === "superadmin") {
-          // Silently swallow — Super Admin has no PHP token to expire
-        } else {
+        if (!(isTokenErr && currentUser?.role === "superadmin")) {
           setError(msg);
         }
       } finally {
         setIsLoading(false);
+        setIsRefreshing(false);
       }
     },
-    [
-      currentPage,
-      filterClass,
-      filterSection,
-      filterStatus,
-      search,
-      currentUser?.role,
-    ],
+    [currentSessionId, currentUser?.role],
   );
 
-  // Fetch classes once on mount
+  // Load classes once on mount
   useEffect(() => {
     phpApiService
       .getClasses()
@@ -354,30 +305,25 @@ export default function Students({ onNavigate }: StudentsProps) {
         );
       })
       .catch(() => {
-        /* fail silently */
+        /* silent */
       });
   }, []);
 
-  const fetchStudentsRef = useRef(fetchStudents);
-  fetchStudentsRef.current = fetchStudents;
+  // Initial + session-change fetch
+  const fetchRef = useRef(fetchStudents);
+  fetchRef.current = fetchStudents;
 
-  // Fetch students when filters change
-  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — we only trigger on filter changes
+  // biome-ignore lint/correctness/useExhaustiveDependencies: intentional — re-fetch when session changes
   useEffect(() => {
-    void fetchStudentsRef.current(true);
-  }, [filterClass, filterSection, filterStatus]); // eslint-disable-line
+    void fetchRef.current();
+  }, [currentSessionId]);
 
-  // Initial load
-  useEffect(() => {
-    void fetchStudentsRef.current();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
+  // Persist column visibility
   useEffect(() => {
     ls.set(LS_COL_KEY, visibleCols);
   }, [visibleCols]);
 
-  // ── Derived data ───────────────────────────────────────────────────────────
+  // ── Derived ────────────────────────────────────────────────────────────────
   const classNames = useMemo(() => {
     if (classes.length > 0) return classes.map((c) => c.className);
     const seen = new Set<string>();
@@ -400,23 +346,16 @@ export default function Students({ onNavigate }: StudentsProps) {
       );
   }, [filterClass, classes, students]);
 
-  const uniqueRoutes = useMemo(() => {
-    const routes = new Set<string>();
-    for (const s of students)
-      if (s.transportRoute) routes.add(s.transportRoute);
-    return Array.from(routes).sort();
-  }, [students]);
-
-  const stats = useMemo(() => {
-    const active = students.filter((s) => s.status === "active");
-    return {
+  const stats = useMemo(
+    () => ({
       total: students.length,
-      active: active.length,
-      discontinued: students.length - active.length,
+      active: students.filter((s) => s.status === "active").length,
+      discontinued: students.filter((s) => s.status === "discontinued").length,
       boys: students.filter((s) => s.gender === "Male").length,
       girls: students.filter((s) => s.gender === "Female").length,
-    };
-  }, [students]);
+    }),
+    [students],
+  );
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -426,10 +365,6 @@ export default function Students({ onNavigate }: StudentsProps) {
       if (filterSection !== "all" && s.section !== filterSection) return false;
       if (filterStatus !== "all" && s.status !== filterStatus) return false;
       if (filterGender !== "all" && s.gender !== filterGender) return false;
-      if (filterCategory !== "all" && (s.category ?? "") !== filterCategory)
-        return false;
-      if (filterRoute !== "all" && (s.transportRoute ?? "") !== filterRoute)
-        return false;
       if (q) {
         const hay = [
           s.fullName,
@@ -463,433 +398,325 @@ export default function Students({ onNavigate }: StudentsProps) {
     filterSection,
     filterStatus,
     filterGender,
-    filterCategory,
-    filterRoute,
     sortKey,
     sortDir,
   ]);
+
+  // Family grouping: group by fatherMobile
+  const displayRows = useMemo(() => {
+    if (!familyGrouping) return filtered;
+    const seen = new Set<string>();
+    const grouped: Student[] = [];
+    const families = new Map<string, Student[]>();
+    for (const s of filtered) {
+      const key = s.fatherMobile?.trim() || s.id;
+      if (!families.has(key)) families.set(key, []);
+      families.get(key)!.push(s);
+    }
+    for (const [, members] of families) {
+      for (const m of members) {
+        if (!seen.has(m.id)) {
+          seen.add(m.id);
+          grouped.push(m);
+        }
+      }
+    }
+    return grouped;
+  }, [filtered, familyGrouping]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(displayRows.length / ITEMS_PER_PAGE),
+  );
+  const safePage = Math.min(currentPage, totalPages);
+  const pageStudents = useMemo(() => {
+    const start = (safePage - 1) * ITEMS_PER_PAGE;
+    return displayRows.slice(start, start + ITEMS_PER_PAGE);
+  }, [displayRows, safePage]);
 
   const activeVisibleCols = useMemo(
     () => ALL_COLUMNS.filter((c) => visibleCols.includes(c.key)),
     [visibleCols],
   );
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE));
-  const safePage = Math.min(currentPage, totalPages);
-  const paginatedStudents = useMemo(() => {
-    const start = (safePage - 1) * ITEMS_PER_PAGE;
-    return filtered.slice(start, start + ITEMS_PER_PAGE);
-  }, [filtered, safePage]);
-  const paginationStart =
-    filtered.length === 0 ? 0 : (safePage - 1) * ITEMS_PER_PAGE + 1;
-  const paginationEnd = Math.min(safePage * ITEMS_PER_PAGE, filtered.length);
-
-  // Birthdays this month
-  const today = new Date();
-  const currentMonthStr = String(today.getMonth() + 1).padStart(2, "0");
-  const birthdayStudents = students.filter((s) => {
-    const parts = s.dob?.split("/");
-    return parts && parts.length >= 2 && parts[1] === currentMonthStr;
-  });
-
+  // ── Sort handler ───────────────────────────────────────────────────────────
   function handleSort(key: string) {
-    if (!ALL_COLUMNS.find((c) => c.key === key)?.sortable) return;
     if (sortKey === key) {
-      if (sortDir === "asc") setSortDir("desc");
-      else {
-        setSortKey(null);
-        setSortDir("asc");
-      }
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortKey(key);
       setSortDir("asc");
     }
   }
 
-  const allVisibleSelected =
-    filtered.length > 0 && filtered.every((s) => selectedIds.has(s.id));
-  function toggleAll() {
-    if (allVisibleSelected) setSelectedIds(new Set());
-    else setSelectedIds(new Set(filtered.map((s) => s.id)));
-  }
-  function toggleRow(id: string) {
+  // ── Select all ─────────────────────────────────────────────────────────────
+  const allPageSelected =
+    pageStudents.length > 0 && pageStudents.every((s) => selectedIds.has(s.id));
+  function toggleSelectAll() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (allPageSelected) {
+        for (const s of pageStudents) next.delete(s.id);
+      } else {
+        for (const s of pageStudents) next.add(s.id);
+      }
       return next;
     });
   }
 
-  function handleSaved() {
-    setShowForm(false);
-    setEditStudent(null);
-    setSelectedStudent(null);
-    void fetchStudents();
-  }
-
+  // ── Delete ─────────────────────────────────────────────────────────────────
   async function handleDelete(student: Student) {
     try {
-      await phpApiService.deleteStudent(student.id);
-      addNotification(
-        `Student ${student.fullName ?? student.admNo} deleted`,
-        "success",
-      );
-      void fetchStudents();
+      await deleteData("students", student.id);
+      addNotification(`Student ${student.fullName} deleted.`, "success");
+      setDeleteConfirm(null);
+      await fetchStudents(true);
     } catch (err) {
-      addNotification(
-        `Delete failed: ${err instanceof Error ? err.message : "Unknown"}`,
-        "error",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
-    setDeleteConfirm(null);
   }
 
   async function handleBulkDelete() {
-    const ids = Array.from(selectedIds);
-    let deleted = 0;
-    for (const id of ids) {
-      try {
-        await phpApiService.deleteStudent(id);
-        deleted++;
-      } catch {
-        /* continue */
-      }
-    }
-    addNotification(`Deleted ${deleted} students`, "success");
-    setSelectedIds(new Set());
-    setBulkDeleteConfirm(false);
-    void fetchStudents();
-  }
-
-  function clearFilters() {
-    setSearch("");
-    setFilterClass("all");
-    setFilterSection("all");
-    setFilterStatus("all");
-    setFilterGender("all");
-    setFilterCategory("all");
-    setFilterRoute("all");
-    setCurrentPage(1);
-  }
-
-  function handlePrint() {
-    const schoolProfile = ls.get("school_profile", {
-      name: "SHUBH SCHOOL ERP",
-    }) as { name: string };
-    const headers = PRINT_COLS.filter((c) => printCols.includes(c.key)).map(
-      (c) => c.label,
-    );
-    const rows = filtered.map((s) =>
-      PRINT_COLS.filter((c) => printCols.includes(c.key)).map((c) =>
-        getCellValue(s, c.key),
-      ),
-    );
-    const printWin = window.open("", "_blank");
-    if (!printWin) return;
-    printWin.document.write(
-      `<html><head><title>Student List</title><style>body{font-family:Arial,sans-serif;font-size:10px;margin:8mm}table{width:100%;border-collapse:collapse}th{background:#f0f0f0;border:1px solid #999;padding:3px 5px;text-align:left;white-space:nowrap}td{border:1px solid #ddd;padding:3px 5px;white-space:nowrap}h2{text-align:center;margin-bottom:2px;font-size:14px}p{text-align:center;margin:0 0 6px;font-size:9px;color:#666}</style></head><body><h2>${schoolProfile.name}</h2><p>Student List — ${new Date().toLocaleDateString("en-IN")} | ${filtered.length} students</p><table><thead><tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr style="${i % 2 === 1 ? "background:#f9f9f9" : ""}">${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></body></html>`,
-    );
-    printWin.document.close();
-    printWin.print();
-  }
-
-  function handleExportCSV() {
-    const header = PRINT_COLS.map((c) => c.label).join(",");
-    const rows = filtered.map((s) =>
-      PRINT_COLS.map(
-        (c) => `"${getCellValue(s, c.key).replace(/"/g, '""')}"`,
-      ).join(","),
-    );
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `students_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
-  async function handleExportExcel() {
     try {
-      const { utils, writeFile } = await import("xlsx");
-      const header = PRINT_COLS.map((c) => c.label);
-      const rows = filtered.map((s) =>
-        PRINT_COLS.map((c) => getCellValue(s, c.key)),
-      );
-      const ws = utils.aoa_to_sheet([header, ...rows]);
-      ws["!cols"] = header.map((h, i) => ({
-        wch: Math.max(
-          h.length + 2,
-          ...rows.map((r) => (r[i]?.length ?? 0) + 1),
-        ),
-      }));
-      const wb = utils.book_new();
-      utils.book_append_sheet(wb, ws, "Students");
-      writeFile(wb, `Students_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    } catch {
-      handleExportCSV();
+      for (const id of selectedIds) {
+        await deleteData("students", id);
+      }
+      addNotification(`${selectedIds.size} students deleted.`, "success");
+      setSelectedIds(new Set());
+      setBulkDeleteConfirm(false);
+      await fetchStudents(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to bulk delete");
     }
   }
 
-  function toggleCol(key: string) {
-    setVisibleCols((prev) =>
-      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-    );
+  // ── Excel export ───────────────────────────────────────────────────────────
+  async function exportExcel() {
+    try {
+      const xlsx = await import("xlsx");
+      const rows = displayRows.map((s) => ({
+        "Adm.No": s.admNo,
+        "Full Name": s.fullName,
+        Class: s.class,
+        Section: s.section,
+        Gender: s.gender,
+        DOB: s.dob,
+        "Father Name": s.fatherName,
+        "Father Mobile": s.fatherMobile,
+        "Mother Name": s.motherName,
+        "Mother Mobile": s.motherMobile,
+        Mobile: s.mobile,
+        Category: s.category,
+        Village: s.village,
+        Address: s.address,
+        "Aadhaar No": s.aadhaarNo,
+        "SR No": s.srNo,
+        "Pen No": s.penNo,
+        "APAAR No": s.apaarNo,
+        "Previous School": s.previousSchool,
+        "Adm. Date": s.admissionDate,
+        Route: s.transportRoute,
+        "Bus No": s.transportBusNo,
+        Status: s.status,
+      }));
+      const ws = xlsx.utils.json_to_sheet(rows);
+      const wb = xlsx.utils.book_new();
+      xlsx.utils.book_append_sheet(wb, ws, "Students");
+      xlsx.writeFile(wb, `students_${currentSession?.label ?? "export"}.xlsx`);
+      toast.success("Excel exported successfully");
+    } catch {
+      toast.error("Failed to export Excel");
+    }
   }
 
-  function renderCell(student: Student, colKey: string) {
-    const isDiscontinued = student.status === "discontinued";
-    const safeName = student.fullName ?? student.admNo ?? "–";
-    if (colKey === "photo")
-      return (
-        <div className="w-7 h-7 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center overflow-hidden flex-shrink-0">
-          {student.photo ? (
-            <img
-              src={student.photo}
-              alt={safeName}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <span className="text-[9px] font-bold text-primary">
-              {safeName.charAt(0).toUpperCase()}
-            </span>
+  // ── WhatsApp broadcast ─────────────────────────────────────────────────────
+  function handleWhatsAppBroadcast() {
+    toast.info("Open Communication → Bulk Broadcast to send WhatsApp messages");
+  }
+
+  const birthdayStudents = useMemo(
+    () => upcomingBirthdays(students),
+    [students],
+  );
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col h-full" data-ocid="students.page">
+      {/* Header bar */}
+      <div className="flex items-center justify-between gap-3 px-4 py-3 bg-card border-b border-border flex-wrap">
+        <div className="flex items-center gap-2 min-w-0">
+          <Users className="w-5 h-5 text-primary flex-shrink-0" />
+          <h1 className="font-display font-bold text-foreground text-lg truncate">
+            Students
+          </h1>
+          <Badge variant="secondary" className="text-xs">
+            {totalCount}
+          </Badge>
+          {isRefreshing && (
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground" />
           )}
         </div>
-      );
-    if (colKey === "admNo")
-      return (
-        <span
-          className={`text-xs font-mono font-semibold ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
-        >
-          {student.admNo || "–"}
-        </span>
-      );
-    if (colKey === "fullName")
-      return (
-        <span
-          className={`font-medium text-xs ${isDiscontinued ? "line-through text-muted-foreground" : "text-foreground"}`}
-        >
-          {safeName}
-        </span>
-      );
-    if (colKey === "class")
-      return (
-        <span className="text-xs bg-secondary text-secondary-foreground px-1.5 py-0.5 rounded font-medium">
-          {student.class ?? "–"}
-        </span>
-      );
-    if (colKey === "section")
-      return (
-        <span className="text-xs text-foreground">
-          {student.section ?? "–"}
-        </span>
-      );
-    if (colKey === "status")
-      return (
-        <Badge
-          variant={student.status === "active" ? "default" : "destructive"}
-          className="text-[9px] px-1.5 py-0"
-        >
-          {student.status === "active" ? "Active" : "Discontinued"}
-        </Badge>
-      );
-    if (colKey === "category" && student.category)
-      return (
-        <Badge variant="outline" className="text-[9px] px-1 py-0">
-          {student.category}
-        </Badge>
-      );
-    return (
-      <span className="text-xs text-muted-foreground truncate max-w-[140px] block">
-        {getCellValue(student, colKey) || "—"}
-      </span>
-    );
-  }
 
-  function SortIcon({ colKey }: { colKey: string }) {
-    if (!ALL_COLUMNS.find((c) => c.key === colKey)?.sortable) return null;
-    if (sortKey !== colKey)
-      return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30 inline" />;
-    return sortDir === "asc" ? (
-      <ArrowUp className="w-3 h-3 ml-1 text-primary inline" />
-    ) : (
-      <ArrowDown className="w-3 h-3 ml-1 text-primary inline" />
-    );
-  }
-
-  function handleRowDoubleClick(student: Student) {
-    try {
-      if (!student?.id) return;
-      setSelectedStudent(student);
-    } catch {
-      /* guard */
-    }
-  }
-
-  return (
-    <div className="flex flex-col h-full overflow-hidden">
-      {/* Page Header */}
-      <div className="px-4 md:px-6 pt-4 pb-2 bg-card border-b border-border flex-shrink-0">
-        <div className="flex items-center justify-between flex-wrap gap-3 mb-3">
-          <div>
-            <h1 className="text-xl font-bold font-display text-foreground flex items-center gap-2">
-              <Users className="w-5 h-5 text-primary" />
-              Student Information
-            </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {currentSession && `Session ${currentSession.label} · `}
-              {filtered.length < students.length
-                ? `${filtered.length} of ${students.length}`
-                : `${students.length}`}{" "}
-              students
-              {filtered.length > ITEMS_PER_PAGE &&
-                ` · Page ${safePage} of ${totalPages}`}
-              {isLoading && (
-                <span className="ml-2 text-primary animate-pulse">
-                  Loading…
-                </span>
-              )}
-              {error && <span className="ml-2 text-destructive">{error}</span>}
-            </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Stat pills */}
+          <div className="hidden md:flex items-center gap-2 text-xs text-muted-foreground">
+            <span className="bg-muted/60 px-2 py-0.5 rounded-full">
+              Active: {stats.active}
+            </span>
+            <span className="bg-muted/60 px-2 py-0.5 rounded-full">
+              Boys: {stats.boys}
+            </span>
+            <span className="bg-muted/60 px-2 py-0.5 rounded-full">
+              Girls: {stats.girls}
+            </span>
           </div>
-          <div className="flex gap-2 flex-wrap">
-            {canWrite && canManage && (
-              <Button
-                size="sm"
-                onClick={() => {
-                  setEditStudent(null);
-                  setShowForm(true);
-                }}
-                data-ocid="add-student-btn"
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" /> Add Student
-              </Button>
-            )}
-            {canWrite && canManage && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setShowImportExport(true)}
-                data-ocid="students-importexport-btn"
-              >
-                <Upload className="w-3.5 h-3.5 mr-1" /> Import/Export
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowPrintDialog(true)}
-            >
-              <List className="w-3.5 h-3.5 mr-1" /> Print
-            </Button>
-            <Button size="sm" variant="outline" onClick={handleExportCSV}>
-              <Download className="w-3.5 h-3.5 mr-1" /> CSV
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleExportExcel()}
-              data-ocid="students.excel_export_button"
-            >
-              <Download className="w-3.5 h-3.5 mr-1" /> Excel
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowBirthdays(!showBirthdays)}
-              className="relative"
-            >
-              <Cake className="w-3.5 h-3.5 mr-1" /> Birthdays
-              {birthdayStudents.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground text-[9px] rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                  {birthdayStudents.length}
-                </span>
-              )}
-            </Button>
-          </div>
-        </div>
 
-        {/* Stats */}
-        <div className="flex gap-3 flex-wrap text-xs mb-3">
-          {[
-            { label: "Total", value: stats.total, color: "text-foreground" },
-            { label: "Active", value: stats.active, color: "text-emerald-600" },
-            {
-              label: "Discontinued",
-              value: stats.discontinued,
-              color: "text-destructive",
-            },
-            { label: "Boys", value: stats.boys, color: "text-blue-600" },
-            { label: "Girls", value: stats.girls, color: "text-pink-600" },
-          ].map(({ label, value, color }) => (
-            <div
-              key={label}
-              className="bg-muted/50 rounded-md px-3 py-1.5 flex items-center gap-1.5"
+          {birthdayStudents.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-amber-500 h-8"
+              onClick={() => setShowBirthdays(true)}
+              data-ocid="students.birthdays_button"
             >
-              <span className="text-muted-foreground">{label}:</span>
-              <span className={`font-bold ${color}`}>{value}</span>
-            </div>
-          ))}
-        </div>
+              <Cake className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {birthdayStudents.length} Birthday
+                {birthdayStudents.length > 1 ? "s" : ""}
+              </span>
+            </Button>
+          )}
 
-        {/* Filters */}
-        <div className="flex gap-2 flex-wrap items-center">
-          <div className="relative flex-1 min-w-[180px] max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input
-              className="pl-8 h-8 text-xs"
-              placeholder="Search name, Adm.No…"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setCurrentPage(1);
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 h-8"
+            onClick={() => setFamilyGrouping((v) => !v)}
+            data-ocid="students.family_grouping_toggle"
+          >
+            <Users className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {familyGrouping ? "Ungrouped" : "Family"}
+            </span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 h-8"
+            onClick={handleWhatsAppBroadcast}
+            data-ocid="students.whatsapp_button"
+          >
+            <MessageCircle className="w-3.5 h-3.5 text-green-500" />
+            <span className="hidden sm:inline">WhatsApp</span>
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 h-8"
+            onClick={exportExcel}
+            data-ocid="students.export_button"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Export</span>
+          </Button>
+
+          {canManage && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8"
+              onClick={() => setShowImportExport(true)}
+              data-ocid="students.import_button"
+            >
+              <Upload className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Import</span>
+            </Button>
+          )}
+
+          {canManage && (
+            <Button
+              size="sm"
+              className="gap-1.5 h-8"
+              onClick={() => {
+                setEditStudent(null);
+                setShowForm(true);
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void fetchStudents(true);
-              }}
-              data-ocid="students-search"
-            />
-          </div>
-          <Select
-            value={filterClass}
-            onValueChange={(v) => {
-              setFilterClass(v);
-              setFilterSection("all");
+              data-ocid="students.add_button"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add Student
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Filter bar */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-background border-b border-border flex-wrap">
+        <div className="relative flex-1 min-w-[160px] max-w-xs">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            className="pl-8 h-8 text-sm"
+            placeholder="Search name, adm no, mobile…"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
               setCurrentPage(1);
             }}
-          >
-            <SelectTrigger
-              className="w-28 h-8 text-xs"
-              data-ocid="students-filter-class"
+            data-ocid="students.search_input"
+          />
+          {search && (
+            <button
+              type="button"
+              className="absolute right-2 top-1/2 -translate-y-1/2"
+              onClick={() => setSearch("")}
             >
-              <SelectValue placeholder="All Classes" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Classes</SelectItem>
-              {classNames.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+              <X className="w-3 h-3 text-muted-foreground" />
+            </button>
+          )}
+        </div>
+
+        <Select
+          value={filterClass}
+          onValueChange={(v) => {
+            setFilterClass(v);
+            setFilterSection("all");
+            setCurrentPage(1);
+          }}
+        >
+          <SelectTrigger
+            className="h-8 w-[120px] text-xs"
+            data-ocid="students.class_filter"
+          >
+            <SelectValue placeholder="All Classes" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Classes</SelectItem>
+            {classNames.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {sectionsForFilter.length > 0 && (
           <Select
             value={filterSection}
             onValueChange={(v) => {
               setFilterSection(v);
               setCurrentPage(1);
             }}
-            disabled={filterClass === "all"}
           >
             <SelectTrigger
-              className="w-24 h-8 text-xs"
-              data-ocid="students-filter-section"
+              className="h-8 w-[100px] text-xs"
+              data-ocid="students.section_filter"
             >
               <SelectValue placeholder="Section" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="all">All Sections</SelectItem>
               {sectionsForFilter.map((s) => (
                 <SelectItem key={s} value={s}>
                   {s}
@@ -897,575 +724,410 @@ export default function Students({ onNavigate }: StudentsProps) {
               ))}
             </SelectContent>
           </Select>
-          <Select
-            value={filterStatus}
-            onValueChange={(v) => {
-              setFilterStatus(v);
-              setCurrentPage(1);
-            }}
+        )}
+
+        <Select
+          value={filterStatus}
+          onValueChange={(v) => {
+            setFilterStatus(v);
+            setCurrentPage(1);
+          }}
+        >
+          <SelectTrigger
+            className="h-8 w-[110px] text-xs"
+            data-ocid="students.status_filter"
           >
-            <SelectTrigger className="w-28 h-8 text-xs">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="discontinued">Discontinued</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={filterGender}
-            onValueChange={(v) => {
-              setFilterGender(v);
-              setCurrentPage(1);
-            }}
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Status</SelectItem>
+            <SelectItem value="active">Active</SelectItem>
+            <SelectItem value="discontinued">Discontinued</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={filterGender}
+          onValueChange={(v) => {
+            setFilterGender(v);
+            setCurrentPage(1);
+          }}
+        >
+          <SelectTrigger
+            className="h-8 w-[90px] text-xs"
+            data-ocid="students.gender_filter"
           >
-            <SelectTrigger className="w-24 h-8 text-xs">
-              <SelectValue placeholder="Gender" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Gender</SelectItem>
-              <SelectItem value="Male">Male</SelectItem>
-              <SelectItem value="Female">Female</SelectItem>
-              <SelectItem value="Other">Other</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={filterCategory}
-            onValueChange={(v) => {
-              setFilterCategory(v);
-              setCurrentPage(1);
-            }}
-          >
-            <SelectTrigger className="w-28 h-8 text-xs">
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Category</SelectItem>
-              {["General", "OBC", "SC", "ST", "EWS", "Minority"].map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {uniqueRoutes.length > 0 && (
-            <Select value={filterRoute} onValueChange={setFilterRoute}>
-              <SelectTrigger className="w-28 h-8 text-xs">
-                <SelectValue placeholder="Route" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Routes</SelectItem>
-                {uniqueRoutes.map((r) => (
-                  <SelectItem key={r} value={r}>
-                    {r}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-8 text-xs px-2"
-            onClick={clearFilters}
-          >
-            <X className="w-3 h-3 mr-1" /> Clear
-          </Button>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs ml-auto"
-                data-ocid="columns-toggle-btn"
-              >
-                <Columns3 className="w-3.5 h-3.5 mr-1" /> Columns
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-3" align="end">
-              <p className="text-xs font-semibold text-foreground mb-2">
-                Show / Hide Columns
-              </p>
-              <div className="grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
-                {ALL_COLUMNS.map((col) => (
+            <SelectValue placeholder="Gender" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="Male">Male</SelectItem>
+            <SelectItem value="Female">Female</SelectItem>
+            <SelectItem value="Other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Column picker */}
+        <Popover open={colPickerOpen} onOpenChange={setColPickerOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 h-8 ml-auto"
+              data-ocid="students.columns_button"
+            >
+              <Columns3 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Columns</span>
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-56 p-2">
+            <p className="text-xs font-medium text-muted-foreground mb-2 px-1">
+              Show/Hide Columns
+            </p>
+            <div className="grid grid-cols-2 gap-1 max-h-56 overflow-y-auto">
+              {ALL_COLUMNS.filter((c) => c.key !== "photo").map((col) => (
+                <div
+                  key={col.key}
+                  className="flex items-center gap-1.5 text-xs cursor-pointer px-1 py-0.5 rounded hover:bg-muted"
+                >
+                  <Checkbox
+                    id={`col-toggle-${col.key}`}
+                    checked={visibleCols.includes(col.key)}
+                    onCheckedChange={(v) =>
+                      setVisibleCols((prev) =>
+                        v
+                          ? [...prev, col.key]
+                          : prev.filter((k) => k !== col.key),
+                      )
+                    }
+                  />
                   <label
-                    key={col.key}
-                    htmlFor={`col-chk-${col.key}`}
-                    className="flex items-center gap-1.5 cursor-pointer text-xs hover:text-foreground text-muted-foreground"
+                    htmlFor={`col-toggle-${col.key}`}
+                    className="cursor-pointer"
                   >
-                    <Checkbox
-                      id={`col-chk-${col.key}`}
-                      checked={visibleCols.includes(col.key)}
-                      onCheckedChange={() => toggleCol(col.key)}
-                      className="w-3.5 h-3.5"
-                    />
                     {col.label}
                   </label>
-                ))}
-              </div>
-              <div className="flex gap-1 mt-2 pt-2 border-t border-border">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-6 flex-1"
-                  onClick={() => setVisibleCols(ALL_COLUMNS.map((c) => c.key))}
-                >
-                  Show All
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-xs h-6 flex-1"
-                  onClick={() => setVisibleCols(DEFAULT_VISIBLE)}
-                >
-                  Reset
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
-        </div>
+                </div>
+              ))}
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 p-0"
+          onClick={() => void fetchStudents(true)}
+          title="Refresh"
+          data-ocid="students.refresh_button"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+        </Button>
       </div>
 
-      {/* Bulk Actions */}
+      {/* Bulk actions */}
       {selectedIds.size > 0 && (
-        <div className="flex-shrink-0 bg-primary/5 border-b border-primary/20 px-4 py-2 flex items-center gap-3 flex-wrap">
-          <span className="text-xs font-semibold text-primary">
+        <div
+          className="flex items-center gap-3 px-4 py-2 bg-primary/10 border-b border-primary/20 text-sm"
+          data-ocid="students.bulk_actions"
+        >
+          <span className="text-primary font-medium">
             {selectedIds.size} selected
           </span>
           <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={() => setShowPrintDialog(true)}
-          >
-            <List className="w-3 h-3 mr-1" /> Print
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 text-xs"
-            onClick={handleExportCSV}
-          >
-            <Download className="w-3 h-3 mr-1" /> Export CSV
-          </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs">
-            <MessageCircle className="w-3 h-3 mr-1" /> WhatsApp
-          </Button>
-          {currentUser?.role === "superadmin" && (
-            <Button
-              size="sm"
-              variant="destructive"
-              className="h-7 text-xs"
-              onClick={() => setBulkDeleteConfirm(true)}
-            >
-              <Trash2 className="w-3 h-3 mr-1" /> Delete
-            </Button>
-          )}
-          <Button
-            size="sm"
             variant="ghost"
-            className="h-7 text-xs ml-auto"
-            onClick={() => setSelectedIds(new Set())}
+            size="sm"
+            className="h-7 text-destructive gap-1.5"
+            onClick={() => setBulkDeleteConfirm(true)}
+            data-ocid="students.bulk_delete_button"
           >
-            <X className="w-3 h-3 mr-1" /> Clear
+            <Trash2 className="w-3.5 h-3.5" />
+            Delete Selected
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 ml-auto"
+            onClick={() => setSelectedIds(new Set())}
+            data-ocid="students.bulk_clear_button"
+          >
+            <X className="w-3.5 h-3.5" /> Clear
           </Button>
         </div>
       )}
 
-      {/* Birthdays */}
-      {showBirthdays && birthdayStudents.length > 0 && (
-        <div className="flex-shrink-0 bg-amber-50 border-b border-amber-200 px-4 py-3">
-          <h3 className="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1">
-            <Cake className="w-3.5 h-3.5" /> Birthdays This Month (
-            {birthdayStudents.length})
-          </h3>
-          <div className="flex flex-wrap gap-1.5">
-            {birthdayStudents.map((s) => (
-              <div
-                key={s.id}
-                className="bg-card border border-amber-300 rounded px-2 py-1 text-xs"
-              >
-                <span className="font-medium text-amber-900">{s.fullName}</span>
-                <span className="text-amber-600 ml-1">({s.dob})</span>
-                <span className="text-amber-500 ml-1">
-                  Cl.{s.class}
-                  {s.section}
-                </span>
-              </div>
-            ))}
-          </div>
+      {/* Error state */}
+      {error && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 bg-destructive/10 border-b border-destructive/20 text-sm text-destructive"
+          data-ocid="students.error_state"
+        >
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          <span className="flex-1">{error}</span>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-destructive"
+            onClick={() => void fetchStudents()}
+          >
+            Retry
+          </Button>
         </div>
       )}
 
-      {/* Grid */}
-      <div className="flex-1 overflow-auto">
+      {/* Table */}
+      <div className="flex-1 overflow-auto min-h-0">
         <table
-          className="w-full text-xs border-collapse"
-          style={{ minWidth: "600px" }}
+          className="w-full text-sm border-collapse min-w-max"
+          data-ocid="students.table"
         >
-          <thead className="sticky top-0 z-10 bg-muted border-b border-border shadow-sm">
-            <tr>
-              <th className="w-8 px-2 py-2 border-r border-border">
+          <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur-sm">
+            <tr className="border-b border-border text-xs text-muted-foreground uppercase tracking-wide">
+              <th className="w-8 px-2 text-center border-r border-border/40">
                 <Checkbox
-                  checked={allVisibleSelected}
-                  onCheckedChange={toggleAll}
+                  checked={allPageSelected}
+                  onCheckedChange={toggleSelectAll}
                   aria-label="Select all"
-                  className="w-3.5 h-3.5"
+                  data-ocid="students.select_all_checkbox"
                 />
               </th>
               {activeVisibleCols.map((col) => (
                 <th
                   key={col.key}
-                  className={`px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap border-r border-border last:border-r-0 ${col.sortable ? "cursor-pointer hover:bg-muted/80 select-none" : ""}`}
-                  style={{
-                    minWidth: `${col.width}px`,
-                    width: `${col.width}px`,
-                  }}
-                  onClick={() => handleSort(col.key)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") handleSort(col.key);
-                  }}
-                  tabIndex={col.sortable ? 0 : undefined}
-                  role={col.sortable ? "button" : undefined}
+                  className="px-2 py-2 text-left border-r border-border/40 last:border-r-0 whitespace-nowrap"
+                  style={{ minWidth: col.width }}
                 >
-                  {col.label}
-                  <SortIcon colKey={col.key} />
+                  {col.sortable ? (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 hover:text-foreground transition-colors"
+                      onClick={() => handleSort(col.key)}
+                    >
+                      {col.label}
+                      {sortKey === col.key ? (
+                        sortDir === "asc" ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                      )}
+                    </button>
+                  ) : (
+                    col.label
+                  )}
                 </th>
               ))}
-              {canWrite && canManage && (
-                <th className="px-2 py-2 text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide w-16">
-                  Actions
-                </th>
+              {canManage && (
+                <th className="w-16 px-2 py-2 text-center">Actions</th>
               )}
             </tr>
           </thead>
           <tbody>
-            {isLoading && students.length === 0 && (
-              <SkeletonTableRows rows={10} cols={activeVisibleCols.length} />
-            )}
-            {!isLoading && filtered.length === 0 && (
+            {isLoading ? (
+              <SkeletonTableRows
+                rows={12}
+                cols={activeVisibleCols.length + 1}
+              />
+            ) : pageStudents.length === 0 ? (
               <tr>
                 <td
-                  colSpan={activeVisibleCols.length + 2}
+                  colSpan={activeVisibleCols.length + (canManage ? 2 : 1)}
                   className="py-16 text-center text-muted-foreground"
                   data-ocid="students.empty_state"
                 >
-                  <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                  <p className="font-medium text-sm">No students found</p>
-                  <p className="text-xs mt-1 opacity-60">
-                    Adjust filters or add students
-                  </p>
-                  {canWrite && canManage && (
-                    <Button
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => {
-                        setEditStudent(null);
-                        setShowForm(true);
-                      }}
-                    >
-                      <Plus className="w-3.5 h-3.5 mr-1" /> Add First Student
-                    </Button>
-                  )}
+                  <div className="flex flex-col items-center gap-2">
+                    <Users className="w-8 h-8 opacity-30" />
+                    <p className="text-sm font-medium">No students found</p>
+                    <p className="text-xs">
+                      {students.length === 0
+                        ? "Add your first student to get started."
+                        : "Try adjusting the filters."}
+                    </p>
+                    {canManage && students.length === 0 && (
+                      <Button
+                        size="sm"
+                        className="mt-2 gap-1.5"
+                        onClick={() => {
+                          setEditStudent(null);
+                          setShowForm(true);
+                        }}
+                        data-ocid="students.empty_add_button"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> Add Student
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
-            )}
-            {paginatedStudents.map((student, idx) => {
-              if (!student?.id) return null;
-              const isDiscontinued = student.status === "discontinued";
-              const isChecked = selectedIds.has(student.id);
-              const globalIdx = (safePage - 1) * ITEMS_PER_PAGE + idx;
-              return (
-                <tr
-                  key={student.id}
-                  className={[
-                    "group cursor-pointer transition-colors border-b border-border/60",
-                    isChecked
-                      ? "bg-primary/5"
-                      : isDiscontinued
-                        ? idx % 2 === 0
-                          ? "bg-muted/20 opacity-70"
-                          : "bg-muted/30 opacity-70"
-                        : idx % 2 === 0
-                          ? "bg-background hover:bg-muted/20"
-                          : "bg-muted/10 hover:bg-muted/30",
-                  ].join(" ")}
-                  style={{ height: "36px" }}
-                  data-ocid={`students.item.${globalIdx + 1}`}
-                  onDoubleClick={() => handleRowDoubleClick(student)}
-                >
-                  <td className="w-8 px-2 border-r border-border/40">
-                    <Checkbox
-                      checked={isChecked}
-                      onCheckedChange={() => toggleRow(student.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      aria-label={`Select ${student.fullName}`}
-                      className="w-3.5 h-3.5"
-                    />
-                  </td>
-                  {activeVisibleCols.map((col) => (
+            ) : (
+              pageStudents.map((student, idx) => {
+                const rowIndex = (safePage - 1) * ITEMS_PER_PAGE + idx + 1;
+                const isSelected = selectedIds.has(student.id);
+                return (
+                  <tr
+                    key={student.id}
+                    className={`border-b border-border/60 hover:bg-accent/5 cursor-pointer transition-colors ${isSelected ? "bg-primary/5" : ""}`}
+                    onClick={() => setSelectedStudent(student)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ")
+                        setSelectedStudent(student);
+                    }}
+                    tabIndex={0}
+                    data-ocid={`students.item.${rowIndex}`}
+                  >
                     <td
-                      key={col.key}
-                      className="px-2 py-1 border-r border-border/40 last:border-r-0 overflow-hidden"
-                      style={{ maxWidth: `${col.width}px` }}
+                      className="w-8 px-2 text-center border-r border-border/40"
+                      onClick={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
                     >
-                      {renderCell(student, col.key)}
+                      <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={(v) => {
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev);
+                            if (v) next.add(student.id);
+                            else next.delete(student.id);
+                            return next;
+                          });
+                        }}
+                        aria-label={`Select ${student.fullName}`}
+                        data-ocid={`students.checkbox.${rowIndex}`}
+                      />
                     </td>
-                  ))}
-                  {canWrite && canManage && (
-                    <td className="px-1 py-1">
-                      <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-muted-foreground hover:text-primary"
-                          aria-label="Edit student"
-                          data-ocid={`students.edit_button.${globalIdx + 1}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditStudent(student);
-                            setShowForm(true);
-                          }}
-                        >
-                          <svg
-                            aria-hidden="true"
-                            className="w-3 h-3"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
+                    {activeVisibleCols.map((col) => (
+                      <td
+                        key={col.key}
+                        className="px-2 py-1.5 border-r border-border/40 last:border-r-0 max-w-[200px]"
+                      >
+                        {col.key === "photo" ? (
+                          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0 overflow-hidden">
+                            {student.photo ? (
+                              <img
+                                src={student.photo}
+                                alt={student.fullName}
+                                className="w-full h-full object-cover"
+                              />
+                            ) : (
+                              student.fullName.charAt(0).toUpperCase()
+                            )}
+                          </div>
+                        ) : col.key === "status" ? (
+                          <Badge
+                            variant={
+                              student.status === "active"
+                                ? "default"
+                                : "secondary"
+                            }
+                            className="text-xs"
                           >
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                        </Button>
+                            {student.status === "active"
+                              ? "Active"
+                              : "Discontinued"}
+                          </Badge>
+                        ) : (
+                          <span className="truncate block text-xs">
+                            {getCellValue(student, col.key)}
+                          </span>
+                        )}
+                      </td>
+                    ))}
+                    {canManage && (
+                      <td
+                        className="w-16 px-2 py-1.5 text-center"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
                         <Button
                           variant="ghost"
-                          size="icon"
-                          className="w-6 h-6 text-muted-foreground hover:text-destructive"
+                          size="sm"
+                          className="h-6 w-6 p-0 text-destructive opacity-60 hover:opacity-100"
+                          onClick={() => setDeleteConfirm(student)}
                           aria-label="Delete student"
-                          data-ocid={`students.delete_button.${globalIdx + 1}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDeleteConfirm(student);
-                          }}
+                          data-ocid={`students.delete_button.${rowIndex}`}
                         >
-                          <Trash2 className="w-3 h-3" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
 
       {/* Pagination */}
-      {filtered.length > ITEMS_PER_PAGE && (
-        <div className="flex-shrink-0 border-t border-border bg-card px-4 py-2 flex items-center justify-between gap-3">
+      {!isLoading && displayRows.length > ITEMS_PER_PAGE && (
+        <div className="flex items-center justify-between px-4 py-2 bg-card border-t border-border text-sm flex-wrap gap-2">
           <span className="text-xs text-muted-foreground">
-            Showing {paginationStart}–{paginationEnd} of {filtered.length}{" "}
-            students
+            Showing{" "}
+            {Math.min((safePage - 1) * ITEMS_PER_PAGE + 1, displayRows.length)}–
+            {Math.min(safePage * ITEMS_PER_PAGE, displayRows.length)} of{" "}
+            {displayRows.length}
           </span>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1">
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs"
+              className="h-7 w-7 p-0"
               disabled={safePage <= 1}
-              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              onClick={() => setCurrentPage((p) => p - 1)}
               data-ocid="students.pagination_prev"
             >
-              <ChevronLeft className="w-3.5 h-3.5 mr-1" /> Prev
+              <ChevronLeft className="w-3.5 h-3.5" />
             </Button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const start = Math.max(1, safePage - 2);
-              return start + i;
-            })
-              .filter((p) => p <= totalPages)
-              .map((p) => (
-                <Button
-                  key={p}
-                  variant={p === safePage ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 w-7 p-0 text-xs"
-                  onClick={() => setCurrentPage(p)}
-                >
-                  {p}
-                </Button>
-              ))}
+            <span className="text-xs text-muted-foreground px-2">
+              {safePage} / {totalPages}
+            </span>
             <Button
               variant="outline"
               size="sm"
-              className="h-7 px-2 text-xs"
+              className="h-7 w-7 p-0"
               disabled={safePage >= totalPages}
-              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => setCurrentPage((p) => p + 1)}
               data-ocid="students.pagination_next"
             >
-              Next <ChevronRight className="w-3.5 h-3.5 ml-1" />
+              <ChevronRight className="w-3.5 h-3.5" />
             </Button>
           </div>
         </div>
       )}
 
-      {/* Print Dialog */}
-      {showPrintDialog && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div
-            className="bg-card rounded-xl shadow-2xl w-full max-w-md p-5 space-y-4"
-            data-ocid="students-print.dialog"
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-semibold font-display text-foreground flex items-center gap-2">
-                <List className="w-4 h-4" /> Print Student List
-              </h3>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="w-7 h-7"
-                onClick={() => setShowPrintDialog(false)}
-                data-ocid="students-print.close_button"
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            </div>
-            <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto">
-              {PRINT_COLS.map((col) => (
-                <label
-                  key={col.key}
-                  className="flex items-center gap-2 cursor-pointer text-xs hover:text-foreground"
-                >
-                  <input
-                    type="checkbox"
-                    checked={printCols.includes(col.key)}
-                    onChange={(e) => {
-                      if (e.target.checked)
-                        setPrintCols((p) => [...p, col.key]);
-                      else setPrintCols((p) => p.filter((k) => k !== col.key));
-                    }}
-                    className="rounded w-3.5 h-3.5"
-                  />
-                  <span className="text-muted-foreground">{col.label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex gap-2 justify-end pt-2 border-t border-border">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowPrintDialog(false)}
-                data-ocid="students-print.cancel_button"
-              >
-                Cancel
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => {
-                  handlePrint();
-                  setShowPrintDialog(false);
-                }}
-                data-ocid="students-print.submit_button"
-              >
-                <Download className="w-3.5 h-3.5 mr-1" /> Print
-              </Button>
-            </div>
-          </div>
-        </div>
+      {/* ── Student Detail Modal ── */}
+      {selectedStudent && (
+        <StudentDetailModal
+          student={selectedStudent}
+          onClose={() => setSelectedStudent(null)}
+          onUpdate={(updated) => {
+            setStudents((prev) =>
+              prev.map((s) => (s.id === updated.id ? updated : s)),
+            );
+            setSelectedStudent(updated);
+          }}
+          updateData={updateData}
+          deleteData={deleteData}
+          allStudents={students}
+        />
       )}
 
-      {/* Delete Confirm */}
-      {deleteConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div
-            className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4"
-            data-ocid="students-delete.dialog"
-          >
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-4 h-4 text-destructive" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-foreground text-sm">
-                  Delete Student?
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Delete{" "}
-                  <strong>
-                    {deleteConfirm.fullName ?? deleteConfirm.admNo}
-                  </strong>
-                  ? This cannot be undone.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setDeleteConfirm(null)}
-                data-ocid="students-delete.cancel_button"
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void handleDelete(deleteConfirm)}
-                data-ocid="students-delete.confirm_button"
-              >
-                Delete
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bulk Delete Confirm */}
-      {bulkDeleteConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-xl shadow-2xl w-full max-w-sm p-5 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-9 h-9 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                <Trash2 className="w-4 h-4 text-destructive" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-foreground text-sm">
-                  Delete {selectedIds.size} Students?
-                </h3>
-                <p className="text-xs text-muted-foreground mt-1">
-                  This will permanently delete all selected students. This
-                  cannot be undone.
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkDeleteConfirm(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => void handleBulkDelete()}
-                data-ocid="students-bulk-delete.confirm_button"
-              >
-                Delete All
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Student Form */}
+      {/* ── Add / Edit Form ── */}
       {showForm && (
         <StudentForm
           student={editStudent ?? undefined}
-          onSave={handleSaved}
+          onSave={async (saved) => {
+            // Wait for server confirmation, then reload
+            toast.success(
+              editStudent
+                ? `${saved.fullName} updated`
+                : `${saved.fullName} added`,
+            );
+            setShowForm(false);
+            setEditStudent(null);
+            await fetchStudents(true);
+          }}
           onClose={() => {
             setShowForm(false);
             setEditStudent(null);
@@ -1475,28 +1137,125 @@ export default function Students({ onNavigate }: StudentsProps) {
         />
       )}
 
-      {/* Student Detail Modal */}
-      {selectedStudent && (
-        <StudentDetailModal
-          student={selectedStudent}
-          onClose={() => setSelectedStudent(null)}
-          onUpdate={(updated) => setSelectedStudent(updated)}
-          onNavigate={onNavigate}
-          updateData={updateData}
-          deleteData={deleteData}
-          allStudents={students}
-        />
-      )}
-
-      {/* Import/Export */}
+      {/* ── Import/Export ── */}
       {showImportExport && (
         <StudentImportExport
           onClose={() => setShowImportExport(false)}
-          onImported={() => {
+          onImported={async () => {
             setShowImportExport(false);
-            void fetchStudents();
+            await fetchStudents(true);
           }}
         />
+      )}
+
+      {/* ── Delete Confirm ── */}
+      {deleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          data-ocid="students.delete_dialog"
+        >
+          <div className="bg-card border border-border rounded-xl shadow-xl max-w-sm w-full p-5 space-y-4">
+            <p className="font-semibold text-foreground">Delete Student?</p>
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete{" "}
+              <strong>{deleteConfirm.fullName}</strong>. This action cannot be
+              undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setDeleteConfirm(null)}
+                data-ocid="students.delete_cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void handleDelete(deleteConfirm)}
+                data-ocid="students.delete_confirm_button"
+              >
+                Delete
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk Delete Confirm ── */}
+      {bulkDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          data-ocid="students.bulk_delete_dialog"
+        >
+          <div className="bg-card border border-border rounded-xl shadow-xl max-w-sm w-full p-5 space-y-4">
+            <p className="font-semibold text-foreground">
+              Delete {selectedIds.size} Students?
+            </p>
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete the selected students and cannot be
+              undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkDeleteConfirm(false)}
+                data-ocid="students.bulk_delete_cancel_button"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void handleBulkDelete()}
+                data-ocid="students.bulk_delete_confirm_button"
+              >
+                Delete All
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Birthdays Panel ── */}
+      {showBirthdays && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+          <div className="bg-card border border-border rounded-xl shadow-xl max-w-sm w-full p-5 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="font-semibold text-foreground flex items-center gap-2">
+                <Cake className="w-4 h-4 text-amber-500" /> Upcoming Birthdays
+              </p>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0"
+                onClick={() => setShowBirthdays(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+            <div className="space-y-1 max-h-64 overflow-y-auto">
+              {birthdayStudents.map((s) => (
+                <div
+                  key={s.id}
+                  className="flex items-center gap-2 py-1.5 border-b border-border/60 last:border-0 text-sm"
+                >
+                  <div className="w-7 h-7 rounded-full bg-amber-500/10 flex items-center justify-center text-xs font-bold text-amber-600">
+                    {s.fullName.charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium truncate">{s.fullName}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {s.class} {s.section} · DOB: {s.dob}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

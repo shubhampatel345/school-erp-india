@@ -1,6 +1,6 @@
 /**
- * Examinations — Direct API rebuild
- * All data via phpApiService; no local sync, no getData().
+ * Examinations — Tab router
+ * Tabs: Exam Timetable | Online Exam | Results | Result Designer | Admit Cards
  */
 
 import {

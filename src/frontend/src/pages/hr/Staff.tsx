@@ -1,5 +1,4 @@
 /**
- * Staff — re-exports StaffDirectory for canonical path.
- * All CRUD via useApp() context.
+ * Staff.tsx — re-exports StaffDirectory for canonical path.
  */
 export { default } from "./StaffDirectory";

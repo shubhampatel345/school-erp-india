@@ -1,3 +1,8 @@
+/**
+ * AttendanceSummary — Class-wise, route-wise, and student-level attendance reports
+ * All data fetched directly from MySQL via phpApiService.
+ * NO getData/saveData context calls.
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,18 +20,15 @@ import {
   CalendarCheck,
   CalendarRange,
   Download,
+  Loader2,
   TrendingUp,
   Users,
   X,
 } from "lucide-react";
-import { useMemo, useState } from "react";
-import { useApp } from "../../context/AppContext";
-import type {
-  AttendanceRecord,
-  ClassSection,
-  Student,
-  TransportRoute,
-} from "../../types";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
+import phpApiService from "../../utils/phpApiService";
+import type { AttendanceRecord as ApiAttendance } from "../../utils/phpApiService";
 
 interface AttendanceSummaryProps {
   date: string;
@@ -42,6 +44,47 @@ interface ClassSectionRow {
   leave: number;
   late: number;
 }
+
+interface StudentRow {
+  id: string;
+  admNo: string;
+  fullName: string;
+  class: string;
+  section: string;
+  present: number;
+  absent: number;
+  leave: number;
+  late: number;
+  total: number;
+  pct: number;
+}
+
+interface StudentMin {
+  id: string;
+  admNo: string;
+  fullName: string;
+  class: string;
+  section: string;
+  fatherName?: string;
+}
+
+const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
 
 function SummaryCard({
   label,
@@ -76,11 +119,13 @@ function SummaryCard({
   );
 }
 
-interface DrillDownModalProps {
+// ── Drill-down modal ───────────────────────────────────────────────────────────
+
+interface DrillDownProps {
   row: ClassSectionRow;
   date: string;
-  students: Student[];
-  records: AttendanceRecord[];
+  students: StudentMin[];
+  records: ApiAttendance[];
   onClose: () => void;
 }
 
@@ -90,7 +135,7 @@ function DrillDownModal({
   students,
   records,
   onClose,
-}: DrillDownModalProps) {
+}: DrillDownProps) {
   const classStudents = students.filter(
     (s) => s.class === row.cls && s.section === row.section,
   );
@@ -128,7 +173,7 @@ function DrillDownModal({
         <div className="flex items-center justify-between p-4 border-b border-border">
           <div>
             <h3 className="font-display font-bold text-foreground text-lg">
-              Class {row.cls} - Section {row.section}
+              {row.cls} - Section {row.section}
             </h3>
             <p className="text-sm text-muted-foreground">
               {date} · {classStudents.length} students
@@ -139,7 +184,7 @@ function DrillDownModal({
             onClick={onClose}
             className="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-muted transition-colors"
             aria-label="Close"
-            data-ocid="summary.detail-modal.close-button"
+            data-ocid="summary.detail-modal.close_button"
           >
             <X className="w-4 h-4" />
           </button>
@@ -213,23 +258,8 @@ function DrillDownModal({
                       <td className="p-3 text-muted-foreground text-xs">
                         {idx + 1}
                       </td>
-                      <td className="p-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary flex-shrink-0 overflow-hidden">
-                            {s.photo ? (
-                              <img
-                                src={s.photo}
-                                alt={s.fullName}
-                                className="w-full h-full object-cover"
-                              />
-                            ) : (
-                              s.fullName.charAt(0)
-                            )}
-                          </div>
-                          <span className="font-medium text-foreground truncate">
-                            {s.fullName}
-                          </span>
-                        </div>
+                      <td className="p-3 font-medium text-foreground">
+                        {s.fullName}
                       </td>
                       <td className="p-3 text-muted-foreground font-mono text-xs hidden sm:table-cell">
                         {s.admNo}
@@ -251,17 +281,7 @@ function DrillDownModal({
   );
 }
 
-// ─── Student-level Date Range Report ─────────────────────────────────────────
-
-interface StudentRangeRow {
-  student: Student;
-  present: number;
-  absent: number;
-  leave: number;
-  late: number;
-  total: number;
-  pct: number;
-}
+// ── Date Range student-wise summary ──────────────────────────────────────────
 
 function DateRangeSummary({
   fromDate,
@@ -271,57 +291,34 @@ function DateRangeSummary({
 }: {
   fromDate: string;
   toDate: string;
-  students: Student[];
-  records: AttendanceRecord[];
+  students: StudentMin[];
+  records: ApiAttendance[];
 }) {
   const [search, setSearch] = useState("");
   const [filterClass, setFilterClass] = useState("all");
 
   const classList = useMemo(() => {
     const names = [...new Set(students.map((s) => s.class))];
-    const order = [
-      "Nursery",
-      "LKG",
-      "UKG",
-      "1",
-      "2",
-      "3",
-      "4",
-      "5",
-      "6",
-      "7",
-      "8",
-      "9",
-      "10",
-      "11",
-      "12",
-    ];
-    return order
-      .filter((c) => names.includes(c))
-      .concat(names.filter((n) => !order.includes(n)));
+    return CLASS_ORDER.filter((c) => names.includes(c)).concat(
+      names.filter((n) => !CLASS_ORDER.includes(n)),
+    );
   }, [students]);
 
-  // Count unique working days in range
   const workingDays = useMemo(() => {
     const days = new Set(
       records
-        .filter(
-          (r) => r.date >= fromDate && r.date <= toDate && r.type === "student",
-        )
+        .filter((r) => r.date >= fromDate && r.date <= toDate)
         .map((r) => r.date),
     );
     return days.size || 1;
   }, [records, fromDate, toDate]);
 
   const rangeRecords = useMemo(
-    () =>
-      records.filter(
-        (r) => r.type === "student" && r.date >= fromDate && r.date <= toDate,
-      ),
+    () => records.filter((r) => r.date >= fromDate && r.date <= toDate),
     [records, fromDate, toDate],
   );
 
-  const rows: StudentRangeRow[] = useMemo(() => {
+  const rows: StudentRow[] = useMemo(() => {
     const filtered = students.filter((s) => {
       if (filterClass !== "all" && s.class !== filterClass) return false;
       if (search) {
@@ -333,7 +330,6 @@ function DateRangeSummary({
       }
       return true;
     });
-
     return filtered.map((s) => {
       const recs = rangeRecords.filter((r) => r.studentId === s.id);
       const present = recs.filter((r) => r.status === "Present").length;
@@ -342,15 +338,7 @@ function DateRangeSummary({
       const late = recs.filter((r) => r.status === "Late").length;
       const pct =
         workingDays > 0 ? Math.round((present / workingDays) * 100) : 0;
-      return {
-        student: s,
-        present,
-        absent,
-        leave,
-        late,
-        total: workingDays,
-        pct,
-      };
+      return { ...s, present, absent, leave, late, total: workingDays, pct };
     });
   }, [students, filterClass, search, rangeRecords, workingDays]);
 
@@ -371,10 +359,10 @@ function DateRangeSummary({
     ];
     for (const r of rows) {
       rowData.push([
-        r.student.admNo,
-        r.student.fullName,
-        r.student.class,
-        r.student.section,
+        r.admNo,
+        r.fullName,
+        r.class,
+        r.section,
         String(r.present),
         String(r.absent),
         String(r.leave),
@@ -429,7 +417,7 @@ function DateRangeSummary({
               <SelectItem value="all">All Classes</SelectItem>
               {classList.map((c) => (
                 <SelectItem key={c} value={c}>
-                  {["Nursery", "LKG", "UKG"].includes(c) ? c : `Class ${c}`}
+                  {c}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -469,7 +457,7 @@ function DateRangeSummary({
                 <td
                   colSpan={7}
                   className="py-10 text-center text-muted-foreground"
-                  data-ocid="summary.range-table.empty-state"
+                  data-ocid="summary.range-table.empty_state"
                 >
                   No student data available
                 </td>
@@ -477,7 +465,7 @@ function DateRangeSummary({
             ) : (
               rows.map((row, idx) => (
                 <tr
-                  key={row.student.id}
+                  key={row.id}
                   className="border-t border-border hover:bg-muted/20 transition-colors"
                   data-ocid={`summary.range-row.${idx + 1}`}
                 >
@@ -485,10 +473,10 @@ function DateRangeSummary({
                     {idx + 1}
                   </td>
                   <td className="p-3 font-medium text-foreground">
-                    {row.student.fullName}
+                    {row.fullName}
                   </td>
                   <td className="p-3 text-muted-foreground hidden sm:table-cell">
-                    {row.student.class}-{row.student.section}
+                    {row.class}-{row.section}
                   </td>
                   <td className="p-3 text-right text-accent font-semibold">
                     {row.present}
@@ -522,93 +510,59 @@ function DateRangeSummary({
   );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────────────
+// ── Main Component ─────────────────────────────────────────────────────────────
 
 export default function AttendanceSummary({
   date,
   onDateChange,
 }: AttendanceSummaryProps) {
-  const { getData, currentSession } = useApp();
-
-  // Date range state
   const today = new Date().toISOString().split("T")[0];
+
   const [viewMode, setViewMode] = useState<"single" | "range">("single");
   const [fromDate, setFromDate] = useState(() => {
     const d = new Date();
-    d.setDate(1); // First of current month
+    d.setDate(1);
     return d.toISOString().split("T")[0];
   });
   const [toDate, setToDate] = useState(today);
 
+  const [students, setStudents] = useState<StudentMin[]>([]);
+  const [records, setRecords] = useState<ApiAttendance[]>([]);
+  const [loading, setLoading] = useState(false);
+
   const [drillDown, setDrillDown] = useState<ClassSectionRow | null>(null);
 
-  const students = useMemo(
-    () =>
-      (getData("students") as Student[]).filter(
-        (s) =>
-          s.sessionId === (currentSession?.id ?? "") && s.status === "active",
-      ),
-    [getData, currentSession],
-  );
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [studResult, recResult] = await Promise.all([
+        phpApiService.getStudents({ status: "active", limit: "1000" }),
+        phpApiService.getAttendance("", date),
+      ]);
+      setStudents(
+        studResult.data.map((s) => ({
+          id: s.id,
+          admNo: s.admNo,
+          fullName: s.fullName,
+          class: s.class,
+          section: s.section,
+          fatherName: s.fatherName,
+        })),
+      );
+      setRecords(recResult);
+    } catch {
+      toast.error("Failed to load attendance data");
+    } finally {
+      setLoading(false);
+    }
+  }, [date]);
 
-  const allRecords = useMemo(
-    () => getData("attendance") as AttendanceRecord[],
-    [getData],
-  );
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
 
-  const records = useMemo(
-    () => allRecords.filter((r) => r.date === date && r.type === "student"),
-    [allRecords, date],
-  );
-
-  const classSections = useMemo(
-    () => getData("classes") as ClassSection[],
-    [getData],
-  );
-
-  const routes = useMemo(
-    () => getData("transport_routes") as TransportRoute[],
-    [getData],
-  );
-
-  const CLASS_ORDER = [
-    "Nursery",
-    "LKG",
-    "UKG",
-    "1",
-    "2",
-    "3",
-    "4",
-    "5",
-    "6",
-    "7",
-    "8",
-    "9",
-    "10",
-    "11",
-    "12",
-  ];
-  const SECTIONS = ["A", "B", "C", "D", "E", "F"];
-
-  const sortedClasses = useMemo(() => {
-    if (classSections.length > 0) return classSections.map((c) => c.className);
-    return CLASS_ORDER;
-  }, [classSections]);
-
-  const presentIds = useMemo(
-    () =>
-      new Set(
-        records.filter((r) => r.status === "Present").map((r) => r.studentId),
-      ),
-    [records],
-  );
-
-  const total = students.length;
-  const present = students.filter((s) => presentIds.has(s.id)).length;
-  const absent = total - present;
-  const pct = total > 0 ? Math.round((present / total) * 100) : 0;
-
-  const classSectionData = useMemo(() => {
+  // Class-section summary
+  const classSectionData = useMemo<ClassSectionRow[]>(() => {
     const map: Record<string, ClassSectionRow> = {};
     for (const s of students) {
       const key = `${s.class}-${s.section}`;
@@ -624,7 +578,7 @@ export default function AttendanceSummary({
         };
       }
       map[key].total++;
-      const rec = records.find((r) => r.studentId === s.id);
+      const rec = records.find((r) => r.studentId === s.id && r.date === date);
       if (rec) {
         const st = rec.status as string;
         if (st === "Present") map[key].present++;
@@ -637,32 +591,27 @@ export default function AttendanceSummary({
       }
     }
     return Object.values(map).sort((a, b) => {
-      const ai = sortedClasses.indexOf(a.cls);
-      const bi = sortedClasses.indexOf(b.cls);
+      const ai = CLASS_ORDER.indexOf(a.cls);
+      const bi = CLASS_ORDER.indexOf(b.cls);
       if (ai !== bi) return ai - bi;
-      return SECTIONS.indexOf(a.section) - SECTIONS.indexOf(b.section);
+      return a.section.localeCompare(b.section);
     });
-  }, [students, records, sortedClasses]);
+  }, [students, records, date]);
 
-  const routeData = useMemo(
+  const presentIds = useMemo(
     () =>
-      routes.map((route) => {
-        const routeStudents = students.filter((s) =>
-          (route.students ?? []).includes(s.id),
-        );
-        const routePresent = routeStudents.filter((s) =>
-          presentIds.has(s.id),
-        ).length;
-        return {
-          route: route.routeName,
-          bus: route.busNo,
-          total: routeStudents.length,
-          present: routePresent,
-          absent: routeStudents.length - routePresent,
-        };
-      }),
-    [routes, students, presentIds],
+      new Set(
+        records
+          .filter((r) => r.status === "Present" && r.date === date)
+          .map((r) => r.studentId ?? ""),
+      ),
+    [records, date],
   );
+
+  const total = students.length;
+  const present = students.filter((s) => presentIds.has(s.id)).length;
+  const absent = total - present;
+  const pct = total > 0 ? Math.round((present / total) * 100) : 0;
 
   function exportCSV() {
     const rows = [
@@ -702,7 +651,7 @@ export default function AttendanceSummary({
 
   return (
     <div className="space-y-6">
-      {/* View Mode Toggle + Date Picker */}
+      {/* View mode toggle + date pickers */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex gap-1 p-1 bg-muted/40 rounded-lg">
           <button
@@ -753,32 +702,38 @@ export default function AttendanceSummary({
             </Button>
           </>
         ) : (
-          <>
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">From</span>
-              <Input
-                type="date"
-                value={fromDate}
-                onChange={(e) => setFromDate(e.target.value)}
-                className="w-36"
-                data-ocid="summary.from-date.input"
-              />
-              <span className="text-sm text-muted-foreground">To</span>
-              <Input
-                type="date"
-                value={toDate}
-                onChange={(e) => setToDate(e.target.value)}
-                className="w-36"
-                data-ocid="summary.to-date.input"
-              />
-            </div>
-          </>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm text-muted-foreground">From</span>
+            <Input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="w-36"
+              data-ocid="summary.from-date.input"
+            />
+            <span className="text-sm text-muted-foreground">To</span>
+            <Input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="w-36"
+              data-ocid="summary.to-date.input"
+            />
+          </div>
         )}
       </div>
 
-      {viewMode === "single" ? (
+      {loading ? (
+        <div
+          className="flex items-center justify-center py-16 text-muted-foreground"
+          data-ocid="summary.loading_state"
+        >
+          <Loader2 className="w-6 h-6 animate-spin mr-2" />
+          <span>Loading attendance data…</span>
+        </div>
+      ) : viewMode === "single" ? (
         <>
-          {/* Summary Cards */}
+          {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
             <SummaryCard
               label="Total Students"
@@ -810,7 +765,7 @@ export default function AttendanceSummary({
             />
           </div>
 
-          {/* Class/Section Breakdown */}
+          {/* Class/Section breakdown */}
           <Card className="overflow-hidden">
             <div className="p-4 border-b border-border flex items-center gap-2">
               <Users className="w-4 h-4 text-primary" />
@@ -824,7 +779,7 @@ export default function AttendanceSummary({
             {classSectionData.length === 0 ? (
               <div
                 className="py-10 text-center text-muted-foreground"
-                data-ocid="summary.class-table.empty-state"
+                data-ocid="summary.class-table.empty_state"
               >
                 <Users className="w-8 h-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">No student data available for {date}</p>
@@ -875,9 +830,7 @@ export default function AttendanceSummary({
                           data-ocid={`summary.class-row.${idx + 1}`}
                         >
                           <td className="p-3 font-medium text-foreground">
-                            {["Nursery", "LKG", "UKG"].includes(row.cls)
-                              ? row.cls
-                              : `Class ${row.cls}`}
+                            {row.cls}
                           </td>
                           <td className="p-3 text-muted-foreground">
                             {row.section}
@@ -916,95 +869,22 @@ export default function AttendanceSummary({
             )}
           </Card>
 
-          {/* Route-wise Breakdown */}
-          {routes.length > 0 ? (
-            <Card className="overflow-hidden">
-              <div className="p-4 border-b border-border flex items-center gap-2">
-                <Bus className="w-4 h-4 text-primary" />
-                <h3 className="font-display font-semibold text-foreground">
-                  Route / Transport Wise Attendance
-                </h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/60">
-                    <tr>
-                      <th className="text-left p-3 font-semibold text-muted-foreground">
-                        Route
-                      </th>
-                      <th className="text-left p-3 font-semibold text-muted-foreground">
-                        Bus No.
-                      </th>
-                      <th className="text-right p-3 font-semibold text-muted-foreground">
-                        Total
-                      </th>
-                      <th className="text-right p-3 font-semibold text-muted-foreground">
-                        Present
-                      </th>
-                      <th className="text-right p-3 font-semibold text-muted-foreground">
-                        Absent
-                      </th>
-                      <th className="text-left p-3 font-semibold text-muted-foreground">
-                        Attendance
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {routeData.map((row, idx) => {
-                      const rowPct =
-                        row.total > 0
-                          ? Math.round((row.present / row.total) * 100)
-                          : 0;
-                      return (
-                        <tr
-                          key={row.route}
-                          className="border-t border-border hover:bg-muted/30 transition-colors"
-                          data-ocid={`summary.route-row.${idx + 1}`}
-                        >
-                          <td className="p-3 font-medium text-foreground">
-                            {row.route}
-                          </td>
-                          <td className="p-3 text-muted-foreground">
-                            {row.bus}
-                          </td>
-                          <td className="p-3 text-right text-muted-foreground">
-                            {row.total}
-                          </td>
-                          <td className="p-3 text-right text-accent font-semibold">
-                            {row.present}
-                          </td>
-                          <td className="p-3 text-right text-orange-500 font-semibold">
-                            {row.absent}
-                          </td>
-                          <td className="p-3">
-                            <div className="flex items-center gap-2">
-                              <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden min-w-16">
-                                <div
-                                  className="h-full bg-accent rounded-full transition-all"
-                                  style={{ width: `${rowPct}%` }}
-                                />
-                              </div>
-                              <span className="text-xs text-muted-foreground w-10 text-right flex-shrink-0">
-                                {rowPct}%
-                              </span>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          ) : null}
+          {/* Route-wise placeholder (transport routes not fetched here) */}
+          <Card className="p-4 bg-muted/20 border-dashed">
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Bus className="w-4 h-4" />
+              <p className="text-sm">
+                Route-wise breakdown: go to Transport module for route data.
+              </p>
+            </div>
+          </Card>
         </>
       ) : (
-        /* Date Range View */
         <DateRangeSummary
           fromDate={fromDate}
           toDate={toDate}
           students={students}
-          records={allRecords}
+          records={records}
         />
       )}
 

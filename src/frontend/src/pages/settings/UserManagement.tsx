@@ -1,735 +1,476 @@
 /**
- * SHUBH SCHOOL ERP — User Management
- * Direct API: all reads/writes go through phpApiService
+ * SHUBH SCHOOL ERP — User Management (rewritten)
+ * Super Admin can add, edit, reset passwords, deactivate users.
+ * All reads/writes go directly to PHP/MySQL via phpApiService.
  */
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Eye,
-  EyeOff,
+  Edit,
   KeyRound,
-  Loader2,
-  Pencil,
   Plus,
   Search,
-  Shield,
   Trash2,
-  UserCog,
+  UserCheck,
+  UserX,
   Users,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
-import { useApp } from "../../context/AppContext";
-import type { UserRole } from "../../types";
-import phpApiSvc from "../../utils/phpApiService";
+import { useEffect, useState } from "react";
+import { ROLES, type UserRole } from "../../types";
+import phpApiService from "../../utils/phpApiService";
 
 interface UserRecord {
   id: string;
   username: string;
-  fullName?: string;
-  name?: string;
-  role: UserRole;
-  mobile?: string;
+  name: string;
   email?: string;
-  isActive?: boolean;
-  lastLogin?: string;
-}
-
-interface UserFormData {
-  fullName: string;
-  username: string;
+  phone?: string;
   role: UserRole;
-  mobile: string;
-  email: string;
-  password: string;
-  confirmPassword: string;
+  isActive: boolean;
 }
 
-const EMPTY_FORM: UserFormData = {
-  fullName: "",
-  username: "",
-  role: "teacher",
-  mobile: "",
-  email: "",
-  password: "",
-  confirmPassword: "",
+const ROLE_COLORS: Record<string, string> = {
+  superadmin: "bg-primary/10 text-primary",
+  admin: "bg-blue-500/10 text-blue-600",
+  teacher: "bg-green-500/10 text-green-600",
+  accountant: "bg-amber-500/10 text-amber-600",
+  parent: "bg-purple-500/10 text-purple-600",
+  student: "bg-cyan-500/10 text-cyan-600",
+  driver: "bg-orange-500/10 text-orange-600",
+  receptionist: "bg-pink-500/10 text-pink-600",
+  librarian: "bg-indigo-500/10 text-indigo-600",
 };
 
-const ROLE_OPTIONS: { value: UserRole; label: string; color: string }[] = [
-  { value: "admin", label: "Admin", color: "bg-purple-100 text-purple-700" },
-  { value: "teacher", label: "Teacher", color: "bg-blue-100 text-blue-700" },
-  {
-    value: "receptionist",
-    label: "Receptionist",
-    color: "bg-teal-100 text-teal-700",
-  },
-  {
-    value: "accountant",
-    label: "Accountant",
-    color: "bg-amber-100 text-amber-700",
-  },
-  {
-    value: "librarian",
-    label: "Librarian",
-    color: "bg-green-100 text-green-700",
-  },
-  { value: "driver", label: "Driver", color: "bg-orange-100 text-orange-700" },
-  { value: "parent", label: "Parent", color: "bg-pink-100 text-pink-700" },
-  { value: "student", label: "Student", color: "bg-sky-100 text-sky-700" },
-];
+type ModalMode = "add" | "edit" | "reset" | null;
 
-function getRoleColor(role: UserRole): string {
-  return (
-    ROLE_OPTIONS.find((r) => r.value === role)?.color ??
-    "bg-muted text-muted-foreground"
-  );
+interface FormData {
+  username: string;
+  password: string;
+  name: string;
+  email: string;
+  phone: string;
+  role: UserRole;
 }
 
+const EMPTY_FORM: FormData = {
+  username: "",
+  password: "",
+  name: "",
+  email: "",
+  phone: "",
+  role: "teacher",
+};
+
 export default function UserManagement() {
-  const { currentUser } = useApp();
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
-  const [showForm, setShowForm] = useState(false);
-  const [editUser, setEditUser] = useState<UserRecord | null>(null);
-  const [form, setForm] = useState<UserFormData>({ ...EMPTY_FORM });
-  const [showPw, setShowPw] = useState(false);
+  const [modal, setModal] = useState<ModalMode>(null);
+  const [selected, setSelected] = useState<UserRecord | null>(null);
+  const [form, setForm] = useState<FormData>(EMPTY_FORM);
+  const [newPw, setNewPw] = useState("");
   const [saving, setSaving] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<UserRecord | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [resetUser, setResetUser] = useState<UserRecord | null>(null);
-  const [newPassword, setNewPassword] = useState("");
-  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState("");
 
-  const isSuperAdmin = currentUser?.role === "superadmin";
-
-  // ── Load users ────────────────────────────────────────────────────────────
-
-  const loadUsers = useCallback(async () => {
+  const load = () => {
     setLoading(true);
-    try {
-      const data = await phpApiSvc.getUsers();
-      setUsers(data as unknown as UserRecord[]);
-    } catch {
-      setUsers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadUsers();
-  }, [loadUsers]);
-
-  const filteredUsers = useMemo(() => {
-    const q = search.toLowerCase();
-    return users.filter(
-      (u) =>
-        u.fullName?.toLowerCase().includes(q) ||
-        u.username?.toLowerCase().includes(q) ||
-        u.role?.toLowerCase().includes(q),
-    );
-  }, [users, search]);
-
-  // ── Open forms ────────────────────────────────────────────────────────────
-
-  function openAdd() {
-    setEditUser(null);
-    setForm({ ...EMPTY_FORM });
-    setShowPw(false);
-    setShowForm(true);
-  }
-
-  function openEdit(user: UserRecord) {
-    setEditUser(user);
-    setForm({
-      fullName: user.fullName ?? user.name ?? "",
-      username: user.username,
-      role: user.role,
-      mobile: user.mobile ?? "",
-      email: user.email ?? "",
-      password: "",
-      confirmPassword: "",
-    });
-    setShowPw(false);
-    setShowForm(true);
-  }
-
-  // ── Save user ─────────────────────────────────────────────────────────────
-
-  async function handleSave() {
-    const {
-      fullName,
-      username,
-      role,
-      mobile,
-      email,
-      password,
-      confirmPassword,
-    } = form;
-    if (!fullName.trim()) {
-      toast.error("Full name is required.");
-      return;
-    }
-    if (!username.trim()) {
-      toast.error("Username is required.");
-      return;
-    }
-    if (username.match(/^\d+$/)) {
-      toast.error("Username cannot be a mobile number.");
-      return;
-    }
-    if (!editUser && !password) {
-      toast.error("Password is required for new users.");
-      return;
-    }
-    if (password && password !== confirmPassword) {
-      toast.error("Passwords do not match.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      if (editUser) {
-        const payload: Record<string, unknown> = {
-          id: editUser.id,
-          fullName,
-          username,
-          role,
-          mobile,
-          email,
-        };
-        if (password) payload.password = password;
-        await phpApiSvc.updateUser(payload);
-        toast.success("User updated.");
-        setUsers((prev) =>
-          prev.map((u) =>
-            u.id === editUser.id
-              ? { ...u, fullName, username, role, mobile, email }
-              : u,
+    void phpApiService
+      .getUsers()
+      .then((raw) => {
+        setUsers(
+          (raw as unknown as UserRecord[]).filter(
+            (u) => u.username !== "superadmin",
           ),
         );
-      } else {
-        const result = (await phpApiSvc.createUser({
-          fullName,
-          username,
-          role,
-          mobile,
-          email,
-          password,
-        })) as unknown as UserRecord;
-        toast.success("User created.");
-        setUsers((prev) => [
-          ...prev,
-          {
-            ...result,
-            fullName,
-            username,
-            role,
-            mobile,
-            email,
-            isActive: true,
-          },
-        ]);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  };
+
+  useEffect(load, []);
+
+  const filtered = users.filter(
+    (u) =>
+      u.name?.toLowerCase().includes(search.toLowerCase()) ||
+      u.username?.toLowerCase().includes(search.toLowerCase()) ||
+      u.role?.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const openAdd = () => {
+    setForm(EMPTY_FORM);
+    setError("");
+    setModal("add");
+  };
+
+  const openEdit = (u: UserRecord) => {
+    setSelected(u);
+    setForm({
+      username: u.username,
+      password: "",
+      name: u.name,
+      email: u.email ?? "",
+      phone: u.phone ?? "",
+      role: u.role,
+    });
+    setError("");
+    setModal("edit");
+  };
+
+  const openReset = (u: UserRecord) => {
+    setSelected(u);
+    setNewPw("");
+    setError("");
+    setModal("reset");
+  };
+
+  const setF = (k: keyof FormData, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  const handleSave = async () => {
+    if (!form.username || !form.name) {
+      setError("Username and name are required");
+      return;
+    }
+    if (modal === "add" && !form.password) {
+      setError("Password is required");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      if (modal === "add") {
+        await phpApiService.createUser({ ...form });
+      } else if (modal === "edit" && selected) {
+        await phpApiService.updateUser({
+          id: selected.id,
+          name: form.name,
+          email: form.email,
+          phone: form.phone,
+          role: form.role,
+        });
       }
-      setShowForm(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save user.");
+      load();
+      setModal(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save user");
     } finally {
       setSaving(false);
     }
-  }
+  };
 
-  // ── Delete user ───────────────────────────────────────────────────────────
-
-  async function handleDelete() {
-    if (!deleteTarget) return;
-    setDeleting(true);
+  const handleReset = async () => {
+    if (!newPw || !selected) return;
+    setSaving(true);
+    setError("");
     try {
-      await phpApiSvc.deleteUser(deleteTarget.id);
-      toast.success("User deleted.");
-      setUsers((prev) => prev.filter((u) => u.id !== deleteTarget.id));
-      setDeleteTarget(null);
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to delete user.",
-      );
+      await phpApiService.resetPassword(selected.id, newPw);
+      setModal(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to reset password");
     } finally {
-      setDeleting(false);
+      setSaving(false);
     }
-  }
+  };
 
-  // ── Reset password ────────────────────────────────────────────────────────
+  const handleToggleActive = async (u: UserRecord) => {
+    await phpApiService.updateUser({ id: u.id, isActive: !u.isActive });
+    setUsers((prev) =>
+      prev.map((x) => (x.id === u.id ? { ...x, isActive: !x.isActive } : x)),
+    );
+  };
 
-  async function handleResetPassword() {
-    if (!resetUser || !newPassword.trim()) {
-      toast.error("Enter a new password.");
-      return;
-    }
-    setResetting(true);
-    try {
-      await phpApiSvc.resetPassword(resetUser.id, newPassword);
-      toast.success(
-        `Password reset for ${resetUser.fullName ?? resetUser.username}.`,
-      );
-      setResetUser(null);
-      setNewPassword("");
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to reset password.",
-      );
-    } finally {
-      setResetting(false);
-    }
-  }
+  const handleDelete = async (u: UserRecord) => {
+    if (!confirm(`Delete user "${u.name}"?`)) return;
+    await phpApiService.deleteUser(u.id);
+    setUsers((prev) => prev.filter((x) => x.id !== u.id));
+  };
+
+  const FORM_FIELDS: [keyof FormData, string, string][] = [
+    ["name", "Full Name", "text"],
+    ["username", "Username", "text"],
+    ["email", "Email", "email"],
+    ["phone", "Phone", "tel"],
+  ];
 
   return (
-    <div className="p-4 lg:p-6 max-w-5xl space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-xl font-display font-semibold text-foreground flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary" /> User Management
+    <div className="p-4 lg:p-6 space-y-5">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Users className="w-5 h-5 text-primary" />
+          <h2 className="font-display font-semibold text-foreground">
+            User Management
           </h2>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {loading
-              ? "Loading…"
-              : `${users.length} user${users.length !== 1 ? "s" : ""}`}{" "}
-            — Super Admin manages all roles
-          </p>
+          <Badge variant="secondary">{users.length} users</Badge>
         </div>
-        {isSuperAdmin && (
-          <Button onClick={openAdd} data-ocid="users.add_button">
-            <Plus className="w-4 h-4 mr-1.5" /> Add User
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-2.5 top-2.5 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search users…"
+              className="pl-8 w-48"
+              data-ocid="user-mgmt.search_input"
+            />
+          </div>
+          <Button size="sm" onClick={openAdd} data-ocid="user-mgmt.add_button">
+            <Plus className="w-4 h-4 mr-1" /> Add User
           </Button>
-        )}
-      </div>
-
-      {/* Super Admin Card */}
-      <Card className="p-4 border-primary/20 bg-primary/5">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-            <Shield className="w-5 h-5 text-primary" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-semibold text-foreground">Super Admin</p>
-            <p className="text-xs text-muted-foreground">
-              superadmin — Full access to all modules
-            </p>
-          </div>
-          <Badge className="text-[10px] bg-primary/10 text-primary border-primary/30">
-            Active
-          </Badge>
-          {isSuperAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setResetUser({
-                  id: "su1",
-                  username: "superadmin",
-                  role: "superadmin",
-                  fullName: "Super Admin",
-                });
-                setNewPassword("");
-              }}
-              data-ocid="users.superadmin.reset_button"
-            >
-              <KeyRound className="w-3.5 h-3.5 mr-1" /> Reset Password
-            </Button>
-          )}
         </div>
-      </Card>
-
-      {/* Search */}
-      <div className="relative">
-        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          placeholder="Search by name, username or role…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-          data-ocid="users.search_input"
-        />
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div className="space-y-2" data-ocid="users.loading_state">
-          {[1, 2, 3].map((i) => (
-            <Skeleton key={i} className="h-16 rounded-xl" />
+      {loading ? (
+        <div className="space-y-3">
+          {["a", "b", "c", "d"].map((k) => (
+            <div key={k} className="h-16 bg-muted rounded-xl animate-pulse" />
           ))}
         </div>
-      )}
-
-      {/* Users list */}
-      {!loading && filteredUsers.length === 0 && users.length === 0 ? (
-        <Card className="p-10 text-center" data-ocid="users.empty_state">
-          <UserCog className="w-12 h-12 mx-auto text-muted-foreground/30 mb-3" />
-          <p className="font-medium text-muted-foreground">
-            No custom users yet
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Add staff users — they can log in with their username and password.
-          </p>
-          {isSuperAdmin && (
-            <Button className="mt-4" onClick={openAdd}>
-              <Plus className="w-4 h-4 mr-1.5" />
-              Add First User
-            </Button>
-          )}
-        </Card>
+      ) : filtered.length === 0 ? (
+        <div
+          className="text-center py-12 bg-card rounded-xl border border-border"
+          data-ocid="user-mgmt.empty_state"
+        >
+          <Users className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+          <p className="text-muted-foreground text-sm">No users found</p>
+          <Button size="sm" className="mt-3" onClick={openAdd}>
+            Add First User
+          </Button>
+        </div>
       ) : (
-        !loading && (
-          <div className="space-y-2">
-            {filteredUsers.map((user, idx) => (
-              <Card
-                key={user.id}
-                className={`p-4 transition-smooth ${user.isActive === false ? "opacity-60" : ""}`}
-                data-ocid={`users.item.${idx + 1}`}
-              >
-                <div className="flex items-center gap-3 flex-wrap">
-                  <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center shrink-0">
-                    <span className="text-sm font-bold text-muted-foreground">
-                      {(user.fullName ?? user.username)[0]?.toUpperCase()}
+        <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40">
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                  Name
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden sm:table-cell">
+                  Username
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground">
+                  Role
+                </th>
+                <th className="text-left px-4 py-3 font-medium text-muted-foreground hidden md:table-cell">
+                  Status
+                </th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((u, idx) => (
+                <tr
+                  key={u.id}
+                  className="border-b border-border last:border-0 hover:bg-muted/30"
+                  data-ocid={`user-mgmt.item.${idx + 1}`}
+                >
+                  <td className="px-4 py-3">
+                    <p className="font-medium text-foreground">{u.name}</p>
+                    <p className="text-xs text-muted-foreground sm:hidden">
+                      @{u.username}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                    @{u.username}
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        ROLE_COLORS[u.role] ?? "bg-muted text-foreground"
+                      }`}
+                    >
+                      {u.role}
                     </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-foreground truncate">
-                      {user.fullName ?? user.name ?? user.username}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      @{user.username}
-                      {user.mobile ? ` · ${user.mobile}` : ""}
-                    </p>
-                  </div>
-                  <Badge className={`text-[10px] ${getRoleColor(user.role)}`}>
-                    {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ??
-                      user.role}
-                  </Badge>
-                  <Badge
-                    variant={user.isActive !== false ? "outline" : "secondary"}
-                    className="text-[10px]"
-                  >
-                    {user.isActive !== false ? "Active" : "Inactive"}
-                  </Badge>
-                  {isSuperAdmin && (
-                    <div className="flex gap-1.5 shrink-0">
+                  </td>
+                  <td className="px-4 py-3 hidden md:table-cell">
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full ${
+                        u.isActive !== false
+                          ? "bg-green-500/10 text-green-600"
+                          : "bg-destructive/10 text-destructive"
+                      }`}
+                    >
+                      {u.isActive !== false ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1 justify-end">
                       <Button
+                        variant="ghost"
                         size="sm"
-                        variant="outline"
-                        onClick={() => openEdit(user)}
-                        data-ocid={`users.edit_button.${idx + 1}`}
+                        className="h-7 w-7 p-0"
+                        onClick={() => openEdit(u)}
+                        data-ocid={`user-mgmt.edit_button.${idx + 1}`}
                       >
-                        <Pencil className="w-3.5 h-3.5" />
+                        <Edit className="w-3.5 h-3.5" />
                       </Button>
                       <Button
+                        variant="ghost"
                         size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setResetUser(user);
-                          setNewPassword("");
-                        }}
-                        data-ocid={`users.reset_button.${idx + 1}`}
+                        className="h-7 w-7 p-0"
+                        onClick={() => openReset(u)}
+                        data-ocid={`user-mgmt.reset_pw_button.${idx + 1}`}
                       >
                         <KeyRound className="w-3.5 h-3.5" />
                       </Button>
                       <Button
+                        variant="ghost"
                         size="sm"
-                        variant="outline"
-                        className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                        onClick={() => setDeleteTarget(user)}
-                        data-ocid={`users.delete_button.${idx + 1}`}
+                        className="h-7 w-7 p-0"
+                        onClick={() => handleToggleActive(u)}
+                        data-ocid={`user-mgmt.toggle_button.${idx + 1}`}
+                      >
+                        {u.isActive !== false ? (
+                          <UserX className="w-3.5 h-3.5" />
+                        ) : (
+                          <UserCheck className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 w-7 p-0 text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(u)}
+                        data-ocid={`user-mgmt.delete_button.${idx + 1}`}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </Button>
                     </div>
-                  )}
-                </div>
-              </Card>
-            ))}
-          </div>
-        )
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
-      {/* Add/Edit Dialog */}
-      <Dialog
-        open={showForm}
-        onOpenChange={(v) => {
-          if (!v) setShowForm(false);
-        }}
-      >
-        <DialogContent className="max-w-lg" data-ocid="users.dialog">
-          <DialogHeader>
-            <DialogTitle>{editUser ? "Edit User" : "Add New User"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="u-fullname">Full Name *</Label>
-                <Input
-                  id="u-fullname"
-                  value={form.fullName}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, fullName: e.target.value }))
-                  }
-                  placeholder="Full name"
-                  data-ocid="users.fullname.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="u-username">Username *</Label>
-                <Input
-                  id="u-username"
-                  value={form.username}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, username: e.target.value }))
-                  }
-                  placeholder="login username"
-                  data-ocid="users.username.input"
-                  disabled={!!editUser}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="u-role">Role *</Label>
-                <Select
-                  value={form.role}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, role: v as UserRole }))
-                  }
-                  disabled={!isSuperAdmin}
+      {/* Add/Edit Modal */}
+      {(modal === "add" || modal === "edit") && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          data-ocid="user-mgmt.dialog"
+        >
+          <div className="bg-card border border-border rounded-2xl shadow-elevated w-full max-w-md p-5 space-y-4">
+            <h3 className="font-display font-semibold text-foreground">
+              {modal === "add" ? "Add User" : "Edit User"}
+            </h3>
+            {error && (
+              <p className="text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-lg">
+                {error}
+              </p>
+            )}
+            <div className="grid grid-cols-2 gap-3">
+              {FORM_FIELDS.map(([k, lbl, type]) => (
+                <div
+                  key={String(k)}
+                  className={k === "name" ? "col-span-2" : ""}
                 >
-                  <SelectTrigger id="u-role" data-ocid="users.role.select">
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {ROLE_OPTIONS.map((r) => (
-                      <SelectItem key={r.value} value={r.value}>
-                        {r.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="u-mobile">Mobile</Label>
-                <Input
-                  id="u-mobile"
-                  value={form.mobile}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, mobile: e.target.value }))
-                  }
-                  placeholder="+91 XXXXX XXXXX"
-                  data-ocid="users.mobile.input"
-                />
-              </div>
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label htmlFor="u-email">Email</Label>
-                <Input
-                  id="u-email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, email: e.target.value }))
-                  }
-                  placeholder="user@school.com"
-                  data-ocid="users.email.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="u-pw">
-                  {editUser
-                    ? "New Password (leave blank to keep)"
-                    : "Password *"}
-                </Label>
-                <div className="relative">
+                  <Label className="text-xs mb-1 block">{lbl}</Label>
                   <Input
-                    id="u-pw"
-                    type={showPw ? "text" : "password"}
-                    value={form.password}
-                    onChange={(e) =>
-                      setForm((f) => ({ ...f, password: e.target.value }))
-                    }
-                    placeholder={editUser ? "Leave blank to keep" : "Password"}
-                    data-ocid="users.password.input"
-                    className="pr-10"
+                    type={type}
+                    value={form[k]}
+                    onChange={(e) => setF(k, e.target.value)}
+                    disabled={modal === "edit" && k === "username"}
+                    data-ocid={`user-modal.${k}_input`}
                   />
-                  <button
-                    type="button"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    onClick={() => setShowPw((v) => !v)}
-                  >
-                    {showPw ? (
-                      <EyeOff className="w-4 h-4" />
-                    ) : (
-                      <Eye className="w-4 h-4" />
-                    )}
-                  </button>
                 </div>
-              </div>
-              {form.password && (
-                <div className="space-y-1.5">
-                  <Label htmlFor="u-confirm-pw">Confirm Password</Label>
+              ))}
+              {modal === "add" && (
+                <div>
+                  <Label className="text-xs mb-1 block">Password</Label>
                   <Input
-                    id="u-confirm-pw"
                     type="password"
-                    value={form.confirmPassword}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        confirmPassword: e.target.value,
-                      }))
-                    }
-                    placeholder="Repeat password"
-                    data-ocid="users.confirm_password.input"
+                    value={form.password}
+                    onChange={(e) => setF("password", e.target.value)}
+                    data-ocid="user-modal.password_input"
                   />
                 </div>
               )}
+              <div className={modal === "add" ? "" : "col-span-2"}>
+                <Label className="text-xs mb-1 block">Role</Label>
+                <select
+                  value={form.role}
+                  onChange={(e) => setF("role", e.target.value)}
+                  className="w-full border border-input bg-background text-foreground rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-ring"
+                  data-ocid="user-modal.role_select"
+                >
+                  {ROLES.filter((r) => r !== "superadmin").map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="flex gap-2 justify-end pt-2">
+            <div className="flex justify-end gap-2 pt-1">
               <Button
                 variant="outline"
-                onClick={() => setShowForm(false)}
-                data-ocid="users.form.cancel_button"
+                onClick={() => setModal(null)}
+                data-ocid="user-modal.cancel_button"
               >
                 Cancel
               </Button>
               <Button
-                onClick={() => void handleSave()}
+                onClick={handleSave}
                 disabled={saving}
-                data-ocid="users.form.submit_button"
+                data-ocid="user-modal.confirm_button"
               >
-                {saving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Saving…
-                  </>
-                ) : editUser ? (
-                  "Save Changes"
-                ) : (
-                  "Create User"
-                )}
+                {saving ? "Saving…" : "Save User"}
               </Button>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
 
-      {/* Reset Password Dialog */}
-      <Dialog
-        open={!!resetUser}
-        onOpenChange={(v) => {
-          if (!v) setResetUser(null);
-        }}
-      >
-        <DialogContent className="max-w-sm" data-ocid="users.reset_dialog">
-          <DialogHeader>
-            <DialogTitle>
-              Reset Password — {resetUser?.fullName ?? resetUser?.username}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1.5">
-              <Label htmlFor="reset-pw">New Password</Label>
+      {/* Reset Password Modal */}
+      {modal === "reset" && selected && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
+          data-ocid="user-mgmt.reset-dialog"
+        >
+          <div className="bg-card border border-border rounded-2xl shadow-elevated w-full max-w-sm p-5 space-y-4">
+            <h3 className="font-display font-semibold text-foreground">
+              Reset Password
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Set a new password for <strong>{selected.name}</strong>
+            </p>
+            {error && (
+              <p className="text-xs text-destructive bg-destructive/10 px-3 py-2 rounded-lg">
+                {error}
+              </p>
+            )}
+            <div>
+              <Label className="text-xs mb-1 block">New Password</Label>
               <Input
-                id="reset-pw"
                 type="password"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
+                value={newPw}
+                onChange={(e) => setNewPw(e.target.value)}
                 placeholder="Enter new password"
-                data-ocid="users.reset.password.input"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void handleResetPassword();
-                }}
+                data-ocid="user-reset.password_input"
               />
             </div>
-            <div className="flex gap-2 justify-end">
+            <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
-                onClick={() => setResetUser(null)}
-                data-ocid="users.reset.cancel_button"
+                onClick={() => setModal(null)}
+                data-ocid="user-reset.cancel_button"
               >
                 Cancel
               </Button>
               <Button
-                onClick={() => void handleResetPassword()}
-                disabled={resetting || !newPassword}
-                data-ocid="users.reset.confirm_button"
+                onClick={handleReset}
+                disabled={saving || !newPw}
+                data-ocid="user-reset.confirm_button"
               >
-                {resetting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Resetting…
-                  </>
-                ) : (
-                  <>
-                    <KeyRound className="w-4 h-4 mr-2" />
-                    Reset Password
-                  </>
-                )}
+                {saving ? "Resetting…" : "Reset Password"}
               </Button>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Delete Confirm */}
-      <Dialog
-        open={!!deleteTarget}
-        onOpenChange={(v) => {
-          if (!v) setDeleteTarget(null);
-        }}
-      >
-        <DialogContent className="max-w-sm" data-ocid="users.delete_dialog">
-          <DialogHeader>
-            <DialogTitle>Delete User?</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground py-2">
-            Delete{" "}
-            <strong>{deleteTarget?.fullName ?? deleteTarget?.username}</strong>?
-            This cannot be undone.
-          </p>
-          <div className="flex gap-2 justify-end">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteTarget(null)}
-              data-ocid="users.delete.cancel_button"
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void handleDelete()}
-              disabled={deleting}
-              data-ocid="users.delete.confirm_button"
-            >
-              {deleting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                "Delete"
-              )}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </div>
   );
 }
