@@ -219,19 +219,27 @@ export default function Classes() {
         toast.success(`${displayName(finalName)} updated`);
       } else {
         // Add: POST with name (no id)
-        await phpApiService.addClass({
+        console.debug("[Classes] adding class:", {
+          name: finalName,
+          sections: modal.sections,
+          is_enabled: modal.isEnabled ? 1 : 0,
+        });
+        const result = await phpApiService.addClass({
           name: finalName, // ← 'name', NOT 'className'
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0,
         });
-        toast.success(`${displayName(finalName)} added`);
+        console.debug("[Classes] addClass result:", result);
+        toast.success(`${displayName(finalName)} added successfully`);
       }
       setModal(BLANK_MODAL);
       void loadClasses();
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to save. Please retry.";
+      console.error("[Classes] save failed:", err);
       setModal((p) => ({ ...p, error: msg }));
+      toast.error(msg);
     } finally {
       setSaving(false);
     }

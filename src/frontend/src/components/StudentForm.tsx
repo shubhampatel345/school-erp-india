@@ -19,7 +19,6 @@ import { AlertCircle, Loader2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
-import { CLASSES_ORDER } from "../types";
 import phpApiService, { type ClassRecord } from "../utils/phpApiService";
 
 interface StudentFormProps {
@@ -43,12 +42,30 @@ function normalizeClassName(name: string): string {
   return name;
 }
 
+const CLASS_ORDER_KEYS = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12",
+];
+
 function classOrderIndex(name: string): number {
   const norm = normalizeClassName(name);
-  const idx = CLASSES_ORDER.indexOf(norm);
+  const idx = CLASS_ORDER_KEYS.indexOf(norm);
   if (idx !== -1) return idx;
-  const direct = CLASSES_ORDER.indexOf(name);
-  return direct !== -1 ? direct : CLASSES_ORDER.length;
+  const direct = CLASS_ORDER_KEYS.indexOf(name);
+  return direct !== -1 ? direct : CLASS_ORDER_KEYS.length;
 }
 
 function sortClasses(classes: ClassRecord[]): ClassRecord[] {
@@ -133,15 +150,18 @@ export default function StudentForm({
 
   // ── Classes from API ────────────────────────────────────────────────────────
   const [apiClasses, setApiClasses] = useState<ClassRecord[]>([]);
+  const [classesLoading, setClassesLoading] = useState(true);
   useEffect(() => {
+    setClassesLoading(true);
     phpApiService
       .getClasses()
       .then((cls) => {
         setApiClasses(sortClasses(cls.filter((c) => c.isEnabled !== false)));
       })
       .catch(() => {
-        /* silent */
-      });
+        setApiClasses([]);
+      })
+      .finally(() => setClassesLoading(false));
   }, []);
 
   // ── Form field refs (stable, no cursor jump) ────────────────────────────────
@@ -396,17 +416,21 @@ export default function StudentForm({
                         <SelectValue placeholder="Select class" />
                       </SelectTrigger>
                       <SelectContent>
-                        {apiClasses.length > 0
-                          ? apiClasses.map((c) => (
-                              <SelectItem key={c.id} value={c.className}>
-                                {c.className}
-                              </SelectItem>
-                            ))
-                          : CLASSES_ORDER.map((c) => (
-                              <SelectItem key={c} value={c}>
-                                {c}
-                              </SelectItem>
-                            ))}
+                        {classesLoading ? (
+                          <SelectItem value="__loading__" disabled>
+                            Loading classes…
+                          </SelectItem>
+                        ) : apiClasses.length > 0 ? (
+                          apiClasses.map((c) => (
+                            <SelectItem key={c.id} value={c.className}>
+                              {c.className}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__empty__" disabled>
+                            No classes — add in Academics first
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
@@ -427,17 +451,19 @@ export default function StudentForm({
                         <SelectValue placeholder="Section" />
                       </SelectTrigger>
                       <SelectContent>
-                        {sectionsForClass.length > 0
-                          ? sectionsForClass.map((s) => (
-                              <SelectItem key={s} value={s}>
-                                {s}
-                              </SelectItem>
-                            ))
-                          : ["A", "B", "C", "D", "E"].map((s) => (
-                              <SelectItem key={s} value={s}>
-                                {s}
-                              </SelectItem>
-                            ))}
+                        {sectionsForClass.length > 0 ? (
+                          sectionsForClass.map((s) => (
+                            <SelectItem key={s} value={s}>
+                              {s}
+                            </SelectItem>
+                          ))
+                        ) : (
+                          <SelectItem value="__no_section__" disabled>
+                            {selectedClass
+                              ? "No sections configured"
+                              : "Select a class first"}
+                          </SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>

@@ -711,9 +711,30 @@ class PhpApiService {
   // ── Classes ────────────────────────────────────────────────────────────────
 
   async getClasses(sessionId?: string): Promise<ClassRecord[]> {
+    const params: Record<string, string> = {};
+    if (sessionId) params.session_id = sessionId;
+    const paramStr = Object.keys(params).length ? params : undefined;
+
+    // Normalise raw rows from either route format
+    const normalise = (
+      raw: Array<{
+        id: string;
+        name: string;
+        display_order?: number;
+        is_enabled?: number;
+        sections?: string[];
+      }>,
+    ): ClassRecord[] =>
+      (raw ?? []).map((c) => ({
+        id: String(c.id),
+        className: c.name ?? "",
+        displayOrder: c.display_order ?? 0,
+        isEnabled: c.is_enabled !== 0,
+        sections: Array.isArray(c.sections) ? c.sections : [],
+      }));
+
+    // Try clean route first, then legacy academic route
     try {
-      const params: Record<string, string> = {};
-      if (sessionId) params.session_id = sessionId;
       const raw = await this.apiGet<
         Array<{
           id: string;
@@ -722,14 +743,22 @@ class PhpApiService {
           is_enabled?: number;
           sections?: string[];
         }>
-      >("academics/classes", Object.keys(params).length ? params : undefined);
-      return (raw ?? []).map((c) => ({
-        id: String(c.id),
-        className: c.name ?? "",
-        displayOrder: c.display_order ?? 0,
-        isEnabled: c.is_enabled !== 0,
-        sections: Array.isArray(c.sections) ? c.sections : [],
-      }));
+      >("classes/list", paramStr);
+      return normalise(raw);
+    } catch {
+      /* fall through */
+    }
+    try {
+      const raw = await this.apiGet<
+        Array<{
+          id: string;
+          name: string;
+          display_order?: number;
+          is_enabled?: number;
+          sections?: string[];
+        }>
+      >("academics/classes", paramStr);
+      return normalise(raw);
     } catch {
       return [];
     }
@@ -766,7 +795,36 @@ class PhpApiService {
             : 0
           : 1;
     if (cls.sections) payload.sections = cls.sections;
-    return this.apiPost<ClassRecord>("academics/classes/save", payload);
+
+    // Try primary route first; fall back to legacy route if it returns a 404-style error.
+    // Primary:  POST ?route=classes/add        (clean single-file router)
+    // Fallback: POST ?route=academics/classes/save  (older multi-file structure)
+    try {
+      console.debug("[addClass] trying route: classes/add", payload);
+      const result = await this.apiPost<ClassRecord>("classes/add", payload);
+      console.debug("[addClass] classes/add succeeded", result);
+      return result;
+    } catch (primaryErr) {
+      console.warn(
+        "[addClass] classes/add failed, trying academics/classes/save:",
+        primaryErr,
+      );
+      try {
+        const result = await this.apiPost<ClassRecord>(
+          "academics/classes/save",
+          payload,
+        );
+        console.debug("[addClass] academics/classes/save succeeded", result);
+        return result;
+      } catch (fallbackErr) {
+        console.error("[addClass] both routes failed:", {
+          primary: primaryErr,
+          fallback: fallbackErr,
+        });
+        // Re-throw the primary error (more likely to be descriptive)
+        throw primaryErr;
+      }
+    }
   }
 
   async updateClass(
@@ -792,11 +850,21 @@ class PhpApiService {
             ? 1
             : 0
           : 1;
-    return this.apiPost<ClassRecord>("academics/classes/save", payload);
+
+    // Try primary route first; fall back to legacy route on failure.
+    try {
+      return await this.apiPost<ClassRecord>("classes/update", payload);
+    } catch {
+      return this.apiPost<ClassRecord>("academics/classes/save", payload);
+    }
   }
 
   async deleteClass(id: string): Promise<void> {
-    await this.apiPost("academics/classes/delete", { id });
+    try {
+      await this.apiPost("classes/delete", { id });
+    } catch {
+      await this.apiPost("academics/classes/delete", { id });
+    }
   }
 
   async addSection(section: { classId: string; name: string }): Promise<{

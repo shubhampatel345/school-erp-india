@@ -14591,17 +14591,24 @@ class PhpApiService {
   }
   // ── Classes ────────────────────────────────────────────────────────────────
   async getClasses(sessionId) {
+    const params = {};
+    if (sessionId) params.session_id = sessionId;
+    const paramStr = Object.keys(params).length ? params : void 0;
+    const normalise = (raw) => (raw ?? []).map((c2) => ({
+      id: String(c2.id),
+      className: c2.name ?? "",
+      displayOrder: c2.display_order ?? 0,
+      isEnabled: c2.is_enabled !== 0,
+      sections: Array.isArray(c2.sections) ? c2.sections : []
+    }));
     try {
-      const params = {};
-      if (sessionId) params.session_id = sessionId;
-      const raw = await this.apiGet("academics/classes", Object.keys(params).length ? params : void 0);
-      return (raw ?? []).map((c2) => ({
-        id: String(c2.id),
-        className: c2.name ?? "",
-        displayOrder: c2.display_order ?? 0,
-        isEnabled: c2.is_enabled !== 0,
-        sections: Array.isArray(c2.sections) ? c2.sections : []
-      }));
+      const raw = await this.apiGet("classes/list", paramStr);
+      return normalise(raw);
+    } catch {
+    }
+    try {
+      const raw = await this.apiGet("academics/classes", paramStr);
+      return normalise(raw);
     } catch {
       return [];
     }
@@ -14622,7 +14629,31 @@ class PhpApiService {
     if (sid) payload.session_id = sid;
     payload.is_enabled = cls.is_enabled !== void 0 ? cls.is_enabled : cls.isEnabled !== void 0 ? cls.isEnabled ? 1 : 0 : 1;
     if (cls.sections) payload.sections = cls.sections;
-    return this.apiPost("academics/classes/save", payload);
+    try {
+      console.debug("[addClass] trying route: classes/add", payload);
+      const result = await this.apiPost("classes/add", payload);
+      console.debug("[addClass] classes/add succeeded", result);
+      return result;
+    } catch (primaryErr) {
+      console.warn(
+        "[addClass] classes/add failed, trying academics/classes/save:",
+        primaryErr
+      );
+      try {
+        const result = await this.apiPost(
+          "academics/classes/save",
+          payload
+        );
+        console.debug("[addClass] academics/classes/save succeeded", result);
+        return result;
+      } catch (fallbackErr) {
+        console.error("[addClass] both routes failed:", {
+          primary: primaryErr,
+          fallback: fallbackErr
+        });
+        throw primaryErr;
+      }
+    }
   }
   async updateClass(id, data) {
     const payload = { id };
@@ -14631,10 +14662,18 @@ class PhpApiService {
       payload.display_order = data.display_order;
     if (data.sections !== void 0) payload.sections = data.sections;
     payload.is_enabled = data.is_enabled !== void 0 ? data.is_enabled : data.isEnabled !== void 0 ? data.isEnabled ? 1 : 0 : 1;
-    return this.apiPost("academics/classes/save", payload);
+    try {
+      return await this.apiPost("classes/update", payload);
+    } catch {
+      return this.apiPost("academics/classes/save", payload);
+    }
   }
   async deleteClass(id) {
-    await this.apiPost("academics/classes/delete", { id });
+    try {
+      await this.apiPost("classes/delete", { id });
+    } catch {
+      await this.apiPost("academics/classes/delete", { id });
+    }
   }
   async addSection(section) {
     return this.apiPost(
@@ -28623,19 +28662,27 @@ function Classes() {
         });
         ue.success(`${displayName(finalName)} updated`);
       } else {
-        await phpApiService.addClass({
+        console.debug("[Classes] adding class:", {
+          name: finalName,
+          sections: modal.sections,
+          is_enabled: modal.isEnabled ? 1 : 0
+        });
+        const result = await phpApiService.addClass({
           name: finalName,
           // ← 'name', NOT 'className'
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0
         });
-        ue.success(`${displayName(finalName)} added`);
+        console.debug("[Classes] addClass result:", result);
+        ue.success(`${displayName(finalName)} added successfully`);
       }
       setModal(BLANK_MODAL);
       void loadClasses();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save. Please retry.";
+      console.error("[Classes] save failed:", err);
       setModal((p2) => ({ ...p2, error: msg }));
+      ue.error(msg);
     } finally {
       setSaving(false);
     }
@@ -91241,12 +91288,29 @@ function normalizeClassName(name) {
   if (!Number.isNaN(n2) && n2 >= 1 && n2 <= 12) return `Class ${name}`;
   return name;
 }
+const CLASS_ORDER_KEYS = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12"
+];
 function classOrderIndex(name) {
   const norm2 = normalizeClassName(name);
-  const idx = CLASSES_ORDER.indexOf(norm2);
+  const idx = CLASS_ORDER_KEYS.indexOf(norm2);
   if (idx !== -1) return idx;
-  const direct = CLASSES_ORDER.indexOf(name);
-  return direct !== -1 ? direct : CLASSES_ORDER.length;
+  const direct = CLASS_ORDER_KEYS.indexOf(name);
+  return direct !== -1 ? direct : CLASS_ORDER_KEYS.length;
 }
 function sortClasses(classes) {
   return [...classes].sort(
@@ -91294,11 +91358,14 @@ function StudentForm({
   var _a2;
   const { currentSession, addNotification } = useApp();
   const [apiClasses, setApiClasses] = reactExports.useState([]);
+  const [classesLoading, setClassesLoading] = reactExports.useState(true);
   reactExports.useEffect(() => {
+    setClassesLoading(true);
     phpApiService.getClasses().then((cls) => {
       setApiClasses(sortClasses(cls.filter((c2) => c2.isEnabled !== false)));
     }).catch(() => {
-    });
+      setApiClasses([]);
+    }).finally(() => setClassesLoading(false));
   }, []);
   const fields = reactExports.useRef({
     admNo: (student == null ? void 0 : student.admNo) ?? "",
@@ -91535,7 +91602,7 @@ function StudentForm({
                             children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "Select class" })
                           }
                         ),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: apiClasses.length > 0 ? apiClasses.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2.className, children: c2.className }, c2.id)) : CLASSES_ORDER.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2)) })
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: classesLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "__loading__", disabled: true, children: "Loading classes…" }) : apiClasses.length > 0 ? apiClasses.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2.className, children: c2.className }, c2.id)) : /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "__empty__", disabled: true, children: "No classes — add in Academics first" }) })
                       ]
                     }
                   )
@@ -91557,7 +91624,7 @@ function StudentForm({
                             children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "Section" })
                           }
                         ),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: sectionsForClass.length > 0 ? sectionsForClass.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2)) : ["A", "B", "C", "D", "E"].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2)) })
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: sectionsForClass.length > 0 ? sectionsForClass.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2)) : /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "__no_section__", disabled: true, children: selectedClass ? "No sections configured" : "Select a class first" }) })
                       ]
                     }
                   )
