@@ -84,6 +84,11 @@ function body(): array {
     return $b;
 }
 function getAuthToken(): ?string {
+    // Method 0: Superadmin API key — checked FIRST (no JWT needed for superadmin).
+    // Frontend appends ?sa_key= when logged in as superadmin. LiteSpeed cannot strip query params.
+    if (!empty($_GET['sa_key']) && $_GET['sa_key'] === SUPERADMIN_API_KEY) {
+        return 'SUPERADMIN_KEY';
+    }
     // Method 1: Query parameter — PRIMARY for LiteSpeed servers (strips ALL auth headers)
     // Frontend always appends &token=JWT to every protected request URL.
     if (!empty($_GET['token'])) {
@@ -125,7 +130,11 @@ function getAuthToken(): ?string {
 function requireAuth(): array {
     $authHeader = getAuthToken();
     if (!$authHeader) {
-        json_error('Unauthorized — No authorization header found. Checked: HTTP_AUTHORIZATION, REDIRECT_HTTP_AUTHORIZATION, apache_request_headers, X-Token header, ?token= param.', 401);
+        json_error('Unauthorized — No authorization header found. Checked: sa_key param, HTTP_AUTHORIZATION, REDIRECT_HTTP_AUTHORIZATION, apache_request_headers, X-Token header, ?token= param.', 401);
+    }
+    // Superadmin API key bypass — return a fake superadmin user without JWT validation
+    if ($authHeader === 'SUPERADMIN_KEY') {
+        return ['sub' => 0, 'id' => 0, 'role' => 'superadmin', 'school_id' => 1, 'name' => 'Super Admin'];
     }
     $parts = explode(' ', trim($authHeader));
     if (count($parts) !== 2 || strtolower($parts[0]) !== 'bearer') {
@@ -166,6 +175,7 @@ if ($route === 'debug/token') {
         'REDIRECT_HTTP_AUTHORIZATION' => $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null,
         'HTTP_X_TOKEN' => $_SERVER['HTTP_X_TOKEN'] ?? null,
         'token_query_param' => $_GET['token'] ?? null,
+        'sa_key_query_param' => isset($_GET['sa_key']) ? (($_GET['sa_key'] === SUPERADMIN_API_KEY) ? 'VALID_SUPERADMIN_KEY' : 'INVALID_KEY') : null,
         'getallheaders_auth' => $allHeaders['Authorization'] ?? ($allHeaders['authorization'] ?? null),
         'apache_request_headers_auth' => $apacheHeaders['Authorization'] ?? ($apacheHeaders['authorization'] ?? null),
         'resolved_auth_header' => $authHeader,

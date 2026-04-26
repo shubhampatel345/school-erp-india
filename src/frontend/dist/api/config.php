@@ -12,4 +12,8 @@ define('REFRESH_TOKEN_EXPIRY', JWT_REFRESH_EXPIRY);
 define('API_VERSION', '1.0');
 define('APP_VERSION', '1.0');
 define('APP_NAME', 'SHUBH SCHOOL ERP');
+define('API_URL', 'https://shubh.psmkgs.com/api');
+// Superadmin API key — used by the frontend when logged in as superadmin (no JWT needed).
+// LiteSpeed strips all Authorization headers; the superadmin key is sent as ?sa_key= query param.
+define('SUPERADMIN_API_KEY', 'shubh_superadmin_2024_secure_key');
 define('ALLOWED_ORIGINS', ['https://shubh.psmkgs.com', 'http://localhost:3000', 'http://localhost:5173']);

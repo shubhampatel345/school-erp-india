@@ -14415,9 +14415,17 @@ class PhpApiService {
         throw new Error("Session expired — please log in again");
       }
     }
+    const SA_KEY = "shubh_superadmin_2024_secure_key";
     const rawToken = this.getToken();
-    const tokenParam = !isAuthRoute && !superAdmin && rawToken ? `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}` : "";
-    const url = `${getApiBase()}/index.php?route=${route}${tokenParam}`;
+    let authParam = "";
+    if (!isAuthRoute) {
+      if (superAdmin) {
+        authParam = `&sa_key=${SA_KEY}`;
+      } else if (rawToken) {
+        authParam = `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}`;
+      }
+    }
+    const url = `${getApiBase()}/index.php?route=${route}${authParam}`;
     const headers = {
       ...this.getAuthHeaders(),
       ...options.headers ?? {}

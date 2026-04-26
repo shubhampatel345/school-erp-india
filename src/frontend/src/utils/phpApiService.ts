@@ -480,14 +480,22 @@ class PhpApiService {
       }
     }
 
-    // LiteSpeed strips the Authorization header — append token as query param
-    // (PHP getAuthToken() checks $_GET['token'] first on LiteSpeed servers)
+    // LiteSpeed strips ALL Authorization headers — token must be a query parameter.
+    // For superadmin: append &sa_key= (no JWT issued for local superadmin accounts).
+    // For regular users: append &token=JWT.
+    // PHP getAuthToken() checks sa_key first, then $_GET['token'].
+    const SA_KEY = "shubh_superadmin_2024_secure_key";
     const rawToken = this.getToken();
-    const tokenParam =
-      !isAuthRoute && !superAdmin && rawToken
-        ? `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}`
-        : "";
-    const url = `${getApiBase()}/index.php?route=${route}${tokenParam}`;
+    let authParam = "";
+    if (!isAuthRoute) {
+      if (superAdmin) {
+        // Superadmin uses the shared API key — no JWT required
+        authParam = `&sa_key=${SA_KEY}`;
+      } else if (rawToken) {
+        authParam = `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}`;
+      }
+    }
+    const url = `${getApiBase()}/index.php?route=${route}${authParam}`;
     const headers = {
       ...this.getAuthHeaders(),
       ...((options.headers as Record<string, string>) ?? {}),
