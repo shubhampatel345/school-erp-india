@@ -11,7 +11,7 @@ if (in_array($origin, $allowed, true)) {
     header("Access-Control-Allow-Origin: *");
 }
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
-header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-Token");
 header("Access-Control-Allow-Credentials: true");
 header("Content-Type: application/json; charset=UTF-8");
 
@@ -83,31 +83,57 @@ function body(): array {
     }
     return $b;
 }
-function requireAuth(): array {
-    // Extract Authorization header using every possible source cPanel Apache may use
-    $h = '';
+function getAuthToken(): ?string {
+    // Method 1: Standard PHP header
     if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
-        $h = $_SERVER['HTTP_AUTHORIZATION'];
-    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-        // cPanel Apache mod_rewrite redirect strips HTTP_AUTHORIZATION; it ends up here
-        $h = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
-    } elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
-        $h = $_SERVER['HTTP_X_AUTHORIZATION'];
-    } else {
-        if (function_exists('getallheaders')) {
-            foreach (getallheaders() as $name => $value) {
-                if (strtolower($name) === 'authorization') { $h = $value; break; }
+        return $_SERVER['HTTP_AUTHORIZATION'];
+    }
+    // Method 2: Apache mod_rewrite redirect strips HTTP_AUTHORIZATION; it ends up here
+    if (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        return $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    }
+    // Method 3: apache_request_headers() — works on many cPanel configs
+    if (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        foreach ($headers as $key => $value) {
+            if (strtolower($key) === 'authorization') {
+                return $value;
             }
         }
-        if ($h === '' && function_exists('apache_request_headers')) {
-            $headers = apache_request_headers();
-            $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+    }
+    // Method 4: getallheaders() fallback
+    if (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        foreach ($headers as $key => $value) {
+            if (strtolower($key) === 'authorization') {
+                return $value;
+            }
         }
     }
-    $h = trim($h);
-    $token = '';
-    if (preg_match('/^Bearer\s+(.+)$/i', $h, $m)) $token = trim($m[1]);
-    if (!$token || !verifyJWT($token)) json_error('Unauthorized', 401);
+    // Method 5: X-Token header (frontend fallback)
+    if (!empty($_SERVER['HTTP_X_TOKEN'])) {
+        return 'Bearer ' . $_SERVER['HTTP_X_TOKEN'];
+    }
+    // Method 6: Query parameter — for browser testing and absolute last resort
+    if (!empty($_GET['token'])) {
+        return 'Bearer ' . $_GET['token'];
+    }
+    return null;
+}
+
+function requireAuth(): array {
+    $authHeader = getAuthToken();
+    if (!$authHeader) {
+        json_error('Unauthorized — No authorization header found. Checked: HTTP_AUTHORIZATION, REDIRECT_HTTP_AUTHORIZATION, apache_request_headers, X-Token header, ?token= param.', 401);
+    }
+    $parts = explode(' ', trim($authHeader));
+    if (count($parts) !== 2 || strtolower($parts[0]) !== 'bearer') {
+        json_error('Unauthorized — Invalid authorization format. Expected: Bearer TOKEN', 401);
+    }
+    $token = $parts[1];
+    if (!verifyJWT($token)) {
+        json_error('Unauthorized — Invalid or expired token', 401);
+    }
     return decodeJWT($token);
 }
 
@@ -124,8 +150,34 @@ if ($route === 'ping') {
     exit;
 }
 
+// ─── DEBUG/TOKEN (public, no auth) ───────────────────────────────────────────
+if ($route === 'debug/token') {
+    $authHeader = getAuthToken();
+    $allHeaders = function_exists('getallheaders') ? getallheaders() : [];
+    $apacheHeaders = function_exists('apache_request_headers') ? apache_request_headers() : [];
+    $authServerKeys = array_values(array_filter(array_keys($_SERVER), function($k) {
+        return stripos($k, 'auth') !== false;
+    }));
+    echo json_encode([
+        'success' => true,
+        'message' => 'Debug token info — no auth required',
+        'HTTP_AUTHORIZATION' => $_SERVER['HTTP_AUTHORIZATION'] ?? null,
+        'REDIRECT_HTTP_AUTHORIZATION' => $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null,
+        'HTTP_X_TOKEN' => $_SERVER['HTTP_X_TOKEN'] ?? null,
+        'token_query_param' => $_GET['token'] ?? null,
+        'getallheaders_auth' => $allHeaders['Authorization'] ?? ($allHeaders['authorization'] ?? null),
+        'apache_request_headers_auth' => $apacheHeaders['Authorization'] ?? ($apacheHeaders['authorization'] ?? null),
+        'resolved_auth_header' => $authHeader,
+        'request_method' => $_SERVER['REQUEST_METHOD'],
+        'auth_related_server_keys' => $authServerKeys,
+        'php_sapi' => PHP_SAPI,
+        'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
+    ]);
+    exit;
+}
+
 // Public routes (no auth required)
-$public = ['auth/login', 'auth/verify', 'migrate/run', 'ping'];
+$public = ['auth/login', 'auth/verify', 'migrate/run', 'ping', 'debug/token'];
 $isPublic = in_array($route, $public, true);
 
 $user = null;

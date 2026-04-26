@@ -453,7 +453,11 @@ class PhpApiService {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+      // X-Token is a fallback for cPanel Apache servers that strip the Authorization header
+      headers["X-Token"] = token;
+    }
     return headers;
   }
 

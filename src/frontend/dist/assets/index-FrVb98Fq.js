@@ -14399,7 +14399,10 @@ class PhpApiService {
     const headers = {
       "Content-Type": "application/json"
     };
-    if (token) headers.Authorization = `Bearer ${token}`;
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+      headers["X-Token"] = token;
+    }
     return headers;
   }
   async request(route, options = {}, isRetry = false) {
