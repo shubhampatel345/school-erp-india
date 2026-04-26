@@ -374,7 +374,7 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-// ── Hardcoded Super Admin ─────────────────────────────────────────────────────
+// ── Hardcoded local admin accounts (always work even if PHP server is down) ───
 
 const SUPER_ADMIN: AppUser = {
   id: "su1",
@@ -382,6 +382,15 @@ const SUPER_ADMIN: AppUser = {
   role: "superadmin",
   fullName: "Super Admin",
   name: "Super Admin",
+};
+
+// admin account — local fallback with superadmin privileges when PHP is down
+const LOCAL_ADMIN: AppUser = {
+  id: "su2",
+  username: "admin",
+  role: "superadmin", // treated as superadmin locally so SA_KEY is used for API calls
+  fullName: "Administrator",
+  name: "Administrator",
 };
 
 // ── App Loading Screen ────────────────────────────────────────────────────────
@@ -616,7 +625,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── Login ─────────────────────────────────────────────────────────────────
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
-      // 1. Super Admin — local password check
+      // 1. Super Admin — always local password check (no PHP token needed)
       if (username === "superadmin") {
         const passwords = lsGet<Record<string, string>>("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
@@ -631,7 +640,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return true;
       }
 
-      // 2. PHP API login
+      // 2. PHP API login — try first for non-superadmin users
       try {
         const result = await phpApiService.login(username, password);
         if (result?.token && result.user) {
@@ -665,7 +674,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return true;
         }
       } catch {
-        /* server down — try local staff fallback */
+        /* server down or network error — try local fallbacks below */
+      }
+
+      // 2b. Local admin fallback — 'admin' ALWAYS gets a local auth attempt.
+      // This covers: PHP server down, admin not yet seeded in MySQL, or any PHP error.
+      // The admin user must always be able to log in even if PHP server is broken.
+      if (username === "admin") {
+        const passwords = lsGet<Record<string, string>>("user_passwords", {});
+        const validPw = passwords.admin ?? "admin123";
+        if (password === validPw) {
+          // Mark this user as using local auth (role=superadmin so isSuperAdmin() returns true
+          // and SA_KEY is used for all API calls — no JWT required)
+          sessionStorage.setItem(
+            "shubh_current_user",
+            JSON.stringify(LOCAL_ADMIN),
+          );
+          initStartedRef.current = false;
+          setLoginTime(Date.now());
+          dispatch({ type: "SET_USER", user: LOCAL_ADMIN });
+          return true;
+        }
+        // Password doesn't match local admin password either — fall through to return false
+        // But don't show "Invalid" error if PHP also failed — it just means wrong password
       }
 
       // 3. Local staff fallback (when server is unreachable)

@@ -179,16 +179,24 @@ class PhpApiService {
   }> = [];
 
   /**
-   * Returns true if the current user is superadmin (locally authenticated).
-   * Superadmin does NOT use a PHP JWT token — they authenticate locally.
-   * When in superadmin mode, ALL token validation is bypassed.
+   * Returns true if the current user is superadmin OR local-admin
+   * (both authenticated locally — no PHP JWT needed).
+   * When true, ALL PHP token validation is bypassed and SA_KEY is used instead.
    */
   private isSuperAdmin(): boolean {
     try {
       const raw = sessionStorage.getItem("shubh_current_user");
       if (!raw) return false;
-      const u = JSON.parse(raw) as { role?: string };
-      return u.role === "superadmin";
+      const u = JSON.parse(raw) as { role?: string; username?: string };
+      // superadmin role OR admin user with no JWT token stored (local auth fallback)
+      if (u.role === "superadmin") return true;
+      if (
+        u.username === "admin" &&
+        !this._token &&
+        !localStorage.getItem("erp_token")
+      )
+        return true;
+      return false;
     } catch {
       return false;
     }
@@ -679,14 +687,85 @@ class PhpApiService {
   }
 
   async addStudent(student: Partial<StudentRecord>): Promise<StudentRecord> {
-    return this.apiPost<StudentRecord>("students/add", student);
+    // Map camelCase → snake_case for PHP backend compatibility
+    const s = student as Record<string, unknown>;
+    const payload: Record<string, unknown> = {
+      adm_no: s.admNo ?? s.adm_no ?? "",
+      full_name: s.fullName ?? s.full_name ?? "",
+      father_name: s.fatherName ?? s.father_name ?? "",
+      mother_name: s.motherName ?? s.mother_name ?? "",
+      father_mobile: s.fatherMobile ?? s.father_mobile ?? "",
+      mother_mobile: s.motherMobile ?? s.mother_mobile ?? "",
+      mobile: s.mobile ?? "",
+      dob: s.dob ?? "",
+      roll_no: s.rollNo ?? s.roll_no ?? "",
+      gender: s.gender ?? "Male",
+      class: s.class ?? "",
+      section: s.section ?? "",
+      category: s.category ?? "",
+      religion: s.religion ?? "",
+      blood_group: s.bloodGroup ?? s.blood_group ?? "",
+      address: s.address ?? "",
+      village: s.village ?? "",
+      aadhaar_no: s.aadhaarNo ?? s.aadhaar_no ?? "",
+      sr_no: s.srNo ?? s.sr_no ?? "",
+      pen_no: s.penNo ?? s.pen_no ?? "",
+      apaar_no: s.apaarNo ?? s.apaar_no ?? "",
+      previous_school: s.previousSchool ?? s.previous_school ?? "",
+      admission_date: s.admissionDate ?? s.admission_date ?? "",
+      guardian_name: s.guardianName ?? s.guardian_name ?? "",
+      guardian_mobile:
+        s.guardianMobile ?? s.guardian_mobile ?? s.fatherMobile ?? "",
+      status: s.status ?? "active",
+      session_id: s.sessionId ?? s.session_id ?? "",
+      class_id: s.classId ?? s.class_id ?? "",
+      section_id: s.sectionId ?? s.section_id ?? "",
+    };
+    return this.apiPost<StudentRecord>("students/add", payload);
   }
 
   async updateStudent(
     student: Partial<StudentRecord> & { id: string },
   ): Promise<StudentRecord> {
-    const { id, ...body } = student;
-    return this.postWithId<StudentRecord>("students/update", id, body);
+    const { id } = student;
+    const s = student as Record<string, unknown>;
+    // Map camelCase → snake_case for PHP backend compatibility
+    const payload: Record<string, unknown> = {
+      adm_no: s.admNo ?? s.adm_no,
+      full_name: s.fullName ?? s.full_name,
+      father_name: s.fatherName ?? s.father_name,
+      mother_name: s.motherName ?? s.mother_name,
+      father_mobile: s.fatherMobile ?? s.father_mobile,
+      mother_mobile: s.motherMobile ?? s.mother_mobile,
+      mobile: s.mobile,
+      dob: s.dob,
+      roll_no: s.rollNo ?? s.roll_no,
+      gender: s.gender,
+      class: s.class,
+      section: s.section,
+      category: s.category,
+      religion: s.religion,
+      blood_group: s.bloodGroup ?? s.blood_group,
+      address: s.address,
+      village: s.village,
+      aadhaar_no: s.aadhaarNo ?? s.aadhaar_no,
+      sr_no: s.srNo ?? s.sr_no,
+      pen_no: s.penNo ?? s.pen_no,
+      apaar_no: s.apaarNo ?? s.apaar_no,
+      previous_school: s.previousSchool ?? s.previous_school,
+      admission_date: s.admissionDate ?? s.admission_date,
+      guardian_name: s.guardianName ?? s.guardian_name,
+      guardian_mobile: s.guardianMobile ?? s.guardian_mobile,
+      status: s.status,
+      session_id: s.sessionId ?? s.session_id,
+      class_id: s.classId ?? s.class_id,
+      section_id: s.sectionId ?? s.section_id,
+    };
+    // Remove undefined values
+    for (const k of Object.keys(payload)) {
+      if (payload[k] === undefined) delete payload[k];
+    }
+    return this.postWithId<StudentRecord>("students/update", id, payload);
   }
 
   async deleteStudent(id: string): Promise<void> {

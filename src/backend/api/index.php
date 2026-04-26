@@ -82,14 +82,31 @@ function body(): array {
     return $b;
 }
 function requireAuth(): array {
-    $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-    if (!$h && function_exists('apache_request_headers')) {
-        $headers = apache_request_headers();
-        $h = $headers['Authorization'] ?? '';
+    // Super Admin API key bypass — LiteSpeed-safe (query param)
+    if (!empty($_GET['api_key']) && $_GET['api_key'] === SUPER_ADMIN_API_KEY) {
+        return ['sub' => 0, 'username' => 'superadmin', 'role' => 'superadmin', 'school_id' => 1, 'name' => 'Super Admin'];
     }
+
+    // Token priority: query param first (LiteSpeed strips headers), then headers
     $token = '';
-    if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
-    if (!$token || !verifyJWT($token)) json_error('Unauthorized', 401);
+    if (!empty($_GET['token'])) {
+        $token = $_GET['token'];
+    } elseif (!empty($_SERVER['HTTP_X_TOKEN'])) {
+        $token = $_SERVER['HTTP_X_TOKEN'];
+    } elseif (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $h = $_SERVER['HTTP_AUTHORIZATION'];
+        if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+    } elseif (function_exists('apache_request_headers')) {
+        $headers = apache_request_headers();
+        $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+    }
+
+    if (!$token || !verifyJWT($token)) {
+        http_response_code(401);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized — token missing or expired. Send ?token=YOUR_JWT or ?api_key=API_KEY', 'data' => null]);
+        exit;
+    }
     return decodeJWT($token);
 }
 
@@ -102,12 +119,37 @@ $method  = $_SERVER['REQUEST_METHOD'];
 
 // ─── PING (public, no auth) ───────────────────────────────────────────────────
 if ($route === 'ping') {
-    echo json_encode(['success' => true, 'message' => 'API is working', 'version' => '1.0']);
+    echo json_encode(['success' => true, 'message' => 'SHUBH ERP API is online', 'version' => '1.0', 'timestamp' => date('c'), 'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown']);
+    exit;
+}
+
+// ─── DEBUG/TOKEN (public, no auth needed) ─────────────────────────────────────
+if ($route === 'debug/token') {
+    $apiKey = $_GET['api_key'] ?? null;
+    $tokenQP = $_GET['token'] ?? null;
+    $xToken = $_SERVER['HTTP_X_TOKEN'] ?? null;
+    $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
+    $redirectAuth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null;
+    $apacheHeaders = function_exists('apache_request_headers') ? (apache_request_headers()['Authorization'] ?? null) : null;
+    $serverSoftware = $_SERVER['SERVER_SOFTWARE'] ?? 'unknown';
+    echo json_encode([
+        'success' => true,
+        'server_software' => $serverSoftware,
+        'token_sources' => [
+            'api_key_param'     => $apiKey ? substr($apiKey, 0, 10) . '...' : null,
+            'token_query_param' => $tokenQP ? substr($tokenQP, 0, 20) . '...' : null,
+            'HTTP_X_TOKEN'      => $xToken ? substr($xToken, 0, 20) . '...' : null,
+            'HTTP_AUTHORIZATION' => $authHeader ? substr($authHeader, 0, 20) . '...' : null,
+            'REDIRECT_HTTP_AUTHORIZATION' => $redirectAuth ? substr($redirectAuth, 0, 20) . '...' : null,
+            'apache_request_headers' => $apacheHeaders ? substr($apacheHeaders, 0, 20) . '...' : null,
+        ],
+        'hint' => 'LiteSpeed strips headers — send token as ?token=JWT_HERE for reliable auth',
+    ]);
     exit;
 }
 
 // Public routes (no auth required)
-$public = ['auth/login', 'auth/verify', 'migrate/run', 'ping'];
+$public = ['auth/login', 'auth/verify', 'auth/logout', 'auth/refresh', 'migrate/run', 'ping', 'debug/token'];
 $isPublic = in_array($route, $public, true);
 
 $user = null;
@@ -150,7 +192,8 @@ if ($section === 'migrate' && $action === 'run') {
             start_year INT NOT NULL,
             end_year INT NOT NULL,
             is_current TINYINT(1) NOT NULL DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY unique_session (school_id, name)
         )",
         "CREATE TABLE IF NOT EXISTS classes (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -471,32 +514,29 @@ if ($section === 'migrate' && $action === 'run') {
         $db->exec("ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_enabled TINYINT(1) NOT NULL DEFAULT 1");
     } catch (Exception $e) { /* column may already exist */ }
 
-    // Seed default super admin
-    $exists = $db->query("SELECT id FROM users WHERE username='admin' LIMIT 1")->fetch();
-    if (!$exists) {
-        $hash = password_hash('admin123', PASSWORD_BCRYPT);
-        $stmt = $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, is_active) VALUES (1, 'admin', ?, 'Super Admin', 'super_admin', 1)");
-        $stmt->execute([$hash]);
-    }
+    // Add unique index on sessions_academic(school_id, name) for existing deployments
+    try {
+        $db->exec("ALTER TABLE sessions_academic ADD UNIQUE INDEX unique_session (school_id, name)");
+    } catch (Exception $e) { /* index may already exist */ }
 
-    // Seed default academic session 2025-26
-    $sessExists = $db->query("SELECT id FROM sessions_academic WHERE name='2025-26' LIMIT 1")->fetch();
-    if (!$sessExists) {
-        $db->exec("INSERT INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1,'2025-26',2025,2026,1)");
-    }
+    // Seed default admin users (ON DUPLICATE KEY UPDATE for idempotent runs)
+    $adminHash = password_hash('admin123', PASSWORD_BCRYPT);
+    $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, is_active) VALUES (1, 'admin', ?, 'Administrator', 'admin', 1) ON DUPLICATE KEY UPDATE name='Administrator', role='admin', is_active=1")->execute([$adminHash]);
+    $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, is_active) VALUES (1, 'superadmin', ?, 'Super Admin', 'superadmin', 1) ON DUPLICATE KEY UPDATE name='Super Admin', role='superadmin', is_active=1")->execute([$adminHash]);
 
-    // Seed historical sessions 2019-20 through 2024-25 (is_current=0)
-    $historicalSessions = [
-        ['2019-20', 2019, 2020],
-        ['2020-21', 2020, 2021],
-        ['2021-22', 2021, 2022],
-        ['2022-23', 2022, 2023],
-        ['2023-24', 2023, 2024],
-        ['2024-25', 2024, 2025],
+    // Seed academic sessions 2019-20 through 2025-26 (idempotent)
+    $allSessions = [
+        ['2019-20', 2019, 2020, 0],
+        ['2020-21', 2020, 2021, 0],
+        ['2021-22', 2021, 2022, 0],
+        ['2022-23', 2022, 2023, 0],
+        ['2023-24', 2023, 2024, 0],
+        ['2024-25', 2024, 2025, 0],
+        ['2025-26', 2025, 2026, 1],
     ];
-    $sessInsert = $db->prepare("INSERT IGNORE INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1, ?, ?, ?, 0)");
-    foreach ($historicalSessions as [$sName, $sStart, $sEnd]) {
-        $sessInsert->execute([$sName, $sStart, $sEnd]);
+    $sessInsert = $db->prepare("INSERT INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE start_year=VALUES(start_year), end_year=VALUES(end_year)");
+    foreach ($allSessions as [$sName, $sStart, $sEnd, $isCurrent]) {
+        $sessInsert->execute([$sName, $sStart, $sEnd, $isCurrent]);
     }
 
     // Seed default classes
@@ -587,13 +627,16 @@ if ($section === 'auth') {
     }
 
     if ($action === 'verify') {
-        // Public: verify a token passed in Authorization header
-        $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
-        if (!$h && function_exists('apache_request_headers')) {
-            $headers = apache_request_headers();
-            $h = $headers['Authorization'] ?? '';
+        // Public: verify a token — check query param first (LiteSpeed-safe), then header
+        $token = $_GET['token'] ?? '';
+        if (!$token) {
+            $h = $_SERVER['HTTP_AUTHORIZATION'] ?? '';
+            if (!$h && function_exists('apache_request_headers')) {
+                $headers = apache_request_headers();
+                $h = $headers['Authorization'] ?? '';
+            }
+            if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
         }
-        $token = str_starts_with($h, 'Bearer ') ? substr($h, 7) : '';
         if (!$token || !verifyJWT($token)) {
             json_out(['success' => true, 'valid' => false]);
         }
@@ -1079,6 +1122,95 @@ if ($section === 'staff' || $section === 'payroll') {
     }
 
     json_error('Unknown staff/payroll route');
+}
+
+// ─── CLASSES (direct route, same as academics/classes*) ──────────────────────
+if ($section === 'classes') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'list' && $method === 'GET') {
+        $sessionId = $_GET['session_id'] ?? null;
+        $where  = "school_id = $schoolId"; $params = [];
+        if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
+        $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
+        $stmt->execute($params);
+        json_out(['success' => true, 'classes' => $stmt->fetchAll()]);
+    }
+
+    if ($action === 'add' && $method === 'POST') {
+        $b = body();
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
+        $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
+            ->execute([$schoolId, $b['session_id'] ?? null, $b['name'] ?? '', (int)($b['display_order'] ?? 0), $isEnabled]);
+        $id = (int)$db->lastInsertId();
+        // Also insert sections if provided
+        if (!empty($b['sections']) && is_array($b['sections'])) {
+            $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+            foreach ($b['sections'] as $secName) {
+                if ($secName) $secStmt->execute([$schoolId, $id, $secName]);
+            }
+        }
+        json_out(['success' => true, 'id' => $id]);
+    }
+
+    if ($action === 'update' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0); $b = body();
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
+        $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=?, is_enabled=? WHERE id=? AND school_id=?")
+            ->execute([$b['name'] ?? '', (int)($b['display_order'] ?? 0), $b['session_id'] ?? null, $isEnabled, $id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'delete' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $db->prepare("UPDATE classes SET is_enabled=0 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    json_error('Unknown classes route');
+}
+
+// ─── USERS (direct route for user management) ────────────────────────────────
+if ($section === 'users') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'list' && $method === 'GET') {
+        $stmt = $db->prepare("SELECT id, school_id, username, name, role, email, mobile, is_active, created_at FROM users WHERE school_id=? ORDER BY name");
+        $stmt->execute([$schoolId]);
+        json_out(['success' => true, 'users' => $stmt->fetchAll()]);
+    }
+
+    if ($action === 'add' && $method === 'POST') {
+        $b = body();
+        $hash = password_hash($b['password'] ?? 'changeme123', PASSWORD_BCRYPT);
+        $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, email, mobile, permissions_json) VALUES (?,?,?,?,?,?,?,?)")
+            ->execute([$schoolId, $b['username'], $hash, $b['name'], $b['role'] ?? 'teacher', $b['email'] ?? '', $b['mobile'] ?? '', json_encode($b['permissions'] ?? [])]);
+        json_out(['success' => true, 'id' => (int)$db->lastInsertId()]);
+    }
+
+    if ($action === 'update' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0); $b = body();
+        $db->prepare("UPDATE users SET name=?, role=?, email=?, mobile=?, permissions_json=?, is_active=?, updated_at=NOW() WHERE id=? AND school_id=?")
+            ->execute([$b['name'], $b['role'] ?? 'teacher', $b['email'] ?? '', $b['mobile'] ?? '', json_encode($b['permissions'] ?? []), (int)($b['is_active'] ?? 1), $id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'delete' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0);
+        $db->prepare("UPDATE users SET is_active=0 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'reset-password' && $method === 'POST') {
+        $id = (int)($_GET['id'] ?? 0); $b = body();
+        $hash = password_hash($b['password'] ?? 'changeme123', PASSWORD_BCRYPT);
+        $db->prepare("UPDATE users SET password_hash=?, updated_at=NOW() WHERE id=? AND school_id=?")->execute([$hash, $id, $schoolId]);
+        json_out(['success' => true]);
+    }
+
+    json_error('Unknown users route');
 }
 
 // ─── ACADEMICS ────────────────────────────────────────────────────────────────

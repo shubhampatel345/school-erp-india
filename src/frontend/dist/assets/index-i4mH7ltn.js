@@ -14167,16 +14167,19 @@ class PhpApiService {
     __publicField(this, "refreshQueue", []);
   }
   /**
-   * Returns true if the current user is superadmin (locally authenticated).
-   * Superadmin does NOT use a PHP JWT token — they authenticate locally.
-   * When in superadmin mode, ALL token validation is bypassed.
+   * Returns true if the current user is superadmin OR local-admin
+   * (both authenticated locally — no PHP JWT needed).
+   * When true, ALL PHP token validation is bypassed and SA_KEY is used instead.
    */
   isSuperAdmin() {
     try {
       const raw = sessionStorage.getItem("shubh_current_user");
       if (!raw) return false;
       const u2 = JSON.parse(raw);
-      return u2.role === "superadmin";
+      if (u2.role === "superadmin") return true;
+      if (u2.username === "admin" && !this._token && !localStorage.getItem("erp_token"))
+        return true;
+      return false;
     } catch {
       return false;
     }
@@ -14569,11 +14572,78 @@ class PhpApiService {
     return { data: res.data ?? [], total: res.total ?? ((_a2 = res.data) == null ? void 0 : _a2.length) ?? 0 };
   }
   async addStudent(student) {
-    return this.apiPost("students/add", student);
+    const s2 = student;
+    const payload = {
+      adm_no: s2.admNo ?? s2.adm_no ?? "",
+      full_name: s2.fullName ?? s2.full_name ?? "",
+      father_name: s2.fatherName ?? s2.father_name ?? "",
+      mother_name: s2.motherName ?? s2.mother_name ?? "",
+      father_mobile: s2.fatherMobile ?? s2.father_mobile ?? "",
+      mother_mobile: s2.motherMobile ?? s2.mother_mobile ?? "",
+      mobile: s2.mobile ?? "",
+      dob: s2.dob ?? "",
+      roll_no: s2.rollNo ?? s2.roll_no ?? "",
+      gender: s2.gender ?? "Male",
+      class: s2.class ?? "",
+      section: s2.section ?? "",
+      category: s2.category ?? "",
+      religion: s2.religion ?? "",
+      blood_group: s2.bloodGroup ?? s2.blood_group ?? "",
+      address: s2.address ?? "",
+      village: s2.village ?? "",
+      aadhaar_no: s2.aadhaarNo ?? s2.aadhaar_no ?? "",
+      sr_no: s2.srNo ?? s2.sr_no ?? "",
+      pen_no: s2.penNo ?? s2.pen_no ?? "",
+      apaar_no: s2.apaarNo ?? s2.apaar_no ?? "",
+      previous_school: s2.previousSchool ?? s2.previous_school ?? "",
+      admission_date: s2.admissionDate ?? s2.admission_date ?? "",
+      guardian_name: s2.guardianName ?? s2.guardian_name ?? "",
+      guardian_mobile: s2.guardianMobile ?? s2.guardian_mobile ?? s2.fatherMobile ?? "",
+      status: s2.status ?? "active",
+      session_id: s2.sessionId ?? s2.session_id ?? "",
+      class_id: s2.classId ?? s2.class_id ?? "",
+      section_id: s2.sectionId ?? s2.section_id ?? ""
+    };
+    return this.apiPost("students/add", payload);
   }
   async updateStudent(student) {
-    const { id, ...body } = student;
-    return this.postWithId("students/update", id, body);
+    const { id } = student;
+    const s2 = student;
+    const payload = {
+      adm_no: s2.admNo ?? s2.adm_no,
+      full_name: s2.fullName ?? s2.full_name,
+      father_name: s2.fatherName ?? s2.father_name,
+      mother_name: s2.motherName ?? s2.mother_name,
+      father_mobile: s2.fatherMobile ?? s2.father_mobile,
+      mother_mobile: s2.motherMobile ?? s2.mother_mobile,
+      mobile: s2.mobile,
+      dob: s2.dob,
+      roll_no: s2.rollNo ?? s2.roll_no,
+      gender: s2.gender,
+      class: s2.class,
+      section: s2.section,
+      category: s2.category,
+      religion: s2.religion,
+      blood_group: s2.bloodGroup ?? s2.blood_group,
+      address: s2.address,
+      village: s2.village,
+      aadhaar_no: s2.aadhaarNo ?? s2.aadhaar_no,
+      sr_no: s2.srNo ?? s2.sr_no,
+      pen_no: s2.penNo ?? s2.pen_no,
+      apaar_no: s2.apaarNo ?? s2.apaar_no,
+      previous_school: s2.previousSchool ?? s2.previous_school,
+      admission_date: s2.admissionDate ?? s2.admission_date,
+      guardian_name: s2.guardianName ?? s2.guardian_name,
+      guardian_mobile: s2.guardianMobile ?? s2.guardian_mobile,
+      status: s2.status,
+      session_id: s2.sessionId ?? s2.session_id,
+      class_id: s2.classId ?? s2.class_id,
+      section_id: s2.sectionId ?? s2.section_id
+    };
+    for (const k2 of Object.keys(payload)) {
+      if (payload[k2] === void 0) delete payload[k2];
+    }
+    return this.postWithId("students/update", id, payload);
   }
   async deleteStudent(id) {
     await this.apiPost("students/delete", { id });
@@ -15483,6 +15553,14 @@ const SUPER_ADMIN = {
   fullName: "Super Admin",
   name: "Super Admin"
 };
+const LOCAL_ADMIN = {
+  id: "su2",
+  username: "admin",
+  role: "superadmin",
+  // treated as superadmin locally so SA_KEY is used for API calls
+  fullName: "Administrator",
+  name: "Administrator"
+};
 function AppLoading({
   error,
   onRetry
@@ -15720,6 +15798,20 @@ function AppProvider({ children }) {
           return true;
         }
       } catch {
+      }
+      if (username === "admin") {
+        const passwords = lsGet("user_passwords", {});
+        const validPw = passwords.admin ?? "admin123";
+        if (password === validPw) {
+          sessionStorage.setItem(
+            "shubh_current_user",
+            JSON.stringify(LOCAL_ADMIN)
+          );
+          initStartedRef.current = false;
+          setLoginTime(Date.now());
+          dispatch({ type: "SET_USER", user: LOCAL_ADMIN });
+          return true;
+        }
       }
       const staffList = lsGet("staff", []);
       const staffMember = staffList.find(
