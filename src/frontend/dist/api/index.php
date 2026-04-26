@@ -84,15 +84,20 @@ function body(): array {
     return $b;
 }
 function getAuthToken(): ?string {
-    // Method 1: Standard PHP header
+    // Method 1: Query parameter — PRIMARY for LiteSpeed servers (strips ALL auth headers)
+    // Frontend always appends &token=JWT to every protected request URL.
+    if (!empty($_GET['token'])) {
+        return 'Bearer ' . $_GET['token'];
+    }
+    // Method 2: Standard PHP header (Apache/Nginx)
     if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
         return $_SERVER['HTTP_AUTHORIZATION'];
     }
-    // Method 2: Apache mod_rewrite redirect strips HTTP_AUTHORIZATION; it ends up here
+    // Method 3: Apache mod_rewrite redirect preserves Authorization here
     if (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
         return $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
     }
-    // Method 3: apache_request_headers() — works on many cPanel configs
+    // Method 4: apache_request_headers() — works on many cPanel configs
     if (function_exists('apache_request_headers')) {
         $headers = apache_request_headers();
         foreach ($headers as $key => $value) {
@@ -101,7 +106,7 @@ function getAuthToken(): ?string {
             }
         }
     }
-    // Method 4: getallheaders() fallback
+    // Method 5: getallheaders() fallback
     if (function_exists('getallheaders')) {
         $headers = getallheaders();
         foreach ($headers as $key => $value) {
@@ -110,13 +115,9 @@ function getAuthToken(): ?string {
             }
         }
     }
-    // Method 5: X-Token header (frontend fallback)
+    // Method 6: X-Token header (belt-and-suspenders fallback)
     if (!empty($_SERVER['HTTP_X_TOKEN'])) {
         return 'Bearer ' . $_SERVER['HTTP_X_TOKEN'];
-    }
-    // Method 6: Query parameter — for browser testing and absolute last resort
-    if (!empty($_GET['token'])) {
-        return 'Bearer ' . $_GET['token'];
     }
     return null;
 }

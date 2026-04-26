@@ -480,7 +480,14 @@ class PhpApiService {
       }
     }
 
-    const url = `${getApiBase()}/index.php?route=${route}`;
+    // LiteSpeed strips the Authorization header — append token as query param
+    // (PHP getAuthToken() checks $_GET['token'] first on LiteSpeed servers)
+    const rawToken = this.getToken();
+    const tokenParam =
+      !isAuthRoute && !superAdmin && rawToken
+        ? `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}`
+        : "";
+    const url = `${getApiBase()}/index.php?route=${route}${tokenParam}`;
     const headers = {
       ...this.getAuthHeaders(),
       ...((options.headers as Record<string, string>) ?? {}),
@@ -504,6 +511,7 @@ class PhpApiService {
             headers: {
               ...headers,
               Authorization: `Bearer ${this.getToken() ?? ""}`,
+              "X-Token": this.getToken() ?? "",
             },
           },
           true,

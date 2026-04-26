@@ -14415,7 +14415,9 @@ class PhpApiService {
         throw new Error("Session expired — please log in again");
       }
     }
-    const url = `${getApiBase()}/index.php?route=${route}`;
+    const rawToken = this.getToken();
+    const tokenParam = !isAuthRoute && !superAdmin && rawToken ? `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}` : "";
+    const url = `${getApiBase()}/index.php?route=${route}${tokenParam}`;
     const headers = {
       ...this.getAuthHeaders(),
       ...options.headers ?? {}
@@ -14432,7 +14434,8 @@ class PhpApiService {
             ...options,
             headers: {
               ...headers,
-              Authorization: `Bearer ${this.getToken() ?? ""}`
+              Authorization: `Bearer ${this.getToken() ?? ""}`,
+              "X-Token": this.getToken() ?? ""
             }
           },
           true
