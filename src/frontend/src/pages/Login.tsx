@@ -94,13 +94,13 @@ export default function Login() {
         }
       } else {
         // Reset loginTime on failed login
-        setLoginTime(null);
+        setLoginTime(0);
         setError(
           "Invalid username or password. Please check your credentials and try again.",
         );
       }
     } catch {
-      setLoginTime(null);
+      setLoginTime(0);
       setError("Login failed. Please try again.");
     } finally {
       setLoading(false);

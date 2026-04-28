@@ -7,9 +7,6 @@ import {
   FileJson,
   HardDrive,
   HardDriveDownload,
-  Info,
-  Loader2,
-  RefreshCcw,
   Trash2,
   Upload,
   XCircle,
@@ -113,7 +110,7 @@ function daysSinceLastBackup(history: BackupHistoryEntry[]): number {
 // ── Component ──────────────────────────────────────────────
 
 export default function DataManagement() {
-  const { currentUser, logout, syncStatus } = useApp();
+  const { currentUser, logout } = useApp();
 
   // ── Backup / Restore state ─────────────────────────────
   const [history, setHistory] =
@@ -131,9 +128,6 @@ export default function DataManagement() {
   const [resetText, setResetText] = useState("");
   const [resetPassword, setResetPassword] = useState("");
   const [resetError, setResetError] = useState("");
-
-  // ── Sync state ─────────────────────────────────────────
-  const [isSyncing, setIsSyncing] = useState(false);
 
   // ── Storage estimate ───────────────────────────────────
   const [storageInfo, setStorageInfo] = useState<{
@@ -174,8 +168,6 @@ export default function DataManagement() {
 
   const daysSince = daysSinceLastBackup(history);
   const showWarning = daysSince >= 7;
-
-  const pendingCount = syncStatus.pendingCount;
 
   // ── Backup ─────────────────────────────────────────────
 
@@ -316,20 +308,6 @@ export default function DataManagement() {
     logout();
   }
 
-  // ── Sync Now ───────────────────────────────────────────
-
-  async function handleSyncNow() {
-    setIsSyncing(true);
-    try {
-      await phpApiService.checkHealth();
-      toast.success("Connection to MySQL server verified.");
-    } catch {
-      toast.error("Server unreachable. Please check your connection.");
-    } finally {
-      setIsSyncing(false);
-    }
-  }
-
   // ─────────────────────────────────────────────────────
   return (
     <div className="p-4 lg:p-6 space-y-6 max-w-4xl">
@@ -339,8 +317,8 @@ export default function DataManagement() {
           Data Management
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Backup, restore, and manage your school ERP data stored on the
-          Internet Computer.
+          Backup, restore, and manage your school ERP data stored in MySQL on
+          cPanel.
         </p>
       </div>
 
@@ -355,9 +333,9 @@ export default function DataManagement() {
               MySQL / cPanel Storage
             </p>
             <p className="text-sm text-muted-foreground mt-1">
-              All data is stored in your MySQL database on cPanel. Data is saved
-              locally first (IndexedDB) and synced to MySQL in the background.
-              Upload the latest{" "}
+              All data is stored in your MySQL database on cPanel. Every save
+              goes directly to MySQL — no offline queue, no local cache. Upload
+              the latest{" "}
               <code className="font-mono text-xs">api/index.php</code> to your
               cPanel <code className="font-mono text-xs">public_html/api/</code>{" "}
               folder, then visit{" "}
@@ -382,68 +360,6 @@ export default function DataManagement() {
               )}
             </div>
           </div>
-        </div>
-      </Card>
-
-      {/* ── Sync Status ── */}
-      <Card className="p-5 space-y-4">
-        <div className="flex items-center gap-2">
-          <RefreshCcw className="w-4 h-4 text-primary" />
-          <h3 className="font-semibold text-foreground">MySQL Sync Status</h3>
-        </div>
-
-        <div className="flex items-center gap-3 flex-wrap">
-          <div
-            className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${
-              pendingCount === 0
-                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700"
-                : "bg-amber-500/10 border-amber-500/40 text-amber-700"
-            }`}
-            data-ocid="data-mgmt.sync.status"
-          >
-            {pendingCount === 0 ? (
-              <>
-                <CheckCircle2 className="w-4 h-4 shrink-0" />
-                <span>All data synced to MySQL</span>
-              </>
-            ) : (
-              <>
-                <Loader2 className="w-4 h-4 shrink-0 animate-spin" />
-                <span>
-                  {pendingCount} change{pendingCount !== 1 ? "s" : ""} pending
-                  sync
-                </span>
-              </>
-            )}
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void handleSyncNow()}
-            disabled={isSyncing}
-            data-ocid="data-mgmt.sync.button"
-          >
-            {isSyncing ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-                Syncing…
-              </>
-            ) : (
-              <>
-                <RefreshCcw className="w-3.5 h-3.5 mr-1.5" />
-                Sync Now
-              </>
-            )}
-          </Button>
-        </div>
-
-        <div className="flex items-start gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2">
-          <Info className="w-4 h-4 text-blue-600 mt-0.5 shrink-0" />
-          <p className="text-xs text-blue-700 dark:text-blue-400">
-            Data syncs automatically in the background. Use "Sync Now" to force
-            an immediate refresh from the canister on all devices.
-          </p>
         </div>
       </Card>
 

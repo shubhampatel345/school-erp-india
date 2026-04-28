@@ -21,9 +21,11 @@ import Library from "./pages/Library";
 import Login from "./pages/Login";
 import PromoteStudents from "./pages/PromoteStudents";
 import Reports from "./pages/Reports";
+import Sessions from "./pages/Sessions";
 import Settings from "./pages/Settings";
 import Students from "./pages/Students";
 import Transport from "./pages/Transport";
+import UserManagement from "./pages/UserManagement";
 import VirtualClasses from "./pages/VirtualClasses";
 import StudentAnalytics from "./pages/analytics/StudentAnalytics";
 import AccountantDashboard from "./pages/dashboards/AccountantDashboard";
@@ -106,6 +108,8 @@ function AppRoutes() {
     if (effectivePage === "virtualclasses") return <VirtualClasses />;
     if (effectivePage === "chat") return <Chat />;
     if (effectivePage === "promote") return <PromoteStudents />;
+    if (effectivePage === "sessions") return <Sessions />;
+    if (effectivePage === "usermanagement") return <UserManagement />;
     if (effectivePage === "transport") return <Transport />;
     if (effectivePage === "inventory") return <Inventory />;
     if (effectivePage === "library") return <Library />;
@@ -160,11 +164,11 @@ function AppRoutes() {
       const colonTab = effectivePage.includes(":")
         ? effectivePage.split(":")[1]
         : null;
-      const tab = colonTab
-        ? colonTab
-        : effectivePage.includes("/")
-          ? effectivePage.split("/")[1]
-          : "profile";
+      // "settings/usermgmt" → tab "usermgmt"
+      const slashTab = effectivePage.includes("/")
+        ? effectivePage.split("/")[1]
+        : null;
+      const tab = colonTab ?? slashTab ?? "profile";
       return <Settings initialTab={tab} />;
     }
 

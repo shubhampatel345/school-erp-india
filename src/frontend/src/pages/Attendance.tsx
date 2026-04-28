@@ -1,6 +1,7 @@
 /**
  * Attendance — Main module shell for SHUBH SCHOOL ERP
  * Tabs: Daily | QR Scanner | Face Recognition | Welcome Display | Summary | Biometric | Settings
+ * All data: direct PHP/MySQL via phpApiService. No offline cache, no IndexedDB.
  */
 import { Badge } from "@/components/ui/badge";
 import {

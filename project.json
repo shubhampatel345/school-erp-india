@@ -1,29 +1,26 @@
 {
-  "overview": "SHUBH SCHOOL ERP is a comprehensive school management system for Indian schools. Fully cPanel/MySQL powered — every add, edit, and delete goes directly to your MySQL database with instant confirmation. All 7 roles (Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver) have individual login panels with smart dashboards showing only what's relevant to each user. 25+ modules: Students, Fees, Attendance, HR/Payroll, Academics, Examinations, Transport, Library, Inventory, Chat, Communication, Certificates, Reports, Virtual Classes, and more.",
+  "overview": "SHUBH SCHOOL ERP is a comprehensive, modular School Management system for Indian schools. It is a fully online, mobile-optimized Progressive Web App covering all standard school management needs: Students, Fees, Attendance, HR/Payroll, Examinations, Transport, Library, Inventory, Communication, and 15+ more modules. Designed for cPanel/MySQL shared hosting with LiteSpeed web server compatibility.",
   "features": [
-    "Role-based login panels — Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver each get their own smart dashboard",
-    "Ultra-fast online-only architecture — all data saves directly to MySQL via PHP API, no local sync overhead",
-    "Students module with Excel-style grid, bulk import, Indian class ordering (Nursery to Class 12)",
-    "Fees collection with typeable amount fields, QR receipts, auto month selection, UPI QR payment",
-    "Attendance with daily marking, QR scanner, AI face recognition",
-    "HR/Payroll with staff directory, payslips, payroll register",
-    "Academics, Examinations with online MCQ tests and auto-grading",
-    "Transport with GPS tracking, Library with barcode scanning",
-    "Communication with WhatsApp broadcast, Certificate Studio, Reports export to Excel",
-    "Dark navy sidebar, 10 color themes, PWA installable on phone",
-    "Session management with auto-promote students to next academic year",
-    "Token auto-refresh — no Session Expired popups"
+    "Multi-role login (Super Admin, Admin, Teacher, Accountant, Parent, Student, Driver)",
+    "Students with Excel-style grid, bulk import, and family grouping",
+    "Fee collection with QR receipts, balance auto-carry, and monthly chart",
+    "Attendance with RFID/QR, AI face recognition, and biometric sync",
+    "Examinations with drag-and-drop result designer and WhatsApp broadcast",
+    "HR/Payroll with staff directory and payslip generation",
+    "Transport with routes, pickup points, and GPS tracking",
+    "Communication with WhatsApp integration and notification scheduler",
+    "10 color themes, dark navy sidebar, PWA installable on phone",
+    "All data saves directly to MySQL — no offline sync, ultra-fast"
   ],
-  "category": "education",
+  "category": "productivity",
   "tags": [
     "school-erp",
-    "education",
     "india",
+    "education",
+    "management",
     "cpanel",
     "mysql",
-    "attendance",
-    "fees",
-    "role-based"
+    "pwa"
   ],
-  "last_updated": "2026-04-24T15:42:12.117Z"
+  "last_updated": "2026-04-28T18:07:10.244Z"
 }

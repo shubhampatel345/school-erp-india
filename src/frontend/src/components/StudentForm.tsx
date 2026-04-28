@@ -25,11 +25,11 @@ interface StudentFormProps {
   student?: Student;
   onSave: (student: Student) => Promise<void>;
   onClose: () => void;
-  saveData: (
+  saveData?: (
     collection: string,
     item: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
-  updateData: (
+  updateData?: (
     collection: string,
     id: string,
     changes: Record<string, unknown>,

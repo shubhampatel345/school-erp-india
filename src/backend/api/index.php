@@ -2,6 +2,18 @@
 error_reporting(0);
 require_once __DIR__ . '/config.php';
 
+// ─── GLOBAL SHUTDOWN HANDLER — always returns JSON ────────────────────────────
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=UTF-8');
+            http_response_code(500);
+        }
+        echo json_encode(['success' => false, 'error' => 'Fatal error: ' . $err['message'], 'data' => null]);
+    }
+});
+
 // ─── CORS ────────────────────────────────────────────────────────────────────
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowed = ALLOWED_ORIGINS;
@@ -83,8 +95,11 @@ function body(): array {
 }
 function requireAuth(): array {
     // Super Admin API key bypass — LiteSpeed-safe (query param)
-    if (!empty($_GET['api_key']) && $_GET['api_key'] === SUPER_ADMIN_API_KEY) {
-        return ['sub' => 0, 'username' => 'superadmin', 'role' => 'superadmin', 'school_id' => 1, 'name' => 'Super Admin'];
+    // Accept both ?sa_key= (frontend v143+) and ?api_key= (older builds)
+    $saKey = $_GET['sa_key'] ?? $_GET['api_key'] ?? '';
+    $validKeys = [SUPER_ADMIN_API_KEY, 'shubh_superadmin_2024_secure_key'];
+    if ($saKey && in_array($saKey, $validKeys, true)) {
+        return ['sub' => 0, 'id' => 0, 'role' => 'superadmin', 'school_id' => 1, 'name' => 'Super Admin'];
     }
 
     // Token priority: query param first (LiteSpeed strips headers), then headers
@@ -96,15 +111,26 @@ function requireAuth(): array {
     } elseif (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
         $h = $_SERVER['HTTP_AUTHORIZATION'];
         if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+        else $token = $h;
+    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $h = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+        if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+        else $token = $h;
     } elseif (function_exists('apache_request_headers')) {
         $headers = apache_request_headers();
         $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
         if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+        elseif ($h) $token = $h;
+    } elseif (function_exists('getallheaders')) {
+        $headers = getallheaders();
+        $h = $headers['Authorization'] ?? $headers['authorization'] ?? '';
+        if (str_starts_with($h, 'Bearer ')) $token = substr($h, 7);
+        elseif ($h) $token = $h;
     }
 
     if (!$token || !verifyJWT($token)) {
         http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Unauthorized — token missing or expired. Send ?token=YOUR_JWT or ?api_key=API_KEY', 'data' => null]);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized — token missing or expired. Send ?token=YOUR_JWT or ?sa_key=API_KEY', 'data' => null]);
         exit;
     }
     return decodeJWT($token);
@@ -119,31 +145,30 @@ $method  = $_SERVER['REQUEST_METHOD'];
 
 // ─── PING (public, no auth) ───────────────────────────────────────────────────
 if ($route === 'ping') {
-    echo json_encode(['success' => true, 'message' => 'SHUBH ERP API is online', 'version' => '1.0', 'timestamp' => date('c'), 'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown']);
+    echo json_encode(['success' => true, 'message' => 'SHUBH ERP API is online', 'version' => API_VERSION, 'timestamp' => date('c'), 'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown']);
     exit;
 }
 
 // ─── DEBUG/TOKEN (public, no auth needed) ─────────────────────────────────────
 if ($route === 'debug/token') {
-    $apiKey = $_GET['api_key'] ?? null;
+    $apiKey = $_GET['api_key'] ?? $_GET['sa_key'] ?? null;
     $tokenQP = $_GET['token'] ?? null;
     $xToken = $_SERVER['HTTP_X_TOKEN'] ?? null;
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? null;
     $redirectAuth = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? null;
     $apacheHeaders = function_exists('apache_request_headers') ? (apache_request_headers()['Authorization'] ?? null) : null;
-    $serverSoftware = $_SERVER['SERVER_SOFTWARE'] ?? 'unknown';
     echo json_encode([
         'success' => true,
-        'server_software' => $serverSoftware,
+        'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'unknown',
         'token_sources' => [
-            'api_key_param'     => $apiKey ? substr($apiKey, 0, 10) . '...' : null,
+            'sa_key_param'      => $apiKey ? (in_array($apiKey, [SUPER_ADMIN_API_KEY, SUPERADMIN_API_KEY], true) ? 'VALID_SUPERADMIN_KEY' : 'INVALID_KEY') : null,
             'token_query_param' => $tokenQP ? substr($tokenQP, 0, 20) . '...' : null,
             'HTTP_X_TOKEN'      => $xToken ? substr($xToken, 0, 20) . '...' : null,
             'HTTP_AUTHORIZATION' => $authHeader ? substr($authHeader, 0, 20) . '...' : null,
             'REDIRECT_HTTP_AUTHORIZATION' => $redirectAuth ? substr($redirectAuth, 0, 20) . '...' : null,
             'apache_request_headers' => $apacheHeaders ? substr($apacheHeaders, 0, 20) . '...' : null,
         ],
-        'hint' => 'LiteSpeed strips headers — send token as ?token=JWT_HERE for reliable auth',
+        'hint' => 'LiteSpeed strips headers — send token as ?token=JWT_HERE or sa_key as ?sa_key=KEY for reliable auth',
     ]);
     exit;
 }
@@ -955,7 +980,7 @@ if ($section === 'attendance') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($action === 'daily' && $method === 'GET') {
+    if (($action === 'daily' || $action === 'list' || $action === '') && $method === 'GET') {
         $classId   = $_GET['class_id'] ?? null;
         $sectionId = $_GET['section_id'] ?? null;
         $date      = $_GET['date'] ?? date('Y-m-d');
@@ -1733,7 +1758,7 @@ if ($section === 'settings') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($action === 'all' && $method === 'GET') {
+    if (($action === 'all' || $action === 'get') && $method === 'GET') {
         $stmt = $db->prepare("SELECT `key`, value FROM settings WHERE school_id=?");
         $stmt->execute([$schoolId]);
         $rows = $stmt->fetchAll();
@@ -2028,6 +2053,33 @@ if ($section === 'notifications') {
     }
 
     json_error('Unknown notifications route');
+}
+
+// ─── RESULTS alias (top-level route) ─────────────────────────────────────────
+if ($section === 'results') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'save' && $method === 'POST') {
+        $b = body();
+        $results = $b['results'] ?? [$b];
+        $stmt = $db->prepare("INSERT INTO exam_results (school_id, exam_id, student_id, subject_id, marks_obtained, max_marks, grade, remarks) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained),grade=VALUES(grade),remarks=VALUES(remarks)");
+        foreach ($results as $r) {
+            $stmt->execute([$schoolId, $r['exam_id'], $r['student_id'], $r['subject_id'], (float)($r['marks_obtained'] ?? 0), (int)($r['max_marks'] ?? 100), $r['grade'] ?? '', $r['remarks'] ?? '']);
+        }
+        json_out(['success' => true]);
+    }
+    if ($action === 'list' && $method === 'GET') {
+        $examId  = (int)($_GET['exam_id'] ?? 0);
+        $classId = $_GET['class_id'] ?? null;
+        $where   = "er.exam_id = $examId AND er.school_id = $schoolId";
+        $params  = [];
+        if ($classId) { $where .= " AND st.class_id = ?"; $params[] = $classId; }
+        $stmt = $db->prepare("SELECT er.*, st.full_name, st.adm_no, su.name as subject_name FROM exam_results er LEFT JOIN students st ON st.id=er.student_id LEFT JOIN subjects su ON su.id=er.subject_id WHERE $where ORDER BY st.full_name, su.name");
+        $stmt->execute($params);
+        json_out(['success' => true, 'results' => $stmt->fetchAll()]);
+    }
+    json_error('Unknown results route');
 }
 
 // ─── 404 ────────────────────────────────────────────────────────────────────

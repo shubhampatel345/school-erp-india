@@ -61,7 +61,9 @@ const ROLE_NAV: Record<UserRole | "default", NavItem[]> = {
     { id: "certificates", label: "Certificates", icon: Award },
     { id: "calling", label: "Calling", icon: Phone },
     { id: "settings", label: "Settings", icon: Settings },
-    { id: "settings/usermgmt", label: "User Management", icon: UserCog },
+    { id: "sessions", label: "Sessions", icon: CalendarCheck },
+    { id: "usermanagement", label: "User Management", icon: UserCog },
+    { id: "settings/usermgmt", label: "Permissions", icon: UserCog },
     { id: "documentation", label: "Documentation", icon: HelpCircle },
   ],
   admin: [

@@ -1,8 +1,9 @@
 /**
  * Students.tsx — PHP/MySQL direct (no IndexedDB, no offline sync)
  *
- * Fetch-first: all reads come from the server. Mutations wait for server
- * confirmation before showing success and refreshing the list.
+ * Fetch-first: all reads come from the server via phpApiService.
+ * Mutations wait for server HTTP 200 before refreshing list and showing success.
+ * No canister, no IndexedDB, no pending queue, no sync engine.
  */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -210,14 +211,7 @@ interface StudentsProps {
 }
 
 export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
-  const {
-    currentSession,
-    currentUser,
-    saveData,
-    updateData,
-    deleteData,
-    addNotification,
-  } = useApp();
+  const { currentSession, currentUser, addNotification } = useApp();
 
   // ── Server state ───────────────────────────────────────────────────────────
   const [students, setStudents] = useState<Student[]>([]);
@@ -467,7 +461,7 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
   // ── Delete ─────────────────────────────────────────────────────────────────
   async function handleDelete(student: Student) {
     try {
-      await deleteData("students", student.id);
+      await phpApiService.deleteStudent(student.id);
       addNotification(`Student ${student.fullName} deleted.`, "success");
       setDeleteConfirm(null);
       await fetchStudents(true);
@@ -479,7 +473,7 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
   async function handleBulkDelete() {
     try {
       for (const id of selectedIds) {
-        await deleteData("students", id);
+        await phpApiService.deleteStudent(id);
       }
       addNotification(`${selectedIds.size} students deleted.`, "success");
       setSelectedIds(new Set());
@@ -1107,8 +1101,6 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
             );
             setSelectedStudent(updated);
           }}
-          updateData={updateData}
-          deleteData={deleteData}
           allStudents={students}
         />
       )}
@@ -1132,8 +1124,6 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
             setShowForm(false);
             setEditStudent(null);
           }}
-          saveData={saveData}
-          updateData={updateData}
         />
       )}
 

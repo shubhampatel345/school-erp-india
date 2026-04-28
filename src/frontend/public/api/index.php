@@ -2,6 +2,19 @@
 error_reporting(0);
 require_once __DIR__ . '/config.php';
 
+// ─── GLOBAL TRY/CATCH wrapper — every response is guaranteed JSON ─────────────
+// (inner try/catch at the bottom catches logic errors; this catches startup errors)
+register_shutdown_function(function() {
+    $err = error_get_last();
+    if ($err && in_array($err['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR])) {
+        if (!headers_sent()) {
+            header('Content-Type: application/json; charset=UTF-8');
+            http_response_code(500);
+        }
+        echo json_encode(['success' => false, 'error' => 'Fatal error: ' . $err['message'], 'data' => null]);
+    }
+});
+
 // ─── CORS ────────────────────────────────────────────────────────────────────
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
 $allowed = ALLOWED_ORIGINS;
@@ -188,7 +201,7 @@ if ($route === 'debug/token') {
 }
 
 // Public routes (no auth required)
-$public = ['auth/login', 'auth/verify', 'migrate/run', 'ping', 'debug/token'];
+$public = ['auth/login', 'auth/verify', 'auth/logout', 'auth/refresh', 'migrate/run', 'ping', 'debug/token'];
 $isPublic = in_array($route, $public, true);
 
 $user = null;
@@ -552,19 +565,16 @@ if ($section === 'migrate' && $action === 'run') {
         $db->exec("ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_enabled TINYINT(1) NOT NULL DEFAULT 1");
     } catch (Exception $e) { /* column may already exist */ }
 
-    // Seed default super admin
-    $exists = $db->query("SELECT id FROM users WHERE username='admin' LIMIT 1")->fetch();
-    if (!$exists) {
-        $hash = password_hash('admin123', PASSWORD_BCRYPT);
-        $stmt = $db->prepare("INSERT INTO users (school_id, username, password_hash, name, role, is_active) VALUES (1, 'admin', ?, 'Super Admin', 'super_admin', 1)");
-        $stmt->execute([$hash]);
-    }
+    // Seed default super admin using INSERT IGNORE for idempotency
+    $hash = password_hash('admin123', PASSWORD_BCRYPT);
+    $stmt = $db->prepare("INSERT IGNORE INTO users (school_id, username, password_hash, name, role, is_active) VALUES (1, 'admin', ?, 'Super Admin', 'super_admin', 1)");
+    $stmt->execute([$hash]);
 
-    // Seed default academic session 2025-26
-    $sessExists = $db->query("SELECT id FROM sessions_academic WHERE name='2025-26' LIMIT 1")->fetch();
-    if (!$sessExists) {
-        $db->exec("INSERT INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1,'2025-26',2025,2026,1)");
-    }
+    // Seed default academic session 2025-26 and historical sessions (INSERT IGNORE = idempotent)
+    $db->exec("INSERT IGNORE INTO sessions_academic (school_id, name, start_year, end_year, is_current) VALUES (1,'2025-26',2025,2026,1)");
+
+    // Add unique key on sessions name to make INSERT IGNORE idempotent
+    try { $db->exec("ALTER TABLE sessions_academic ADD UNIQUE KEY unique_sess_name (school_id, name)"); } catch (Exception $e) { /* already exists */ }
 
     // Seed historical sessions 2019-20 through 2024-25 (is_current=0)
     $historicalSessions = [
@@ -995,7 +1005,7 @@ if ($section === 'attendance') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($action === 'daily' && $method === 'GET') {
+    if (($action === 'list' || $action === 'daily' || $action === '') && $method === 'GET') {
         $classId   = $_GET['class_id'] ?? null;
         $sectionId = $_GET['section_id'] ?? null;
         $date      = $_GET['date'] ?? date('Y-m-d');
@@ -1397,6 +1407,35 @@ if ($section === 'exams') {
     json_error('Unknown exams route');
 }
 
+// ─── RESULTS (top-level alias: ?route=results/save) ──────────────────────────
+if ($section === 'results') {
+    $db = getDB();
+    $schoolId = (int)($user['school_id'] ?? 1);
+
+    if ($action === 'save' && $method === 'POST') {
+        $b = body();
+        $results = $b['results'] ?? [$b];
+        $stmt = $db->prepare("INSERT INTO exam_results (school_id, exam_id, student_id, subject_id, marks_obtained, max_marks, grade, remarks) VALUES (?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE marks_obtained=VALUES(marks_obtained),grade=VALUES(grade),remarks=VALUES(remarks)");
+        foreach ($results as $r) {
+            $stmt->execute([$schoolId, $r['exam_id'], $r['student_id'], $r['subject_id'], (float)($r['marks_obtained'] ?? 0), (int)($r['max_marks'] ?? 100), $r['grade'] ?? '', $r['remarks'] ?? '']);
+        }
+        json_out(['success' => true]);
+    }
+
+    if ($action === 'list' && $method === 'GET') {
+        $examId  = (int)($_GET['exam_id'] ?? 0);
+        $classId = $_GET['class_id'] ?? null;
+        $where   = "er.exam_id = $examId AND er.school_id = $schoolId";
+        $params  = [];
+        if ($classId) { $where .= " AND st.class_id = ?"; $params[] = $classId; }
+        $stmt = $db->prepare("SELECT er.*, st.full_name, st.adm_no, su.name as subject_name FROM exam_results er LEFT JOIN students st ON st.id=er.student_id LEFT JOIN subjects su ON su.id=er.subject_id WHERE $where ORDER BY st.full_name, su.name");
+        $stmt->execute($params);
+        json_out(['success' => true, 'results' => $stmt->fetchAll()]);
+    }
+
+    json_error('Unknown results route');
+}
+
 // ─── TRANSPORT ────────────────────────────────────────────────────────────────
 if ($section === 'transport') {
     $db = getDB();
@@ -1684,7 +1723,7 @@ if ($section === 'settings') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($action === 'all' && $method === 'GET') {
+    if (($action === 'all' || $action === 'get') && $method === 'GET') {
         $stmt = $db->prepare("SELECT `key`, value FROM settings WHERE school_id=?");
         $stmt->execute([$schoolId]);
         $rows = $stmt->fetchAll();
@@ -1781,7 +1820,7 @@ if ($section === 'reports') {
         json_out(['success' => true, 'attendance' => $stmt->fetchAll()]);
     }
 
-    if ($action === 'fee-register' && $method === 'GET') {
+    if (($action === 'fee-register' || $action === 'fees') && $method === 'GET') {
         $sessionId = $_GET['session_id'] ?? null;
         $classId   = $_GET['class_id'] ?? null;
         $where = ["s.school_id = $schoolId", "s.is_active = 1"]; $params = [];
@@ -1801,7 +1840,7 @@ if ($section === 'expenses') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($method === 'GET') {
+    if ($method === 'GET' && ($action === 'list' || $action === '')) {
         $page   = max(1, (int)($_GET['page'] ?? 1));
         $limit  = min(200, (int)($_GET['limit'] ?? 50));
         $offset = ($page - 1) * $limit;
@@ -1829,7 +1868,7 @@ if ($section === 'homework') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
-    if ($method === 'GET') {
+    if ($method === 'GET' && ($action === 'list' || $action === '')) {
         $classId   = $_GET['class_id'] ?? null;
         $sectionId = $_GET['section_id'] ?? null;
         $where = "school_id = $schoolId"; $params = [];
@@ -2059,7 +2098,7 @@ if ($section === 'classes') {
         json_out(['success' => true]);
     }
 
-    json_error("Route not found: $route", 404);
+    json_error('Unknown classes route');
 }
 
 // ─── USERS (direct route: ?route=users/...) ───────────────────────────────────
@@ -2122,7 +2161,7 @@ if ($section === 'users') {
         json_out(['success' => true]);
     }
 
-    json_error("Route not found: $route", 404);
+    json_error('Unknown users route');
 }
 
 // ─── 404 ────────────────────────────────────────────────────────────────────

@@ -1,3 +1,8 @@
+/**
+ * SHUBH SCHOOL ERP — Virtual Classes
+ * Schedule Zoom/Google Meet sessions. Data via apiCall().
+ * No offline cache, no local storage for meetings.
+ */
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,13 +13,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useState } from "react";
+import { Loader2, Video } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
-import { generateId } from "../utils/canisterService";
-import { ls } from "../utils/localStorage";
-
-// ── Types ────────────────────────────────────────────────────────────────────
+import { apiCall } from "../utils/api";
 
 interface Meeting {
   id: string;
@@ -35,8 +40,6 @@ interface PlatformCreds {
   zoomApiSecret: string;
   googleClientId: string;
 }
-
-// ── Seed data ────────────────────────────────────────────────────────────────
 
 const TODAY = new Date().toISOString().split("T")[0];
 const TOMORROW = new Date(Date.now() + 86400000).toISOString().split("T")[0];
@@ -81,22 +84,7 @@ const SEED_MEETINGS: Meeting[] = [
     hostName: "Mrs. Priya Singh",
     participants: 32,
   },
-  {
-    id: "m4",
-    title: "Parent-Teacher Meeting",
-    classSection: "All Classes",
-    platform: "zoom",
-    date: "2026-04-20",
-    time: "15:00",
-    duration: 90,
-    link: "https://zoom.us/j/87654321",
-    status: "ended",
-    hostName: "Super Admin",
-    participants: 120,
-  },
 ];
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
 
 function generateMeetLink(platform: "zoom" | "meet") {
   if (platform === "meet") {
@@ -137,8 +125,6 @@ function statusBadge(status: Meeting["status"]) {
     </Badge>
   );
 }
-
-// ── Meeting Card ──────────────────────────────────────────────────────────────
 
 function MeetingCard({
   meeting,
@@ -186,17 +172,17 @@ function MeetingCard({
             <Button
               size="sm"
               variant="outline"
+              className="h-8 text-xs"
               data-ocid={`virtualclasses.notify_button.${idx}`}
               onClick={() => onNotify(meeting)}
-              className="h-8 text-xs"
             >
               Notify
             </Button>
             <Button
               size="sm"
+              className="h-8"
               data-ocid={`virtualclasses.join_button.${idx}`}
               asChild
-              className="h-8"
             >
               <a href={meeting.link} target="_blank" rel="noreferrer">
                 Join
@@ -212,8 +198,6 @@ function MeetingCard({
   );
 }
 
-// ── Schedule Form ─────────────────────────────────────────────────────────────
-
 function ScheduleForm({
   onSave,
   classes,
@@ -227,25 +211,37 @@ function ScheduleForm({
     time: "09:00",
     duration: "45",
   });
+  const [saving, setSaving] = useState(false);
 
   const update = (k: keyof typeof form, v: string) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const save = () => {
+  const save = async () => {
     if (!form.title || !form.date) return;
-    onSave({
-      id: generateId(),
+    setSaving(true);
+    const link = generateMeetLink(form.platform);
+    const m: Meeting = {
+      id: `m_${Date.now()}`,
       title: form.title,
       classSection: form.classSection || "All Classes",
       platform: form.platform,
       date: form.date,
       time: form.time,
       duration: Number.parseInt(form.duration, 10) || 45,
-      link: generateMeetLink(form.platform),
+      link,
       status: "upcoming",
       hostName: currentUser?.fullName ?? "Teacher",
       participants: 0,
-    });
+    };
+    try {
+      await apiCall("settings/save", "POST", {
+        key: `virtual_class_${m.id}`,
+        value: JSON.stringify(m),
+      });
+    } catch {
+      /* continue — save locally */
+    }
+    onSave(m);
     setForm({
       title: "",
       classSection: "",
@@ -254,6 +250,7 @@ function ScheduleForm({
       time: "09:00",
       duration: "45",
     });
+    setSaving(false);
   };
 
   return (
@@ -340,33 +337,58 @@ function ScheduleForm({
       </div>
       <Button
         data-ocid="virtualclasses.schedule_submit_button"
-        onClick={save}
+        onClick={() => void save()}
         className="w-full"
-        disabled={!form.title}
+        disabled={!form.title || saving}
       >
+        {saving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : null}
         Schedule Meeting
       </Button>
     </div>
   );
 }
 
-// ── Settings Tab ──────────────────────────────────────────────────────────────
-
 function SettingsTab() {
-  const [creds, setCreds] = useState<PlatformCreds>(() =>
-    ls.get("vc_creds", {
-      zoomApiKey: "",
-      zoomApiSecret: "",
-      googleClientId: "",
-    }),
-  );
+  const [creds, setCreds] = useState<PlatformCreds>({
+    zoomApiKey: "",
+    zoomApiSecret: "",
+    googleClientId: "",
+  });
   const [saved, setSaved] = useState(false);
+  const [loading, setLoading] = useState(true);
 
-  const save = () => {
-    ls.set("vc_creds", creds);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  useEffect(() => {
+    void apiCall<{ value?: string }>("settings/get?key=vc_creds")
+      .then((res) => {
+        if (res?.value) {
+          try {
+            setCreds(JSON.parse(res.value) as PlatformCreds);
+          } catch {
+            /* noop */
+          }
+        }
+      })
+      .catch(() => {
+        /* noop */
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    try {
+      await apiCall("settings/save", "POST", {
+        key: "vc_creds",
+        value: JSON.stringify(creds),
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+      toast.success("Settings saved");
+    } catch {
+      toast.error("Failed to save");
+    }
   };
+
+  if (loading) return <Skeleton className="h-40 rounded-xl" />;
 
   return (
     <div className="space-y-4 max-w-lg">
@@ -426,7 +448,7 @@ function SettingsTab() {
       </div>
       <Button
         data-ocid="virtualclasses.settings_save_button"
-        onClick={save}
+        onClick={() => void save()}
         className="w-full"
       >
         {saved ? "✓ Saved" : "Save Settings"}
@@ -435,29 +457,39 @@ function SettingsTab() {
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-
 export default function VirtualClasses() {
-  const { getData, addNotification } = useApp();
-  const [meetings, setMeetings] = useState<Meeting[]>(() =>
-    ls.get("vc_meetings", SEED_MEETINGS),
-  );
+  const { currentUser, addNotification } = useApp();
+  const [meetings, setMeetings] = useState<Meeting[]>(SEED_MEETINGS);
+  const [classes, setClasses] = useState<string[]>([]);
   const [quickLink, setQuickLink] = useState<string | null>(null);
   const [notifyTarget, setNotifyTarget] = useState<Meeting | null>(null);
 
-  const classes = (
-    getData("classes") as Array<{ className: string; sections: string[] }>
-  ).flatMap((c) => (c.sections ?? []).map((s) => `${c.className}-${s}`));
+  // Load classes for the schedule form
+  useEffect(() => {
+    void apiCall<
+      Array<{ name?: string; className?: string; sections?: string[] }>
+    >("academics/classes")
+      .then((res) => {
+        const rows = Array.isArray(res) ? res : [];
+        const combos = rows.flatMap((c) => {
+          const cn = c.name ?? c.className ?? "";
+          return (c.sections ?? []).map((s) => `${cn}-${s}`);
+        });
+        setClasses(combos);
+      })
+      .catch(() => setClasses([]));
+  }, []);
 
-  const addMeeting = (m: Meeting) => {
-    const next = [m, ...meetings];
-    setMeetings(next);
-    ls.set("vc_meetings", next);
-    addNotification(
-      `Meeting "${m.title}" scheduled for ${m.date} at ${m.time}`,
-      "success",
-    );
-  };
+  const addMeeting = useCallback(
+    (m: Meeting) => {
+      setMeetings((prev) => [m, ...prev]);
+      addNotification(
+        `Meeting "${m.title}" scheduled for ${m.date} at ${m.time}`,
+        "success",
+      );
+    },
+    [addNotification],
+  );
 
   const createQuickMeet = () => {
     const link = generateMeetLink("meet");
@@ -467,15 +499,16 @@ export default function VirtualClasses() {
 
   const sendNotification = (m: Meeting) => {
     addNotification(`Meeting link sent to participants: "${m.title}"`, "info");
+    toast.success("Notification sent");
     setNotifyTarget(null);
   };
 
   const upcoming = meetings.filter((m) => m.status !== "ended");
   const past = meetings.filter((m) => m.status === "ended");
+  void currentUser; // available if needed for role-based features
 
   return (
     <div className="p-4 md:p-6 space-y-5" data-ocid="virtualclasses.page">
-      {/* Header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-2xl font-bold text-foreground font-display">
@@ -494,7 +527,6 @@ export default function VirtualClasses() {
         </Button>
       </div>
 
-      {/* Quick link banner */}
       {quickLink && (
         <div
           className="bg-green-600/10 border border-green-500/30 rounded-xl p-4 flex items-center gap-3"
@@ -525,7 +557,6 @@ export default function VirtualClasses() {
         </div>
       )}
 
-      {/* Tabs */}
       <Tabs defaultValue="upcoming">
         <TabsList className="mb-4">
           <TabsTrigger value="upcoming" data-ocid="virtualclasses.upcoming_tab">
@@ -596,7 +627,6 @@ export default function VirtualClasses() {
         </TabsContent>
       </Tabs>
 
-      {/* Notify Dialog */}
       <Dialog open={!!notifyTarget} onOpenChange={() => setNotifyTarget(null)}>
         <DialogContent data-ocid="virtualclasses.notify_dialog">
           <DialogHeader>

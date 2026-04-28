@@ -284,11 +284,11 @@ function matchQuery(filters, query) {
     }
   }
   if (type !== "all") {
-    const isActive = query.isActive();
-    if (type === "active" && !isActive) {
+    const isActive2 = query.isActive();
+    if (type === "active" && !isActive2) {
       return false;
     }
-    if (type === "inactive" && isActive) {
+    if (type === "inactive" && isActive2) {
       return false;
     }
   }
@@ -14059,83 +14059,46 @@ const ReactDOM = /* @__PURE__ */ getDefaultExportFromCjs(clientExports);
 class ErrorBoundary extends reactExports.Component {
   constructor(props) {
     super(props);
-    __publicField(this, "handleReload", () => {
-      this.setState({ hasError: false, error: null, errorInfo: null });
-    });
-    __publicField(this, "handleRefresh", () => {
-      window.location.reload();
-    });
-    this.state = { hasError: false, error: null, errorInfo: null };
+    this.state = { hasError: false, error: null };
   }
   static getDerivedStateFromError(error) {
     return { hasError: true, error };
   }
   componentDidCatch(error, info) {
-    console.error("[ErrorBoundary] Caught render error:", error, info);
-    this.setState({ errorInfo: info });
+    console.error("Module crashed:", error, info.componentStack);
   }
   render() {
     var _a2;
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
-      const moduleName = this.props.moduleName;
-      const message = ((_a2 = this.state.error) == null ? void 0 : _a2.message) ?? "An unexpected error occurred.";
-      const isNetworkError = message.includes("Network") || message.includes("fetch") || message.includes("Failed to load");
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "div",
-        {
-          role: "alert",
-          className: "flex flex-col items-center justify-center min-h-[60vh] p-8 text-center",
-          "data-ocid": "error-boundary.error_state",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mb-4", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "svg",
-              {
-                "aria-hidden": "true",
-                className: "w-8 h-8 text-destructive",
-                fill: "none",
-                viewBox: "0 0 24 24",
-                stroke: "currentColor",
-                strokeWidth: 1.75,
-                children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "path",
-                  {
-                    strokeLinecap: "round",
-                    strokeLinejoin: "round",
-                    d: "M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"
-                  }
-                )
-              }
-            ) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold text-foreground mb-1 font-display", children: moduleName ? `${moduleName} — Something went wrong` : "Something went wrong" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mb-2 max-w-sm", children: message }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mb-6 max-w-sm", children: isNetworkError ? "A network error occurred. Check your server connection and try again." : "This section encountered an unexpected error. Click 'Try Again' to reload it, or navigate to another module." }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  onClick: this.handleReload,
-                  className: "px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity",
-                  "data-ocid": "error-boundary.retry_button",
-                  children: "Try Again"
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "button",
-                {
-                  type: "button",
-                  onClick: this.handleRefresh,
-                  className: "px-4 py-2 rounded-lg border border-border bg-background text-foreground text-sm font-medium hover:bg-muted transition-colors",
-                  "data-ocid": "error-boundary.reload_button",
-                  children: "Reload Page"
-                }
-              )
-            ] }),
-            false
-          ]
-        }
-      );
+      return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-8 flex flex-col items-center justify-center gap-4 min-h-[300px]", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-12 h-12 rounded-xl bg-destructive/10 flex items-center justify-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "svg",
+          {
+            className: "w-6 h-6 text-destructive",
+            fill: "none",
+            stroke: "currentColor",
+            strokeWidth: "2",
+            viewBox: "0 0 24 24",
+            "aria-hidden": "true",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" })
+          }
+        ) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground font-display", children: "Module Error" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mt-1", children: ((_a2 = this.state.error) == null ? void 0 : _a2.message) ?? "An unexpected error occurred" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            onClick: () => this.setState({ hasError: false, error: null }),
+            className: "px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 transition-opacity",
+            "data-ocid": "error-boundary.retry_button",
+            children: "Try Again"
+          }
+        )
+      ] });
     }
     return this.props.children;
   }
@@ -14418,12 +14381,12 @@ class PhpApiService {
         throw new Error("Session expired — please log in again");
       }
     }
-    const SA_KEY = "shubh_superadmin_2024_secure_key";
+    const SA_KEY2 = "shubh_superadmin_2024_secure_key";
     const rawToken = this.getToken();
     let authParam = "";
     if (!isAuthRoute) {
       if (superAdmin) {
-        authParam = `&sa_key=${SA_KEY}`;
+        authParam = `&sa_key=${SA_KEY2}`;
       } else if (rawToken) {
         authParam = `&token=${encodeURIComponent(rawToken.replace(/^Bearer\s+/i, ""))}`;
       }
@@ -15352,21 +15315,17 @@ class PhpApiService {
   }
 }
 const phpApiService = new PhpApiService();
-let _loginTime = null;
+let _loginTime = 0;
 function setLoginTime(t2) {
   _loginTime = t2;
   try {
-    if (t2 !== null) {
-      localStorage.setItem("erp_login_time", String(t2));
-    } else {
-      localStorage.removeItem("erp_login_time");
-    }
+    localStorage.setItem("erp_login_time", String(t2));
   } catch {
   }
 }
-function isWithinGracePeriod(minutesThreshold = 10) {
-  if (_loginTime === null) return false;
-  return Date.now() - _loginTime < minutesThreshold * 60 * 1e3;
+function isWithinGracePeriod(seconds = 120) {
+  if (_loginTime === 0) return false;
+  return Date.now() - _loginTime < seconds * 1e3;
 }
 function lsGet(key, fallback) {
   try {
@@ -15385,6 +15344,10 @@ function lsSet(key, value) {
 }
 function generateId$2() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+function normalizeRole(role) {
+  if (role === "super_admin") return "superadmin";
+  return role || "teacher";
 }
 const PRELOADED_SESSIONS = [
   { label: "2019-20", startYear: 2019, endYear: 2020 },
@@ -15546,18 +15509,17 @@ function appReducer(state, action) {
   }
 }
 const AppContext = reactExports.createContext(null);
-const SUPER_ADMIN = {
+const SUPER_ADMIN_USER = {
   id: "su1",
   username: "superadmin",
   role: "superadmin",
   fullName: "Super Admin",
   name: "Super Admin"
 };
-const LOCAL_ADMIN = {
+const LOCAL_ADMIN_USER = {
   id: "su2",
   username: "admin",
   role: "superadmin",
-  // treated as superadmin locally so SA_KEY is used for API calls
   fullName: "Administrator",
   name: "Administrator"
 };
@@ -15582,7 +15544,7 @@ function AppLoading({
             strokeWidth: "2",
             role: "img",
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("title", { children: "SHUBH School ERP Loading" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("title", { children: "SHUBH School ERP" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M22 10v6M2 10l10-5 10 5-10 5z" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("path", { d: "M6 12v5c3 3 9 3 12 0v-5" })
             ]
@@ -15605,7 +15567,7 @@ function AppLoading({
           }
         )
       ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mt-2", children: "Connecting to server…" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mt-2", children: "Loading…" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center gap-1.5 justify-center mt-3", children: [0, 1, 2].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "div",
           {
@@ -15618,10 +15580,7 @@ function AppLoading({
     ] })
   ] }) });
 }
-function ReLoginModal({ onDismiss }) {
-  const currentYear = (/* @__PURE__ */ new Date()).getFullYear();
-  const baseYear = (/* @__PURE__ */ new Date()).getMonth() >= 3 ? currentYear : currentYear - 1;
-  const sessionYear = `${baseYear}-${String(baseYear + 1).slice(-2)}`;
+function SessionExpiredModal({ onLogout }) {
   return /* @__PURE__ */ jsxRuntimeExports.jsx(
     "div",
     {
@@ -15643,18 +15602,15 @@ function ReLoginModal({ onDismiss }) {
           ) }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground font-display", children: "Session Expired" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
-              "Academic session ",
-              sessionYear
-            ] })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Please log in again to continue" })
           ] })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "Your login session has expired and could not be automatically renewed. Please log out and sign in again to continue." }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "Your login session has expired. Please log out and sign in again." }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           "button",
           {
             type: "button",
-            onClick: onDismiss,
+            onClick: onLogout,
             "data-ocid": "relogin.logout_button",
             className: "w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity",
             children: "Log Out & Sign In Again"
@@ -15667,46 +15623,42 @@ function ReLoginModal({ onDismiss }) {
 function AppProvider({ children }) {
   var _a2, _b2;
   const [state, dispatch] = reactExports.useReducer(appReducer, INITIAL_STATE);
-  const [showReLoginModal, setShowReLoginModal] = reactExports.useState(false);
+  const [showExpiredModal, setShowExpiredModal] = reactExports.useState(false);
   const initStartedRef = reactExports.useRef(false);
   const stateRef = reactExports.useRef(state);
   reactExports.useEffect(() => {
     stateRef.current = state;
   });
   reactExports.useEffect(() => {
-    const handleTokenExpired = async () => {
+    const handleExpired = async () => {
       if (!stateRef.current.currentUser) return;
       if (stateRef.current.currentUser.role === "superadmin") return;
-      if (isWithinGracePeriod(10)) return;
+      if (isWithinGracePeriod(120)) return;
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
-      if (!isWithinGracePeriod(10) && stateRef.current.currentUser) {
-        setShowReLoginModal(true);
+      if (!isWithinGracePeriod(120) && stateRef.current.currentUser) {
+        setShowExpiredModal(true);
       }
     };
     const listener = () => {
-      void handleTokenExpired();
+      void handleExpired();
     };
     window.addEventListener("auth:token-expired", listener);
     return () => window.removeEventListener("auth:token-expired", listener);
   }, []);
   reactExports.useEffect(() => {
-    const storedUserRaw = sessionStorage.getItem("shubh_current_user");
-    if (storedUserRaw) {
-      try {
-        const user = JSON.parse(storedUserRaw);
-        const token = phpApiService.getToken();
-        if (token) {
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user });
-        } else if (user.role === "superadmin") {
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user });
-        } else {
-          sessionStorage.removeItem("shubh_current_user");
-        }
-      } catch {
+    const storedRaw = sessionStorage.getItem("shubh_current_user");
+    if (!storedRaw) return;
+    try {
+      const user = JSON.parse(storedRaw);
+      const token = phpApiService.getToken();
+      if (token || user.role === "superadmin") {
+        setLoginTime(Date.now());
+        dispatch({ type: "SET_USER", user });
+      } else {
+        sessionStorage.removeItem("shubh_current_user");
       }
+    } catch {
     }
   }, []);
   reactExports.useEffect(() => {
@@ -15756,44 +15708,50 @@ function AppProvider({ children }) {
         const passwords = lsGet("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
         if (password !== validPw) return false;
+        setLoginTime(Date.now());
         sessionStorage.setItem(
           "shubh_current_user",
-          JSON.stringify(SUPER_ADMIN)
+          JSON.stringify(SUPER_ADMIN_USER)
         );
+        localStorage.setItem("erp_role", "superadmin");
         initStartedRef.current = false;
-        setLoginTime(Date.now());
-        dispatch({ type: "SET_USER", user: SUPER_ADMIN });
+        dispatch({ type: "SET_USER", user: SUPER_ADMIN_USER });
         return true;
       }
       try {
         const result = await phpApiService.login(username, password);
         if ((result == null ? void 0 : result.token) && result.user) {
           const su = result.user;
+          const normalizedRole = normalizeRole(
+            su.role ?? "teacher"
+          );
           const user = {
-            id: su.id,
+            id: String(su.id),
             username: su.username,
-            role: su.role ?? "teacher",
+            role: normalizedRole,
             fullName: su.fullName ?? su.name ?? username,
             name: su.name ?? su.fullName ?? username
           };
+          localStorage.setItem("erp_role", normalizedRole);
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
           if (result.refresh_token)
             phpApiService.storeRefreshToken(result.refresh_token);
           if (su.permissions) {
             const matrix = {};
             for (const [mod, perms] of Object.entries(su.permissions)) {
+              const p2 = perms;
               matrix[mod] = {
                 module: mod,
-                canView: perms.canView ?? true,
-                canAdd: perms.canAdd ?? false,
-                canEdit: perms.canEdit ?? false,
-                canDelete: perms.canDelete ?? false
+                canView: p2.canView ?? true,
+                canAdd: p2.canAdd ?? false,
+                canEdit: p2.canEdit ?? false,
+                canDelete: p2.canDelete ?? false
               };
             }
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
-          initStartedRef.current = false;
           setLoginTime(Date.now());
+          initStartedRef.current = false;
           dispatch({ type: "SET_USER", user });
           return true;
         }
@@ -15803,13 +15761,14 @@ function AppProvider({ children }) {
         const passwords = lsGet("user_passwords", {});
         const validPw = passwords.admin ?? "admin123";
         if (password === validPw) {
+          setLoginTime(Date.now());
+          localStorage.setItem("erp_role", "superadmin");
           sessionStorage.setItem(
             "shubh_current_user",
-            JSON.stringify(LOCAL_ADMIN)
+            JSON.stringify(LOCAL_ADMIN_USER)
           );
           initStartedRef.current = false;
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user: LOCAL_ADMIN });
+          dispatch({ type: "SET_USER", user: LOCAL_ADMIN_USER });
           return true;
         }
       }
@@ -15832,31 +15791,10 @@ function AppProvider({ children }) {
           staffId: staffMember.id,
           mobile: staffMember.mobile
         };
+        setLoginTime(Date.now());
+        localStorage.setItem("erp_role", role);
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        setLoginTime(Date.now());
-        dispatch({ type: "SET_USER", user });
-        return true;
-      }
-      const students = lsGet("students", []);
-      const student = students.find(
-        (s2) => {
-          var _a3, _b3;
-          return ((_a3 = s2.credentials) == null ? void 0 : _a3.username) === username && ((_b3 = s2.credentials) == null ? void 0 : _b3.password) === password;
-        }
-      );
-      if (student) {
-        const user = {
-          id: student.id,
-          username,
-          role: "student",
-          fullName: student.fullName ?? "Student",
-          name: student.fullName ?? "Student",
-          studentId: student.id
-        };
-        sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-        initStartedRef.current = false;
-        setLoginTime(Date.now());
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -15866,10 +15804,11 @@ function AppProvider({ children }) {
   );
   const logout = reactExports.useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");
+    localStorage.removeItem("erp_role");
     phpApiService.clearToken();
     initStartedRef.current = false;
-    setLoginTime(null);
-    setShowReLoginModal(false);
+    setLoginTime(0);
+    setShowExpiredModal(false);
     dispatch({ type: "LOGOUT" });
   }, []);
   const retryInit = reactExports.useCallback(() => {
@@ -15896,7 +15835,7 @@ function AppProvider({ children }) {
   const changePassword = reactExports.useCallback(
     (userId, newPassword) => {
       let username;
-      if (userId === SUPER_ADMIN.id) username = "superadmin";
+      if (userId === SUPER_ADMIN_USER.id) username = "superadmin";
       else {
         const custom = lsGet("custom_users", []).find(
           (u2) => u2.id === userId
@@ -16056,7 +15995,7 @@ function AppProvider({ children }) {
             onRetry: retryInit
           }
         ) : children,
-        showReLoginModal && state.currentUser !== null && state.currentUser.role !== "superadmin" && !isWithinGracePeriod(10) && /* @__PURE__ */ jsxRuntimeExports.jsx(ReLoginModal, { onDismiss: logout })
+        showExpiredModal && state.currentUser !== null && state.currentUser.role !== "superadmin" && !isWithinGracePeriod(120) && /* @__PURE__ */ jsxRuntimeExports.jsx(SessionExpiredModal, { onLogout: logout })
       ]
     }
   );
@@ -16102,7 +16041,7 @@ function formatDate$1(date2) {
     year: "numeric"
   });
 }
-function formatCurrency$2(amount) {
+function formatCurrency$1(amount) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -16123,7 +16062,7 @@ const MONTHS$4 = [
   "February",
   "March"
 ];
-const CLASSES$1 = [
+const CLASSES$2 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -19018,7 +18957,7 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$21 = [
+const __iconNode$1$ = [
   [
     "path",
     {
@@ -19027,31 +18966,7 @@ const __iconNode$21 = [
     }
   ]
 ];
-const Activity = createLucideIcon("activity", __iconNode$21);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$20 = [
-  ["path", { d: "M17 12H7", key: "16if0g" }],
-  ["path", { d: "M19 18H5", key: "18s9l3" }],
-  ["path", { d: "M21 6H3", key: "1jwq7v" }]
-];
-const AlignCenter = createLucideIcon("align-center", __iconNode$20);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1$ = [
-  ["path", { d: "M15 12H3", key: "6jk70r" }],
-  ["path", { d: "M17 18H3", key: "1amg6g" }],
-  ["path", { d: "M21 6H3", key: "1jwq7v" }]
-];
-const AlignLeft = createLucideIcon("align-left", __iconNode$1$);
+const Activity = createLucideIcon("activity", __iconNode$1$);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19059,11 +18974,11 @@ const AlignLeft = createLucideIcon("align-left", __iconNode$1$);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1_ = [
-  ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
-  ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
-  ["path", { d: "M10 12h4", key: "a56b0p" }]
+  ["path", { d: "M17 12H7", key: "16if0g" }],
+  ["path", { d: "M19 18H5", key: "18s9l3" }],
+  ["path", { d: "M21 6H3", key: "1jwq7v" }]
 ];
-const Archive = createLucideIcon("archive", __iconNode$1_);
+const AlignCenter = createLucideIcon("align-center", __iconNode$1_);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19071,10 +18986,11 @@ const Archive = createLucideIcon("archive", __iconNode$1_);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1Z = [
-  ["path", { d: "M12 5v14", key: "s699le" }],
-  ["path", { d: "m19 12-7 7-7-7", key: "1idqje" }]
+  ["path", { d: "M15 12H3", key: "6jk70r" }],
+  ["path", { d: "M17 18H3", key: "1amg6g" }],
+  ["path", { d: "M21 6H3", key: "1jwq7v" }]
 ];
-const ArrowDown = createLucideIcon("arrow-down", __iconNode$1Z);
+const AlignLeft = createLucideIcon("align-left", __iconNode$1Z);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19082,10 +18998,11 @@ const ArrowDown = createLucideIcon("arrow-down", __iconNode$1Z);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1Y = [
-  ["path", { d: "M5 12h14", key: "1ays0h" }],
-  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
+  ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
+  ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
+  ["path", { d: "M10 12h4", key: "a56b0p" }]
 ];
-const ArrowRight = createLucideIcon("arrow-right", __iconNode$1Y);
+const Archive = createLucideIcon("archive", __iconNode$1Y);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19093,12 +19010,10 @@ const ArrowRight = createLucideIcon("arrow-right", __iconNode$1Y);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1X = [
-  ["path", { d: "m21 16-4 4-4-4", key: "f6ql7i" }],
-  ["path", { d: "M17 20V4", key: "1ejh1v" }],
-  ["path", { d: "m3 8 4-4 4 4", key: "11wl7u" }],
-  ["path", { d: "M7 4v16", key: "1glfcx" }]
+  ["path", { d: "M12 5v14", key: "s699le" }],
+  ["path", { d: "m19 12-7 7-7-7", key: "1idqje" }]
 ];
-const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1X);
+const ArrowDown = createLucideIcon("arrow-down", __iconNode$1X);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19106,10 +19021,10 @@ const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1X);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1W = [
-  ["path", { d: "M7 7h10v10", key: "1tivn9" }],
-  ["path", { d: "M7 17 17 7", key: "1vkiza" }]
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
 ];
-const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1W);
+const ArrowRight = createLucideIcon("arrow-right", __iconNode$1W);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19117,10 +19032,12 @@ const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1W);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1V = [
-  ["path", { d: "m5 12 7-7 7 7", key: "hav0vg" }],
-  ["path", { d: "M12 19V5", key: "x0mq9r" }]
+  ["path", { d: "m21 16-4 4-4-4", key: "f6ql7i" }],
+  ["path", { d: "M17 20V4", key: "1ejh1v" }],
+  ["path", { d: "m3 8 4-4 4 4", key: "11wl7u" }],
+  ["path", { d: "M7 4v16", key: "1glfcx" }]
 ];
-const ArrowUp = createLucideIcon("arrow-up", __iconNode$1V);
+const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1V);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19128,6 +19045,28 @@ const ArrowUp = createLucideIcon("arrow-up", __iconNode$1V);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1U = [
+  ["path", { d: "M7 7h10v10", key: "1tivn9" }],
+  ["path", { d: "M7 17 17 7", key: "1vkiza" }]
+];
+const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1U);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1T = [
+  ["path", { d: "m5 12 7-7 7 7", key: "hav0vg" }],
+  ["path", { d: "M12 19V5", key: "x0mq9r" }]
+];
+const ArrowUp = createLucideIcon("arrow-up", __iconNode$1T);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1S = [
   [
     "path",
     {
@@ -19137,45 +19076,7 @@ const __iconNode$1U = [
   ],
   ["circle", { cx: "12", cy: "8", r: "6", key: "1vp47v" }]
 ];
-const Award = createLucideIcon("award", __iconNode$1U);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1T = [
-  ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
-  [
-    "path",
-    {
-      d: "M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742",
-      key: "178tsu"
-    }
-  ],
-  ["path", { d: "m2 2 20 20", key: "1ooewy" }],
-  ["path", { d: "M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05", key: "1hqiys" }]
-];
-const BellOff = createLucideIcon("bell-off", __iconNode$1T);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1S = [
-  ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
-  ["path", { d: "M22 8c0-2.3-.8-4.3-2-6", key: "5bb3ad" }],
-  [
-    "path",
-    {
-      d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
-      key: "11g9vi"
-    }
-  ],
-  ["path", { d: "M4 2C2.8 3.7 2 5.7 2 8", key: "tap9e0" }]
-];
-const BellRing = createLucideIcon("bell-ring", __iconNode$1S);
+const Award = createLucideIcon("award", __iconNode$1S);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19187,12 +19088,14 @@ const __iconNode$1R = [
   [
     "path",
     {
-      d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
-      key: "11g9vi"
+      d: "M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742",
+      key: "178tsu"
     }
-  ]
+  ],
+  ["path", { d: "m2 2 20 20", key: "1ooewy" }],
+  ["path", { d: "M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05", key: "1hqiys" }]
 ];
-const Bell = createLucideIcon("bell", __iconNode$1R);
+const BellOff = createLucideIcon("bell-off", __iconNode$1R);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19200,12 +19103,18 @@ const Bell = createLucideIcon("bell", __iconNode$1R);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1Q = [
+  ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
+  ["path", { d: "M22 8c0-2.3-.8-4.3-2-6", key: "5bb3ad" }],
   [
     "path",
-    { d: "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8", key: "mg9rjx" }
-  ]
+    {
+      d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
+      key: "11g9vi"
+    }
+  ],
+  ["path", { d: "M4 2C2.8 3.7 2 5.7 2 8", key: "tap9e0" }]
 ];
-const Bold = createLucideIcon("bold", __iconNode$1Q);
+const BellRing = createLucideIcon("bell-ring", __iconNode$1Q);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19213,6 +19122,36 @@ const Bold = createLucideIcon("bold", __iconNode$1Q);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1P = [
+  ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
+  [
+    "path",
+    {
+      d: "M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326",
+      key: "11g9vi"
+    }
+  ]
+];
+const Bell = createLucideIcon("bell", __iconNode$1P);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1O = [
+  [
+    "path",
+    { d: "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8", key: "mg9rjx" }
+  ]
+];
+const Bold = createLucideIcon("bold", __iconNode$1O);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1N = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -19222,14 +19161,14 @@ const __iconNode$1P = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$1P);
+const BookOpen = createLucideIcon("book-open", __iconNode$1N);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1O = [
+const __iconNode$1M = [
   [
     "path",
     {
@@ -19240,14 +19179,14 @@ const __iconNode$1O = [
   ["path", { d: "M8 11h8", key: "vwpz6n" }],
   ["path", { d: "M8 7h6", key: "1f0q6e" }]
 ];
-const BookText = createLucideIcon("book-text", __iconNode$1O);
+const BookText = createLucideIcon("book-text", __iconNode$1M);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1N = [
+const __iconNode$1L = [
   ["path", { d: "M12 8V4H8", key: "hb8ula" }],
   ["rect", { width: "16", height: "12", x: "4", y: "8", rx: "2", key: "enze0r" }],
   ["path", { d: "M2 14h2", key: "vft8re" }],
@@ -19255,14 +19194,14 @@ const __iconNode$1N = [
   ["path", { d: "M15 13v2", key: "1xurst" }],
   ["path", { d: "M9 13v2", key: "rq6x2g" }]
 ];
-const Bot = createLucideIcon("bot", __iconNode$1N);
+const Bot = createLucideIcon("bot", __iconNode$1L);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1M = [
+const __iconNode$1K = [
   [
     "path",
     {
@@ -19285,14 +19224,14 @@ const __iconNode$1M = [
   ["path", { d: "M6 18a4 4 0 0 1-1.967-.516", key: "2e4loj" }],
   ["path", { d: "M19.967 17.484A4 4 0 0 1 18 18", key: "159ez6" }]
 ];
-const Brain = createLucideIcon("brain", __iconNode$1M);
+const Brain = createLucideIcon("brain", __iconNode$1K);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1L = [
+const __iconNode$1J = [
   ["path", { d: "M8 6v6", key: "18i7km" }],
   ["path", { d: "M15 6v6", key: "1sg6z9" }],
   ["path", { d: "M2 12h19.6", key: "de5uta" }],
@@ -19307,14 +19246,14 @@ const __iconNode$1L = [
   ["path", { d: "M9 18h5", key: "lrx6i" }],
   ["circle", { cx: "16", cy: "18", r: "2", key: "1v4tcr" }]
 ];
-const Bus = createLucideIcon("bus", __iconNode$1L);
+const Bus = createLucideIcon("bus", __iconNode$1J);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1K = [
+const __iconNode$1I = [
   ["path", { d: "M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8", key: "1w3rig" }],
   ["path", { d: "M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1", key: "n2jgmb" }],
   ["path", { d: "M2 21h20", key: "1nyx9w" }],
@@ -19325,28 +19264,28 @@ const __iconNode$1K = [
   ["path", { d: "M12 4h.01", key: "1ujb9j" }],
   ["path", { d: "M17 4h.01", key: "1upcoc" }]
 ];
-const Cake = createLucideIcon("cake", __iconNode$1K);
+const Cake = createLucideIcon("cake", __iconNode$1I);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1J = [
+const __iconNode$1H = [
   ["path", { d: "M8 2v4", key: "1cmpym" }],
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
   ["path", { d: "M3 10h18", key: "8toen8" }],
   ["path", { d: "m9 16 2 2 4-4", key: "19s6y9" }]
 ];
-const CalendarCheck = createLucideIcon("calendar-check", __iconNode$1J);
+const CalendarCheck = createLucideIcon("calendar-check", __iconNode$1H);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1I = [
+const __iconNode$1G = [
   ["path", { d: "M8 2v4", key: "1cmpym" }],
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
@@ -19358,14 +19297,14 @@ const __iconNode$1I = [
   ["path", { d: "M12 18h.01", key: "mhygvu" }],
   ["path", { d: "M16 18h.01", key: "kzsmim" }]
 ];
-const CalendarDays = createLucideIcon("calendar-days", __iconNode$1I);
+const CalendarDays = createLucideIcon("calendar-days", __iconNode$1G);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1H = [
+const __iconNode$1F = [
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["path", { d: "M3 10h18", key: "8toen8" }],
@@ -19375,27 +19314,27 @@ const __iconNode$1H = [
   ["path", { d: "M7 14h.01", key: "1qa3f1" }],
   ["path", { d: "M17 18h.01", key: "1bdyru" }]
 ];
-const CalendarRange = createLucideIcon("calendar-range", __iconNode$1H);
+const CalendarRange = createLucideIcon("calendar-range", __iconNode$1F);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1G = [
+const __iconNode$1E = [
   ["path", { d: "M8 2v4", key: "1cmpym" }],
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
   ["path", { d: "M3 10h18", key: "8toen8" }]
 ];
-const Calendar = createLucideIcon("calendar", __iconNode$1G);
+const Calendar = createLucideIcon("calendar", __iconNode$1E);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1F = [
+const __iconNode$1D = [
   [
     "path",
     {
@@ -19405,31 +19344,7 @@ const __iconNode$1F = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$1F);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1E = [
-  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
-  ["path", { d: "M18 17V9", key: "2bz60n" }],
-  ["path", { d: "M13 17V5", key: "1frdt8" }],
-  ["path", { d: "M8 17v-3", key: "17ska0" }]
-];
-const ChartColumn = createLucideIcon("chart-column", __iconNode$1E);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1D = [
-  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
-  ["path", { d: "m19 9-5 5-4-4-3 3", key: "2osh9i" }]
-];
-const ChartLine = createLucideIcon("chart-line", __iconNode$1D);
+const Camera = createLucideIcon("camera", __iconNode$1D);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19437,11 +19352,12 @@ const ChartLine = createLucideIcon("chart-line", __iconNode$1D);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1C = [
-  ["line", { x1: "18", x2: "18", y1: "20", y2: "10", key: "1xfpm4" }],
-  ["line", { x1: "12", x2: "12", y1: "20", y2: "4", key: "be30l9" }],
-  ["line", { x1: "6", x2: "6", y1: "20", y2: "14", key: "1r4le6" }]
+  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
+  ["path", { d: "M18 17V9", key: "2bz60n" }],
+  ["path", { d: "M13 17V5", key: "1frdt8" }],
+  ["path", { d: "M8 17v-3", key: "17ska0" }]
 ];
-const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode$1C);
+const ChartColumn = createLucideIcon("chart-column", __iconNode$1C);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19449,6 +19365,29 @@ const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode$1C
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1B = [
+  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
+  ["path", { d: "m19 9-5 5-4-4-3 3", key: "2osh9i" }]
+];
+const ChartLine = createLucideIcon("chart-line", __iconNode$1B);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1A = [
+  ["line", { x1: "18", x2: "18", y1: "20", y2: "10", key: "1xfpm4" }],
+  ["line", { x1: "12", x2: "12", y1: "20", y2: "4", key: "be30l9" }],
+  ["line", { x1: "6", x2: "6", y1: "20", y2: "14", key: "1r4le6" }]
+];
+const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode$1A);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1z = [
   [
     "path",
     {
@@ -19458,81 +19397,58 @@ const __iconNode$1B = [
   ],
   ["path", { d: "M21.21 15.89A10 10 0 1 1 8 2.83", key: "k2fpak" }]
 ];
-const ChartPie = createLucideIcon("chart-pie", __iconNode$1B);
+const ChartPie = createLucideIcon("chart-pie", __iconNode$1z);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1A = [
+const __iconNode$1y = [
   ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }]
 ];
-const CheckCheck = createLucideIcon("check-check", __iconNode$1A);
+const CheckCheck = createLucideIcon("check-check", __iconNode$1y);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1z = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$1z);
+const __iconNode$1x = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$1x);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1y = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
-const ChevronDown = createLucideIcon("chevron-down", __iconNode$1y);
+const __iconNode$1w = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
+const ChevronDown = createLucideIcon("chevron-down", __iconNode$1w);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1x = [["path", { d: "m15 18-6-6 6-6", key: "1wnfg3" }]];
-const ChevronLeft = createLucideIcon("chevron-left", __iconNode$1x);
+const __iconNode$1v = [["path", { d: "m15 18-6-6 6-6", key: "1wnfg3" }]];
+const ChevronLeft = createLucideIcon("chevron-left", __iconNode$1v);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1w = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$1w);
+const __iconNode$1u = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$1u);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1v = [["path", { d: "m18 15-6-6-6 6", key: "153udz" }]];
-const ChevronUp = createLucideIcon("chevron-up", __iconNode$1v);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1u = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
-];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$1u);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1t = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
-];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1t);
+const __iconNode$1t = [["path", { d: "m18 15-6-6-6 6", key: "153udz" }]];
+const ChevronUp = createLucideIcon("chevron-up", __iconNode$1t);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19541,9 +19457,10 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1t);
  */
 const __iconNode$1s = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m9 12 2 2 4-4", key: "dzmm74" }]
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
 ];
-const CircleCheck = createLucideIcon("circle-check", __iconNode$1s);
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$1s);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19551,11 +19468,10 @@ const CircleCheck = createLucideIcon("circle-check", __iconNode$1s);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1r = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", key: "1u773s" }],
-  ["path", { d: "M12 17h.01", key: "p32p05" }]
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
 ];
-const CircleHelp = createLucideIcon("circle-help", __iconNode$1r);
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1r);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19564,10 +19480,9 @@ const CircleHelp = createLucideIcon("circle-help", __iconNode$1r);
  */
 const __iconNode$1q = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M8 12h8", key: "1wcyev" }],
-  ["path", { d: "M12 8v8", key: "napkw2" }]
+  ["path", { d: "m9 12 2 2 4-4", key: "dzmm74" }]
 ];
-const CirclePlus = createLucideIcon("circle-plus", __iconNode$1q);
+const CircleCheck = createLucideIcon("circle-check", __iconNode$1q);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19576,10 +19491,10 @@ const CirclePlus = createLucideIcon("circle-plus", __iconNode$1q);
  */
 const __iconNode$1p = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
-  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+  ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", key: "1u773s" }],
+  ["path", { d: "M12 17h.01", key: "p32p05" }]
 ];
-const CircleUser = createLucideIcon("circle-user", __iconNode$1p);
+const CircleHelp = createLucideIcon("circle-help", __iconNode$1p);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19588,10 +19503,10 @@ const CircleUser = createLucideIcon("circle-user", __iconNode$1p);
  */
 const __iconNode$1o = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["path", { d: "M8 12h8", key: "1wcyev" }],
+  ["path", { d: "M12 8v8", key: "napkw2" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$1o);
+const CirclePlus = createLucideIcon("circle-plus", __iconNode$1o);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19599,6 +19514,30 @@ const CircleX = createLucideIcon("circle-x", __iconNode$1o);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1n = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+];
+const CircleUser = createLucideIcon("circle-user", __iconNode$1n);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1m = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+];
+const CircleX = createLucideIcon("circle-x", __iconNode$1m);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1l = [
   ["rect", { width: "8", height: "4", x: "8", y: "2", rx: "1", ry: "1", key: "tgr4d6" }],
   [
     "path",
@@ -19612,14 +19551,14 @@ const __iconNode$1n = [
   ["path", { d: "M8 11h.01", key: "1dfujw" }],
   ["path", { d: "M8 16h.01", key: "18s6g9" }]
 ];
-const ClipboardList = createLucideIcon("clipboard-list", __iconNode$1n);
+const ClipboardList = createLucideIcon("clipboard-list", __iconNode$1l);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1m = [
+const __iconNode$1k = [
   ["rect", { width: "8", height: "4", x: "8", y: "2", rx: "1", ry: "1", key: "tgr4d6" }],
   [
     "path",
@@ -19629,28 +19568,7 @@ const __iconNode$1m = [
     }
   ]
 ];
-const Clipboard = createLucideIcon("clipboard", __iconNode$1m);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1l = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["polyline", { points: "12 6 12 12 16 14", key: "68esgv" }]
-];
-const Clock$1 = createLucideIcon("clock", __iconNode$1l);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1k = [
-  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
-];
-const Cloud = createLucideIcon("cloud", __iconNode$1k);
+const Clipboard = createLucideIcon("clipboard", __iconNode$1k);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19658,10 +19576,10 @@ const Cloud = createLucideIcon("cloud", __iconNode$1k);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1j = [
-  ["path", { d: "m16 18 6-6-6-6", key: "eg8j8" }],
-  ["path", { d: "m8 6-6 6 6 6", key: "ppft3o" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["polyline", { points: "12 6 12 12 16 14", key: "68esgv" }]
 ];
-const Code = createLucideIcon("code", __iconNode$1j);
+const Clock$1 = createLucideIcon("clock", __iconNode$1j);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19669,11 +19587,9 @@ const Code = createLucideIcon("code", __iconNode$1j);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1i = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }],
-  ["path", { d: "M9 3v18", key: "fh3hqa" }],
-  ["path", { d: "M15 3v18", key: "14nvp0" }]
+  ["path", { d: "M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z", key: "p7xjir" }]
 ];
-const Columns3 = createLucideIcon("columns-3", __iconNode$1i);
+const Cloud = createLucideIcon("cloud", __iconNode$1i);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19681,10 +19597,10 @@ const Columns3 = createLucideIcon("columns-3", __iconNode$1i);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1h = [
-  ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2", key: "17jyea" }],
-  ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", key: "zix9uf" }]
+  ["path", { d: "m16 18 6-6-6-6", key: "eg8j8" }],
+  ["path", { d: "m8 6-6 6 6 6", key: "ppft3o" }]
 ];
-const Copy = createLucideIcon("copy", __iconNode$1h);
+const Code = createLucideIcon("code", __iconNode$1h);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19692,6 +19608,29 @@ const Copy = createLucideIcon("copy", __iconNode$1h);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1g = [
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }],
+  ["path", { d: "M9 3v18", key: "fh3hqa" }],
+  ["path", { d: "M15 3v18", key: "14nvp0" }]
+];
+const Columns3 = createLucideIcon("columns-3", __iconNode$1g);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1f = [
+  ["rect", { width: "14", height: "14", x: "8", y: "8", rx: "2", ry: "2", key: "17jyea" }],
+  ["path", { d: "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2", key: "zix9uf" }]
+];
+const Copy = createLucideIcon("copy", __iconNode$1f);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1e = [
   ["path", { d: "M12 20v2", key: "1lh1kg" }],
   ["path", { d: "M12 2v2", key: "tus03m" }],
   ["path", { d: "M17 20v2", key: "1rnc9c" }],
@@ -19707,30 +19646,7 @@ const __iconNode$1g = [
   ["rect", { x: "4", y: "4", width: "16", height: "16", rx: "2", key: "1vbyd7" }],
   ["rect", { x: "8", y: "8", width: "8", height: "8", rx: "1", key: "z9xiuo" }]
 ];
-const Cpu = createLucideIcon("cpu", __iconNode$1g);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1f = [
-  ["rect", { width: "20", height: "14", x: "2", y: "5", rx: "2", key: "ynyp8z" }],
-  ["line", { x1: "2", x2: "22", y1: "10", y2: "10", key: "1b3vmo" }]
-];
-const CreditCard = createLucideIcon("credit-card", __iconNode$1f);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1e = [
-  ["ellipse", { cx: "12", cy: "5", rx: "9", ry: "3", key: "msslwz" }],
-  ["path", { d: "M3 5V19A9 3 0 0 0 21 19V5", key: "1wlel7" }],
-  ["path", { d: "M3 12A9 3 0 0 0 21 12", key: "mv7ke4" }]
-];
-const Database = createLucideIcon("database", __iconNode$1e);
+const Cpu = createLucideIcon("cpu", __iconNode$1e);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19738,11 +19654,10 @@ const Database = createLucideIcon("database", __iconNode$1e);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1d = [
-  ["path", { d: "M12 15V3", key: "m9g1x1" }],
-  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
-  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
+  ["rect", { width: "20", height: "14", x: "2", y: "5", rx: "2", key: "ynyp8z" }],
+  ["line", { x1: "2", x2: "22", y1: "10", y2: "10", key: "1b3vmo" }]
 ];
-const Download = createLucideIcon("download", __iconNode$1d);
+const CreditCard = createLucideIcon("credit-card", __iconNode$1d);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19750,11 +19665,11 @@ const Download = createLucideIcon("download", __iconNode$1d);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1c = [
-  ["circle", { cx: "12", cy: "12", r: "1", key: "41hilf" }],
-  ["circle", { cx: "19", cy: "12", r: "1", key: "1wjl8i" }],
-  ["circle", { cx: "5", cy: "12", r: "1", key: "1pcz8c" }]
+  ["ellipse", { cx: "12", cy: "5", rx: "9", ry: "3", key: "msslwz" }],
+  ["path", { d: "M3 5V19A9 3 0 0 0 21 19V5", key: "1wlel7" }],
+  ["path", { d: "M3 12A9 3 0 0 0 21 12", key: "mv7ke4" }]
 ];
-const Ellipsis = createLucideIcon("ellipsis", __iconNode$1c);
+const Database = createLucideIcon("database", __iconNode$1c);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19762,11 +19677,11 @@ const Ellipsis = createLucideIcon("ellipsis", __iconNode$1c);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1b = [
-  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
-  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
-  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+  ["path", { d: "M12 15V3", key: "m9g1x1" }],
+  ["path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4", key: "ih7n3h" }],
+  ["path", { d: "m7 10 5 5 5-5", key: "brsn70" }]
 ];
-const ExternalLink = createLucideIcon("external-link", __iconNode$1b);
+const Download = createLucideIcon("download", __iconNode$1b);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19774,6 +19689,30 @@ const ExternalLink = createLucideIcon("external-link", __iconNode$1b);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1a = [
+  ["circle", { cx: "12", cy: "12", r: "1", key: "41hilf" }],
+  ["circle", { cx: "19", cy: "12", r: "1", key: "1wjl8i" }],
+  ["circle", { cx: "5", cy: "12", r: "1", key: "1pcz8c" }]
+];
+const Ellipsis = createLucideIcon("ellipsis", __iconNode$1a);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$19 = [
+  ["path", { d: "M15 3h6v6", key: "1q9fwt" }],
+  ["path", { d: "M10 14 21 3", key: "gplh6r" }],
+  ["path", { d: "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6", key: "a6xqqp" }]
+];
+const ExternalLink = createLucideIcon("external-link", __iconNode$19);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$18 = [
   [
     "path",
     {
@@ -19791,14 +19730,14 @@ const __iconNode$1a = [
   ],
   ["path", { d: "m2 2 20 20", key: "1ooewy" }]
 ];
-const EyeOff = createLucideIcon("eye-off", __iconNode$1a);
+const EyeOff = createLucideIcon("eye-off", __iconNode$18);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$19 = [
+const __iconNode$17 = [
   [
     "path",
     {
@@ -19808,14 +19747,14 @@ const __iconNode$19 = [
   ],
   ["circle", { cx: "12", cy: "12", r: "3", key: "1v7zrd" }]
 ];
-const Eye = createLucideIcon("eye", __iconNode$19);
+const Eye = createLucideIcon("eye", __iconNode$17);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$18 = [
+const __iconNode$16 = [
   ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
   ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
   [
@@ -19827,36 +19766,7 @@ const __iconNode$18 = [
     { d: "M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1", key: "mpwhp6" }
   ]
 ];
-const FileJson = createLucideIcon("file-json", __iconNode$18);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$17 = [
-  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
-  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
-  ["path", { d: "M8 13h2", key: "yr2amv" }],
-  ["path", { d: "M14 13h2", key: "un5t4a" }],
-  ["path", { d: "M8 17h2", key: "2yhykz" }],
-  ["path", { d: "M14 17h2", key: "10kma7" }]
-];
-const FileSpreadsheet = createLucideIcon("file-spreadsheet", __iconNode$17);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$16 = [
-  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
-  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
-  ["path", { d: "M10 9H8", key: "b1mrlr" }],
-  ["path", { d: "M16 13H8", key: "t4e002" }],
-  ["path", { d: "M16 17H8", key: "z1uh3a" }]
-];
-const FileText = createLucideIcon("file-text", __iconNode$16);
+const FileJson = createLucideIcon("file-json", __iconNode$16);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19864,6 +19774,35 @@ const FileText = createLucideIcon("file-text", __iconNode$16);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$15 = [
+  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
+  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
+  ["path", { d: "M8 13h2", key: "yr2amv" }],
+  ["path", { d: "M14 13h2", key: "un5t4a" }],
+  ["path", { d: "M8 17h2", key: "2yhykz" }],
+  ["path", { d: "M14 17h2", key: "10kma7" }]
+];
+const FileSpreadsheet = createLucideIcon("file-spreadsheet", __iconNode$15);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$14 = [
+  ["path", { d: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", key: "1rqfz7" }],
+  ["path", { d: "M14 2v4a2 2 0 0 0 2 2h4", key: "tnqrlb" }],
+  ["path", { d: "M10 9H8", key: "b1mrlr" }],
+  ["path", { d: "M16 13H8", key: "t4e002" }],
+  ["path", { d: "M16 17H8", key: "z1uh3a" }]
+];
+const FileText = createLucideIcon("file-text", __iconNode$14);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$13 = [
   ["path", { d: "M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4", key: "1nerag" }],
   ["path", { d: "M14 13.12c0 2.38 0 6.38-1 8.88", key: "o46ks0" }],
   ["path", { d: "M17.29 21.02c.12-.6.43-2.3.5-3.02", key: "ptglia" }],
@@ -19874,14 +19813,14 @@ const __iconNode$15 = [
   ["path", { d: "M8.65 22c.21-.66.45-1.32.57-2", key: "13wd9y" }],
   ["path", { d: "M9 6.8a6 6 0 0 1 9 5.2v2", key: "1fr1j5" }]
 ];
-const Fingerprint = createLucideIcon("fingerprint", __iconNode$15);
+const Fingerprint = createLucideIcon("fingerprint", __iconNode$13);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$14 = [
+const __iconNode$12 = [
   [
     "path",
     {
@@ -19892,28 +19831,28 @@ const __iconNode$14 = [
   ["path", { d: "M22 10v6", key: "1lu8f3" }],
   ["path", { d: "M6 12.5V16a6 3 0 0 0 12 0v-3.5", key: "1r8lef" }]
 ];
-const GraduationCap = createLucideIcon("graduation-cap", __iconNode$14);
+const GraduationCap = createLucideIcon("graduation-cap", __iconNode$12);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$13 = [
+const __iconNode$11 = [
   ["path", { d: "M12 2v8", key: "1q4o3n" }],
   ["path", { d: "m16 6-4 4-4-4", key: "6wukr" }],
   ["rect", { width: "20", height: "8", x: "2", y: "14", rx: "2", key: "w68u3i" }],
   ["path", { d: "M6 18h.01", key: "uhywen" }],
   ["path", { d: "M10 18h.01", key: "h775k" }]
 ];
-const HardDriveDownload = createLucideIcon("hard-drive-download", __iconNode$13);
+const HardDriveDownload = createLucideIcon("hard-drive-download", __iconNode$11);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$12 = [
+const __iconNode$10 = [
   ["line", { x1: "22", x2: "2", y1: "12", y2: "12", key: "1y58io" }],
   [
     "path",
@@ -19925,31 +19864,7 @@ const __iconNode$12 = [
   ["line", { x1: "6", x2: "6.01", y1: "16", y2: "16", key: "sgf278" }],
   ["line", { x1: "10", x2: "10.01", y1: "16", y2: "16", key: "1l4acy" }]
 ];
-const HardDrive = createLucideIcon("hard-drive", __iconNode$12);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$11 = [
-  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
-  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
-  ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }]
-];
-const History = createLucideIcon("history", __iconNode$11);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$10 = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
-  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
-  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
-];
-const Image = createLucideIcon("image", __iconNode$10);
+const HardDrive = createLucideIcon("hard-drive", __iconNode$10);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19957,13 +19872,11 @@ const Image = createLucideIcon("image", __iconNode$10);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$$ = [
-  ["path", { d: "M6 3h12", key: "ggurg9" }],
-  ["path", { d: "M6 8h12", key: "6g4wlu" }],
-  ["path", { d: "m6 13 8.5 8", key: "u1kupk" }],
-  ["path", { d: "M6 13h3", key: "wdp6ag" }],
-  ["path", { d: "M9 13c6.667 0 6.667-10 0-10", key: "1nkvk2" }]
+  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
+  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
+  ["path", { d: "M12 7v5l4 2", key: "1fdv2h" }]
 ];
-const IndianRupee = createLucideIcon("indian-rupee", __iconNode$$);
+const History = createLucideIcon("history", __iconNode$$);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19971,11 +19884,11 @@ const IndianRupee = createLucideIcon("indian-rupee", __iconNode$$);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$_ = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M12 16v-4", key: "1dtifu" }],
-  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", ry: "2", key: "1m3agn" }],
+  ["circle", { cx: "9", cy: "9", r: "2", key: "af1f0g" }],
+  ["path", { d: "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21", key: "1xmnt7" }]
 ];
-const Info = createLucideIcon("info", __iconNode$_);
+const Image = createLucideIcon("image", __iconNode$_);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19983,11 +19896,13 @@ const Info = createLucideIcon("info", __iconNode$_);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$Z = [
-  ["line", { x1: "19", x2: "10", y1: "4", y2: "4", key: "15jd3p" }],
-  ["line", { x1: "14", x2: "5", y1: "20", y2: "20", key: "bu0au3" }],
-  ["line", { x1: "15", x2: "9", y1: "4", y2: "20", key: "uljnxc" }]
+  ["path", { d: "M6 3h12", key: "ggurg9" }],
+  ["path", { d: "M6 8h12", key: "6g4wlu" }],
+  ["path", { d: "m6 13 8.5 8", key: "u1kupk" }],
+  ["path", { d: "M6 13h3", key: "wdp6ag" }],
+  ["path", { d: "M9 13c6.667 0 6.667-10 0-10", key: "1nkvk2" }]
 ];
-const Italic = createLucideIcon("italic", __iconNode$Z);
+const IndianRupee = createLucideIcon("indian-rupee", __iconNode$Z);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19995,6 +19910,30 @@ const Italic = createLucideIcon("italic", __iconNode$Z);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$Y = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "M12 16v-4", key: "1dtifu" }],
+  ["path", { d: "M12 8h.01", key: "e9boi3" }]
+];
+const Info = createLucideIcon("info", __iconNode$Y);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$X = [
+  ["line", { x1: "19", x2: "10", y1: "4", y2: "4", key: "15jd3p" }],
+  ["line", { x1: "14", x2: "5", y1: "20", y2: "20", key: "bu0au3" }],
+  ["line", { x1: "15", x2: "9", y1: "4", y2: "20", key: "uljnxc" }]
+];
+const Italic = createLucideIcon("italic", __iconNode$X);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$W = [
   [
     "path",
     {
@@ -20004,14 +19943,14 @@ const __iconNode$Y = [
   ],
   ["circle", { cx: "16.5", cy: "7.5", r: ".5", fill: "currentColor", key: "w0ekpg" }]
 ];
-const KeyRound = createLucideIcon("key-round", __iconNode$Y);
+const KeyRound = createLucideIcon("key-round", __iconNode$W);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$X = [
+const __iconNode$V = [
   ["path", { d: "M10 8h.01", key: "1r9ogq" }],
   ["path", { d: "M12 12h.01", key: "1mp3jc" }],
   ["path", { d: "M14 8h.01", key: "1primd" }],
@@ -20022,33 +19961,7 @@ const __iconNode$X = [
   ["path", { d: "M8 12h.01", key: "czm47f" }],
   ["rect", { width: "20", height: "16", x: "2", y: "4", rx: "2", key: "18n3k1" }]
 ];
-const Keyboard = createLucideIcon("keyboard", __iconNode$X);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$W = [
-  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
-  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
-  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
-  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
-];
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$W);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$V = [
-  ["rect", { width: "7", height: "7", x: "3", y: "3", rx: "1", key: "1g98yp" }],
-  ["rect", { width: "7", height: "7", x: "14", y: "3", rx: "1", key: "6d4xhi" }],
-  ["rect", { width: "7", height: "7", x: "14", y: "14", rx: "1", key: "nxv5o0" }],
-  ["rect", { width: "7", height: "7", x: "3", y: "14", rx: "1", key: "1bb6yr" }]
-];
-const LayoutGrid = createLucideIcon("layout-grid", __iconNode$V);
+const Keyboard = createLucideIcon("keyboard", __iconNode$V);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20056,12 +19969,12 @@ const LayoutGrid = createLucideIcon("layout-grid", __iconNode$V);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$U = [
-  ["path", { d: "m16 6 4 14", key: "ji33uf" }],
-  ["path", { d: "M12 6v14", key: "1n7gus" }],
-  ["path", { d: "M8 8v12", key: "1gg7y9" }],
-  ["path", { d: "M4 4v16", key: "6qkkli" }]
+  ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1", key: "10lvy0" }],
+  ["rect", { width: "7", height: "5", x: "14", y: "3", rx: "1", key: "16une8" }],
+  ["rect", { width: "7", height: "9", x: "14", y: "12", rx: "1", key: "1hutg5" }],
+  ["rect", { width: "7", height: "5", x: "3", y: "16", rx: "1", key: "ldoo1y" }]
 ];
-const Library$1 = createLucideIcon("library", __iconNode$U);
+const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode$U);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20069,10 +19982,12 @@ const Library$1 = createLucideIcon("library", __iconNode$U);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$T = [
-  ["path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71", key: "1cjeqo" }],
-  ["path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71", key: "19qd67" }]
+  ["rect", { width: "7", height: "7", x: "3", y: "3", rx: "1", key: "1g98yp" }],
+  ["rect", { width: "7", height: "7", x: "14", y: "3", rx: "1", key: "6d4xhi" }],
+  ["rect", { width: "7", height: "7", x: "14", y: "14", rx: "1", key: "nxv5o0" }],
+  ["rect", { width: "7", height: "7", x: "3", y: "14", rx: "1", key: "1bb6yr" }]
 ];
-const Link = createLucideIcon("link", __iconNode$T);
+const LayoutGrid = createLucideIcon("layout-grid", __iconNode$T);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20080,6 +19995,19 @@ const Link = createLucideIcon("link", __iconNode$T);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$S = [
+  ["path", { d: "m16 6 4 14", key: "ji33uf" }],
+  ["path", { d: "M12 6v14", key: "1n7gus" }],
+  ["path", { d: "M8 8v12", key: "1gg7y9" }],
+  ["path", { d: "M4 4v16", key: "6qkkli" }]
+];
+const Library$1 = createLucideIcon("library", __iconNode$S);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$R = [
   ["path", { d: "M3 12h.01", key: "nlz23k" }],
   ["path", { d: "M3 18h.01", key: "1tta3j" }],
   ["path", { d: "M3 6h.01", key: "1rqtza" }],
@@ -20087,26 +20015,15 @@ const __iconNode$S = [
   ["path", { d: "M8 18h13", key: "1lx6n3" }],
   ["path", { d: "M8 6h13", key: "ik3vkj" }]
 ];
-const List$1 = createLucideIcon("list", __iconNode$S);
+const List$1 = createLucideIcon("list", __iconNode$R);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$R = [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56", key: "13zald" }]];
-const LoaderCircle = createLucideIcon("loader-circle", __iconNode$R);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$Q = [
-  ["rect", { width: "18", height: "11", x: "3", y: "11", rx: "2", ry: "2", key: "1w4ew1" }],
-  ["path", { d: "M7 11V7a5 5 0 0 1 10 0v4", key: "fwvmzm" }]
-];
-const Lock = createLucideIcon("lock", __iconNode$Q);
+const __iconNode$Q = [["path", { d: "M21 12a9 9 0 1 1-6.219-8.56", key: "13zald" }]];
+const LoaderCircle = createLucideIcon("loader-circle", __iconNode$Q);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20114,11 +20031,10 @@ const Lock = createLucideIcon("lock", __iconNode$Q);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$P = [
-  ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
-  ["path", { d: "M21 12H9", key: "dn1m92" }],
-  ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
+  ["rect", { width: "18", height: "11", x: "3", y: "11", rx: "2", ry: "2", key: "1w4ew1" }],
+  ["path", { d: "M7 11V7a5 5 0 0 1 10 0v4", key: "fwvmzm" }]
 ];
-const LogOut = createLucideIcon("log-out", __iconNode$P);
+const Lock = createLucideIcon("lock", __iconNode$P);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20126,6 +20042,18 @@ const LogOut = createLucideIcon("log-out", __iconNode$P);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$O = [
+  ["path", { d: "m16 17 5-5-5-5", key: "1bji2h" }],
+  ["path", { d: "M21 12H9", key: "dn1m92" }],
+  ["path", { d: "M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4", key: "1uf3rs" }]
+];
+const LogOut = createLucideIcon("log-out", __iconNode$O);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$N = [
   [
     "path",
     {
@@ -20135,19 +20063,7 @@ const __iconNode$O = [
   ],
   ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }]
 ];
-const MapPin = createLucideIcon("map-pin", __iconNode$O);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$N = [
-  ["path", { d: "M4 12h16", key: "1lakjw" }],
-  ["path", { d: "M4 18h16", key: "19g7jn" }],
-  ["path", { d: "M4 6h16", key: "1o0s65" }]
-];
-const Menu = createLucideIcon("menu", __iconNode$N);
+const MapPin = createLucideIcon("map-pin", __iconNode$N);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20155,9 +20071,11 @@ const Menu = createLucideIcon("menu", __iconNode$N);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$M = [
-  ["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z", key: "vv11sd" }]
+  ["path", { d: "M4 12h16", key: "1lakjw" }],
+  ["path", { d: "M4 18h16", key: "19g7jn" }],
+  ["path", { d: "M4 6h16", key: "1o0s65" }]
 ];
-const MessageCircle = createLucideIcon("message-circle", __iconNode$M);
+const Menu = createLucideIcon("menu", __iconNode$M);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20165,9 +20083,9 @@ const MessageCircle = createLucideIcon("message-circle", __iconNode$M);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$L = [
-  ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", key: "1lielz" }]
+  ["path", { d: "M7.9 20A9 9 0 1 0 4 16.1L2 22Z", key: "vv11sd" }]
 ];
-const MessageSquare = createLucideIcon("message-square", __iconNode$L);
+const MessageCircle = createLucideIcon("message-circle", __iconNode$L);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20175,6 +20093,16 @@ const MessageSquare = createLucideIcon("message-square", __iconNode$L);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$K = [
+  ["path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z", key: "1lielz" }]
+];
+const MessageSquare = createLucideIcon("message-square", __iconNode$K);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$J = [
   [
     "path",
     {
@@ -20186,19 +20114,7 @@ const __iconNode$K = [
   ["path", { d: "M8 21h8", key: "1ev6f3" }],
   ["rect", { x: "2", y: "3", width: "20", height: "14", rx: "2", key: "x3v2xh" }]
 ];
-const MonitorPlay = createLucideIcon("monitor-play", __iconNode$K);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$J = [
-  ["rect", { width: "20", height: "14", x: "2", y: "3", rx: "2", key: "48i651" }],
-  ["line", { x1: "8", x2: "16", y1: "21", y2: "21", key: "1svkeh" }],
-  ["line", { x1: "12", x2: "12", y1: "17", y2: "21", key: "vw1qmm" }]
-];
-const Monitor = createLucideIcon("monitor", __iconNode$J);
+const MonitorPlay = createLucideIcon("monitor-play", __iconNode$J);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20206,9 +20122,11 @@ const Monitor = createLucideIcon("monitor", __iconNode$J);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$I = [
-  ["polygon", { points: "3 11 22 2 13 21 11 13 3 11", key: "1ltx0t" }]
+  ["rect", { width: "20", height: "14", x: "2", y: "3", rx: "2", key: "48i651" }],
+  ["line", { x1: "8", x2: "16", y1: "21", y2: "21", key: "1svkeh" }],
+  ["line", { x1: "12", x2: "12", y1: "17", y2: "21", key: "vw1qmm" }]
 ];
-const Navigation = createLucideIcon("navigation", __iconNode$I);
+const Monitor = createLucideIcon("monitor", __iconNode$I);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20216,6 +20134,16 @@ const Navigation = createLucideIcon("navigation", __iconNode$I);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$H = [
+  ["polygon", { points: "3 11 22 2 13 21 11 13 3 11", key: "1ltx0t" }]
+];
+const Navigation = createLucideIcon("navigation", __iconNode$H);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$G = [
   [
     "path",
     {
@@ -20227,14 +20155,14 @@ const __iconNode$H = [
   ["polyline", { points: "3.29 7 12 12 20.71 7", key: "ousv84" }],
   ["path", { d: "m7.5 4.27 9 5.15", key: "1c824w" }]
 ];
-const Package = createLucideIcon("package", __iconNode$H);
+const Package = createLucideIcon("package", __iconNode$G);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$G = [
+const __iconNode$F = [
   [
     "path",
     {
@@ -20247,19 +20175,7 @@ const __iconNode$G = [
   ["circle", { cx: "6.5", cy: "12.5", r: ".5", fill: "currentColor", key: "qy21gx" }],
   ["circle", { cx: "8.5", cy: "7.5", r: ".5", fill: "currentColor", key: "fotxhn" }]
 ];
-const Palette = createLucideIcon("palette", __iconNode$G);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$F = [
-  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }],
-  ["path", { d: "M3 9h18", key: "1pudct" }],
-  ["path", { d: "M9 21V9", key: "1oto5p" }]
-];
-const PanelsTopLeft = createLucideIcon("panels-top-left", __iconNode$F);
+const Palette = createLucideIcon("palette", __iconNode$F);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20267,15 +20183,11 @@ const PanelsTopLeft = createLucideIcon("panels-top-left", __iconNode$F);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$E = [
-  [
-    "path",
-    {
-      d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
-      key: "1a8usu"
-    }
-  ]
+  ["rect", { width: "18", height: "18", x: "3", y: "3", rx: "2", key: "afitv7" }],
+  ["path", { d: "M3 9h18", key: "1pudct" }],
+  ["path", { d: "M9 21V9", key: "1oto5p" }]
 ];
-const Pen = createLucideIcon("pen", __iconNode$E);
+const PanelsTopLeft = createLucideIcon("panels-top-left", __iconNode$E);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20289,10 +20201,9 @@ const __iconNode$D = [
       d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
       key: "1a8usu"
     }
-  ],
-  ["path", { d: "m15 5 4 4", key: "1mk7zo" }]
+  ]
 ];
-const Pencil = createLucideIcon("pencil", __iconNode$D);
+const Pen = createLucideIcon("pen", __iconNode$D);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20303,31 +20214,37 @@ const __iconNode$C = [
   [
     "path",
     {
+      d: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z",
+      key: "1a8usu"
+    }
+  ],
+  ["path", { d: "m15 5 4 4", key: "1mk7zo" }]
+];
+const Pencil = createLucideIcon("pencil", __iconNode$C);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$B = [
+  [
+    "path",
+    {
       d: "M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384",
       key: "9njp5v"
     }
   ]
 ];
-const Phone = createLucideIcon("phone", __iconNode$C);
+const Phone = createLucideIcon("phone", __iconNode$B);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$B = [["polygon", { points: "6 3 20 12 6 21 6 3", key: "1oa8hb" }]];
-const Play = createLucideIcon("play", __iconNode$B);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$A = [
-  ["path", { d: "M5 12h14", key: "1ays0h" }],
-  ["path", { d: "M12 5v14", key: "s699le" }]
-];
-const Plus = createLucideIcon("plus", __iconNode$A);
+const __iconNode$A = [["polygon", { points: "6 3 20 12 6 21 6 3", key: "1oa8hb" }]];
+const Play = createLucideIcon("play", __iconNode$A);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20335,6 +20252,17 @@ const Plus = createLucideIcon("plus", __iconNode$A);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$z = [
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "M12 5v14", key: "s699le" }]
+];
+const Plus = createLucideIcon("plus", __iconNode$z);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$y = [
   [
     "path",
     {
@@ -20345,14 +20273,14 @@ const __iconNode$z = [
   ["path", { d: "M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6", key: "1itne7" }],
   ["rect", { x: "6", y: "14", width: "12", height: "8", rx: "1", key: "1ue0tg" }]
 ];
-const Printer = createLucideIcon("printer", __iconNode$z);
+const Printer = createLucideIcon("printer", __iconNode$y);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$y = [
+const __iconNode$x = [
   ["rect", { width: "5", height: "5", x: "3", y: "3", rx: "1", key: "1tu5fj" }],
   ["rect", { width: "5", height: "5", x: "16", y: "3", rx: "1", key: "1v8r4q" }],
   ["rect", { width: "5", height: "5", x: "3", y: "16", rx: "1", key: "1x03jg" }],
@@ -20366,20 +20294,7 @@ const __iconNode$y = [
   ["path", { d: "M21 12v.01", key: "1lwtk9" }],
   ["path", { d: "M12 21v-1", key: "1880an" }]
 ];
-const QrCode = createLucideIcon("qr-code", __iconNode$y);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$x = [
-  ["path", { d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "14sxne" }],
-  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
-  ["path", { d: "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", key: "1hlbsb" }],
-  ["path", { d: "M16 16h5v5", key: "ccwih5" }]
-];
-const RefreshCcw = createLucideIcon("refresh-ccw", __iconNode$x);
+const QrCode = createLucideIcon("qr-code", __iconNode$x);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20387,12 +20302,12 @@ const RefreshCcw = createLucideIcon("refresh-ccw", __iconNode$x);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$w = [
-  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
-  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
-  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
-  ["path", { d: "M8 16H3v5", key: "1cv678" }]
+  ["path", { d: "M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "14sxne" }],
+  ["path", { d: "M3 3v5h5", key: "1xhq8a" }],
+  ["path", { d: "M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16", key: "1hlbsb" }],
+  ["path", { d: "M16 16h5v5", key: "ccwih5" }]
 ];
-const RefreshCw = createLucideIcon("refresh-cw", __iconNode$w);
+const RefreshCcw = createLucideIcon("refresh-ccw", __iconNode$w);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20400,10 +20315,12 @@ const RefreshCw = createLucideIcon("refresh-cw", __iconNode$w);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$v = [
-  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
-  ["path", { d: "M3 3v5h5", key: "1xhq8a" }]
+  ["path", { d: "M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8", key: "v9h5vc" }],
+  ["path", { d: "M21 3v5h-5", key: "1q7to0" }],
+  ["path", { d: "M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16", key: "3uifl3" }],
+  ["path", { d: "M8 16H3v5", key: "1cv678" }]
 ];
-const RotateCcw = createLucideIcon("rotate-ccw", __iconNode$v);
+const RefreshCw = createLucideIcon("refresh-cw", __iconNode$v);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20411,11 +20328,10 @@ const RotateCcw = createLucideIcon("rotate-ccw", __iconNode$v);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$u = [
-  ["circle", { cx: "6", cy: "19", r: "3", key: "1kj8tv" }],
-  ["path", { d: "M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15", key: "1d8sl" }],
-  ["circle", { cx: "18", cy: "5", r: "3", key: "gq8acd" }]
+  ["path", { d: "M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8", key: "1357e3" }],
+  ["path", { d: "M3 3v5h5", key: "1xhq8a" }]
 ];
-const Route = createLucideIcon("route", __iconNode$u);
+const RotateCcw = createLucideIcon("rotate-ccw", __iconNode$u);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20423,6 +20339,18 @@ const Route = createLucideIcon("route", __iconNode$u);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$t = [
+  ["circle", { cx: "6", cy: "19", r: "3", key: "1kj8tv" }],
+  ["path", { d: "M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15", key: "1d8sl" }],
+  ["circle", { cx: "18", cy: "5", r: "3", key: "gq8acd" }]
+];
+const Route = createLucideIcon("route", __iconNode$t);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$s = [
   [
     "path",
     {
@@ -20433,14 +20361,14 @@ const __iconNode$t = [
   ["path", { d: "M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7", key: "1ydtos" }],
   ["path", { d: "M7 3v4a1 1 0 0 0 1 1h7", key: "t51u73" }]
 ];
-const Save = createLucideIcon("save", __iconNode$t);
+const Save = createLucideIcon("save", __iconNode$s);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$s = [
+const __iconNode$r = [
   ["path", { d: "M14 22v-4a2 2 0 1 0-4 0v4", key: "hhkicm" }],
   [
     "path",
@@ -20454,18 +20382,7 @@ const __iconNode$s = [
   ["path", { d: "M6 5v17", key: "1xfsm0" }],
   ["circle", { cx: "12", cy: "9", r: "2", key: "1092wv" }]
 ];
-const School = createLucideIcon("school", __iconNode$s);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$r = [
-  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
-  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
-];
-const Search = createLucideIcon("search", __iconNode$r);
+const School = createLucideIcon("school", __iconNode$r);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20473,6 +20390,17 @@ const Search = createLucideIcon("search", __iconNode$r);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$q = [
+  ["path", { d: "m21 21-4.34-4.34", key: "14j7rj" }],
+  ["circle", { cx: "11", cy: "11", r: "8", key: "4ej97u" }]
+];
+const Search = createLucideIcon("search", __iconNode$q);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$p = [
   [
     "path",
     {
@@ -20482,20 +20410,7 @@ const __iconNode$q = [
   ],
   ["path", { d: "m21.854 2.147-10.94 10.939", key: "12cjpa" }]
 ];
-const Send = createLucideIcon("send", __iconNode$q);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$p = [
-  ["rect", { width: "20", height: "8", x: "2", y: "2", rx: "2", ry: "2", key: "ngkwjq" }],
-  ["rect", { width: "20", height: "8", x: "2", y: "14", rx: "2", ry: "2", key: "iecqi9" }],
-  ["line", { x1: "6", x2: "6.01", y1: "6", y2: "6", key: "16zg32" }],
-  ["line", { x1: "6", x2: "6.01", y1: "18", y2: "18", key: "nzw8ys" }]
-];
-const Server = createLucideIcon("server", __iconNode$p);
+const Send = createLucideIcon("send", __iconNode$p);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20503,16 +20418,12 @@ const Server = createLucideIcon("server", __iconNode$p);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$o = [
-  [
-    "path",
-    {
-      d: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
-      key: "1qme2f"
-    }
-  ],
-  ["circle", { cx: "12", cy: "12", r: "3", key: "1v7zrd" }]
+  ["rect", { width: "20", height: "8", x: "2", y: "2", rx: "2", ry: "2", key: "ngkwjq" }],
+  ["rect", { width: "20", height: "8", x: "2", y: "14", rx: "2", ry: "2", key: "iecqi9" }],
+  ["line", { x1: "6", x2: "6.01", y1: "6", y2: "6", key: "16zg32" }],
+  ["line", { x1: "6", x2: "6.01", y1: "18", y2: "18", key: "nzw8ys" }]
 ];
-const Settings$1 = createLucideIcon("settings", __iconNode$o);
+const Server = createLucideIcon("server", __iconNode$o);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20523,14 +20434,13 @@ const __iconNode$n = [
   [
     "path",
     {
-      d: "M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z",
-      key: "oel41y"
+      d: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z",
+      key: "1qme2f"
     }
   ],
-  ["path", { d: "M12 8v4", key: "1got3b" }],
-  ["path", { d: "M12 16h.01", key: "1drbdi" }]
+  ["circle", { cx: "12", cy: "12", r: "3", key: "1v7zrd" }]
 ];
-const ShieldAlert = createLucideIcon("shield-alert", __iconNode$n);
+const Settings$1 = createLucideIcon("settings", __iconNode$n);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -20875,7 +20785,7 @@ const __iconNode = [
   ]
 ];
 const Zap = createLucideIcon("zap", __iconNode);
-const ROLES = [
+const ROLES$1 = [
   "superadmin",
   "admin",
   "receptionist",
@@ -20943,7 +20853,7 @@ const CLASSES_ORDER = [
   "Class 11",
   "Class 12"
 ];
-const CLASS_ORDER$4 = CLASSES_ORDER;
+const CLASS_ORDER$5 = CLASSES_ORDER;
 const MONTHS$3 = [
   "April",
   "May",
@@ -20958,7 +20868,7 @@ const MONTHS$3 = [
   "February",
   "March"
 ];
-function formatCurrency$1(amount) {
+function formatCurrency(amount) {
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
@@ -21866,7 +21776,7 @@ function MobileNav({
       { id: "__menu__", label: "More", icon: Ellipsis }
     ];
   }
-  const isActive = (id) => activePage === id || activePage.startsWith(`${id}/`);
+  const isActive2 = (id) => activePage === id || activePage.startsWith(`${id}/`);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx(
       "nav",
@@ -21876,7 +21786,7 @@ function MobileNav({
         "data-ocid": "mobile-nav",
         children: tabs.map((tab) => {
           const Icon2 = tab.icon;
-          const active = isActive(tab.id) || tab.id === "__menu__" && isOpen;
+          const active = isActive2(tab.id) || tab.id === "__menu__" && isOpen;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "button",
             {
@@ -21941,7 +21851,7 @@ function MobileNav({
               section.title && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-[10px] font-bold uppercase tracking-widest text-muted-foreground px-2 pt-2 pb-1", children: section.title }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 gap-1.5", children: section.items.map((item) => {
                 const Icon2 = item.icon;
-                const active = isActive(item.id);
+                const active = isActive2(item.id);
                 return /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "button",
                   {
@@ -21990,7 +21900,9 @@ const ROLE_NAV = {
     { id: "certificates", label: "Certificates", icon: Award },
     { id: "calling", label: "Calling", icon: Phone },
     { id: "settings", label: "Settings", icon: Settings$1 },
-    { id: "settings/usermgmt", label: "User Management", icon: UserCog },
+    { id: "sessions", label: "Sessions", icon: CalendarCheck },
+    { id: "usermanagement", label: "User Management", icon: UserCog },
+    { id: "settings/usermgmt", label: "Permissions", icon: UserCog },
     { id: "documentation", label: "Documentation", icon: CircleHelp }
   ],
   admin: [
@@ -22089,7 +22001,7 @@ function Sidebar({
     return () => clearInterval(interval);
   }, []);
   const navItems = ((currentUser == null ? void 0 : currentUser.role) ? ROLE_NAV[currentUser.role] : ROLE_NAV.default) ?? ROLE_NAV.default;
-  const isActive = (id) => activePage === id || activePage.startsWith(`${id}/`) || // Dashboard sub-routes: "dashboard/superadmin" should match when activePage has it
+  const isActive2 = (id) => activePage === id || activePage.startsWith(`${id}/`) || // Dashboard sub-routes: "dashboard/superadmin" should match when activePage has it
   id.startsWith("dashboard") && activePage === id;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     "aside",
@@ -22150,7 +22062,7 @@ function Sidebar({
             "aria-label": "Main navigation",
             children: navItems.map((item) => {
               const Icon2 = item.icon;
-              const active = isActive(item.id);
+              const active = isActive2(item.id);
               const showUnread = item.id === "chat" && chatUnread > 0;
               return /* @__PURE__ */ jsxRuntimeExports.jsxs(
                 "button",
@@ -22708,7 +22620,7 @@ reactExports.forwardRef(function(e3, t2) {
     })) : null;
   }));
 });
-const CLASS_ORDER$3 = [
+const CLASS_ORDER$4 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -22733,8 +22645,8 @@ function sortClasses$3(arr) {
   return [...arr].sort((a2, b2) => {
     const aName = a2.name ?? a2.className ?? "";
     const bName = b2.name ?? b2.className ?? "";
-    const ai = CLASS_ORDER$3.indexOf(aName);
-    const bi = CLASS_ORDER$3.indexOf(bName);
+    const ai = CLASS_ORDER$4.indexOf(aName);
+    const bi = CLASS_ORDER$4.indexOf(bName);
     if (ai === -1 && bi === -1) return aName.localeCompare(bName);
     if (ai === -1) return 1;
     if (bi === -1) return -1;
@@ -22743,8 +22655,8 @@ function sortClasses$3(arr) {
 }
 function sortEntries(entries) {
   return [...entries].sort((a2, b2) => {
-    const ai = CLASS_ORDER$3.indexOf(a2.className);
-    const bi = CLASS_ORDER$3.indexOf(b2.className);
+    const ai = CLASS_ORDER$4.indexOf(a2.className);
+    const bi = CLASS_ORDER$4.indexOf(b2.className);
     const classDiff = ai === -1 && bi === -1 ? a2.className.localeCompare(b2.className) : ai === -1 ? 1 : bi === -1 ? -1 : ai - bi;
     if (classDiff !== 0) return classDiff;
     return a2.section.localeCompare(b2.section);
@@ -28626,7 +28538,7 @@ const CLASS_ORDER_SHORT$1 = [
   "11",
   "12"
 ];
-function displayName(raw) {
+function displayName$1(raw) {
   if (["Nursery", "LKG", "UKG"].includes(raw)) return raw;
   if (raw.startsWith("Class ")) return raw;
   if (/^\d+$/.test(raw)) return `Class ${raw}`;
@@ -28739,7 +28651,7 @@ function Classes() {
     if (!modal.editing && usedNames.has(finalName)) {
       setModal((p2) => ({
         ...p2,
-        error: `${displayName(finalName)} already exists.`
+        error: `${displayName$1(finalName)} already exists.`
       }));
       return;
     }
@@ -28752,7 +28664,7 @@ function Classes() {
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0
         });
-        ue.success(`${displayName(finalName)} updated`);
+        ue.success(`${displayName$1(finalName)} updated`);
       } else {
         console.debug("[Classes] adding class:", {
           name: finalName,
@@ -28766,7 +28678,7 @@ function Classes() {
           is_enabled: modal.isEnabled ? 1 : 0
         });
         console.debug("[Classes] addClass result:", result);
-        ue.success(`${displayName(finalName)} added successfully`);
+        ue.success(`${displayName$1(finalName)} added successfully`);
       }
       setModal(BLANK_MODAL);
       void loadClasses();
@@ -28786,7 +28698,7 @@ function Classes() {
         is_enabled: wasEnabled ? 0 : 1
       });
       ue.success(
-        `${displayName(cls.className)} ${wasEnabled ? "disabled" : "enabled"}`
+        `${displayName$1(cls.className)} ${wasEnabled ? "disabled" : "enabled"}`
       );
       void loadClasses();
     } catch {
@@ -28794,12 +28706,12 @@ function Classes() {
     }
   }
   async function handleDelete(cls) {
-    if (!confirm(`Delete ${displayName(cls.className)} and all its sections?`))
+    if (!confirm(`Delete ${displayName$1(cls.className)} and all its sections?`))
       return;
     setDeletingId(cls.id);
     try {
       await phpApiService.deleteClass(cls.id);
-      ue.success(`${displayName(cls.className)} deleted`);
+      ue.success(`${displayName$1(cls.className)} deleted`);
       void loadClasses();
     } catch {
       ue.error("Failed to delete class");
@@ -28878,7 +28790,7 @@ function Classes() {
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-2 mb-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-display font-semibold text-foreground truncate", children: displayName(cls.className) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-display font-semibold text-foreground truncate", children: displayName$1(cls.className) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 mt-0.5 flex-wrap", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
                     cls.sections.length,
@@ -28967,7 +28879,7 @@ function Classes() {
                       error: null
                     })),
                     className: `py-1.5 rounded-md text-xs font-medium border transition-colors ${modal.nameKey === key ? "bg-primary text-primary-foreground border-primary" : "bg-transparent border-border text-foreground hover:bg-muted/50 disabled:opacity-30 disabled:cursor-not-allowed"}`,
-                    children: displayName(key)
+                    children: displayName$1(key)
                   },
                   key
                 )),
@@ -30220,13 +30132,13 @@ function buildPeriods(count2, startTime, durations, intervalMin) {
   return result;
 }
 function expandSections(classFrom, classTo) {
-  const fromIdx = CLASSES$1.indexOf(classFrom);
-  const toIdx = CLASSES$1.indexOf(classTo);
+  const fromIdx = CLASSES$2.indexOf(classFrom);
+  const toIdx = CLASSES$2.indexOf(classTo);
   if (fromIdx < 0 || toIdx < 0) return [];
   const result = [];
   for (let i = fromIdx; i <= toIdx; i++) {
     for (const sec of SECTIONS.slice(0, 3)) {
-      result.push(`${CLASSES$1[i]}${sec}`);
+      result.push(`${CLASSES$2[i]}${sec}`);
     }
   }
   return result;
@@ -30568,7 +30480,7 @@ function TeacherTimetable$1() {
     (c2) => (Array.isArray(c2.sections) ? c2.sections : []).map(
       (sec) => `${c2.name ?? c2.className ?? ""}${sec}`
     )
-  ) : CLASSES$1.flatMap((c2) => SECTIONS.slice(0, 3).map((s2) => `${c2}${s2}`));
+  ) : CLASSES$2.flatMap((c2) => SECTIONS.slice(0, 3).map((s2) => `${c2}${s2}`));
   reactExports.useEffect(() => {
     var _a2;
     const rows = [];
@@ -30874,7 +30786,7 @@ function TeacherTimetable$1() {
                     onChange: (e3) => updateSplitPair(pair.id, "class_", e3.target.value),
                     children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "—" }),
-                      CLASSES$1.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
+                      CLASSES$2.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
                     ]
                   }
                 )
@@ -31178,7 +31090,7 @@ function TeacherTimetable$1() {
     ] })
   ] });
 }
-const TABS$6 = [
+const TABS$9 = [
   { id: "classes", label: "Classes & Sections", icon: LayoutGrid },
   { id: "subjects", label: "Subjects", icon: BookOpen },
   { id: "class-timetable", label: "Class Timetable", icon: CalendarCheck },
@@ -31206,7 +31118,7 @@ function Academics({ initialTab }) {
         className: "bg-card border-b px-4 lg:px-6 flex gap-0 overflow-x-auto sticky top-0 z-10 scrollbar-thin",
         role: "tablist",
         "aria-label": "Academics navigation",
-        children: TABS$6.map((tab) => {
+        children: TABS$9.map((tab) => {
           const Icon2 = tab.icon;
           const active = activeTab === tab.id;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -31752,6 +31664,16 @@ function DialogTitle({
     }
   );
 }
+function Skeleton({ className, ...props }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    "div",
+    {
+      "data-slot": "skeleton",
+      className: cn("bg-accent animate-pulse rounded-md", className),
+      ...props
+    }
+  );
+}
 var ENTRY_FOCUS = "rovingFocusGroup.onEntryFocus";
 var EVENT_OPTIONS = { bubbles: false, cancelable: true };
 var GROUP_NAME = "RovingFocusGroup";
@@ -32193,82 +32115,63 @@ function TabsContent({
     }
   );
 }
-const SEED_ALUMNI = [
-  {
-    id: "al1",
-    name: "Rahul Sharma",
-    batch: "2023",
-    class_: "Class 12",
-    admNo: "2023001",
-    mobile: "9876543210",
-    email: "rahul@example.com",
-    address: "Delhi"
-  },
-  {
-    id: "al2",
-    name: "Priya Patel",
-    batch: "2023",
-    class_: "Class 12",
-    admNo: "2023002",
-    mobile: "9876543211",
-    email: "priya@example.com",
-    address: "Mumbai"
-  },
-  {
-    id: "al3",
-    name: "Vikram Singh",
-    batch: "2022",
-    class_: "Class 12",
-    admNo: "2022005",
-    mobile: "9876543212",
-    address: "Pune"
-  },
-  {
-    id: "al4",
-    name: "Anita Verma",
-    batch: "2022",
-    class_: "Class 10",
-    admNo: "2022010",
-    mobile: "9876543213",
-    email: "anita@example.com",
-    address: "Jaipur"
-  },
-  {
-    id: "al5",
-    name: "Suresh Kumar",
-    batch: "2021",
-    class_: "Class 12",
-    admNo: "2021003",
-    mobile: "9876543214",
-    address: "Lucknow"
-  },
-  {
-    id: "al6",
-    name: "Meena Joshi",
-    batch: "2021",
-    class_: "Class 12",
-    admNo: "2021008",
-    mobile: "9876543215",
-    email: "meena@example.com",
-    address: "Agra"
+const API_BASE = "https://shubh.psmkgs.com/api/index.php";
+const SA_KEY = "shubh_superadmin_2024_secure_key";
+function getToken() {
+  try {
+    return localStorage.getItem("erp_token");
+  } catch {
+    return null;
   }
-];
-const SEED_EVENTS = [
-  {
-    id: "ev1",
-    title: "Annual Alumni Meet 2026",
-    date: "2026-12-20",
-    description: "Annual gathering — dinner, cultural program, and prize distribution.",
-    attendees: ["al1", "al2", "al3"]
-  },
-  {
-    id: "ev2",
-    title: "Career Guidance Talk",
-    date: "2026-05-10",
-    description: "Alumni speakers share career experiences with current students.",
-    attendees: ["al1", "al4"]
+}
+function getRole() {
+  try {
+    return localStorage.getItem("erp_role");
+  } catch {
+    return null;
   }
-];
+}
+async function apiCall(route, method = "GET", body) {
+  const token = getToken();
+  const role = getRole();
+  let url = `${API_BASE}?route=${route}`;
+  if (role === "super_admin" || role === "superadmin") {
+    url += `&sa_key=${SA_KEY}`;
+  } else if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+  const options = { method };
+  if (body && method !== "GET") {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+  const response = await fetch(url, options);
+  const text = await response.text();
+  let json;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new Error(
+      `Server error (HTTP ${response.status}): non-JSON response`
+    );
+  }
+  if (!json.success && json.error) {
+    if (response.status === 401 || json.error.toLowerCase().includes("unauthorized") || json.error.toLowerCase().includes("token") || json.error.toLowerCase().includes("expired")) {
+      window.dispatchEvent(new CustomEvent("auth:token-expired"));
+    }
+    throw new Error(json.error);
+  }
+  return json.data ?? json;
+}
+function getJwt() {
+  return getToken();
+}
+function getApiIndexUrl() {
+  return API_BASE;
+}
+async function apiUpdatePermissions(userId, permissions, _token) {
+  await apiCall("users/permissions", "POST", { userId, permissions });
+}
 function initials$1(name) {
   return name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 }
@@ -32326,7 +32229,8 @@ function AlumniCard({
 function AlumniForm({
   initial,
   onSave,
-  onClose
+  onClose,
+  saving
 }) {
   const [form, setForm] = reactExports.useState(
     initial ?? {
@@ -32335,19 +32239,6 @@ function AlumniForm({
     }
   );
   const upd = (k2, v2) => setForm((f2) => ({ ...f2, [k2]: v2 }));
-  const save = () => {
-    if (!form.name) return;
-    onSave({
-      id: form.id ?? generateId$1(),
-      name: form.name,
-      batch: form.batch ?? "",
-      class_: form.class_ ?? "Class 12",
-      admNo: form.admNo,
-      mobile: form.mobile,
-      email: form.email,
-      address: form.address
-    });
-  };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
@@ -32436,14 +32327,19 @@ function AlumniForm({
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
         Button,
         {
           "data-ocid": "alumni.form_save_button",
-          onClick: save,
-          disabled: !form.name,
+          onClick: () => {
+            if (form.name) onSave(form);
+          },
+          disabled: !form.name || saving,
           className: "flex-1",
-          children: "Save"
+          children: [
+            saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+            "Save"
+          ]
         }
       ),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -32504,25 +32400,47 @@ function BatchView({ alumni }) {
 }
 function EventsTab({ alumni: _alumni }) {
   const { addNotification } = useApp();
-  const [events, setEvents] = reactExports.useState(SEED_EVENTS);
+  const [events, setEvents] = reactExports.useState([
+    {
+      id: "ev1",
+      title: "Annual Alumni Meet 2026",
+      date: "2026-12-20",
+      description: "Annual gathering — dinner, cultural program, and prize distribution.",
+      attendees: []
+    },
+    {
+      id: "ev2",
+      title: "Career Guidance Talk",
+      date: "2026-05-10",
+      description: "Alumni speakers share career experiences with current students.",
+      attendees: []
+    }
+  ]);
   const [showForm, setShowForm] = reactExports.useState(false);
   const [form, setForm] = reactExports.useState({ title: "", date: "", description: "" });
-  const createEvent = () => {
+  const [saving, setSaving] = reactExports.useState(false);
+  const createEvent = async () => {
     if (!form.title || !form.date) return;
+    setSaving(true);
     const ev = {
-      id: generateId$1(),
+      id: `ev_${Date.now()}`,
       title: form.title,
       date: form.date,
       description: form.description,
       attendees: []
     };
+    try {
+      await apiCall("settings/save", "POST", {
+        key: `alumni_event_${ev.id}`,
+        value: JSON.stringify(ev)
+      });
+    } catch {
+    }
     setEvents((prev) => [ev, ...prev]);
     setForm({ title: "", date: "", description: "" });
     setShowForm(false);
+    setSaving(false);
     addNotification(`Event "${form.title}" created`, "success");
-  };
-  const invite = (ev) => {
-    addNotification(`Invitations sent to all alumni for "${ev.title}"`, "info");
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex justify-end", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -32577,13 +32495,17 @@ function EventsTab({ alumni: _alumni }) {
             )
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
               Button,
               {
                 "data-ocid": "alumni.event_save_button",
-                onClick: createEvent,
+                onClick: () => void createEvent(),
+                disabled: saving,
                 className: "flex-1",
-                children: "Create Event"
+                children: [
+                  saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                  "Create Event"
+                ]
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -32600,47 +32522,53 @@ function EventsTab({ alumni: _alumni }) {
       }
     ),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
-      events.map((ev, i) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "div",
-        {
-          "data-ocid": `alumni.event.item.${i + 1}`,
-          className: "bg-card border border-border rounded-xl p-4",
-          children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-sm text-foreground", children: ev.title }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: (() => {
-                try {
-                  return new Date(ev.date).toLocaleDateString("en-IN", {
-                    weekday: "short",
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric"
-                  });
-                } catch {
-                  return ev.date;
+      events.map((ev, i) => {
+        var _a2;
+        return /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            "data-ocid": `alumni.event.item.${i + 1}`,
+            className: "bg-card border border-border rounded-xl p-4",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between gap-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-sm text-foreground", children: ev.title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: (() => {
+                  try {
+                    return new Date(ev.date).toLocaleDateString("en-IN", {
+                      weekday: "short",
+                      day: "numeric",
+                      month: "long",
+                      year: "numeric"
+                    });
+                  } catch {
+                    return ev.date;
+                  }
+                })() }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-1", children: ev.description }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground mt-1", children: [
+                  ((_a2 = ev.attendees) == null ? void 0 : _a2.length) ?? 0,
+                  " attending"
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Button,
+                {
+                  size: "sm",
+                  variant: "outline",
+                  "data-ocid": `alumni.invite_button.${i + 1}`,
+                  onClick: () => {
+                    addNotification(`Invitations sent for "${ev.title}"`, "info");
+                    ue.success("Invitations sent");
+                  },
+                  className: "h-8 text-xs shrink-0",
+                  children: "Send Invites"
                 }
-              })() }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-1", children: ev.description }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground mt-1", children: [
-                ev.attendees.length,
-                " attending"
-              ] })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Button,
-              {
-                size: "sm",
-                variant: "outline",
-                "data-ocid": `alumni.invite_button.${i + 1}`,
-                onClick: () => invite(ev),
-                className: "h-8 text-xs shrink-0",
-                children: "Send Invites"
-              }
-            )
-          ] })
-        },
-        ev.id
-      )),
+              )
+            ] })
+          },
+          ev.id
+        );
+      }),
       events.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
         {
@@ -32656,15 +32584,80 @@ function EventsTab({ alumni: _alumni }) {
   ] });
 }
 function AlumniPage() {
-  const { getData: getData2, saveData, updateData, addNotification } = useApp();
-  const storedAlumni = getData2("alumni");
-  const [alumni, setAlumni] = reactExports.useState(
-    storedAlumni.length ? storedAlumni : SEED_ALUMNI
-  );
+  const { addNotification } = useApp();
+  const [alumni, setAlumni] = reactExports.useState([]);
+  const [loading, setLoading] = reactExports.useState(true);
   const [search, setSearch] = reactExports.useState("");
   const [batchFilter, setBatchFilter] = reactExports.useState("all");
   const [editTarget, setEditTarget] = reactExports.useState(void 0);
   const [showForm, setShowForm] = reactExports.useState(false);
+  const [saving, setSaving] = reactExports.useState(false);
+  const load = reactExports.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiCall("alumni/list");
+      const rows = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : [];
+      if (rows.length === 0) {
+        setAlumni([
+          {
+            id: "al1",
+            name: "Rahul Sharma",
+            batch: "2023",
+            class_: "Class 12",
+            admNo: "2023001",
+            mobile: "9876543210",
+            email: "rahul@example.com",
+            address: "Delhi"
+          },
+          {
+            id: "al2",
+            name: "Priya Patel",
+            batch: "2023",
+            class_: "Class 12",
+            admNo: "2023002",
+            mobile: "9876543211",
+            address: "Mumbai"
+          },
+          {
+            id: "al3",
+            name: "Vikram Singh",
+            batch: "2022",
+            class_: "Class 12",
+            admNo: "2022005",
+            mobile: "9876543212",
+            address: "Pune"
+          }
+        ]);
+      } else {
+        setAlumni(rows);
+      }
+    } catch {
+      setAlumni([
+        {
+          id: "al1",
+          name: "Rahul Sharma",
+          batch: "2023",
+          class_: "Class 12",
+          admNo: "2023001",
+          mobile: "9876543210",
+          address: "Delhi"
+        },
+        {
+          id: "al2",
+          name: "Priya Patel",
+          batch: "2023",
+          class_: "Class 12",
+          admNo: "2023002",
+          address: "Mumbai"
+        }
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
   const batches = [...new Set(alumni.map((a2) => a2.batch))].sort(
     (a2, b2) => Number(b2) - Number(a2)
   );
@@ -32672,31 +32665,33 @@ function AlumniPage() {
     if (batchFilter !== "all" && a2.batch !== batchFilter) return false;
     return !search || a2.name.toLowerCase().includes(search.toLowerCase()) || (a2.mobile ?? "").includes(search);
   });
-  const handleSave = async (a2) => {
-    const isEdit = alumni.some((x2) => x2.id === a2.id);
-    if (isEdit) {
-      setAlumni((prev) => prev.map((x2) => x2.id === a2.id ? a2 : x2));
-      await updateData("alumni", a2.id, a2);
-      addNotification(`Alumni "${a2.name}" updated`, "success");
-    } else {
-      setAlumni((prev) => [a2, ...prev]);
-      await saveData("alumni", a2);
-      addNotification(`Alumni "${a2.name}" added`, "success");
+  const handleSave = async (form) => {
+    setSaving(true);
+    const isEdit = editTarget !== void 0;
+    try {
+      if (isEdit && editTarget) {
+        await apiCall("alumni/update", "POST", { ...form, id: editTarget.id });
+        setAlumni(
+          (prev) => prev.map(
+            (x2) => x2.id === editTarget.id ? { ...x2, ...form } : x2
+          )
+        );
+        addNotification(`Alumni "${form.name}" updated`, "success");
+        ue.success("Updated");
+      } else {
+        const res = await apiCall("alumni/add", "POST", form);
+        const newA = { ...form, id: (res == null ? void 0 : res.id) ?? `al_${Date.now()}` };
+        setAlumni((prev) => [newA, ...prev]);
+        addNotification(`Alumni "${form.name}" added`, "success");
+        ue.success("Added");
+      }
+    } catch {
+      ue.error("Save failed");
+    } finally {
+      setSaving(false);
+      setEditTarget(void 0);
+      setShowForm(false);
     }
-    setEditTarget(void 0);
-    setShowForm(false);
-  };
-  const openEdit = (a2) => {
-    setEditTarget(a2);
-    setShowForm(true);
-  };
-  const openAdd = () => {
-    setEditTarget(void 0);
-    setShowForm(true);
-  };
-  const closeForm = () => {
-    setEditTarget(void 0);
-    setShowForm(false);
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 space-y-4", "data-ocid": "alumni.page", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-4 flex-wrap", children: [
@@ -32709,7 +32704,32 @@ function AlumniPage() {
           " batches"
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { "data-ocid": "alumni.add_button", onClick: openAdd, children: "+ Add Alumni" })
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
+          {
+            variant: "outline",
+            size: "sm",
+            onClick: load,
+            "data-ocid": "alumni.refresh_button",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 mr-1" }),
+              " Refresh"
+            ]
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Button,
+          {
+            "data-ocid": "alumni.add_button",
+            onClick: () => {
+              setEditTarget(void 0);
+              setShowForm(true);
+            },
+            children: "+ Add Alumni"
+          }
+        )
+      ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(Tabs, { defaultValue: "directory", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(TabsList, { className: "mb-4", children: [
@@ -32746,20 +32766,23 @@ function AlumniPage() {
             }
           )
         ] }),
-        filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", "data-ocid": "alumni.loading_state", children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-20 rounded-xl" }, i)) }) : filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "div",
           {
             "data-ocid": "alumni.empty_state",
             className: "text-center py-12 text-muted-foreground",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl mb-3", children: "🎓" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm", children: "No alumni found. Add your first record." }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm", children: "No alumni found." }),
               /* @__PURE__ */ jsxRuntimeExports.jsx(
                 Button,
                 {
                   className: "mt-4",
                   "data-ocid": "alumni.empty_add_button",
-                  onClick: openAdd,
+                  onClick: () => {
+                    setEditTarget(void 0);
+                    setShowForm(true);
+                  },
                   children: "Add Alumni"
                 }
               )
@@ -32770,7 +32793,10 @@ function AlumniPage() {
           {
             alumni: a2,
             idx: i + 1,
-            onEdit: openEdit
+            onEdit: (x2) => {
+              setEditTarget(x2);
+              setShowForm(true);
+            }
           },
           a2.id
         )) })
@@ -32783,7 +32809,10 @@ function AlumniPage() {
       {
         open: showForm,
         onOpenChange: (open) => {
-          if (!open) closeForm();
+          if (!open) {
+            setShowForm(false);
+            setEditTarget(void 0);
+          }
         },
         children: /* @__PURE__ */ jsxRuntimeExports.jsxs(DialogContent, { "data-ocid": "alumni.form_dialog", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DialogTitle, { children: editTarget ? "Edit Alumni" : "Add Alumni" }) }),
@@ -32792,7 +32821,11 @@ function AlumniPage() {
             {
               initial: editTarget,
               onSave: handleSave,
-              onClose: closeForm
+              onClose: () => {
+                setShowForm(false);
+                setEditTarget(void 0);
+              },
+              saving
             }
           )
         ] })
@@ -33230,7 +33263,7 @@ function AttendanceSettings() {
     ) })
   ] });
 }
-const CLASS_ORDER$2 = [
+const CLASS_ORDER$3 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -33428,8 +33461,8 @@ function DateRangeSummary({
   const [filterClass, setFilterClass] = reactExports.useState("all");
   const classList = reactExports.useMemo(() => {
     const names = [...new Set(students.map((s2) => s2.class))];
-    return CLASS_ORDER$2.filter((c2) => names.includes(c2)).concat(
-      names.filter((n2) => !CLASS_ORDER$2.includes(n2))
+    return CLASS_ORDER$3.filter((c2) => names.includes(c2)).concat(
+      names.filter((n2) => !CLASS_ORDER$3.includes(n2))
     );
   }, [students]);
   const workingDays = reactExports.useMemo(() => {
@@ -33680,8 +33713,8 @@ function AttendanceSummary({
       }
     }
     return Object.values(map2).sort((a2, b2) => {
-      const ai = CLASS_ORDER$2.indexOf(a2.cls);
-      const bi = CLASS_ORDER$2.indexOf(b2.cls);
+      const ai = CLASS_ORDER$3.indexOf(a2.cls);
+      const bi = CLASS_ORDER$3.indexOf(b2.cls);
       if (ai !== bi) return ai - bi;
       return a2.section.localeCompare(b2.section);
     });
@@ -34741,7 +34774,7 @@ function getRowBg(status) {
   if (status === "Late") return "bg-amber-500/5";
   return "";
 }
-const CLASS_ORDER$1 = [
+const CLASS_ORDER$2 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -34777,8 +34810,8 @@ function DailyAttendance({
     phpApiService.getClasses().then((data) => setClasses(data)).catch(() => ue.error("Failed to load classes")).finally(() => setClassesLoading(false));
   }, []);
   const sortedClasses = [...classes].sort((a2, b2) => {
-    const ai = CLASS_ORDER$1.indexOf(a2.className);
-    const bi = CLASS_ORDER$1.indexOf(b2.className);
+    const ai = CLASS_ORDER$2.indexOf(a2.className);
+    const bi = CLASS_ORDER$2.indexOf(b2.className);
     if (ai === -1 && bi === -1) return a2.className.localeCompare(b2.className);
     if (ai === -1) return 1;
     if (bi === -1) return -1;
@@ -36907,7 +36940,7 @@ function WelcomeDisplay() {
     )
   ] });
 }
-const TABS$5 = [
+const TABS$8 = [
   {
     id: "daily",
     label: "Daily Attendance",
@@ -36950,7 +36983,7 @@ function Attendance() {
           className: "flex gap-0 overflow-x-auto scrollbar-thin",
           role: "tablist",
           "aria-label": "Attendance navigation",
-          children: TABS$5.map((tab) => {
+          children: TABS$8.map((tab) => {
             const Icon2 = tab.icon;
             const active = activeTab === tab.id;
             return /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -38646,16 +38679,6 @@ function ScrollBar({
     }
   );
 }
-function Skeleton({ className, ...props }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    "div",
-    {
-      "data-slot": "skeleton",
-      className: cn("bg-accent animate-pulse rounded-md", className),
-      ...props
-    }
-  );
-}
 function initials(name) {
   return name.split(" ").map((w) => w[0]).join("").toUpperCase().slice(0, 2);
 }
@@ -39181,218 +39204,209 @@ function Textarea({ className, ...props }) {
     }
   );
 }
-const DEFAULT_CREDS = {
-  apiUrl: "",
-  apiKey: "",
-  instanceId: "",
-  enabled: false
-};
-const SEED_RULES = [
-  {
-    id: "r1",
-    event: "Fee due reminder",
-    description: "Send fee reminder X days before due date",
-    channel: "whatsapp",
-    daysBeforeDue: 3,
-    enabled: true,
-    recipient: "All Parents"
-  },
-  {
-    id: "r2",
-    event: "Attendance alert",
-    description: "Alert when student is marked absent",
-    channel: "whatsapp",
-    enabled: true,
-    recipient: "Parents"
-  },
-  {
-    id: "r3",
-    event: "Result published",
-    description: "Notify when exam results are published",
-    channel: "both",
-    enabled: false,
-    recipient: "All Parents"
-  },
-  {
-    id: "r4",
-    event: "Birthday wishes",
-    description: "Auto-send birthday message on student's birthday",
-    channel: "whatsapp",
-    enabled: true,
-    recipient: "Student"
-  }
+const TABS$7 = [
+  { id: "broadcast", label: "WhatsApp Broadcast", icon: MessageSquare },
+  { id: "bell", label: "Notification Bell", icon: Bell },
+  { id: "scheduler", label: "Notification Scheduler", icon: Zap }
 ];
 const RECIPIENT_GROUPS = [
   "All Students",
   "All Parents",
   "Fee Defaulters",
-  "Class 5 Parents",
+  "All Staff",
   "Class 10 Parents",
-  "Route 1 Parents"
+  "By Class"
 ];
-const MESSAGE_VARS = [
-  "{student_name}",
-  "{class}",
-  "{admNo}",
-  "{amount}",
-  "{date}"
-];
-function loadCredsFromStorage() {
+const MSG_VARS = ["{student_name}", "{class}", "{admNo}", "{amount}", "{date}"];
+function loadCreds() {
   try {
-    const raw = localStorage.getItem("wa_creds");
-    if (raw) return JSON.parse(raw);
+    return JSON.parse(
+      localStorage.getItem("wa_creds") ?? "{}"
+    );
   } catch {
+    return { apiUrl: "", apiKey: "", instanceId: "", enabled: false };
   }
-  return DEFAULT_CREDS;
 }
-function Communication({ initialTab = "whatsapp" }) {
-  const { addNotification } = useApp();
-  const [tab, setTab] = reactExports.useState(initialTab || "whatsapp");
-  const [creds, setCreds] = reactExports.useState(loadCredsFromStorage);
-  const [manualTo, setManualTo] = reactExports.useState("");
-  const [manualMsg, setManualMsg] = reactExports.useState("");
-  const [isTesting, setIsTesting] = reactExports.useState(false);
+function Communication({ initialTab = "broadcast" }) {
+  const [tab, setTab] = reactExports.useState(initialTab || "broadcast");
+  const [creds, setCreds] = reactExports.useState(loadCreds);
   const [testResult, setTestResult] = reactExports.useState(null);
+  const [isTesting, setIsTesting] = reactExports.useState(false);
   const [bcRecipient, setBcRecipient] = reactExports.useState("All Parents");
-  const [bcTemplate, setBcTemplate] = reactExports.useState(
+  const [bcMessage, setBcMessage] = reactExports.useState(
     "Dear {student_name}, this is a reminder from the school."
   );
-  const [bcChannel, setBcChannel] = reactExports.useState("whatsapp");
   const [isSending, setIsSending] = reactExports.useState(false);
   const [sendReport, setSendReport] = reactExports.useState(null);
-  const [broadcastHistory, setBroadcastHistory] = reactExports.useState(
-    []
-  );
-  const [historyLoading, setHistoryLoading] = reactExports.useState(false);
-  const [rules, setRules] = reactExports.useState(SEED_RULES);
-  const [savingRules, setSavingRules] = reactExports.useState(false);
-  const loadHistory = reactExports.useCallback(async () => {
-    setHistoryLoading(true);
+  const [notifications, setNotifications] = reactExports.useState([]);
+  const [bellLoading, setBellLoading] = reactExports.useState(false);
+  const [unreadCount, setUnreadCount] = reactExports.useState(0);
+  const [scheduled, setScheduled] = reactExports.useState([]);
+  const [schedLoading, setSchedLoading] = reactExports.useState(false);
+  const [newTitle, setNewTitle] = reactExports.useState("");
+  const [newMessage, setNewMessage] = reactExports.useState("");
+  const [newGroup, setNewGroup] = reactExports.useState("All Parents");
+  const [newTime, setNewTime] = reactExports.useState("");
+  const [addingSched, setAddingSched] = reactExports.useState(false);
+  const loadNotifications = reactExports.useCallback(async () => {
+    setBellLoading(true);
     try {
-      const data = await phpApiService.get(
-        "communication/broadcast-history"
-      );
-      setBroadcastHistory(Array.isArray(data) ? data : []);
+      const res = await apiCall("notifications/list");
+      const list = res.data ?? [];
+      setNotifications(list);
+      setUnreadCount(list.filter((n2) => !n2.is_read).length);
     } catch {
-      setBroadcastHistory([]);
+      setNotifications([]);
     } finally {
-      setHistoryLoading(false);
+      setBellLoading(false);
+    }
+  }, []);
+  const loadScheduled = reactExports.useCallback(async () => {
+    setSchedLoading(true);
+    try {
+      const res = await apiCall(
+        "notifications/scheduled"
+      );
+      setScheduled(res.data ?? []);
+    } catch {
+      setScheduled([]);
+    } finally {
+      setSchedLoading(false);
     }
   }, []);
   reactExports.useEffect(() => {
-    if (tab === "broadcast") {
-      void loadHistory();
-    }
-  }, [tab, loadHistory]);
-  const saveCreds = reactExports.useCallback(async () => {
+    if (tab === "bell") void loadNotifications();
+    if (tab === "scheduler") void loadScheduled();
+  }, [tab, loadNotifications, loadScheduled]);
+  async function saveCreds() {
+    localStorage.setItem("wa_creds", JSON.stringify(creds));
     try {
-      localStorage.setItem("wa_creds", JSON.stringify(creds));
-      await phpApiService.saveSettings({
-        whatsapp_api_url: creds.apiUrl,
-        whatsapp_api_key: creds.apiKey,
-        whatsapp_instance_id: creds.instanceId,
-        whatsapp_enabled: creds.enabled
+      await apiCall("settings/save", "POST", {
+        key: "whatsapp_creds",
+        value: JSON.stringify(creds)
       });
       ue.success("WhatsApp settings saved");
     } catch {
       ue.error("Failed to save settings");
     }
-  }, [creds]);
-  const testConnection = reactExports.useCallback(async () => {
+  }
+  async function testConnection() {
     setIsTesting(true);
     setTestResult(null);
     try {
-      await phpApiService.post("communication/whatsapp-test", {
-        apiUrl: creds.apiUrl,
-        apiKey: creds.apiKey,
-        instanceId: creds.instanceId
+      await apiCall("whatsapp/test", "POST", {
+        api_url: creds.apiUrl,
+        api_key: creds.apiKey,
+        instance_id: creds.instanceId
       });
       setTestResult("ok");
-      addNotification("Connection test passed ✓", "success");
+      ue.success("Connection successful");
     } catch {
       setTestResult("fail");
-      addNotification("Connection test failed — check API key", "error");
+      ue.error("Connection failed — check credentials");
     } finally {
       setIsTesting(false);
     }
-  }, [creds, addNotification]);
-  const sendManual = reactExports.useCallback(async () => {
-    if (!manualTo.trim() || !manualMsg.trim()) return;
-    try {
-      await phpApiService.post("communication/send-whatsapp", {
-        to: manualTo.trim(),
-        message: manualMsg.trim(),
-        channel: "whatsapp"
-      });
-      ue.success("Message sent");
-      setManualTo("");
-      setManualMsg("");
-    } catch (err) {
-      ue.error(
-        err instanceof Error ? err.message : "Failed to send message"
-      );
-    }
-  }, [manualTo, manualMsg]);
-  const sendBroadcast = reactExports.useCallback(async () => {
-    if (!bcTemplate.trim()) return;
+  }
+  async function sendBroadcast() {
+    if (!bcMessage.trim()) return;
     setIsSending(true);
     setSendReport(null);
     try {
-      const result = await phpApiService.post(
-        "communication/broadcast",
+      const res = await apiCall(
+        "whatsapp/broadcast",
+        "POST",
         {
-          recipientGroup: bcRecipient,
-          message: bcTemplate,
-          channel: bcChannel
+          recipient_group: bcRecipient,
+          message: bcMessage
         }
       );
-      setSendReport({ sent: result.sent ?? 0, failed: result.failed ?? 0 });
-      ue.success(`Broadcast sent to ${result.sent ?? 0} recipients`);
-      void loadHistory();
-    } catch (err) {
-      ue.error(err instanceof Error ? err.message : "Broadcast failed");
+      const r2 = res;
+      setSendReport({ sent: r2.sent ?? 0, failed: r2.failed ?? 0 });
+      ue.success(`Broadcast sent to ${r2.sent ?? 0} recipients`);
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Broadcast failed");
     } finally {
       setIsSending(false);
     }
-  }, [bcRecipient, bcTemplate, bcChannel, loadHistory]);
-  const saveSchedulerRules = reactExports.useCallback(async () => {
-    setSavingRules(true);
+  }
+  async function markRead(id) {
     try {
-      await phpApiService.post("communication/scheduler/save", { rules });
-      ue.success("Notification rules saved");
+      await apiCall("notifications/mark-read", "POST", { id });
+      setNotifications(
+        (prev) => prev.map((n2) => n2.id === id ? { ...n2, is_read: true } : n2)
+      );
+      setUnreadCount((c2) => Math.max(0, c2 - 1));
     } catch {
-      ue.error("Failed to save rules");
-    } finally {
-      setSavingRules(false);
+      ue.error("Failed to mark as read");
     }
-  }, [rules]);
-  const triggerRule = reactExports.useCallback(async (rule) => {
+  }
+  async function markAllRead() {
     try {
-      await phpApiService.post("communication/scheduler/trigger", {
-        ruleId: rule.id
+      await apiCall("notifications/mark-read", "POST", { all: true });
+      setNotifications((prev) => prev.map((n2) => ({ ...n2, is_read: true })));
+      setUnreadCount(0);
+      ue.success("All notifications marked as read");
+    } catch {
+      ue.error("Failed to mark all as read");
+    }
+  }
+  async function clearAll() {
+    if (!confirm("Clear all notifications?")) return;
+    try {
+      await apiCall("notifications/clear", "POST", {});
+      setNotifications([]);
+      setUnreadCount(0);
+      ue.success("Notifications cleared");
+    } catch {
+      ue.error("Failed to clear");
+    }
+  }
+  async function addScheduled() {
+    if (!newTitle.trim() || !newMessage.trim() || !newTime) {
+      ue.error("Fill all fields");
+      return;
+    }
+    setAddingSched(true);
+    try {
+      await apiCall("notifications/schedule-add", "POST", {
+        title: newTitle,
+        message: newMessage,
+        target_group: newGroup,
+        send_time: newTime,
+        is_enabled: true
       });
-      ue.success(`Triggered: "${rule.event}"`);
-    } catch {
-      ue.error("Failed to trigger rule");
+      ue.success("Notification scheduled");
+      setNewTitle("");
+      setNewMessage("");
+      setNewTime("");
+      await loadScheduled();
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to schedule");
+    } finally {
+      setAddingSched(false);
     }
-  }, []);
-  const toggleRule = reactExports.useCallback((id) => {
-    setRules(
-      (p2) => p2.map((r2) => r2.id === id ? { ...r2, enabled: !r2.enabled } : r2)
-    );
-  }, []);
-  const previewMsg = bcTemplate.replace(/{student_name}/g, "Arjun Sharma").replace(/{class}/g, "Class 5A").replace(/{admNo}/g, "1042").replace(/{amount}/g, "₹2,500").replace(/{date}/g, (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN"));
-  const TABS2 = [
-    { id: "whatsapp", label: "WhatsApp", icon: MessageSquare },
-    { id: "broadcast", label: "Bulk Broadcast", icon: Send },
-    { id: "scheduler", label: "Notification Scheduler", icon: Bell }
-  ];
+  }
+  async function toggleScheduled(id, enabled) {
+    try {
+      await apiCall("notifications/schedule-toggle", "POST", {
+        id,
+        is_enabled: enabled
+      });
+      setScheduled(
+        (prev) => prev.map((s2) => s2.id === id ? { ...s2, is_enabled: enabled } : s2)
+      );
+    } catch {
+      ue.error("Failed to toggle");
+    }
+  }
+  const previewMsg = bcMessage.replace(/{student_name}/g, "Arjun Sharma").replace(/{class}/g, "Class 5A").replace(/{admNo}/g, "1042").replace(/{amount}/g, "₹2,500").replace(/{date}/g, (/* @__PURE__ */ new Date()).toLocaleDateString("en-IN"));
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 bg-background min-h-screen space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Communication" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm mt-0.5", children: "WhatsApp integration, bulk broadcasts, and notification rules" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm mt-0.5", children: "WhatsApp broadcasts, notification bell, and scheduled alerts" })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS2.map((t2) => {
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS$7.map((t2) => {
       const Icon2 = t2.icon;
       return /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "button",
@@ -39403,19 +39417,19 @@ function Communication({ initialTab = "whatsapp" }) {
           className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${tab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(Icon2, { className: "w-4 h-4" }),
-            t2.label
+            t2.label,
+            t2.id === "bell" && unreadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "ml-1 text-xs px-1.5 py-0", children: unreadCount })
           ]
         },
         t2.id
       );
     }) }),
-    tab === "whatsapp" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+    tab === "broadcast" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Settings$1, { className: "w-5 h-5 text-primary" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "API Credentials" })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2", children: "💡 Connect your WhatsApp Business API or use a third-party service like WATI, Interakt, or Gupshup." }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-3", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "API URL" }),
@@ -39470,11 +39484,11 @@ function Communication({ initialTab = "whatsapp" }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-foreground", children: creds.enabled ? "WhatsApp enabled" : "WhatsApp disabled" }),
             testResult === "ok" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "bg-green-500/10 text-green-600 border-green-500/20", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "w-3 h-3 mr-1" }),
-              " Connected"
+              "Connected"
             ] }),
             testResult === "fail" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", className: "text-xs", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(CircleX, { className: "w-3 h-3 mr-1" }),
-              " Failed"
+              "Failed"
             ] })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
@@ -39483,7 +39497,7 @@ function Communication({ initialTab = "whatsapp" }) {
               {
                 variant: "outline",
                 size: "sm",
-                onClick: () => void testConnection(),
+                onClick: testConnection,
                 disabled: isTesting,
                 "data-ocid": "communication.test_connection_button",
                 children: isTesting ? "Testing…" : "Test Connection"
@@ -39493,7 +39507,7 @@ function Communication({ initialTab = "whatsapp" }) {
               Button,
               {
                 size: "sm",
-                onClick: () => void saveCreds(),
+                onClick: saveCreds,
                 "data-ocid": "communication.save_creds_button",
                 children: "Save Settings"
               }
@@ -39501,50 +39515,6 @@ function Communication({ initialTab = "whatsapp" }) {
           ] })
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-3", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Send Manual Message" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "To (Student / Parent / Class)" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Input,
-            {
-              value: manualTo,
-              onChange: (e3) => setManualTo(e3.target.value),
-              placeholder: "e.g. Arjun Sharma, Class 5A, or mobile number",
-              className: "mt-1",
-              "data-ocid": "communication.manual_to_input"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Message" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Textarea,
-            {
-              value: manualMsg,
-              onChange: (e3) => setManualMsg(e3.target.value),
-              placeholder: "Type your message here…",
-              className: "mt-1",
-              rows: 3,
-              "data-ocid": "communication.manual_message_textarea"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            onClick: () => void sendManual(),
-            disabled: !manualTo.trim() || !manualMsg.trim(),
-            "data-ocid": "communication.send_manual_button",
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Send, { className: "w-4 h-4 mr-1.5" }),
-              " Send Message"
-            ]
-          }
-        )
-      ] })
-    ] }),
-    tab === "broadcast" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-4", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Compose Broadcast" }),
@@ -39562,12 +39532,12 @@ function Communication({ initialTab = "whatsapp" }) {
             )
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Message Template" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Message" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               Textarea,
               {
-                value: bcTemplate,
-                onChange: (e3) => setBcTemplate(e3.target.value),
+                value: bcMessage,
+                onChange: (e3) => setBcMessage(e3.target.value),
                 rows: 4,
                 className: "mt-1 font-mono text-xs",
                 "data-ocid": "communication.bc_template_textarea"
@@ -39575,46 +39545,22 @@ function Communication({ initialTab = "whatsapp" }) {
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-1.5 mt-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-muted-foreground", children: "Variables:" }),
-              MESSAGE_VARS.map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              MSG_VARS.map((v2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
                 "button",
                 {
                   type: "button",
                   className: "text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded font-mono hover:bg-primary/20 transition-colors",
-                  onClick: () => setBcTemplate((p2) => `${p2} ${v2}`),
+                  onClick: () => setBcMessage((p2) => `${p2} ${v2}`),
                   children: v2
                 },
                 v2
               ))
             ] })
           ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Channel" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex gap-3 mt-1", children: ["whatsapp", "sms"].map((ch) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "label",
-              {
-                className: "flex items-center gap-2 cursor-pointer",
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    "input",
-                    {
-                      type: "radio",
-                      name: "channel",
-                      value: ch,
-                      checked: bcChannel === ch,
-                      onChange: () => setBcChannel(ch),
-                      "data-ocid": `communication.channel_${ch}`
-                    }
-                  ),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-foreground capitalize", children: ch === "whatsapp" ? "📱 WhatsApp" : "✉️ SMS" })
-                ]
-              },
-              ch
-            )) })
-          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
             {
-              onClick: () => void sendBroadcast(),
+              onClick: sendBroadcast,
               disabled: isSending,
               "data-ocid": "communication.send_broadcast_button",
               children: [
@@ -39643,7 +39589,7 @@ function Communication({ initialTab = "whatsapp" }) {
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-4", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Message Preview" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Showing preview for first 3 recipients:" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Showing preview for sample recipients:" }),
           ["Arjun Sharma", "Pooja Patel", "Rahul Verma"].map((name) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "div",
             {
@@ -39659,129 +39605,218 @@ function Communication({ initialTab = "whatsapp" }) {
             name
           ))
         ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl overflow-hidden", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "px-5 py-4 border-b border-border flex items-center justify-between", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Broadcast History" }),
+      ] })
+    ] }),
+    tab === "bell" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "text-base font-semibold text-foreground", children: [
+          "Notifications",
+          " ",
+          unreadCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { className: "ml-2", children: [
+            unreadCount,
+            " unread"
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(
+            Button,
+            {
+              variant: "outline",
+              size: "sm",
+              onClick: markAllRead,
+              "data-ocid": "communication.mark_all_read_button",
+              children: "Mark All Read"
+            }
+          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
             {
               variant: "ghost",
               size: "sm",
-              onClick: () => void loadHistory(),
-              children: "Refresh"
+              onClick: clearAll,
+              className: "text-destructive hover:text-destructive",
+              "data-ocid": "communication.clear_all_button",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-4 h-4 mr-1" }),
+                "Clear All"
+              ]
             }
           )
-        ] }),
-        historyLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            className: "p-4 space-y-2",
-            "data-ocid": "communication.history.loading_state",
-            children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-12 rounded-lg" }, i))
-          }
-        ) : broadcastHistory.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            className: "py-10 text-center text-muted-foreground",
-            "data-ocid": "communication.history.empty_state",
-            children: "No broadcasts sent yet"
-          }
-        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-border", children: broadcastHistory.map((bc, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: "px-5 py-3 flex items-start justify-between gap-3",
-            "data-ocid": `communication.history.item.${idx + 1}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-medium text-foreground truncate", children: [
-                  bc.recipientGroup,
-                  " · ",
-                  bc.channel
-                ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5 line-clamp-1", children: bc.message }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: bc.sentAt })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-xs text-right shrink-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-green-600 font-medium", children: [
-                  "✓ ",
-                  bc.sentCount
-                ] }),
-                bc.failedCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-destructive ml-2", children: [
-                  "✗ ",
-                  bc.failedCount
-                ] })
-              ] })
-            ]
-          },
-          bc.id
-        )) })
-      ] })
-    ] }),
-    tab === "scheduler" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "Configure automatic notification rules. Toggle each rule on/off or trigger manually." }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
-          {
-            size: "sm",
-            onClick: () => void saveSchedulerRules(),
-            disabled: savingRules,
-            "data-ocid": "communication.save_rules_button",
-            children: savingRules ? "Saving…" : "Save Rules"
-          }
-        )
+        ] })
       ] }),
-      rules.map((rule, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      bellLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(
         "div",
         {
-          className: "bg-card border border-border rounded-xl p-4 flex items-start justify-between gap-4",
-          "data-ocid": `communication.rule.${idx + 1}`,
+          className: "space-y-2",
+          "data-ocid": "communication.bell.loading_state",
+          children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-16 rounded-lg" }, i))
+        }
+      ) : notifications.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "py-16 text-center text-muted-foreground",
+          "data-ocid": "communication.bell.empty_state",
           children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3 min-w-0", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-0.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Switch,
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Bell, { className: "w-12 h-12 mx-auto mb-3 opacity-20" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "No notifications yet." })
+          ]
+        }
+      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: notifications.map((n2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: `bg-card border border-border rounded-xl p-4 flex items-start gap-3 ${!n2.is_read ? "border-l-4 border-l-primary" : ""}`,
+          "data-ocid": `communication.notification.item.${idx + 1}`,
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "p",
                 {
-                  checked: rule.enabled,
-                  onCheckedChange: () => toggleRule(rule.id),
-                  "data-ocid": `communication.rule_toggle.${idx + 1}`
+                  className: `font-medium text-sm ${!n2.is_read ? "text-foreground" : "text-muted-foreground"}`,
+                  children: n2.title
                 }
-              ) }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-foreground text-sm", children: rule.event }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: rule.description }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 mt-1.5 flex-wrap", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-xs", children: rule.channel === "both" ? "📱 WhatsApp + SMS" : rule.channel === "whatsapp" ? "📱 WhatsApp" : "✉️ SMS" }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "outline", className: "text-xs", children: [
-                    "👥 ",
-                    rule.recipient
-                  ] }),
-                  rule.daysBeforeDue !== void 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "outline", className: "text-xs", children: [
-                    rule.daysBeforeDue,
-                    " days before due"
-                  ] })
-                ] })
-              ] })
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: n2.message }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground/60 mt-1", children: n2.created_at })
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            !n2.is_read && /* @__PURE__ */ jsxRuntimeExports.jsx(
               Button,
               {
-                variant: "outline",
+                variant: "ghost",
                 size: "sm",
-                onClick: () => void triggerRule(rule),
-                disabled: !rule.enabled,
-                className: "shrink-0",
-                "data-ocid": `communication.trigger_rule.${idx + 1}`,
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(Zap, { className: "w-3.5 h-3.5 mr-1" }),
-                  "Trigger"
-                ]
+                className: "flex-shrink-0 text-xs",
+                onClick: () => void markRead(n2.id),
+                "data-ocid": `communication.mark_read_button.${idx + 1}`,
+                children: "Mark read"
               }
             )
           ]
         },
-        rule.id
-      ))
+        n2.id
+      )) })
+    ] }),
+    tab === "scheduler" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Schedule New Notification" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Title" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                className: "mt-1",
+                value: newTitle,
+                onChange: (e3) => setNewTitle(e3.target.value),
+                placeholder: "Notification title",
+                "data-ocid": "communication.sched_title_input"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Target Group" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "select",
+              {
+                className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
+                value: newGroup,
+                onChange: (e3) => setNewGroup(e3.target.value),
+                "data-ocid": "communication.sched_group_select",
+                children: RECIPIENT_GROUPS.map((g2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: g2, children: g2 }, g2))
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "md:col-span-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Message" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Textarea,
+              {
+                className: "mt-1",
+                value: newMessage,
+                onChange: (e3) => setNewMessage(e3.target.value),
+                rows: 2,
+                placeholder: "Notification message…",
+                "data-ocid": "communication.sched_message_textarea"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Send Time" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                type: "datetime-local",
+                className: "mt-1",
+                value: newTime,
+                onChange: (e3) => setNewTime(e3.target.value),
+                "data-ocid": "communication.sched_time_input"
+              }
+            )
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
+          {
+            onClick: addScheduled,
+            disabled: addingSched,
+            "data-ocid": "communication.sched_add_button",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Zap, { className: "w-4 h-4 mr-1.5" }),
+              addingSched ? "Saving…" : "Schedule Notification"
+            ]
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground mb-3", children: "Scheduled Notifications" }),
+        schedLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            className: "space-y-2",
+            "data-ocid": "communication.sched.loading_state",
+            children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-16 rounded-lg" }, i))
+          }
+        ) : scheduled.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "py-10 text-center text-muted-foreground",
+            "data-ocid": "communication.sched.empty_state",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Zap, { className: "w-10 h-10 mx-auto mb-2 opacity-20" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "No scheduled notifications yet." })
+            ]
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", children: scheduled.map((s2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-card border border-border rounded-xl p-4 flex items-start justify-between gap-4",
+            "data-ocid": `communication.scheduled.item.${idx + 1}`,
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-sm text-foreground", children: s2.title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: s2.message }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 mt-1.5", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "secondary", className: "text-xs", children: [
+                    "👥 ",
+                    s2.target_group
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "outline", className: "text-xs", children: [
+                    "🕐 ",
+                    s2.send_time
+                  ] })
+                ] })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Switch,
+                {
+                  checked: s2.is_enabled,
+                  onCheckedChange: (v2) => void toggleScheduled(s2.id, v2),
+                  "data-ocid": `communication.sched_toggle.${idx + 1}`
+                }
+              )
+            ]
+          },
+          s2.id
+        )) })
+      ] })
     ] })
   ] });
 }
@@ -53519,10 +53554,10 @@ var Animate = /* @__PURE__ */ function(_PureComponent) {
     var _this;
     _classCallCheck$f(this, Animate2);
     _this = _super.call(this, props, context);
-    var _this$props = _this.props, isActive = _this$props.isActive, attributeName = _this$props.attributeName, from = _this$props.from, to = _this$props.to, steps = _this$props.steps, children = _this$props.children, duration = _this$props.duration;
+    var _this$props = _this.props, isActive2 = _this$props.isActive, attributeName = _this$props.attributeName, from = _this$props.from, to = _this$props.to, steps = _this$props.steps, children = _this$props.children, duration = _this$props.duration;
     _this.handleStyleChange = _this.handleStyleChange.bind(_assertThisInitialized$d(_this));
     _this.changeStyle = _this.changeStyle.bind(_assertThisInitialized$d(_this));
-    if (!isActive || duration <= 0) {
+    if (!isActive2 || duration <= 0) {
       _this.state = {
         style: {}
       };
@@ -53557,9 +53592,9 @@ var Animate = /* @__PURE__ */ function(_PureComponent) {
   _createClass$f(Animate2, [{
     key: "componentDidMount",
     value: function componentDidMount() {
-      var _this$props2 = this.props, isActive = _this$props2.isActive, canBegin = _this$props2.canBegin;
+      var _this$props2 = this.props, isActive2 = _this$props2.isActive, canBegin = _this$props2.canBegin;
       this.mounted = true;
-      if (!isActive || !canBegin) {
+      if (!isActive2 || !canBegin) {
         return;
       }
       this.runAnimation(this.props);
@@ -53567,12 +53602,12 @@ var Animate = /* @__PURE__ */ function(_PureComponent) {
   }, {
     key: "componentDidUpdate",
     value: function componentDidUpdate(prevProps) {
-      var _this$props3 = this.props, isActive = _this$props3.isActive, canBegin = _this$props3.canBegin, attributeName = _this$props3.attributeName, shouldReAnimate = _this$props3.shouldReAnimate, to = _this$props3.to, currentFrom = _this$props3.from;
+      var _this$props3 = this.props, isActive2 = _this$props3.isActive, canBegin = _this$props3.canBegin, attributeName = _this$props3.attributeName, shouldReAnimate = _this$props3.shouldReAnimate, to = _this$props3.to, currentFrom = _this$props3.from;
       var style2 = this.state.style;
       if (!canBegin) {
         return;
       }
-      if (!isActive) {
+      if (!isActive2) {
         var newState = {
           style: attributeName ? _defineProperty$o({}, attributeName, to) : to
         };
@@ -53711,7 +53746,7 @@ var Animate = /* @__PURE__ */ function(_PureComponent) {
       var duration = _this$props4.duration;
       _this$props4.attributeName;
       _this$props4.easing;
-      var isActive = _this$props4.isActive;
+      var isActive2 = _this$props4.isActive;
       _this$props4.steps;
       _this$props4.from;
       _this$props4.to;
@@ -53725,7 +53760,7 @@ var Animate = /* @__PURE__ */ function(_PureComponent) {
       if (typeof children === "function") {
         return children(stateStyle);
       }
-      if (!isActive || count2 === 0 || duration <= 0) {
+      if (!isActive2 || count2 === 0 || duration <= 0) {
         return children;
       }
       var cloneContainer = function cloneContainer2(container) {
@@ -55244,7 +55279,7 @@ function getPropsFromShapeOption(option) {
   return option;
 }
 function Shape(_ref2) {
-  var option = _ref2.option, shapeType = _ref2.shapeType, _ref2$propTransformer = _ref2.propTransformer, propTransformer = _ref2$propTransformer === void 0 ? defaultPropTransformer : _ref2$propTransformer, _ref2$activeClassName = _ref2.activeClassName, activeClassName = _ref2$activeClassName === void 0 ? "recharts-active-shape" : _ref2$activeClassName, isActive = _ref2.isActive, props = _objectWithoutProperties$6(_ref2, _excluded$6);
+  var option = _ref2.option, shapeType = _ref2.shapeType, _ref2$propTransformer = _ref2.propTransformer, propTransformer = _ref2$propTransformer === void 0 ? defaultPropTransformer : _ref2$propTransformer, _ref2$activeClassName = _ref2.activeClassName, activeClassName = _ref2$activeClassName === void 0 ? "recharts-active-shape" : _ref2$activeClassName, isActive2 = _ref2.isActive, props = _objectWithoutProperties$6(_ref2, _excluded$6);
   var shape;
   if (/* @__PURE__ */ reactExports.isValidElement(option)) {
     shape = /* @__PURE__ */ reactExports.cloneElement(option, _objectSpread$f(_objectSpread$f({}, props), getPropsFromShapeOption(option)));
@@ -55263,7 +55298,7 @@ function Shape(_ref2) {
       elementProps
     });
   }
-  if (isActive) {
+  if (isActive2) {
     return /* @__PURE__ */ React$2.createElement(Layer, {
       className: activeClassName
     }, shape);
@@ -55586,9 +55621,9 @@ var Pie = /* @__PURE__ */ function(_PureComponent) {
       var _this$props2 = this.props, activeShape = _this$props2.activeShape, blendStroke = _this$props2.blendStroke, inactiveShapeProp = _this$props2.inactiveShape;
       return sectors.map(function(entry, i) {
         if ((entry === null || entry === void 0 ? void 0 : entry.startAngle) === 0 && (entry === null || entry === void 0 ? void 0 : entry.endAngle) === 0 && sectors.length !== 1) return null;
-        var isActive = _this2.isActiveIndex(i);
+        var isActive2 = _this2.isActiveIndex(i);
         var inactiveShape = inactiveShapeProp && _this2.hasActiveIndex() ? inactiveShapeProp : null;
-        var sectorOptions = isActive ? activeShape : inactiveShape;
+        var sectorOptions = isActive2 ? activeShape : inactiveShape;
         var sectorProps = _objectSpread$e(_objectSpread$e({}, entry), {}, {
           stroke: blendStroke ? entry.fill : entry.stroke,
           tabIndex: -1
@@ -55606,7 +55641,7 @@ var Pie = /* @__PURE__ */ function(_PureComponent) {
           key: "sector-".concat(entry === null || entry === void 0 ? void 0 : entry.startAngle, "-").concat(entry === null || entry === void 0 ? void 0 : entry.endAngle, "-").concat(entry.midAngle, "-").concat(i)
         }), /* @__PURE__ */ React$2.createElement(Shape, _extends$c({
           option: sectorOptions,
-          isActive,
+          isActive: isActive2,
           shapeType: "sector"
         }, sectorProps)));
       });
@@ -57097,10 +57132,10 @@ var Bar = /* @__PURE__ */ function(_PureComponent) {
       var _this$props = this.props, shape = _this$props.shape, dataKey = _this$props.dataKey, activeIndex = _this$props.activeIndex, activeBar = _this$props.activeBar;
       var baseProps = filterProps(this.props, false);
       return data && data.map(function(entry, i) {
-        var isActive = i === activeIndex;
-        var option = isActive ? activeBar : shape;
+        var isActive2 = i === activeIndex;
+        var option = isActive2 ? activeBar : shape;
         var props = _objectSpread$a(_objectSpread$a(_objectSpread$a({}, baseProps), entry), {}, {
-          isActive,
+          isActive: isActive2,
           option,
           index: i,
           dataKey,
@@ -61007,9 +61042,9 @@ function _toPrimitive$1(t2, r2) {
 }
 function Cursor(props) {
   var _element$props$cursor, _defaultProps;
-  var element = props.element, tooltipEventType = props.tooltipEventType, isActive = props.isActive, activeCoordinate = props.activeCoordinate, activePayload = props.activePayload, offset2 = props.offset, activeTooltipIndex = props.activeTooltipIndex, tooltipAxisBandSize = props.tooltipAxisBandSize, layout = props.layout, chartName = props.chartName;
+  var element = props.element, tooltipEventType = props.tooltipEventType, isActive2 = props.isActive, activeCoordinate = props.activeCoordinate, activePayload = props.activePayload, offset2 = props.offset, activeTooltipIndex = props.activeTooltipIndex, tooltipAxisBandSize = props.tooltipAxisBandSize, layout = props.layout, chartName = props.chartName;
   var elementPropsCursor = (_element$props$cursor = element.props.cursor) !== null && _element$props$cursor !== void 0 ? _element$props$cursor : (_defaultProps = element.type.defaultProps) === null || _defaultProps === void 0 ? void 0 : _defaultProps.cursor;
-  if (!element || !elementPropsCursor || !isActive || !activeCoordinate || chartName !== "ScatterChart" && tooltipEventType !== "axis") {
+  if (!element || !elementPropsCursor || !isActive2 || !activeCoordinate || chartName !== "ScatterChart" && tooltipEventType !== "axis") {
     return null;
   }
   var restProps;
@@ -62074,7 +62109,7 @@ var generateCategoricalChart = function generateCategoricalChart2(_ref6) {
         var _element$props$active;
         var _this$state3 = _this.state, isTooltipActive = _this$state3.isTooltipActive, activeCoordinate = _this$state3.activeCoordinate, activePayload = _this$state3.activePayload, offset2 = _this$state3.offset, activeTooltipIndex = _this$state3.activeTooltipIndex, tooltipAxisBandSize = _this$state3.tooltipAxisBandSize;
         var tooltipEventType = _this.getTooltipEventType();
-        var isActive = (_element$props$active = element.props.active) !== null && _element$props$active !== void 0 ? _element$props$active : isTooltipActive;
+        var isActive2 = (_element$props$active = element.props.active) !== null && _element$props$active !== void 0 ? _element$props$active : isTooltipActive;
         var layout = _this.props.layout;
         var key = element.key || "_recharts-cursor";
         return /* @__PURE__ */ React$2.createElement(Cursor, {
@@ -62084,7 +62119,7 @@ var generateCategoricalChart = function generateCategoricalChart2(_ref6) {
           activeTooltipIndex,
           chartName,
           element,
-          isActive,
+          isActive: isActive2,
           layout,
           offset: offset2,
           tooltipAxisBandSize,
@@ -62154,15 +62189,15 @@ var generateCategoricalChart = function generateCategoricalChart2(_ref6) {
           return null;
         }
         var _this$state5 = _this.state, isTooltipActive = _this$state5.isTooltipActive, activeCoordinate = _this$state5.activeCoordinate, activePayload = _this$state5.activePayload, activeLabel = _this$state5.activeLabel, offset2 = _this$state5.offset;
-        var isActive = (_tooltipItem$props$ac = tooltipItem.props.active) !== null && _tooltipItem$props$ac !== void 0 ? _tooltipItem$props$ac : isTooltipActive;
+        var isActive2 = (_tooltipItem$props$ac = tooltipItem.props.active) !== null && _tooltipItem$props$ac !== void 0 ? _tooltipItem$props$ac : isTooltipActive;
         return /* @__PURE__ */ reactExports.cloneElement(tooltipItem, {
           viewBox: _objectSpread(_objectSpread({}, offset2), {}, {
             x: offset2.left,
             y: offset2.top
           }),
-          active: isActive,
+          active: isActive2,
           label: activeLabel,
-          payload: isActive ? activePayload : [],
+          payload: isActive2 ? activePayload : [],
           coordinate: activeCoordinate,
           accessibilityLayer
         });
@@ -62918,34 +62953,6 @@ var PieChart = generateCategoricalChart({
     outerRadius: "80%"
   }
 });
-function useSync() {
-  const noop3 = reactExports.useCallback(async () => {
-  }, []);
-  return {
-    mode: navigator.onLine ? "connected" : "offline",
-    lastSyncTime: null,
-    lastSyncError: null,
-    isSynced: navigator.onLine,
-    isPolling: false,
-    needsAuth: false,
-    serverInfo: null,
-    serverCounts: {},
-    syncedCounts: {},
-    pendingSyncCount: 0,
-    failedSyncCount: 0,
-    triggerSync: noop3
-  };
-}
-const PHP_REMOVED = "PHP API removed — use canisterService instead";
-function getApiIndexUrl() {
-  throw new Error(PHP_REMOVED);
-}
-function getJwt() {
-  return null;
-}
-async function apiUpdatePermissions(_userId, _permissions, _token) {
-  throw new Error(PHP_REMOVED);
-}
 class DataService {
   constructor() {
     __publicField(this, "_ready", true);
@@ -63049,185 +63056,11 @@ function StatCard$3({
     }
   );
 }
-function SyncBar() {
-  const {
-    mode,
-    lastSyncTime,
-    lastSyncError,
-    triggerSync,
-    isPolling,
-    serverInfo,
-    needsAuth,
-    serverCounts,
-    syncedCounts,
-    pendingSyncCount,
-    failedSyncCount
-  } = useSync();
-  const [showTooltip, setShowTooltip] = reactExports.useState(false);
-  const displayCounts = Object.keys(serverCounts).length > 0 ? serverCounts : syncedCounts;
-  const countSummary = (() => {
-    const parts = [];
-    if (displayCounts.students)
-      parts.push(`${displayCounts.students} students`);
-    if (displayCounts.fee_receipts)
-      parts.push(`${displayCounts.fee_receipts} receipts`);
-    if (displayCounts.staff) parts.push(`${displayCounts.staff} staff`);
-    return parts.join(", ");
-  })();
-  const barConfig = {
-    local: {
-      bg: "bg-card border-b border-border",
-      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(Info, { className: "w-4 h-4 text-muted-foreground flex-shrink-0" }),
-      label: "Local Mode — syncing to MySQL server",
-      labelClass: "text-xs font-medium text-muted-foreground",
-      badgeCls: "bg-muted text-muted-foreground border-border",
-      badgeText: "Local"
-    },
-    connected: {
-      bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
-      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-4 h-4 text-emerald-600 flex-shrink-0" }),
-      label: countSummary ? `Synced to MySQL server — ${countSummary} — all devices share this data` : "Synced to MySQL server — all devices see the same data",
-      labelClass: "text-xs font-medium text-emerald-700",
-      badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
-      badgeText: "Synced"
-    },
-    syncing: {
-      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200/60",
-      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 text-amber-600 animate-spin flex-shrink-0" }),
-      label: "Loading data from server…",
-      labelClass: "text-xs font-medium text-amber-700",
-      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
-      badgeText: "Syncing"
-    },
-    offline: {
-      bg: "bg-destructive/5 border-b border-destructive/20",
-      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(WifiOff, { className: "w-4 h-4 text-destructive flex-shrink-0" }),
-      label: "Offline Mode — server unreachable, data saved locally only",
-      labelClass: "text-xs font-medium text-destructive",
-      badgeCls: "bg-destructive/10 text-destructive border-destructive/30",
-      badgeText: "Offline"
-    },
-    auth_error: {
-      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-300/60",
-      icon: /* @__PURE__ */ jsxRuntimeExports.jsx(ShieldAlert, { className: "w-4 h-4 text-amber-600 flex-shrink-0" }),
-      label: "Server auth required — data not syncing. Open Settings to fix",
-      labelClass: "text-xs font-medium text-amber-700",
-      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
-      badgeText: "Auth Required"
-    }
-  };
-  const cfg = barConfig[mode] ?? barConfig.offline;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-    "div",
-    {
-      className: `${cfg.bg} px-6 py-2 flex items-center gap-2`,
-      "data-ocid": "dashboard.sync_status",
-      style: { cursor: "default" },
-      onClick: void 0,
-      onKeyDown: void 0,
-      role: void 0,
-      tabIndex: void 0,
-      title: void 0,
-      children: [
-        cfg.icon,
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: cfg.labelClass, children: cfg.label }),
-        lastSyncTime,
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Badge,
-          {
-            variant: "outline",
-            className: `text-[10px] px-1.5 py-0.5 ml-1 border ${cfg.badgeCls}`,
-            "data-ocid": `dashboard.sync_badge.${mode}`,
-            children: cfg.badgeText
-          }
-        ),
-        pendingSyncCount > 0,
-        failedSyncCount > 0,
-        mode === "offline" && lastSyncError,
-        needsAuth,
-        mode !== "local" && !needsAuth && /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            type: "button",
-            onClick: () => void triggerSync(),
-            disabled: isPolling,
-            className: "ml-1 p-0.5 rounded hover:bg-black/5 transition-colors",
-            title: "Refresh sync",
-            "aria-label": "Refresh sync",
-            "data-ocid": "dashboard.sync_refresh.button",
-            children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-              RefreshCw,
-              {
-                className: `w-3.5 h-3.5 text-muted-foreground ${""}`
-              }
-            )
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: "ml-1 relative",
-            onMouseEnter: () => setShowTooltip(true),
-            onMouseLeave: () => setShowTooltip(false),
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Info, { className: "w-3.5 h-3.5 text-muted-foreground cursor-help" }),
-              showTooltip && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "absolute left-0 top-6 z-50 w-80 bg-card border border-border rounded-lg shadow-elevated p-3 text-xs text-foreground", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-1 flex items-center gap-1.5", children: mode === "connected" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-3.5 h-3.5 text-emerald-600" }),
-                  " ",
-                  "MySQL Server"
-                ] }) : mode === "local" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(Info, { className: "w-3.5 h-3.5 text-muted-foreground" }),
-                  " ",
-                  "Device-Local Storage"
-                ] }) : mode === "auth_error" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(ShieldAlert, { className: "w-3.5 h-3.5 text-amber-600" }),
-                  " Server Auth Required"
-                ] }) : mode === "offline" ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(WifiOff, { className: "w-3.5 h-3.5 text-destructive" }),
-                  " Server Unreachable"
-                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-3.5 h-3.5 animate-spin" }),
-                  " Loading data…"
-                ] }) }),
-                mode === "connected" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-0.5 text-muted-foreground", children: [
-                  serverInfo == null ? void 0 : serverInfo.version,
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1 pt-1 border-t border-border/50", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-foreground mb-0.5", children: "Records on MySQL server:" }),
-                    Object.entries(displayCounts).filter(([, count2]) => count2 > 0).map(([col, count2]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "flex justify-between", children: [
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "capitalize", children: col.replace(/_/g, " ") }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground", children: count2 })
-                    ] }, col))
-                  ] })
-                ] }),
-                mode === "local" && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground leading-relaxed", children: "Data is stored locally and syncing to the MySQL server in the background." }),
-                mode === "auth_error" && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground leading-relaxed", children: [
-                  "Go to ",
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Settings → Data Management" }),
-                  " and click",
-                  " ",
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Authenticate Now" }),
-                  "."
-                ] }),
-                mode === "offline" && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground leading-relaxed", children: "MySQL server is configured but unreachable. Check your internet connection or server status." })
-              ] })
-            ]
-          }
-        ),
-        mode === "local" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Server, { className: "w-3.5 h-3.5" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "hidden sm:inline", children: "MySQL Server" })
-        ] })
-      ]
-    }
-  );
-}
 function Dashboard({ onNavigate }) {
   const { currentSession, currentUser, isReadOnly } = useApp();
   const sessionId = (currentSession == null ? void 0 : currentSession.id) ?? "";
   const [showAttendanceModal, setShowAttendanceModal] = reactExports.useState(false);
-  const { serverCounts, mode: syncMode } = useSync();
-  const serverCountsLoaded = Object.keys(serverCounts).length > 0 || syncMode === "offline" || syncMode === "local" || syncMode === "auth_error";
+  const serverCounts = {};
   const schoolSettings = reactExports.useMemo(
     () => ls.get(
       "school_profile",
@@ -63238,9 +63071,9 @@ function Dashboard({ onNavigate }) {
   const stats = reactExports.useMemo(() => {
     const cachedStudents = dataService.get("students");
     const cachedStaff = dataService.get("staff");
-    const totalStudentsCount = serverCounts.students != null ? serverCounts.students : syncMode === "offline" || syncMode === "local" || syncMode === "auth_error" ? cachedStudents.filter(
+    const totalStudentsCount = serverCounts.students != null ? serverCounts.students : cachedStudents.filter(
       (s2) => s2.sessionId === sessionId && s2.status === "active"
-    ).length : "—";
+    ).length;
     const totalTeachersCount = serverCounts.teachers != null ? serverCounts.teachers : cachedStaff.filter(
       (s2) => {
         var _a2, _b2, _c2, _d2;
@@ -63386,7 +63219,7 @@ function Dashboard({ onNavigate }) {
       today,
       currentMonthName
     };
-  }, [sessionId, serverCounts, syncMode]);
+  }, [sessionId]);
   const recentReceipts = reactExports.useMemo(() => {
     const allReceipts = dataService.get("fee_receipts").length > 0 ? dataService.get("fee_receipts") : ls.get("fee_receipts", []);
     return allReceipts.filter((r2) => r2.sessionId === sessionId && !r2.isDeleted).sort((a2, b2) => b2.date.localeCompare(a2.date)).slice(0, 5);
@@ -63462,7 +63295,6 @@ function Dashboard({ onNavigate }) {
       color: "bg-orange-100 text-orange-700 hover:bg-orange-200"
     }
   ];
-  const showLoadingSkeleton = !serverCountsLoaded;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-col gap-0", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "div",
@@ -63528,15 +63360,14 @@ function Dashboard({ onNavigate }) {
         ]
       }
     ),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(SyncBar, {}),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 lg:p-6 space-y-6", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           StatCard$3,
           {
             label: "Total Students",
-            value: showLoadingSkeleton ? /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-7 w-20" }) : stats.students,
-            sub: showLoadingSkeleton ? "Loading from server…" : "Active enrollments",
+            value: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-7 w-20" }),
+            sub: "Loading from server…",
             icon: Users,
             color: "bg-primary",
             onClick: () => onNavigate("students"),
@@ -63547,7 +63378,7 @@ function Dashboard({ onNavigate }) {
           StatCard$3,
           {
             label: "Total Teachers",
-            value: showLoadingSkeleton ? /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-7 w-16" }) : stats.teachers,
+            value: /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-7 w-16" }),
             sub: `${stats.totalStaff} total staff`,
             icon: GraduationCap,
             color: "bg-purple-600",
@@ -63570,8 +63401,8 @@ function Dashboard({ onNavigate }) {
           StatCard$3,
           {
             label: "Fees Collected Today",
-            value: formatCurrency$2(stats.collectedToday),
-            sub: `Session: ${formatCurrency$2(stats.totalCollectedSession)}`,
+            value: formatCurrency$1(stats.collectedToday),
+            sub: `Session: ${formatCurrency$1(stats.totalCollectedSession)}`,
             icon: IndianRupee,
             color: "bg-emerald-600",
             onClick: () => onNavigate("fees"),
@@ -63600,12 +63431,12 @@ function Dashboard({ onNavigate }) {
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 bg-orange-500", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "w-5 h-5 text-white" }) }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-xs font-medium uppercase tracking-wide", children: "Fees Awaiting" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-2xl font-bold text-foreground font-display mt-0.5", children: formatCurrency$2(stats.grandTotalDue) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-2xl font-bold text-foreground font-display mt-0.5", children: formatCurrency$1(stats.grandTotalDue) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "mt-1.5 space-y-0.5", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-center text-[11px]", children: [
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: "Tuition/Fees" }),
                     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-semibold text-orange-600", children: [
-                      formatCurrency$2(stats.totalDueAmount),
+                      formatCurrency$1(stats.totalDueAmount),
                       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground font-normal ml-1", children: [
                         "(",
                         stats.dueStudents,
@@ -63619,7 +63450,7 @@ function Dashboard({ onNavigate }) {
                       " Transport"
                     ] }),
                     /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-semibold text-blue-600", children: [
-                      formatCurrency$2(stats.totalTransportDue),
+                      formatCurrency$1(stats.totalTransportDue),
                       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground font-normal ml-1", children: [
                         "(",
                         stats.transportDueStudents,
@@ -63893,7 +63724,7 @@ function Dashboard({ onNavigate }) {
                     const d2 = (_a2 = payload[0]) == null ? void 0 : _a2.payload;
                     return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-lg px-3 py-2 shadow-elevated text-xs", children: [
                       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground mb-0.5", children: d2.fullMonth }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-emerald-700 font-bold", children: formatCurrency$2(d2.amount) })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-emerald-700 font-bold", children: formatCurrency$1(d2.amount) })
                     ] });
                   }
                 }
@@ -63923,8 +63754,8 @@ function Dashboard({ onNavigate }) {
             " ",
             "students have pending dues · Total outstanding:",
             " ",
-            formatCurrency$2(stats.grandTotalDue),
-            stats.totalTransportDue > 0 && ` (incl. ${formatCurrency$2(stats.totalTransportDue)} transport)`
+            formatCurrency$1(stats.grandTotalDue),
+            stats.totalTransportDue > 0 && ` (incl. ${formatCurrency$1(stats.totalTransportDue)} transport)`
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -66468,14 +66299,14 @@ function AdmitCards() {
     )
   ] });
 }
-const DEFAULT_SETTINGS$2 = {
+const DEFAULT_SETTINGS$1 = {
   appKey: "8d786da0-d381-4604-80e6-7b5f449ed801",
   authKey: "XFnyEeW9v8xBCLVHEbVLUxPjvuT7wFfzfu27X5qz2scMuAoXom",
   enabled: true
 };
 const WA_ENDPOINT = "https://wacoder.in/api/whatsapp-web/send-message";
 function getWhatsAppSettings() {
-  return ls.get("whatsapp_settings", DEFAULT_SETTINGS$2);
+  return ls.get("whatsapp_settings", DEFAULT_SETTINGS$1);
 }
 function saveWhatsAppSettings(settings) {
   ls.set("whatsapp_settings", settings);
@@ -68644,7 +68475,7 @@ function ExamResults() {
     setGroups((prev) => prev.filter((g2) => g2.id !== id));
   };
   const examNames = [...new Set(groups.map((g2) => g2.examName))];
-  const classKeys = CLASSES$1.flatMap(
+  const classKeys = CLASSES$2.flatMap(
     (c2) => SECTIONS.slice(0, 3).map((s2) => `Class ${c2}${s2}`)
   );
   const filteredGroups = groups.filter((g2) => {
@@ -69111,7 +68942,7 @@ function formatDate(dateStr) {
     year: "numeric"
   });
 }
-function exportCSV$2(tables, examName) {
+function exportCSV(tables, examName) {
   if (tables.length === 0) return;
   const allDates = [
     ...new Set(tables.flatMap((t2) => t2.rows.map((r2) => r2.date)))
@@ -69220,7 +69051,7 @@ function CombinedView({
           {
             size: "sm",
             variant: "outline",
-            onClick: () => exportCSV$2(tables, examName),
+            onClick: () => exportCSV(tables, examName),
             "data-ocid": "exam-export-csv",
             children: "Export CSV"
           }
@@ -69347,7 +69178,7 @@ function ExamTimetableMaker() {
     }).finally(() => setLoading(false));
   }, []);
   const examDates = getExamDates(startDate, endDate);
-  const allClassKeys = CLASSES$1.flatMap(
+  const allClassKeys = CLASSES$2.flatMap(
     (c2) => SECTIONS.slice(0, 3).map((s2) => `Class ${c2}${s2}`)
   );
   const toggleClass = (key) => {
@@ -69672,7 +69503,7 @@ function ExamTimetableMaker() {
               {
                 size: "sm",
                 variant: "outline",
-                onClick: () => exportCSV$2(entry.tables, entry.examName),
+                onClick: () => exportCSV(entry.tables, entry.examName),
                 children: "CSV"
               }
             ),
@@ -70006,7 +69837,7 @@ function CreateExamDialog({
                   "data-ocid": "online_tests.class_select",
                   children: [
                     /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select class" }),
-                    CLASSES$1.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
+                    CLASSES$2.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
                   ]
                 }
               )
@@ -71384,7 +71215,7 @@ function TeacherTimetable() {
       return s2.designation === "Teacher" || (((_a2 = s2.subjects) == null ? void 0 : _a2.length) ?? 0) > 0;
     }
   );
-  const classSections = CLASSES$1.flatMap(
+  const classSections = CLASSES$2.flatMap(
     (c2) => SECTIONS.slice(0, 3).map((s2) => `Class ${c2}${s2}`)
   );
   const loadConfigs = reactExports.useCallback(async () => {
@@ -71839,7 +71670,7 @@ function TeacherTimetable() {
     ] })
   ] });
 }
-const TABS$4 = [
+const TABS$6 = [
   { id: "timetable", label: "Exam Timetable", icon: CalendarDays },
   { id: "teacher", label: "Teacher Timetable", icon: UserCheck },
   { id: "results", label: "Exam Results", icon: BookOpen },
@@ -71861,7 +71692,7 @@ function Examinations({ initialTab }) {
       {
         className: "flex gap-1 bg-muted/50 rounded-xl p-1 flex-wrap",
         role: "tablist",
-        children: TABS$4.map((tab) => {
+        children: TABS$6.map((tab) => {
           const Icon2 = tab.icon;
           const active = activeTab === tab.id;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -71910,15 +71741,15 @@ function Examinations({ initialTab }) {
   ] });
 }
 const DEFAULT_HEADS = [
-  { id: "h0", name: "Salary", type: "expense", monthlyBudget: 0 },
-  { id: "h1", name: "Utilities", type: "expense", monthlyBudget: 0 },
-  { id: "h2", name: "Maintenance", type: "expense", monthlyBudget: 0 },
-  { id: "h3", name: "Stationery", type: "expense", monthlyBudget: 0 },
-  { id: "h4", name: "Food / Canteen", type: "expense", monthlyBudget: 0 },
-  { id: "h5", name: "Transport", type: "expense", monthlyBudget: 0 },
-  { id: "h6", name: "Events", type: "expense", monthlyBudget: 0 },
-  { id: "h7", name: "Fees Income", type: "income", monthlyBudget: 0 },
-  { id: "h8", name: "Other Income", type: "income", monthlyBudget: 0 }
+  { id: "h0", name: "Salary", type: "expense" },
+  { id: "h1", name: "Utilities", type: "expense" },
+  { id: "h2", name: "Maintenance", type: "expense" },
+  { id: "h3", name: "Stationery", type: "expense" },
+  { id: "h4", name: "Food / Canteen", type: "expense" },
+  { id: "h5", name: "Transport", type: "expense" },
+  { id: "h6", name: "Events", type: "expense" },
+  { id: "h7", name: "Fees Income", type: "income" },
+  { id: "h8", name: "Other Income", type: "income" }
 ];
 function downloadCSV$1(filename, rows) {
   const csv = rows.map((r2) => r2.map((c2) => `"${String(c2).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -71947,7 +71778,7 @@ function SimpleBarChart({
                 height: `${d2.income / max2 * 100}%`,
                 backgroundColor: "oklch(0.7 0.16 142)"
               },
-              title: `Income: ${formatCurrency$2(d2.income)}`
+              title: `Income: ${formatCurrency$1(d2.income)}`
             }
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -71958,7 +71789,7 @@ function SimpleBarChart({
                 height: `${d2.expense / max2 * 100}%`,
                 backgroundColor: "oklch(0.56 0.22 25)"
               },
-              title: `Expense: ${formatCurrency$2(d2.expense)}`
+              title: `Expense: ${formatCurrency$1(d2.expense)}`
             }
           )
         ] }),
@@ -71968,20 +71799,18 @@ function SimpleBarChart({
     d2.label
   )) });
 }
-const EMPTY_ENTRY = {
-  headName: "",
-  amount: "",
-  date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
-  description: "",
-  type: "expense",
-  paymentMode: "Cash",
-  voucherNo: ""
-};
+const TABS$5 = [
+  { id: "expenses", label: "Expenses" },
+  { id: "income", label: "Income" },
+  { id: "heads", label: "Heads" },
+  { id: "report", label: "Reports" }
+];
 function Expenses() {
-  const { getData: getData2, saveData, updateData, deleteData, currentSession } = useApp();
-  const allExpenses = getData2("expenses");
-  const rawHeads = getData2("expense_heads");
+  const { currentSession } = useApp();
   const sessionId = (currentSession == null ? void 0 : currentSession.id) ?? "";
+  const [expenses, setExpenses] = reactExports.useState([]);
+  const [heads, setHeads] = reactExports.useState(DEFAULT_HEADS);
+  const [loading, setLoading] = reactExports.useState(true);
   const [activeTab, setActiveTab] = reactExports.useState("expenses");
   const [dialogOpen, setDialogOpen] = reactExports.useState(false);
   const [dialogType, setDialogType] = reactExports.useState("expense");
@@ -71996,16 +71825,32 @@ function Expenses() {
     type: "expense",
     monthlyBudget: ""
   });
-  const heads = reactExports.useMemo(() => {
-    if (rawHeads.length > 0) return rawHeads;
-    return DEFAULT_HEADS;
-  }, [rawHeads]);
-  const expenses = reactExports.useMemo(
-    () => allExpenses.filter(
-      (e3) => !sessionId || e3.sessionId === sessionId || !e3.sessionId
-    ),
-    [allExpenses, sessionId]
-  );
+  const [entryForm, setEntryForm] = reactExports.useState({
+    headName: "",
+    amount: "",
+    date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+    description: "",
+    type: "expense",
+    paymentMode: "Cash"
+  });
+  const [saving, setSaving] = reactExports.useState(false);
+  const loadAll = reactExports.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiCall(
+        "expenses/list"
+      );
+      const rows = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : [];
+      setExpenses(rows);
+    } catch {
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
   const expenseList = reactExports.useMemo(
     () => expenses.filter((e3) => e3.type === "expense"),
     [expenses]
@@ -72037,14 +71882,13 @@ function Expenses() {
   const net = totalIncome - totalExpense;
   const monthlyData = reactExports.useMemo(
     () => MONTHS$4.map((m2) => {
-      const mShort = m2.slice(0, 3);
+      const ms = m2.slice(0, 3);
       const mExpenses = expenses.filter((e3) => {
         if (!e3.date) return false;
-        const d2 = new Date(e3.date);
-        return d2.toLocaleString("en-US", { month: "short" }) === mShort;
+        return new Date(e3.date).toLocaleString("en-US", { month: "short" }) === ms;
       });
       return {
-        label: mShort,
+        label: ms,
         income: mExpenses.filter((e3) => e3.type === "income").reduce((s2, e3) => s2 + e3.amount, 0),
         expense: mExpenses.filter((e3) => e3.type === "expense").reduce((s2, e3) => s2 + e3.amount, 0)
       };
@@ -72061,59 +71905,17 @@ function Expenses() {
     }
     return Object.entries(map2).map(([name, v2]) => ({ name, ...v2 })).sort((a2, b2) => b2.expense - a2.expense);
   }, [expenses]);
-  const [entryForm, setEntryForm] = reactExports.useState(EMPTY_ENTRY);
-  const setField = reactExports.useCallback(
-    (k2, v2) => setEntryForm((f2) => ({ ...f2, [k2]: v2 })),
-    []
-  );
-  const handleHeadNameChange = reactExports.useCallback(
-    (e3) => setField("headName", e3.target.value),
-    [setField]
-  );
-  const handleAmountChange = reactExports.useCallback(
-    (e3) => setField(
-      "amount",
-      e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-    ),
-    [setField]
-  );
-  const handleDateChange = reactExports.useCallback(
-    (e3) => setField("date", e3.target.value),
-    [setField]
-  );
-  const handlePaymentModeChange = reactExports.useCallback(
-    (e3) => setField("paymentMode", e3.target.value),
-    [setField]
-  );
-  const handleDescriptionChange = reactExports.useCallback(
-    (e3) => setField("description", e3.target.value),
-    [setField]
-  );
-  const handleVoucherChange = reactExports.useCallback(
-    (e3) => setField("voucherNo", e3.target.value),
-    [setField]
-  );
-  const handleHeadFormNameChange = reactExports.useCallback(
-    (e3) => setHeadForm((f2) => ({ ...f2, name: e3.target.value })),
-    []
-  );
-  const handleHeadFormBudgetChange = reactExports.useCallback(
-    (e3) => setHeadForm((f2) => ({
-      ...f2,
-      monthlyBudget: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-    })),
-    []
-  );
-  const handleBudgetChange = reactExports.useCallback(
-    (e3) => setBudget(
-      e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-    ),
-    []
-  );
   const openAdd = (type) => {
     setDialogType(type);
     setEditItem(null);
-    setEntryForm({ ...EMPTY_ENTRY, type });
+    setEntryForm({
+      headName: "",
+      amount: "",
+      date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0],
+      description: "",
+      type,
+      paymentMode: "Cash"
+    });
     setDialogOpen(true);
   };
   const openEdit = (type, item) => {
@@ -72125,13 +71927,13 @@ function Expenses() {
       date: item.date,
       description: item.description ?? "",
       type: item.type,
-      paymentMode: item.paymentMode ?? "Cash",
-      voucherNo: ""
+      paymentMode: item.paymentMode ?? "Cash"
     });
     setDialogOpen(true);
   };
   const handleSave = async () => {
     if (!entryForm.headName || !entryForm.amount || !entryForm.date) return;
+    setSaving(true);
     const record = {
       date: entryForm.date,
       description: entryForm.description,
@@ -72141,18 +71943,46 @@ function Expenses() {
       paymentMode: entryForm.paymentMode,
       sessionId
     };
-    if (editItem) {
-      await updateData("expenses", editItem.id, record);
-    } else {
-      record.id = generateId$1();
-      await saveData("expenses", record);
+    try {
+      if (editItem) {
+        await apiCall("expenses/update", "POST", {
+          ...record,
+          id: editItem.id
+        });
+        setExpenses(
+          (prev) => prev.map((e3) => e3.id === editItem.id ? { ...e3, ...record } : e3)
+        );
+        ue.success("Updated");
+      } else {
+        const res = await apiCall(
+          "expenses/add",
+          "POST",
+          record
+        );
+        const newE = {
+          ...record,
+          id: (res == null ? void 0 : res.id) ?? `exp_${Date.now()}`
+        };
+        setExpenses((prev) => [newE, ...prev]);
+        ue.success("Added");
+      }
+      setDialogOpen(false);
+      setEditItem(null);
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Save failed");
+    } finally {
+      setSaving(false);
     }
-    setDialogOpen(false);
-    setEditItem(null);
   };
   const handleDelete = async (id) => {
     if (!confirm("Delete this entry?")) return;
-    await deleteData("expenses", id);
+    try {
+      await apiCall("expenses/delete", "POST", { id });
+      setExpenses((prev) => prev.filter((e3) => e3.id !== id));
+      ue.success("Deleted");
+    } catch {
+      ue.error("Delete failed");
+    }
   };
   const handleSaveHead = async () => {
     if (!headForm.name.trim()) return;
@@ -72161,22 +71991,30 @@ function Expenses() {
       type: headForm.type,
       monthlyBudget: Number(headForm.monthlyBudget) || 0
     };
-    if (editHeadId) {
-      await updateData("expense_heads", editHeadId, {
-        id: editHeadId,
-        ...data
-      });
-    } else {
-      await saveData("expense_heads", {
-        id: generateId$1(),
-        ...data
-      });
+    try {
+      if (editHeadId) {
+        await apiCall("settings/save", "POST", {
+          key: `expense_head_${editHeadId}`,
+          value: JSON.stringify({ ...data, id: editHeadId })
+        });
+        setHeads(
+          (prev) => prev.map((h2) => h2.id === editHeadId ? { ...h2, ...data } : h2)
+        );
+        ue.success("Head updated");
+      } else {
+        const id = `h_${Date.now()}`;
+        await apiCall("settings/save", "POST", {
+          key: `expense_head_${id}`,
+          value: JSON.stringify({ ...data, id })
+        });
+        setHeads((prev) => [...prev, { ...data, id }]);
+        ue.success("Head added");
+      }
+      setShowHeadModal(false);
+      setEditHeadId(null);
+    } catch {
+      ue.error("Failed to save head");
     }
-    setShowHeadModal(false);
-    setEditHeadId(null);
-  };
-  const handleDeleteHead = async (id) => {
-    await deleteData("expense_heads", id);
   };
   function EntryList({
     list,
@@ -72199,8 +72037,8 @@ function Expenses() {
     ) : list.map((e3, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "div",
       {
-        className: "flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors",
         "data-ocid": `expenses.${type}_item.${i + 1}`,
+        className: "flex items-center justify-between px-3 py-2.5 rounded-lg border border-border bg-card hover:bg-muted/30 transition-colors",
         children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-medium text-foreground truncate", children: e3.description || e3.category }),
@@ -72219,7 +72057,7 @@ function Expenses() {
                 className: `font-mono font-semibold text-sm ${type === "income" ? "text-foreground" : "text-destructive"}`,
                 children: [
                   type === "income" ? "+" : "-",
-                  formatCurrency$2(e3.amount)
+                  formatCurrency$1(e3.amount)
                 ]
               }
             ),
@@ -72240,7 +72078,7 @@ function Expenses() {
                 size: "icon",
                 variant: "ghost",
                 className: "h-7 w-7 text-destructive",
-                onClick: () => handleDelete(e3.id),
+                onClick: () => void handleDelete(e3.id),
                 "data-ocid": `expenses.delete_button.${i + 1}`,
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
               }
@@ -72251,12 +72089,6 @@ function Expenses() {
       e3.id
     )) });
   }
-  const TABS2 = [
-    { id: "expenses", label: "Expenses" },
-    { id: "income", label: "Income" },
-    { id: "heads", label: "Heads" },
-    { id: "report", label: "Reports" }
-  ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 bg-background min-h-screen space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Expenses & Income" }),
@@ -72265,12 +72097,12 @@ function Expenses() {
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-3 gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-4 pb-3 text-center", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(TrendingUp, { className: "w-4 h-4 mx-auto mb-1 text-foreground opacity-60" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xl font-bold font-mono text-foreground", children: formatCurrency$2(totalIncome) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xl font-bold font-mono text-foreground", children: formatCurrency$1(totalIncome) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Total Income" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-4 pb-3 text-center", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(TrendingDown, { className: "w-4 h-4 mx-auto mb-1 text-destructive" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xl font-bold font-mono text-destructive", children: formatCurrency$2(totalExpense) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xl font-bold font-mono text-destructive", children: formatCurrency$1(totalExpense) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Total Expense" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72282,7 +72114,7 @@ function Expenses() {
               "p",
               {
                 className: `text-xl font-bold font-mono ${net >= 0 ? "text-primary" : "text-destructive"}`,
-                children: formatCurrency$2(Math.abs(net))
+                children: formatCurrency$1(Math.abs(net))
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: net >= 0 ? "Surplus" : "Deficit" })
@@ -72290,18 +72122,19 @@ function Expenses() {
         }
       )
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS2.map((t2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS$5.map((t2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
         type: "button",
         onClick: () => setActiveTab(t2.id),
-        className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
         "data-ocid": `expenses.${t2.id}_tab`,
+        className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
         children: t2.label
       },
       t2.id
     )) }),
-    activeTab === "expenses" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+    loading && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", "data-ocid": "expenses.loading_state", children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-12 rounded-lg" }, i)) }),
+    !loading && activeTab === "expenses" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 flex-wrap", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Input,
@@ -72333,7 +72166,7 @@ function Expenses() {
             "data-ocid": "expenses.add_button",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(CirclePlus, { className: "w-4 h-4 mr-1" }),
-              "Add Expense"
+              " Add Expense"
             ]
           }
         ),
@@ -72346,7 +72179,7 @@ function Expenses() {
               ["Date", "Category", "Description", "Amount", "Mode"],
               ...filteredExpenses.map((e3) => [
                 e3.date,
-                e3.category,
+                e3.category ?? "",
                 e3.description ?? "",
                 String(e3.amount),
                 e3.paymentMode ?? ""
@@ -72355,14 +72188,14 @@ function Expenses() {
             "data-ocid": "expenses.export_button",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-1" }),
-              "Export"
+              " Export"
             ]
           }
         )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(EntryList, { list: filteredExpenses, type: "expense" })
     ] }),
-    activeTab === "income" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+    !loading && activeTab === "income" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 flex-wrap", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Input,
@@ -72381,7 +72214,7 @@ function Expenses() {
             "data-ocid": "income.add_button",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(CirclePlus, { className: "w-4 h-4 mr-1" }),
-              "Add Income"
+              " Add Income"
             ]
           }
         ),
@@ -72394,7 +72227,7 @@ function Expenses() {
               ["Date", "Category", "Description", "Amount", "Mode"],
               ...filteredIncome.map((e3) => [
                 e3.date,
-                e3.category,
+                e3.category ?? "",
                 e3.description ?? "",
                 String(e3.amount),
                 e3.paymentMode ?? ""
@@ -72403,14 +72236,14 @@ function Expenses() {
             "data-ocid": "income.export_button",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-1" }),
-              "Export"
+              " Export"
             ]
           }
         )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(EntryList, { list: filteredIncome, type: "income" })
     ] }),
-    activeTab === "heads" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+    !loading && activeTab === "heads" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground", children: "Expense / Income Heads" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72427,14 +72260,7 @@ function Expenses() {
           }
         )
       ] }),
-      heads.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-        "p",
-        {
-          className: "text-muted-foreground text-sm py-8 text-center",
-          "data-ocid": "expenses.heads_empty_state",
-          children: "No heads yet."
-        }
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-muted/50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: ["Head Name", "Type", "Monthly Budget", "Actions"].map(
           (h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
             "th",
@@ -72459,7 +72285,7 @@ function Expenses() {
                   children: h2.type
                 }
               ) }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: h2.monthlyBudget > 0 ? formatCurrency$2(h2.monthlyBudget) : "—" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: h2.monthlyBudget && h2.monthlyBudget > 0 ? formatCurrency$1(h2.monthlyBudget) : "—" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
                   Button,
@@ -72484,7 +72310,16 @@ function Expenses() {
                   {
                     variant: "destructive",
                     size: "sm",
-                    onClick: () => handleDeleteHead(h2.id),
+                    onClick: async () => {
+                      await apiCall("settings/save", "POST", {
+                        key: `expense_head_${h2.id}`,
+                        value: ""
+                      });
+                      setHeads(
+                        (prev) => prev.filter((x2) => x2.id !== h2.id)
+                      );
+                      ue.success("Deleted");
+                    },
                     "data-ocid": `expenses.delete_head_button.${idx + 1}`,
                     children: "Delete"
                   }
@@ -72496,11 +72331,11 @@ function Expenses() {
         )) })
       ] }) })
     ] }),
-    activeTab === "report" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+    !loading && activeTab === "report" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-sm font-semibold flex items-center gap-2", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(ChartNoAxesColumn, { className: "w-4 h-4" }),
-          "Monthly Income vs Expense"
+          " Monthly Income vs Expense"
         ] }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-4 text-xs mb-2", children: [
@@ -72512,6 +72347,7 @@ function Expenses() {
                   style: { backgroundColor: "oklch(0.7 0.16 142)" }
                 }
               ),
+              " ",
               "Income"
             ] }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "flex items-center gap-1", children: [
@@ -72522,6 +72358,7 @@ function Expenses() {
                   style: { backgroundColor: "oklch(0.56 0.22 25)" }
                 }
               ),
+              " ",
               "Expense"
             ] })
           ] }),
@@ -72538,11 +72375,11 @@ function Expenses() {
               /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-32 truncate font-medium text-foreground", children: h2.name }),
               h2.income > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-foreground font-mono", children: [
                 "+",
-                formatCurrency$2(h2.income)
+                formatCurrency$1(h2.income)
               ] }),
               h2.expense > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-destructive font-mono", children: [
                 "-",
-                formatCurrency$2(h2.expense)
+                formatCurrency$1(h2.expense)
               ] })
             ]
           },
@@ -72560,7 +72397,9 @@ function Expenses() {
                 type: "text",
                 inputMode: "decimal",
                 value: budget,
-                onChange: handleBudgetChange,
+                onChange: (e3) => setBudget(
+                  e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
+                ),
                 className: "w-36",
                 "data-ocid": "expenses.budget_input"
               }
@@ -72581,11 +72420,11 @@ function Expenses() {
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between text-xs text-muted-foreground mb-1", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
                   "Spent: ",
-                  formatCurrency$2(thisMonthExpense)
+                  formatCurrency$1(thisMonthExpense)
                 ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
                   "Budget: ",
-                  formatCurrency$2(budgetNum)
+                  formatCurrency$1(budgetNum)
                 ] })
               ] }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "h-3 bg-muted rounded-full overflow-hidden", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -72622,7 +72461,7 @@ function Expenses() {
               {
                 className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
                 value: entryForm.headName,
-                onChange: handleHeadNameChange,
+                onChange: (e3) => setEntryForm((f2) => ({ ...f2, headName: e3.target.value })),
                 "data-ocid": "expenses.form_head_select",
                 children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "— Select Head —" }),
@@ -72639,7 +72478,10 @@ function Expenses() {
                 type: "text",
                 inputMode: "decimal",
                 value: entryForm.amount,
-                onChange: handleAmountChange,
+                onChange: (e3) => setEntryForm((f2) => ({
+                  ...f2,
+                  amount: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
+                })),
                 placeholder: "0.00",
                 className: "mt-1",
                 "data-ocid": "expenses.form_amount_input"
@@ -72653,7 +72495,7 @@ function Expenses() {
               {
                 type: "date",
                 value: entryForm.date,
-                onChange: handleDateChange,
+                onChange: (e3) => setEntryForm((f2) => ({ ...f2, date: e3.target.value })),
                 className: "mt-1"
               }
             )
@@ -72665,20 +72507,8 @@ function Expenses() {
               {
                 className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
                 value: entryForm.paymentMode,
-                onChange: handlePaymentModeChange,
+                onChange: (e3) => setEntryForm((f2) => ({ ...f2, paymentMode: e3.target.value })),
                 children: ["Cash", "Cheque", "Online"].map((m2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: m2, children: m2 }, m2))
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Voucher No." }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Input,
-              {
-                value: entryForm.voucherNo,
-                onChange: handleVoucherChange,
-                placeholder: "e.g. VCH-001",
-                className: "mt-1"
               }
             )
           ] }),
@@ -72688,7 +72518,7 @@ function Expenses() {
               Input,
               {
                 value: entryForm.description,
-                onChange: handleDescriptionChange,
+                onChange: (e3) => setEntryForm((f2) => ({ ...f2, description: e3.target.value })),
                 placeholder: "Details about this entry",
                 className: "mt-1",
                 "data-ocid": "expenses.form_description_input"
@@ -72709,12 +72539,16 @@ function Expenses() {
               children: "Cancel"
             }
           ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
             {
-              onClick: handleSave,
+              onClick: () => void handleSave(),
+              disabled: saving,
               "data-ocid": "expenses.form_submit_button",
-              children: "Save"
+              children: [
+                saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                "Save"
+              ]
             }
           )
         ] })
@@ -72744,7 +72578,7 @@ function Expenses() {
             Input,
             {
               value: headForm.name,
-              onChange: handleHeadFormNameChange,
+              onChange: (e3) => setHeadForm((f2) => ({ ...f2, name: e3.target.value })),
               placeholder: "e.g. Salary",
               className: "mt-1",
               "data-ocid": "expenses.head_name_input"
@@ -72777,7 +72611,10 @@ function Expenses() {
               type: "text",
               inputMode: "decimal",
               value: headForm.monthlyBudget,
-              onChange: handleHeadFormBudgetChange,
+              onChange: (e3) => setHeadForm((f2) => ({
+                ...f2,
+                monthlyBudget: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
+              })),
               placeholder: "0 = no budget",
               className: "mt-1"
             }
@@ -72787,7 +72624,7 @@ function Expenses() {
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             Button,
             {
-              onClick: handleSaveHead,
+              onClick: () => void handleSaveHead(),
               "data-ocid": "expenses.head_save_button",
               children: "Save"
             }
@@ -73512,7 +73349,7 @@ function CollectFees() {
       const savedR = { ...receipt, receiptNo: savedNo };
       setSavedReceipt(savedR);
       addNotification(
-        `💰 Fee receipt saved: ${formatCurrency$2(receiptAmt)} for ${selectedStudent.fullName}`,
+        `💰 Fee receipt saved: ${formatCurrency$1(receiptAmt)} for ${selectedStudent.fullName}`,
         "success"
       );
       setPrintDone(false);
@@ -74573,7 +74410,7 @@ function toStudent$2(r2) {
     sessionId: r2.sessionId ?? ""
   };
 }
-const CLASSES = [
+const CLASSES$1 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -74790,7 +74627,7 @@ function DueFees() {
             "data-ocid": "due-fees-class-filter",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "All Classes" }),
-              CLASSES.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
+              CLASSES$1.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
             ]
           }
         )
@@ -74837,7 +74674,7 @@ function DueFees() {
             dueRows.length,
             " student(s) with pending fees · Grand Total:",
             " ",
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-red-600", children: formatCurrency$2(grandTotal) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-red-600", children: formatCurrency$1(grandTotal) })
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 flex-wrap", children: [
@@ -74920,7 +74757,7 @@ function DueFees() {
                   row.student.section
                 ] }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-xs", children: row.dueMonths.map((m2) => m2.slice(0, 3)).join(", ") }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-red-600", children: formatCurrency$2(row.dueAmount) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-red-600", children: formatCurrency$1(row.dueAmount) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
                   "button",
                   {
@@ -74938,7 +74775,7 @@ function DueFees() {
           )),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "border-t-2 border-border bg-muted/30 font-bold", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { colSpan: 5, className: "px-3 py-2 text-right", children: "Grand Total" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right text-red-600", children: formatCurrency$2(grandTotal) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right text-red-600", children: formatCurrency$1(grandTotal) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", {})
           ] })
         ] })
@@ -75113,7 +74950,7 @@ function FeeAccounts() {
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gradient-to-r from-primary/10 to-primary/5 border border-primary/20 rounded-xl p-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mb-1", children: "Total Fees Received (Current Session)" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-2xl font-bold text-primary", children: isLoading ? "Loading…" : formatCurrency$2(totalReceipts) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-2xl font-bold text-primary", children: isLoading ? "Loading…" : formatCurrency$1(totalReceipts) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground mt-1", children: [
         receipts.length,
         " receipt(s) in this session"
@@ -75150,7 +74987,7 @@ function FeeAccounts() {
               Tooltip,
               {
                 formatter: (value) => [
-                  formatCurrency$2(value),
+                  formatCurrency$1(value),
                   "Collected"
                 ],
                 contentStyle: {
@@ -75310,7 +75147,7 @@ function FeeAccounts() {
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: idx + 1 }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium text-foreground", children: row.name }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-semibold text-primary", children: formatCurrency$2(row.total) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-semibold text-primary", children: formatCurrency$1(row.total) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell", children: grandTotal > 0 ? `${(row.total / grandTotal * 100).toFixed(1)}%` : "—" })
               ]
             },
@@ -75319,13 +75156,13 @@ function FeeAccounts() {
           otherChargesTotal > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "border-t border-border hover:bg-muted/20", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: headingRows.length + 1 }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium text-foreground", children: "Other Charges" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-semibold text-primary", children: formatCurrency$2(otherChargesTotal) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-semibold text-primary", children: formatCurrency$1(otherChargesTotal) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right text-muted-foreground text-xs hidden md:table-cell", children: grandTotal > 0 ? `${(otherChargesTotal / grandTotal * 100).toFixed(1)}%` : "—" })
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "border-t-2 border-border bg-muted/30", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-bold text-foreground", children: "Grand Total" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-bold text-foreground text-base", children: formatCurrency$2(grandTotal) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-right font-bold text-foreground text-base", children: formatCurrency$1(grandTotal) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "hidden md:table-cell" })
           ] })
         ] })
@@ -75403,7 +75240,7 @@ function FeeHeadingPage() {
   );
   const [accountName, setAccountName] = reactExports.useState("Main Account");
   const [displayOrder, setDisplayOrder] = reactExports.useState("1");
-  const [isActive, setIsActive] = reactExports.useState(true);
+  const [isActive2, setIsActive] = reactExports.useState(true);
   const [selectedMonths, setSelectedMonths] = reactExports.useState([...MONTHS$3]);
   const [selectedClasses, setSelectedClasses] = reactExports.useState([]);
   const [saving, setSaving] = reactExports.useState(false);
@@ -75425,9 +75262,9 @@ function FeeHeadingPage() {
     void fetchHeadings();
     phpApiService.getClasses().then((cls) => {
       setClasses(
-        cls.map((c2) => c2.className).sort((a2, b2) => CLASS_ORDER$4.indexOf(a2) - CLASS_ORDER$4.indexOf(b2))
+        cls.map((c2) => c2.className).sort((a2, b2) => CLASS_ORDER$5.indexOf(a2) - CLASS_ORDER$5.indexOf(b2))
       );
-    }).catch(() => setClasses(CLASS_ORDER$4));
+    }).catch(() => setClasses(CLASS_ORDER$5));
   }, [fetchHeadings]);
   async function save() {
     if (!name.trim()) return;
@@ -75442,8 +75279,8 @@ function FeeHeadingPage() {
         account_name: accountName.trim() || "Main Account",
         displayOrder: Number(displayOrder) || headings.length + 1,
         display_order: Number(displayOrder) || headings.length + 1,
-        isActive,
-        is_active: isActive ? 1 : 0,
+        isActive: isActive2,
+        is_active: isActive2 ? 1 : 0,
         months,
         applicableClasses: selectedClasses.length > 0 ? JSON.stringify(selectedClasses) : null,
         applicable_classes: selectedClasses.length > 0 ? JSON.stringify(selectedClasses) : null,
@@ -75592,7 +75429,7 @@ function FeeHeadingPage() {
     setSelectedClasses([]);
     setOpen(false);
   }
-  const classList = classes.length > 0 ? classes : CLASS_ORDER$4;
+  const classList = classes.length > 0 ? classes : CLASS_ORDER$5;
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between flex-wrap gap-2", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
@@ -75883,7 +75720,7 @@ function FeeHeadingPage() {
                 "input",
                 {
                   type: "checkbox",
-                  checked: isActive,
+                  checked: isActive2,
                   onChange: (e3) => setIsActive(e3.target.checked),
                   className: "w-4 h-4 accent-primary",
                   "data-ocid": "fee-heading.active-checkbox"
@@ -76295,7 +76132,7 @@ function FeeRegister() {
       /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-green-700 font-medium", children: isLoading ? "Loading…" : `${filtered.length} receipt(s) shown` }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-bold text-green-700", children: [
         "Total: ",
-        formatCurrency$2(totalCollected)
+        formatCurrency$1(totalCollected)
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl overflow-hidden", children: isLoading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-12 text-center text-muted-foreground", children: [
@@ -76347,7 +76184,7 @@ function FeeRegister() {
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-xs hidden md:table-cell", children: [
               ...new Set(r2.items.map((i) => i.month.slice(0, 3)))
             ].join(", ") }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-green-600", children: formatCurrency$2(r2.totalAmount) }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-green-600", children: formatCurrency$1(r2.totalAmount) }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 hidden sm:table-cell", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "outline", className: "text-xs", children: r2.paymentMode }) }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("td", { className: "px-3 py-2 text-xs hidden lg:table-cell", children: [
               r2.receivedBy,
@@ -76439,7 +76276,7 @@ function FeeRegister() {
                       children: [
                         /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-1.5", children: item.headingName }),
                         /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-1.5", children: item.month }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-1.5 text-right", children: formatCurrency$2(item.amount) })
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-1.5 text-right", children: formatCurrency$1(item.amount) })
                       ]
                     },
                     `${item.headingId}-${item.month}-${idx}`
@@ -76453,7 +76290,7 @@ function FeeRegister() {
                         children: "TOTAL"
                       }
                     ),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-2 text-right", children: formatCurrency$2(selectedReceipt.totalAmount) })
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "border border-border px-3 py-2 text-right", children: formatCurrency$1(selectedReceipt.totalAmount) })
                   ] })
                 ] })
               ] })
@@ -76470,7 +76307,7 @@ function FeeRegister() {
                   children: [
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: sr.date }),
                     /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-mono", children: sr.receiptNo }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-green-600", children: formatCurrency$2(sr.totalAmount) }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-green-600", children: formatCurrency$1(sr.totalAmount) }),
                     /* @__PURE__ */ jsxRuntimeExports.jsx(
                       Button,
                       {
@@ -76655,7 +76492,7 @@ const MONTH_SHORT_MAP = {
   February: "Feb",
   March: "Mar"
 };
-const CLASS_ORDER = [
+const CLASS_ORDER$1 = [
   "Nursery",
   "LKG",
   "UKG",
@@ -76673,9 +76510,9 @@ const CLASS_ORDER = [
   "Class 12"
 ];
 function classOrderIdx(name) {
-  let idx = CLASS_ORDER.indexOf(name);
+  let idx = CLASS_ORDER$1.indexOf(name);
   if (idx !== -1) return idx;
-  idx = CLASS_ORDER.indexOf(`Class ${name}`);
+  idx = CLASS_ORDER$1.indexOf(`Class ${name}`);
   return idx !== -1 ? idx : 99;
 }
 const FeeCell = reactExports.memo(function FeeCell2({
@@ -77675,7 +77512,7 @@ function OnlineFees() {
                 ] }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 capitalize hidden md:table-cell", children: p2.gateway }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 font-mono text-xs hidden lg:table-cell", children: p2.txnId }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-green-600", children: formatCurrency$2(p2.amount) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-right font-semibold text-green-600", children: formatCurrency$1(p2.amount) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 text-center", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
                   Badge,
                   {
@@ -77847,7 +77684,7 @@ function OnlineFees() {
                 "data-ocid": "confirm-pay-btn",
                 children: [
                   "Record ",
-                  payAmount ? formatCurrency$2(Number(payAmount)) : ""
+                  payAmount ? formatCurrency$1(Number(payAmount)) : ""
                 ]
               }
             )
@@ -77859,7 +77696,7 @@ function OnlineFees() {
           payStep === "success" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-center py-4 space-y-3", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-5xl", children: "✅" }),
             /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-lg text-green-600", children: formatCurrency$2(Number(payAmount)) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-bold text-lg text-green-600", children: formatCurrency$1(Number(payAmount)) }),
               /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-muted-foreground", children: [
                 "Recorded for ",
                 selectedStudent == null ? void 0 : selectedStudent.fullName,
@@ -77889,7 +77726,7 @@ function OnlineFees() {
     )
   ] });
 }
-const TABS$3 = [
+const TABS$4 = [
   { id: "collect", label: "Collect Fees", icon: "💰" },
   { id: "heading", label: "Fee Headings", icon: "📋" },
   { id: "plan", label: "Fees Plan", icon: "📊" },
@@ -77903,7 +77740,7 @@ function Fees({ initialTab }) {
     initialTab ?? "collect"
   );
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto scrollbar-none", children: TABS$3.map((tab) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto scrollbar-none", children: TABS$4.map((tab) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
       "button",
       {
         type: "button",
@@ -79471,7 +79308,7 @@ const DEPARTMENTS = [
   "Transport"
 ];
 const GENDERS = ["Male", "Female", "Other"];
-const EMPTY_FORM$2 = {
+const EMPTY_FORM$3 = {
   name: "",
   designation: "Teacher",
   department: "Teaching",
@@ -79563,7 +79400,7 @@ function StaffDirectory({ onNavigate: _onNavigate }) {
   const [filterDepartment, setFilterDepartment] = reactExports.useState("All");
   const [showModal, setShowModal] = reactExports.useState(false);
   const [editingId, setEditingId] = reactExports.useState(null);
-  const [form, setForm] = reactExports.useState(EMPTY_FORM$2);
+  const [form, setForm] = reactExports.useState(EMPTY_FORM$3);
   const [saving, setSaving] = reactExports.useState(false);
   const [deletingId, setDeletingId] = reactExports.useState(null);
   const [showImport, setShowImport] = reactExports.useState(false);
@@ -79599,7 +79436,7 @@ function StaffDirectory({ onNavigate: _onNavigate }) {
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   function openAdd() {
     setEditingId(null);
-    setForm({ ...EMPTY_FORM$2, empId: autoEmpId(staff) });
+    setForm({ ...EMPTY_FORM$3, empId: autoEmpId(staff) });
     setShowModal(true);
   }
   function openEdit(s2) {
@@ -80529,8 +80366,8 @@ function SubjectAssignment() {
     (a2, b2) => {
       const ka2 = a2.startsWith("Class ") ? a2.replace("Class ", "") : a2;
       const kb = b2.startsWith("Class ") ? b2.replace("Class ", "") : b2;
-      const ai = CLASS_ORDER$4.indexOf(ka2);
-      const bi = CLASS_ORDER$4.indexOf(kb);
+      const ai = CLASS_ORDER$5.indexOf(ka2);
+      const bi = CLASS_ORDER$5.indexOf(kb);
       if (ai === -1 && bi === -1) return a2.localeCompare(b2);
       if (ai === -1) return 1;
       if (bi === -1) return -1;
@@ -80828,7 +80665,7 @@ function SubjectAssignment() {
     )) })
   ] });
 }
-const TABS$2 = [
+const TABS$3 = [
   { id: "staff", label: "Staff Directory", icon: Users },
   { id: "payroll", label: "Payroll", icon: CreditCard },
   { id: "payslips", label: "Payslips", icon: FileText },
@@ -80852,7 +80689,7 @@ function HR({ onNavigate, initialTab }) {
         className: "bg-card border-b px-4 lg:px-6 flex gap-0 overflow-x-auto sticky top-0 z-10 scrollbar-thin",
         role: "tablist",
         "aria-label": "HR navigation",
-        children: TABS$2.map((tab) => {
+        children: TABS$3.map((tab) => {
           const Icon2 = tab.icon;
           const active = activeTab === tab.id;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -80884,299 +80721,24 @@ function HR({ onNavigate, initialTab }) {
     ] })
   ] });
 }
-var CHECKBOX_NAME = "Checkbox";
-var [createCheckboxContext] = createContextScope$1(CHECKBOX_NAME);
-var [CheckboxProviderImpl, useCheckboxContext] = createCheckboxContext(CHECKBOX_NAME);
-function CheckboxProvider(props) {
-  const {
-    __scopeCheckbox,
-    checked: checkedProp,
-    children,
-    defaultChecked,
-    disabled,
-    form,
-    name,
-    onCheckedChange,
-    required,
-    value = "on",
-    // @ts-expect-error
-    internal_do_not_use_render
-  } = props;
-  const [checked, setChecked] = useControllableState({
-    prop: checkedProp,
-    defaultProp: defaultChecked ?? false,
-    onChange: onCheckedChange,
-    caller: CHECKBOX_NAME
-  });
-  const [control, setControl] = reactExports.useState(null);
-  const [bubbleInput, setBubbleInput] = reactExports.useState(null);
-  const hasConsumerStoppedPropagationRef = reactExports.useRef(false);
-  const isFormControl = control ? !!form || !!control.closest("form") : (
-    // We set this to true by default so that events bubble to forms without JS (SSR)
-    true
-  );
-  const context = {
-    checked,
-    disabled,
-    setChecked,
-    control,
-    setControl,
-    name,
-    form,
-    value,
-    hasConsumerStoppedPropagationRef,
-    required,
-    defaultChecked: isIndeterminate(defaultChecked) ? false : defaultChecked,
-    isFormControl,
-    bubbleInput,
-    setBubbleInput
-  };
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    CheckboxProviderImpl,
-    {
-      scope: __scopeCheckbox,
-      ...context,
-      children: isFunction(internal_do_not_use_render) ? internal_do_not_use_render(context) : children
-    }
-  );
-}
-var TRIGGER_NAME$2 = "CheckboxTrigger";
-var CheckboxTrigger = reactExports.forwardRef(
-  ({ __scopeCheckbox, onKeyDown, onClick, ...checkboxProps }, forwardedRef) => {
-    const {
-      control,
-      value,
-      disabled,
-      checked,
-      required,
-      setControl,
-      setChecked,
-      hasConsumerStoppedPropagationRef,
-      isFormControl,
-      bubbleInput
-    } = useCheckboxContext(TRIGGER_NAME$2, __scopeCheckbox);
-    const composedRefs = useComposedRefs(forwardedRef, setControl);
-    const initialCheckedStateRef = reactExports.useRef(checked);
-    reactExports.useEffect(() => {
-      const form = control == null ? void 0 : control.form;
-      if (form) {
-        const reset = () => setChecked(initialCheckedStateRef.current);
-        form.addEventListener("reset", reset);
-        return () => form.removeEventListener("reset", reset);
-      }
-    }, [control, setChecked]);
-    return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      Primitive.button,
-      {
-        type: "button",
-        role: "checkbox",
-        "aria-checked": isIndeterminate(checked) ? "mixed" : checked,
-        "aria-required": required,
-        "data-state": getState$1(checked),
-        "data-disabled": disabled ? "" : void 0,
-        disabled,
-        value,
-        ...checkboxProps,
-        ref: composedRefs,
-        onKeyDown: composeEventHandlers(onKeyDown, (event) => {
-          if (event.key === "Enter") event.preventDefault();
-        }),
-        onClick: composeEventHandlers(onClick, (event) => {
-          setChecked((prevChecked) => isIndeterminate(prevChecked) ? true : !prevChecked);
-          if (bubbleInput && isFormControl) {
-            hasConsumerStoppedPropagationRef.current = event.isPropagationStopped();
-            if (!hasConsumerStoppedPropagationRef.current) event.stopPropagation();
-          }
-        })
-      }
-    );
-  }
-);
-CheckboxTrigger.displayName = TRIGGER_NAME$2;
-var Checkbox$1 = reactExports.forwardRef(
-  (props, forwardedRef) => {
-    const {
-      __scopeCheckbox,
-      name,
-      checked,
-      defaultChecked,
-      required,
-      disabled,
-      value,
-      onCheckedChange,
-      form,
-      ...checkboxProps
-    } = props;
-    return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      CheckboxProvider,
-      {
-        __scopeCheckbox,
-        checked,
-        defaultChecked,
-        disabled,
-        required,
-        onCheckedChange,
-        name,
-        form,
-        value,
-        internal_do_not_use_render: ({ isFormControl }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            CheckboxTrigger,
-            {
-              ...checkboxProps,
-              ref: forwardedRef,
-              __scopeCheckbox
-            }
-          ),
-          isFormControl && /* @__PURE__ */ jsxRuntimeExports.jsx(
-            CheckboxBubbleInput,
-            {
-              __scopeCheckbox
-            }
-          )
-        ] })
-      }
-    );
-  }
-);
-Checkbox$1.displayName = CHECKBOX_NAME;
-var INDICATOR_NAME = "CheckboxIndicator";
-var CheckboxIndicator = reactExports.forwardRef(
-  (props, forwardedRef) => {
-    const { __scopeCheckbox, forceMount, ...indicatorProps } = props;
-    const context = useCheckboxContext(INDICATOR_NAME, __scopeCheckbox);
-    return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      Presence,
-      {
-        present: forceMount || isIndeterminate(context.checked) || context.checked === true,
-        children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Primitive.span,
-          {
-            "data-state": getState$1(context.checked),
-            "data-disabled": context.disabled ? "" : void 0,
-            ...indicatorProps,
-            ref: forwardedRef,
-            style: { pointerEvents: "none", ...props.style }
-          }
-        )
-      }
-    );
-  }
-);
-CheckboxIndicator.displayName = INDICATOR_NAME;
-var BUBBLE_INPUT_NAME = "CheckboxBubbleInput";
-var CheckboxBubbleInput = reactExports.forwardRef(
-  ({ __scopeCheckbox, ...props }, forwardedRef) => {
-    const {
-      control,
-      hasConsumerStoppedPropagationRef,
-      checked,
-      defaultChecked,
-      required,
-      disabled,
-      name,
-      value,
-      form,
-      bubbleInput,
-      setBubbleInput
-    } = useCheckboxContext(BUBBLE_INPUT_NAME, __scopeCheckbox);
-    const composedRefs = useComposedRefs(forwardedRef, setBubbleInput);
-    const prevChecked = usePrevious(checked);
-    const controlSize = useSize(control);
-    reactExports.useEffect(() => {
-      const input = bubbleInput;
-      if (!input) return;
-      const inputProto = window.HTMLInputElement.prototype;
-      const descriptor = Object.getOwnPropertyDescriptor(
-        inputProto,
-        "checked"
-      );
-      const setChecked = descriptor.set;
-      const bubbles = !hasConsumerStoppedPropagationRef.current;
-      if (prevChecked !== checked && setChecked) {
-        const event = new Event("click", { bubbles });
-        input.indeterminate = isIndeterminate(checked);
-        setChecked.call(input, isIndeterminate(checked) ? false : checked);
-        input.dispatchEvent(event);
-      }
-    }, [bubbleInput, prevChecked, checked, hasConsumerStoppedPropagationRef]);
-    const defaultCheckedRef = reactExports.useRef(isIndeterminate(checked) ? false : checked);
-    return /* @__PURE__ */ jsxRuntimeExports.jsx(
-      Primitive.input,
-      {
-        type: "checkbox",
-        "aria-hidden": true,
-        defaultChecked: defaultChecked ?? defaultCheckedRef.current,
-        required,
-        disabled,
-        name,
-        value,
-        form,
-        ...props,
-        tabIndex: -1,
-        ref: composedRefs,
-        style: {
-          ...props.style,
-          ...controlSize,
-          position: "absolute",
-          pointerEvents: "none",
-          opacity: 0,
-          margin: 0,
-          // We transform because the input is absolutely positioned but we have
-          // rendered it **after** the button. This pulls it back to sit on top
-          // of the button.
-          transform: "translateX(-100%)"
-        }
-      }
-    );
-  }
-);
-CheckboxBubbleInput.displayName = BUBBLE_INPUT_NAME;
-function isFunction(value) {
-  return typeof value === "function";
-}
-function isIndeterminate(checked) {
-  return checked === "indeterminate";
-}
-function getState$1(checked) {
-  return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
-}
-function Checkbox({
-  className,
-  ...props
-}) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(
-    Checkbox$1,
-    {
-      "data-slot": "checkbox",
-      className: cn(
-        "peer border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
-        className
-      ),
-      ...props,
-      children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        CheckboxIndicator,
-        {
-          "data-slot": "checkbox-indicator",
-          className: "flex items-center justify-center text-current transition-none",
-          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { className: "size-3.5" })
-        }
-      )
-    }
-  );
-}
-function isOverdue(dueDate) {
-  if (!dueDate) return false;
-  return new Date(dueDate) < new Date((/* @__PURE__ */ new Date()).toDateString());
-}
-function isDueSoon(dueDate) {
-  if (!dueDate) return false;
-  const due = new Date(dueDate);
-  const tomorrow = /* @__PURE__ */ new Date();
-  tomorrow.setDate(tomorrow.getDate() + 2);
-  return due > /* @__PURE__ */ new Date() && due <= tomorrow;
-}
-const EMPTY_FORM$1 = {
+const CLASS_ORDER = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12"
+];
+const EMPTY_FORM$2 = {
   class: "",
   section: "",
   subject: "",
@@ -81185,200 +80747,99 @@ const EMPTY_FORM$1 = {
   dueDate: "",
   attachmentUrl: ""
 };
-function HomeworkFormPanel({
-  initial,
-  classSections,
-  onSave,
-  onClose
-}) {
-  const [form, setForm] = reactExports.useState({ ...EMPTY_FORM$1, ...initial });
-  const set = (k2, v2) => setForm((f2) => ({ ...f2, [k2]: v2 }));
-  const sections = reactExports.useMemo(() => {
-    if (!form.class) return ["A", "B", "C", "D"];
-    const cs = classSections.find((c2) => c2.className === form.class);
-    return (cs == null ? void 0 : cs.sections) ?? ["A", "B", "C", "D"];
-  }, [form.class, classSections]);
-  const sortedClasses = reactExports.useMemo(() => {
-    const fromDB = classSections.map((c2) => c2.className);
-    if (fromDB.length > 0)
-      return fromDB.sort(
-        (a2, b2) => CLASS_ORDER$4.indexOf(a2) - CLASS_ORDER$4.indexOf(b2)
-      );
-    return CLASS_ORDER$4;
-  }, [classSections]);
-  const canSave = form.class && form.subject && form.title && form.dueDate;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Class *" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Select,
-          {
-            value: form.class,
-            onValueChange: (v2) => {
-              set("class", v2);
-              set("section", "");
-            },
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                SelectTrigger,
-                {
-                  className: "mt-1",
-                  "data-ocid": "homework.form_class_select",
-                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "Select class" })
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: sortedClasses.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2)) })
-            ]
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Section" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: form.section, onValueChange: (v2) => set("section", v2), children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            SelectTrigger,
-            {
-              className: "mt-1",
-              "data-ocid": "homework.form_section_select",
-              children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "All sections" })
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Sections" }),
-            sections.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2))
-          ] })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Subject *" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            value: form.subject,
-            onChange: (e3) => set("subject", e3.target.value),
-            placeholder: "e.g. Mathematics",
-            className: "mt-1",
-            "data-ocid": "homework.form_subject_input"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Due Date *" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            type: "date",
-            value: form.dueDate,
-            onChange: (e3) => set("dueDate", e3.target.value),
-            className: "mt-1"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Title *" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            value: form.title,
-            onChange: (e3) => set("title", e3.target.value),
-            placeholder: "Assignment title",
-            className: "mt-1",
-            "data-ocid": "homework.form_title_input"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Description" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "textarea",
-          {
-            value: form.description,
-            onChange: (e3) => set("description", e3.target.value),
-            rows: 3,
-            className: "w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring mt-1",
-            "data-ocid": "homework.form_description_textarea"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Attachment Link (optional)" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            value: form.attachmentUrl,
-            onChange: (e3) => set("attachmentUrl", e3.target.value),
-            placeholder: "https://docs.google.com/...",
-            className: "mt-1",
-            "data-ocid": "homework.form_attachment_input"
-          }
-        )
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 justify-end", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        Button,
-        {
-          variant: "outline",
-          onClick: onClose,
-          "data-ocid": "homework.form_cancel_button",
-          children: "Cancel"
-        }
-      ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        Button,
-        {
-          disabled: !canSave,
-          onClick: () => {
-            if (canSave) onSave(form);
-          },
-          "data-ocid": "homework.form_submit_button",
-          children: "Save"
-        }
-      )
-    ] })
-  ] });
+function isOverdue(dueDate) {
+  if (!dueDate) return false;
+  return new Date(dueDate) < new Date((/* @__PURE__ */ new Date()).toDateString());
+}
+function isDueSoon(dueDate) {
+  if (!dueDate) return false;
+  const due = new Date(dueDate);
+  const soon = /* @__PURE__ */ new Date();
+  soon.setDate(soon.getDate() + 2);
+  return due > /* @__PURE__ */ new Date() && due <= soon;
 }
 function HomeworkPage() {
-  const {
-    getData: getData2,
-    saveData,
-    updateData,
-    deleteData,
-    currentUser,
-    currentSession
-  } = useApp();
-  const homeworkList = getData2("homework");
-  const submissions = getData2("homework_submissions");
-  const students = getData2("students");
-  const classSections = getData2("classes");
-  const [activeTab, setActiveTab] = reactExports.useState("assignments");
+  const { currentUser, currentSession } = useApp();
+  const sessionId = (currentSession == null ? void 0 : currentSession.id) ?? "";
+  const [homework, setHomework] = reactExports.useState([]);
+  const [classes, setClasses] = reactExports.useState(CLASS_ORDER);
+  const [loading, setLoading] = reactExports.useState(true);
+  const [activeTab, setActiveTab] = reactExports.useState(
+    "assignments"
+  );
   const [dialogOpen, setDialogOpen] = reactExports.useState(false);
   const [editItem, setEditItem] = reactExports.useState(null);
+  const [form, setForm] = reactExports.useState(EMPTY_FORM$2);
+  const [saving, setSaving] = reactExports.useState(false);
   const [filterClass, setFilterClass] = reactExports.useState("all");
   const [filterSection, setFilterSection] = reactExports.useState("all");
-  const [filterSubject, setFilterSubject] = reactExports.useState("all");
   const [filterStatus, setFilterStatus] = reactExports.useState("all");
-  const [expandedId, setExpandedId] = reactExports.useState(null);
-  const sessionId = (currentSession == null ? void 0 : currentSession.id) ?? "";
-  const sortedClasses = reactExports.useMemo(() => {
-    const fromDB = classSections.map((c2) => c2.className);
-    if (fromDB.length > 0)
-      return fromDB.sort(
-        (a2, b2) => CLASS_ORDER$4.indexOf(a2) - CLASS_ORDER$4.indexOf(b2)
+  const loadAll = reactExports.useCallback(async () => {
+    setLoading(true);
+    try {
+      const cRes = await apiCall(
+        "academics/classes"
+      ).catch(() => []);
+      const cRows = Array.isArray(cRes) ? cRes : Array.isArray(cRes.data) ? cRes.data : [];
+      if (cRows.length > 0) {
+        const names = cRows.map((c2) => c2.className ?? c2.name ?? "").filter(Boolean);
+        const sorted = names.sort(
+          (a2, b2) => CLASS_ORDER.indexOf(a2) - CLASS_ORDER.indexOf(b2)
+        );
+        setClasses(sorted.length > 0 ? sorted : CLASS_ORDER);
+      }
+      const res = await apiCall(
+        "homework/list"
       );
-    return CLASS_ORDER$4;
-  }, [classSections]);
-  const subjects = reactExports.useMemo(
-    () => [...new Set(homeworkList.map((h2) => h2.subject))].sort(),
-    [homeworkList]
-  );
+      const rows = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : [];
+      setHomework(rows);
+    } catch {
+      setHomework([
+        {
+          id: "hw1",
+          class: "Class 10",
+          section: "A",
+          subject: "Mathematics",
+          title: "Chapter 5 — Quadratic Equations",
+          description: "Complete exercises 5.1 to 5.3 from NCERT",
+          dueDate: new Date(Date.now() + 864e5 * 2).toISOString().split("T")[0],
+          assignedBy: "Mrs. Anjali Sharma",
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        {
+          id: "hw2",
+          class: "Class 8",
+          section: "B",
+          subject: "Science",
+          title: "Diagram — Human Digestive System",
+          description: "Draw and label the complete digestive system",
+          dueDate: new Date(Date.now() - 864e5).toISOString().split("T")[0],
+          assignedBy: "Mr. Ramesh Gupta",
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        },
+        {
+          id: "hw3",
+          class: "Class 6",
+          section: "A",
+          subject: "English",
+          title: "Essay — My Favourite Festival",
+          description: "Write 250 words on your favourite Indian festival",
+          dueDate: new Date(Date.now() + 864e5 * 4).toISOString().split("T")[0],
+          assignedBy: "Mrs. Priya Singh",
+          createdAt: (/* @__PURE__ */ new Date()).toISOString()
+        }
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void loadAll();
+  }, [loadAll]);
   const filtered = reactExports.useMemo(() => {
-    return homeworkList.filter((h2) => {
+    return homework.filter((h2) => {
       if (filterClass !== "all" && h2.class !== filterClass) return false;
       if (filterSection !== "all" && h2.section && h2.section !== "all" && h2.section !== filterSection)
-        return false;
-      if (filterSubject !== "all" && h2.subject !== filterSubject)
         return false;
       if (filterStatus === "overdue" && !isOverdue(h2.dueDate)) return false;
       if (filterStatus === "pending" && isOverdue(h2.dueDate)) return false;
@@ -81386,16 +80847,44 @@ function HomeworkPage() {
     }).sort(
       (a2, b2) => new Date(b2.createdAt).getTime() - new Date(a2.createdAt).getTime()
     );
-  }, [homeworkList, filterClass, filterSection, filterSubject, filterStatus]);
-  const getSubmissionRate = (hw) => {
-    const classStudents = students.filter(
-      (s2) => s2.class === hw.class && (hw.section === "all" || !hw.section || s2.section === hw.section)
-    );
-    if (classStudents.length === 0) return 0;
-    const subs = submissions.filter((s2) => s2.homeworkId === hw.id).length;
-    return Math.round(subs / classStudents.length * 100);
+  }, [homework, filterClass, filterSection, filterStatus]);
+  const analytics = reactExports.useMemo(
+    () => ({
+      total: homework.length,
+      overdue: homework.filter((h2) => isOverdue(h2.dueDate)).length,
+      pending: homework.filter((h2) => !isOverdue(h2.dueDate)).length,
+      bySubject: homework.reduce((acc, h2) => {
+        acc[h2.subject] = (acc[h2.subject] ?? 0) + 1;
+        return acc;
+      }, {}),
+      byClass: homework.reduce((acc, h2) => {
+        acc[h2.class] = (acc[h2.class] ?? 0) + 1;
+        return acc;
+      }, {})
+    }),
+    [homework]
+  );
+  const openAdd = () => {
+    setEditItem(null);
+    setForm(EMPTY_FORM$2);
+    setDialogOpen(true);
   };
-  const handleSave = async (form) => {
+  const openEdit = (h2) => {
+    setEditItem(h2);
+    setForm({
+      class: h2.class,
+      section: h2.section ?? "",
+      subject: h2.subject,
+      title: h2.title,
+      description: h2.description ?? "",
+      dueDate: h2.dueDate,
+      attachmentUrl: h2.attachmentUrl ?? ""
+    });
+    setDialogOpen(true);
+  };
+  const handleSave = async () => {
+    if (!form.class || !form.subject || !form.title || !form.dueDate) return;
+    setSaving(true);
     const record = {
       class: form.class,
       section: form.section,
@@ -81403,183 +80892,94 @@ function HomeworkPage() {
       title: form.title,
       description: form.description,
       dueDate: form.dueDate,
-      assignedBy: (currentUser == null ? void 0 : currentUser.name) ?? "Admin",
+      assignedBy: (currentUser == null ? void 0 : currentUser.fullName) ?? "Teacher",
       attachmentUrl: form.attachmentUrl || void 0,
       createdAt: (editItem == null ? void 0 : editItem.createdAt) ?? (/* @__PURE__ */ new Date()).toISOString(),
       sessionId
     };
-    if (editItem) {
-      await updateData("homework", editItem.id, record);
-    } else {
-      record.id = generateId$1();
-      await saveData("homework", record);
+    try {
+      if (editItem) {
+        await apiCall("homework/update", "POST", {
+          ...record,
+          id: editItem.id
+        });
+        setHomework(
+          (prev) => prev.map(
+            (h2) => h2.id === editItem.id ? { ...h2, ...record } : h2
+          )
+        );
+        ue.success("Updated");
+      } else {
+        const res = await apiCall(
+          "homework/add",
+          "POST",
+          record
+        );
+        const newH = { ...record, id: (res == null ? void 0 : res.id) ?? `hw_${Date.now()}` };
+        setHomework((prev) => [newH, ...prev]);
+        ue.success("Homework added");
+      }
+      setDialogOpen(false);
+      setEditItem(null);
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Save failed");
+    } finally {
+      setSaving(false);
     }
-    setDialogOpen(false);
-    setEditItem(null);
   };
   const handleDelete = async (id) => {
     if (!confirm("Delete this assignment?")) return;
-    await deleteData("homework", id);
-  };
-  const toggleSubmission = async (hw, studentId) => {
-    const existing = submissions.find(
-      (s2) => s2.homeworkId === hw.id && s2.studentId === studentId
-    );
-    if (existing) {
-      await deleteData("homework_submissions", existing.id);
-    } else {
-      await saveData("homework_submissions", {
-        id: generateId$1(),
-        homeworkId: hw.id,
-        studentId,
-        submittedAt: (/* @__PURE__ */ new Date()).toISOString(),
-        status: isOverdue(hw.dueDate) ? "late" : "submitted"
-      });
+    try {
+      await apiCall("homework/delete", "POST", { id });
+      setHomework((prev) => prev.filter((h2) => h2.id !== id));
+      ue.success("Deleted");
+    } catch {
+      ue.error("Delete failed");
     }
   };
-  const analytics = reactExports.useMemo(() => {
-    const subjectCount = {};
-    const classCount = {};
-    const overdueCount = homeworkList.filter(
-      (h2) => isOverdue(h2.dueDate)
-    ).length;
-    const pendingCount = homeworkList.filter(
-      (h2) => !isOverdue(h2.dueDate)
-    ).length;
-    for (const h2 of homeworkList) {
-      subjectCount[h2.subject] = (subjectCount[h2.subject] ?? 0) + 1;
-      classCount[h2.class] = (classCount[h2.class] ?? 0) + 1;
-    }
-    const totalSubmissions = submissions.length;
-    const totalPossible = homeworkList.reduce((acc, hw) => {
-      return acc + students.filter(
-        (s2) => s2.class === hw.class && (hw.section === "all" || !hw.section || s2.section === hw.section)
-      ).length;
-    }, 0);
-    const overallRate = totalPossible > 0 ? Math.round(totalSubmissions / totalPossible * 100) : 0;
-    return {
-      subjectCount,
-      classCount,
-      overdueCount,
-      pendingCount,
-      overallRate
-    };
-  }, [homeworkList, submissions, students]);
-  function SubmissionTracker({ hw }) {
-    const classStudents = students.filter(
-      (s2) => s2.class === hw.class && (!hw.section || hw.section === "all" || s2.section === hw.section)
-    );
-    const submitted = classStudents.filter(
-      (s2) => submissions.some(
-        (sub) => sub.homeworkId === hw.id && sub.studentId === s2.id
-      )
-    );
-    const missing = classStudents.filter(
-      (s2) => !submissions.some(
-        (sub) => sub.homeworkId === hw.id && sub.studentId === s2.id
-      )
-    );
-    return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm font-semibold text-foreground", children: hw.title }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "secondary", className: "text-xs", children: [
-            submitted.length,
-            "/",
-            classStudents.length,
-            " submitted"
-          ] }),
-          isOverdue(hw.dueDate) && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "destructive", className: "text-xs", children: "Overdue" })
-        ] })
-      ] }),
-      classStudents.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
-        "No students in ",
-        hw.class,
-        hw.section && hw.section !== "all" ? `-${hw.section}` : ""
-      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-52 overflow-y-auto space-y-1", children: classStudents.map((s2) => {
-        const sub = submissions.find(
-          (sub2) => sub2.homeworkId === hw.id && sub2.studentId === s2.id
-        );
-        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: "flex items-center gap-2 p-1.5 rounded border border-border hover:bg-muted/30",
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Checkbox,
-                {
-                  checked: !!sub,
-                  onCheckedChange: () => toggleSubmission(hw, s2.id),
-                  id: `sub-${hw.id}-${s2.id}`
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "label",
-                {
-                  htmlFor: `sub-${hw.id}-${s2.id}`,
-                  className: "text-sm flex-1 cursor-pointer",
-                  children: s2.fullName
-                }
-              ),
-              sub && /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Badge,
-                {
-                  variant: sub.status === "late" ? "destructive" : "secondary",
-                  className: "text-xs",
-                  children: sub.status === "late" ? "Late" : "✓"
-                }
-              )
-            ]
-          },
-          s2.id
-        );
-      }) }),
-      missing.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
-        missing.length,
-        " student",
-        missing.length !== 1 ? "s" : "",
-        " yet to submit"
-      ] })
-    ] });
-  }
   const TABS2 = [
     { id: "assignments", label: "Assignments" },
-    { id: "submissions", label: "Submissions" },
     { id: "analytics", label: "Analytics" }
   ];
+  const sections = reactExports.useMemo(() => {
+    if (!form.class) return ["A", "B", "C", "D"];
+    return ["A", "B", "C", "D", "E"];
+  }, [form.class]);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 bg-background min-h-screen space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Homework" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground text-sm mt-0.5", children: [
-          homeworkList.length,
+          homework.length,
           " assignments · ",
-          analytics.overdueCount,
+          analytics.overdue,
           " overdue"
         ] })
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        Button,
-        {
-          onClick: () => {
-            setEditItem(null);
-            setDialogOpen(true);
-          },
-          "data-ocid": "homework.add_button",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
-            "Add Assignment"
-          ]
-        }
-      )
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Button,
+          {
+            variant: "outline",
+            size: "sm",
+            onClick: loadAll,
+            "data-ocid": "homework.refresh_button",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4" })
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: openAdd, "data-ocid": "homework.add_button", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
+          " Add Assignment"
+        ] })
+      ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS2.map((t2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
       "button",
       {
         type: "button",
         onClick: () => setActiveTab(t2.id),
-        className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
         "data-ocid": `homework.${t2.id}_tab`,
+        className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
         children: t2.label
       },
       t2.id
@@ -81597,7 +80997,7 @@ function HomeworkPage() {
           ),
           /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Classes" }),
-            sortedClasses.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2))
+            classes.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2))
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: filterSection, onValueChange: setFilterSection, children: [
@@ -81612,20 +81012,6 @@ function HomeworkPage() {
           /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Sections" }),
             ["A", "B", "C", "D", "E"].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2))
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: filterSubject, onValueChange: setFilterSubject, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            SelectTrigger,
-            {
-              className: "w-36",
-              "data-ocid": "homework.filter_subject_select",
-              children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "All subjects" })
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Subjects" }),
-            subjects.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2))
           ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -81651,7 +81037,7 @@ function HomeworkPage() {
           }
         )
       ] }),
-      filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", "data-ocid": "homework.loading_state", children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-24 rounded-xl" }, i)) }) : filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
         {
           className: "text-center py-16 text-muted-foreground",
@@ -81659,28 +81045,17 @@ function HomeworkPage() {
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-10 h-10 mx-auto mb-2 opacity-30" }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "No assignments found" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Button,
-              {
-                variant: "outline",
-                className: "mt-3",
-                onClick: () => setDialogOpen(true),
-                children: "Add First Assignment"
-              }
-            )
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { variant: "outline", className: "mt-3", onClick: openAdd, children: "Add First Assignment" })
           ]
         }
       ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid gap-3 md:grid-cols-2 lg:grid-cols-3", children: filtered.map((hw, i) => {
         const overdue = isOverdue(hw.dueDate);
         const soon = isDueSoon(hw.dueDate);
-        const rate = getSubmissionRate(hw);
-        const isExpanded = expandedId === hw.id;
         return /* @__PURE__ */ jsxRuntimeExports.jsx(
           Card,
           {
-            className: `hover:shadow-md transition-shadow cursor-pointer ${overdue ? "border-destructive/40" : soon ? "border-yellow-500/40" : ""}`,
             "data-ocid": `homework.item.${i + 1}`,
-            onClick: () => setExpandedId(isExpanded ? null : hw.id),
+            className: `hover:shadow-md transition-shadow ${overdue ? "border-destructive/40" : soon ? "border-yellow-500/40" : ""}`,
             children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { className: "pt-4 pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-start gap-2", children: [
               /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-w-0 flex-1", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground text-sm truncate", children: hw.title }),
@@ -81689,9 +81064,7 @@ function HomeworkPage() {
                   " · ",
                   hw.class,
                   hw.section && hw.section !== "all" ? `-${hw.section}` : "",
-                  " ",
-                  "· By ",
-                  hw.assignedBy
+                  hw.assignedBy ? ` · By ${hw.assignedBy}` : ""
                 ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-1.5 mt-2 flex-wrap", children: [
                   overdue ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -81701,162 +81074,86 @@ function HomeworkPage() {
                       className: "text-xs flex items-center gap-1",
                       children: [
                         /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-3 h-3" }),
-                        "Overdue"
+                        " Overdue"
                       ]
                     }
                   ) : soon ? /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "text-xs bg-yellow-500/20 text-yellow-700 border border-yellow-500/40", children: "Due soon" }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "secondary", className: "text-xs", children: [
                     "Due ",
                     hw.dueDate
                   ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "outline", className: "text-xs", children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(Users, { className: "w-3 h-3 mr-1" }),
-                    rate,
-                    "% submitted"
-                  ] }),
-                  hw.attachmentUrl && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  hw.attachmentUrl && /* @__PURE__ */ jsxRuntimeExports.jsx(
                     "a",
                     {
                       href: hw.attachmentUrl,
                       target: "_blank",
                       rel: "noopener noreferrer",
-                      onClick: (e3) => e3.stopPropagation(),
-                      className: "inline-flex items-center gap-0.5 text-xs text-primary hover:underline",
-                      children: [
-                        /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { className: "w-3 h-3" }),
-                        "Attachment"
-                      ]
+                      className: "text-xs text-primary hover:underline",
+                      children: "📎 Attachment"
                     }
                   )
                 ] }),
-                isExpanded && hw.description && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-2 leading-relaxed", children: hw.description }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2 h-1.5 bg-muted rounded-full overflow-hidden", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "div",
-                  {
-                    className: "h-full bg-primary rounded-full transition-all",
-                    style: { width: `${rate}%` }
-                  }
-                ) })
+                hw.description && /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-1 line-clamp-2", children: hw.description })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "div",
-                {
-                  className: "flex gap-1 ml-1 flex-shrink-0",
-                  onClick: (e3) => e3.stopPropagation(),
-                  onKeyDown: (e3) => e3.stopPropagation(),
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      Button,
-                      {
-                        size: "icon",
-                        variant: "ghost",
-                        className: "h-7 w-7",
-                        onClick: () => {
-                          setEditItem(hw);
-                          setDialogOpen(true);
-                        },
-                        "data-ocid": `homework.edit_button.${i + 1}`,
-                        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pen, { className: "w-3.5 h-3.5" })
-                      }
-                    ),
-                    /* @__PURE__ */ jsxRuntimeExports.jsx(
-                      Button,
-                      {
-                        size: "icon",
-                        variant: "ghost",
-                        className: "h-7 w-7 text-destructive",
-                        onClick: () => handleDelete(hw.id),
-                        "data-ocid": `homework.delete_button.${i + 1}`,
-                        children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
-                      }
-                    )
-                  ]
-                }
-              )
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1 ml-1 flex-shrink-0", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Button,
+                  {
+                    size: "icon",
+                    variant: "ghost",
+                    className: "h-7 w-7",
+                    onClick: () => openEdit(hw),
+                    "data-ocid": `homework.edit_button.${i + 1}`,
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pen, { className: "w-3.5 h-3.5" })
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Button,
+                  {
+                    size: "icon",
+                    variant: "ghost",
+                    className: "h-7 w-7 text-destructive",
+                    onClick: () => void handleDelete(hw.id),
+                    "data-ocid": `homework.delete_button.${i + 1}`,
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
+                  }
+                )
+              ] })
             ] }) })
           },
           hw.id
         );
       }) })
     ] }),
-    activeTab === "submissions" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex gap-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: filterClass, onValueChange: setFilterClass, children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          SelectTrigger,
-          {
-            className: "w-36",
-            "data-ocid": "homework.sub_filter_class",
-            children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "All classes" })
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Classes" }),
-          sortedClasses.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2))
-        ] })
-      ] }) }),
-      filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "div",
-        {
-          className: "text-center py-16 text-muted-foreground",
-          "data-ocid": "homework.submissions_empty_state",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-10 h-10 mx-auto mb-2 opacity-30" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "No assignments to track" })
-          ]
-        }
-      ) : filtered.map((hw, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        Card,
-        {
-          "data-ocid": `homework.submission_tracker.${i + 1}`,
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-sm flex items-center justify-between", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                hw.class,
-                hw.section && hw.section !== "all" ? `-${hw.section}` : "",
-                " ",
-                "— ",
-                hw.subject
-              ] }),
-              isOverdue(hw.dueDate) && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "destructive", className: "text-xs", children: "Overdue" })
-            ] }) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(SubmissionTracker, { hw }) })
-          ]
-        },
-        hw.id
-      ))
-    ] }),
     activeTab === "analytics" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "bg-primary/5 border-primary/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-primary", children: homeworkList.length }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-primary", children: analytics.total }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Total Assignments" })
         ] }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "bg-destructive/5 border-destructive/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-destructive", children: analytics.overdueCount }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-destructive", children: analytics.overdue }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Overdue" })
         ] }) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: analytics.pendingCount }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: analytics.pending }),
           /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "On Time" })
         ] }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "bg-accent/10 border-accent/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-2xl font-bold text-accent", children: [
-            analytics.overallRate,
-            "%"
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Submission Rate" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: Object.keys(analytics.bySubject).length }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Subjects" })
         ] }) })
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid md:grid-cols-2 gap-4", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-sm", children: "Subject-wise Assignments" }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { children: Object.entries(analytics.subjectCount).length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "No data yet" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: Object.entries(analytics.subjectCount).sort(([, a2], [, b2]) => b2 - a2).map(([sub, count2]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { children: Object.entries(analytics.bySubject).length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "No data yet" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: Object.entries(analytics.bySubject).sort(([, a2], [, b2]) => b2 - a2).map(([sub, count2]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-foreground w-32 truncate", children: sub }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 bg-muted rounded-full h-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
               "div",
               {
                 className: "bg-primary h-2 rounded-full",
                 style: {
-                  width: `${count2 / homeworkList.length * 100}%`
+                  width: `${count2 / analytics.total * 100}%`
                 }
               }
             ) }),
@@ -81864,96 +81161,182 @@ function HomeworkPage() {
           ] }, sub)) }) })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-sm", children: "Class-wise Frequency" }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { children: Object.entries(analytics.classCount).length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "No data yet" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: Object.entries(analytics.classCount).sort(([, a2], [, b2]) => b2 - a2).map(([cls, count2]) => /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-sm text-foreground w-24 truncate", children: cls }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex-1 bg-muted rounded-full h-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-              "div",
-              {
-                className: "bg-accent h-2 rounded-full",
-                style: {
-                  width: `${count2 / homeworkList.length * 100}%`
-                }
-              }
-            ) }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-xs", children: count2 })
-          ] }, cls)) }) })
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsx(CardTitle, { className: "text-sm", children: "Overdue Assignments" }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { children: analytics.overdue === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "✓ No overdue assignments" }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: homework.filter((h2) => isOverdue(h2.dueDate)).map((hw, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              "data-ocid": `homework.overdue_item.${i + 1}`,
+              className: "flex items-center gap-2 text-sm",
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-4 h-4 text-destructive flex-shrink-0" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "flex-1 truncate text-foreground", children: hw.title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-xs text-muted-foreground", children: hw.class }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", className: "text-xs", children: [
+                  "Due ",
+                  hw.dueDate
+                ] })
+              ]
+            },
+            hw.id
+          )) }) })
         ] })
-      ] }),
-      analytics.overdueCount > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "border-destructive/30", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-sm flex items-center gap-2 text-destructive", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-4 h-4" }),
-          "Overdue Assignments (",
-          analytics.overdueCount,
-          ")"
-        ] }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { className: "p-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-border", children: homeworkList.filter((h2) => isOverdue(h2.dueDate)).map((hw, i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: "flex items-center gap-3 px-4 py-2.5 text-sm",
-            "data-ocid": `homework.overdue_item.${i + 1}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-4 h-4 text-destructive flex-shrink-0" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium flex-1 truncate", children: hw.title }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground text-xs", children: [
-                hw.class,
-                " · ",
-                hw.subject
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", className: "text-xs", children: [
-                "Due ",
-                hw.dueDate
-              ] })
-            ]
-          },
-          hw.id
-        )) }) })
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(Dialog, { open: dialogOpen, onOpenChange: setDialogOpen, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(DialogContent, { className: "max-w-lg", "data-ocid": "homework.dialog", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DialogTitle, { children: editItem ? "Edit Assignment" : "Add Assignment" }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        HomeworkFormPanel,
-        {
-          initial: editItem ? {
-            class: editItem.class,
-            section: editItem.section,
-            subject: editItem.subject,
-            title: editItem.title,
-            description: editItem.description,
-            dueDate: editItem.dueDate,
-            attachmentUrl: editItem.attachmentUrl ?? ""
-          } : void 0,
-          classSections,
-          onSave: handleSave,
-          onClose: () => {
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Dialog,
+      {
+        open: dialogOpen,
+        onOpenChange: (open) => {
+          if (!open) {
             setDialogOpen(false);
             setEditItem(null);
           }
-        }
-      )
-    ] }) })
+        },
+        children: /* @__PURE__ */ jsxRuntimeExports.jsxs(DialogContent, { className: "max-w-lg", "data-ocid": "homework.dialog", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DialogTitle, { children: editItem ? "Edit Assignment" : "Add Assignment" }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Class *" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  Select,
+                  {
+                    value: form.class,
+                    onValueChange: (v2) => setForm((f2) => ({ ...f2, class: v2, section: "" })),
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        SelectTrigger,
+                        {
+                          className: "mt-1",
+                          "data-ocid": "homework.form_class_select",
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "Select class" })
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: classes.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2)) })
+                    ]
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Section" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  Select,
+                  {
+                    value: form.section,
+                    onValueChange: (v2) => setForm((f2) => ({ ...f2, section: v2 })),
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        SelectTrigger,
+                        {
+                          className: "mt-1",
+                          "data-ocid": "homework.form_section_select",
+                          children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "All sections" })
+                        }
+                      ),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Sections" }),
+                        sections.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: s2, children: s2 }, s2))
+                      ] })
+                    ]
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Subject *" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Input,
+                  {
+                    value: form.subject,
+                    onChange: (e3) => setForm((f2) => ({ ...f2, subject: e3.target.value })),
+                    placeholder: "e.g. Mathematics",
+                    className: "mt-1",
+                    "data-ocid": "homework.form_subject_input"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Due Date *" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Input,
+                  {
+                    type: "date",
+                    value: form.dueDate,
+                    onChange: (e3) => setForm((f2) => ({ ...f2, dueDate: e3.target.value })),
+                    className: "mt-1"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Title *" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Input,
+                  {
+                    value: form.title,
+                    onChange: (e3) => setForm((f2) => ({ ...f2, title: e3.target.value })),
+                    placeholder: "Assignment title",
+                    className: "mt-1",
+                    "data-ocid": "homework.form_title_input"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Description" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "textarea",
+                  {
+                    value: form.description,
+                    onChange: (e3) => setForm((f2) => ({ ...f2, description: e3.target.value })),
+                    rows: 3,
+                    className: "w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring mt-1",
+                    "data-ocid": "homework.form_description_textarea"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "col-span-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Attachment Link (optional)" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Input,
+                  {
+                    value: form.attachmentUrl,
+                    onChange: (e3) => setForm((f2) => ({ ...f2, attachmentUrl: e3.target.value })),
+                    placeholder: "https://docs.google.com/...",
+                    className: "mt-1",
+                    "data-ocid": "homework.form_attachment_input"
+                  }
+                )
+              ] })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 justify-end", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Button,
+                {
+                  variant: "outline",
+                  onClick: () => {
+                    setDialogOpen(false);
+                    setEditItem(null);
+                  },
+                  "data-ocid": "homework.form_cancel_button",
+                  children: "Cancel"
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                Button,
+                {
+                  disabled: !form.class || !form.subject || !form.title || !form.dueDate || saving,
+                  onClick: () => void handleSave(),
+                  "data-ocid": "homework.form_submit_button",
+                  children: [
+                    saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                    "Save"
+                  ]
+                }
+              )
+            ] })
+          ] })
+        ] })
+      }
+    )
   ] });
-}
-const DEFAULT_CATEGORIES = [
-  "Uniform",
-  "Tie",
-  "Belt",
-  "Shoes",
-  "Books",
-  "Stationery",
-  "Sports",
-  "Other"
-];
-function formatCurrency(n2) {
-  return `₹${n2.toLocaleString("en-IN", { minimumFractionDigits: 0 })}`;
-}
-function exportCSV$1(rows, filename) {
-  const csv = rows.map((r2) => r2.map((c2) => `"${String(c2).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const a2 = document.createElement("a");
-  a2.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a2.download = filename;
-  a2.click();
 }
 function InvModal({
   title,
@@ -81968,7 +81351,7 @@ function InvModal({
         {
           type: "button",
           onClick: onClose,
-          className: "text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted",
+          className: "text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center",
           "aria-label": "Close",
           children: "×"
         }
@@ -81977,121 +81360,47 @@ function InvModal({
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-5 space-y-3", children })
   ] }) });
 }
-const EMPTY_ITEM_FORM = {
-  name: "",
-  category: "",
-  unit: "Pcs",
-  costPriceStr: "",
-  sellingPriceStr: "",
-  currentStockStr: "",
-  reorderLevelStr: "5",
-  storeLocation: ""
-};
 function Inventory() {
   const [items, setItems] = reactExports.useState([]);
   const [transactions, setTransactions] = reactExports.useState([]);
-  const [totalItems, setTotalItems] = reactExports.useState(0);
   const [loading, setLoading] = reactExports.useState(true);
   const [tab, setTab] = reactExports.useState("items");
-  const [page, setPage] = reactExports.useState(1);
-  const PAGE_SIZE2 = 50;
-  const [itemSearch, setItemSearch] = reactExports.useState("");
-  const [catFilter, setCatFilter] = reactExports.useState("");
   const [showItemModal, setShowItemModal] = reactExports.useState(false);
-  const [editItemId, setEditItemId] = reactExports.useState(null);
-  const [itemForm, setItemForm] = reactExports.useState(EMPTY_ITEM_FORM);
+  const [editItem, setEditItem] = reactExports.useState(null);
+  const [itemName, setItemName] = reactExports.useState("");
+  const [itemCategory, setItemCategory] = reactExports.useState("");
+  const [itemUnit, setItemUnit] = reactExports.useState("Pcs");
+  const [itemReorder, setItemReorder] = reactExports.useState("5");
   const [savingItem, setSavingItem] = reactExports.useState(false);
-  const [stockItemId, setStockItemId] = reactExports.useState(null);
-  const [stockAction, setStockAction] = reactExports.useState("in");
-  const [stockQtyStr, setStockQtyStr] = reactExports.useState("1");
-  const [stockNote, setStockNote] = reactExports.useState("");
-  const [stockError, setStockError] = reactExports.useState("");
-  const [savingStock, setSavingStock] = reactExports.useState(false);
-  const [showPurchaseModal, setShowPurchaseModal] = reactExports.useState(false);
-  const [purchaseForm, setPurchaseForm] = reactExports.useState({
-    itemId: "",
-    quantityStr: "",
-    rateStr: "",
-    vendor: "",
-    date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
-  });
-  const [savingPurchase, setSavingPurchase] = reactExports.useState(false);
-  const handleItemNameChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({ ...p2, name: e3.target.value })),
-    []
-  );
-  const handleItemCategoryChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({ ...p2, category: e3.target.value })),
-    []
-  );
-  const handleItemUnitChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({ ...p2, unit: e3.target.value })),
-    []
-  );
-  const handleItemCostChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({
-      ...p2,
-      costPriceStr: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-    })),
-    []
-  );
-  const handleItemSellChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({
-      ...p2,
-      sellingPriceStr: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-    })),
-    []
-  );
-  const handleItemStockChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({
-      ...p2,
-      currentStockStr: e3.target.value.replace(/[^0-9]/g, "")
-    })),
-    []
-  );
-  const handleItemReorderChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({
-      ...p2,
-      reorderLevelStr: e3.target.value.replace(/[^0-9]/g, "")
-    })),
-    []
-  );
-  const handleItemLocationChange = reactExports.useCallback(
-    (e3) => setItemForm((p2) => ({ ...p2, storeLocation: e3.target.value })),
-    []
-  );
-  const handleStockQtyChange = reactExports.useCallback(
-    (e3) => {
-      setStockError("");
-      setStockQtyStr(e3.target.value.replace(/[^0-9]/g, ""));
-    },
-    []
-  );
-  const handleStockNoteChange = reactExports.useCallback(
-    (e3) => setStockNote(e3.target.value),
-    []
-  );
+  const [txItemId, setTxItemId] = reactExports.useState("");
+  const [txQty, setTxQty] = reactExports.useState("");
+  const [txDate, setTxDate] = reactExports.useState((/* @__PURE__ */ new Date()).toISOString().split("T")[0]);
+  const [txNotes, setTxNotes] = reactExports.useState("");
+  const [txError, setTxError] = reactExports.useState("");
+  const [savingTx, setSavingTx] = reactExports.useState(false);
+  const TABS2 = [
+    { id: "items", label: "Items", icon: Package },
+    { id: "stock_in", label: "Stock In", icon: Plus },
+    { id: "stock_out", label: "Stock Out", icon: Warehouse },
+    { id: "report", label: "Report", icon: TriangleAlert }
+  ];
   const loadItems = reactExports.useCallback(async () => {
-    var _a2;
     setLoading(true);
     try {
-      const res = await phpApiService.get(
-        `inventory/list&page=${page}&limit=${PAGE_SIZE2}${itemSearch ? `&search=${encodeURIComponent(itemSearch)}` : ""}${catFilter ? `&category=${encodeURIComponent(catFilter)}` : ""}`
-      );
+      const res = await apiCall("inventory/items");
       setItems(res.data ?? []);
-      setTotalItems(res.total ?? ((_a2 = res.data) == null ? void 0 : _a2.length) ?? 0);
     } catch {
-      ue.error("Failed to load inventory items");
+      ue.error("Failed to load items");
     } finally {
       setLoading(false);
     }
-  }, [page, itemSearch, catFilter]);
+  }, []);
   const loadTransactions = reactExports.useCallback(async () => {
     try {
-      const data = await phpApiService.get(
-        "inventory/transactions&limit=50"
+      const res = await apiCall(
+        "inventory/transactions"
       );
-      setTransactions(data ?? []);
+      setTransactions(res.data ?? []);
     } catch {
     }
   }, []);
@@ -82099,207 +81408,149 @@ function Inventory() {
     void loadItems();
   }, [loadItems]);
   reactExports.useEffect(() => {
-    if (tab === "purchase" || tab === "report") void loadTransactions();
+    if (tab === "report") void loadTransactions();
   }, [tab, loadTransactions]);
-  const categories = reactExports.useMemo(() => {
-    const fromItems = [
-      ...new Set(items.map((i) => i.category).filter(Boolean))
-    ];
-    return [.../* @__PURE__ */ new Set([...DEFAULT_CATEGORIES, ...fromItems])].sort();
-  }, [items]);
-  const openAddItem = reactExports.useCallback(() => {
-    setItemForm(EMPTY_ITEM_FORM);
-    setEditItemId(null);
+  const lowStock = reactExports.useMemo(
+    () => items.filter((i) => i.current_stock <= i.reorder_level),
+    [items]
+  );
+  function openAdd() {
+    setEditItem(null);
+    setItemName("");
+    setItemCategory("");
+    setItemUnit("Pcs");
+    setItemReorder("5");
     setShowItemModal(true);
-  }, []);
-  const openEditItem = reactExports.useCallback((item) => {
-    setItemForm({
-      name: item.name,
-      category: item.category,
-      unit: item.unit,
-      costPriceStr: item.costPrice ? String(item.costPrice) : "",
-      sellingPriceStr: item.sellingPrice ? String(item.sellingPrice) : "",
-      currentStockStr: item.currentStock ? String(item.currentStock) : "0",
-      reorderLevelStr: item.reorderLevel ? String(item.reorderLevel) : "5",
-      storeLocation: item.storeLocation ?? ""
-    });
-    setEditItemId(item.id);
+  }
+  function openEdit(item) {
+    setEditItem(item);
+    setItemName(item.name);
+    setItemCategory(item.category);
+    setItemUnit(item.unit);
+    setItemReorder(String(item.reorder_level));
     setShowItemModal(true);
-  }, []);
-  const handleSaveItem = reactExports.useCallback(async () => {
-    if (!itemForm.name.trim()) {
-      ue.error("Item name is required");
+  }
+  async function handleSaveItem() {
+    if (!itemName.trim()) {
+      ue.error("Item name required");
       return;
     }
     setSavingItem(true);
     try {
-      const payload = {
-        id: editItemId ?? void 0,
-        name: itemForm.name.trim(),
-        category: itemForm.category,
-        unit: itemForm.unit,
-        costPrice: Number(itemForm.costPriceStr) || 0,
-        sellingPrice: Number(itemForm.sellingPriceStr) || 0,
-        currentStock: Number(itemForm.currentStockStr) || 0,
-        reorderLevel: Number(itemForm.reorderLevelStr) || 5,
-        storeLocation: itemForm.storeLocation
-      };
-      if (editItemId) {
-        await phpApiService.updateInventoryItem(
-          payload
-        );
-        ue.success(`"${payload.name}" updated`);
-      } else {
-        await phpApiService.addInventoryItem(
-          payload
-        );
-        ue.success(`"${payload.name}" added`);
-      }
+      await apiCall("inventory/item-add", "POST", {
+        id: editItem == null ? void 0 : editItem.id,
+        name: itemName.trim(),
+        category: itemCategory,
+        unit: itemUnit,
+        reorder_level: Number(itemReorder) || 5
+      });
+      ue.success(editItem ? "Item updated" : "Item added");
       setShowItemModal(false);
-      setEditItemId(null);
       await loadItems();
-    } catch (err) {
-      ue.error(err instanceof Error ? err.message : "Failed to save item");
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to save");
     } finally {
       setSavingItem(false);
     }
-  }, [itemForm, editItemId, loadItems]);
-  const handleDeleteItem = reactExports.useCallback(
-    async (id) => {
-      if (!confirm("Delete this item?")) return;
-      try {
-        await phpApiService.del("inventory/delete", { id });
-        ue.success("Item deleted");
-        await loadItems();
-      } catch {
-        ue.error("Failed to delete item");
-      }
-    },
-    [loadItems]
-  );
-  const openStockModal = reactExports.useCallback((item, action) => {
-    setStockItemId(item.id);
-    setStockAction(action);
-    setStockQtyStr("1");
-    setStockNote("");
-    setStockError("");
-  }, []);
-  const handleStockUpdate = reactExports.useCallback(async () => {
-    const qty = Number(stockQtyStr) || 0;
-    if (!stockItemId || qty <= 0) {
+  }
+  async function handleDeleteItem(id) {
+    if (!confirm("Delete this item?")) return;
+    try {
+      await apiCall("inventory/item-delete", "POST", { id });
+      ue.success("Item deleted");
+      await loadItems();
+    } catch {
+      ue.error("Failed to delete");
+    }
+  }
+  async function handleTransaction(type) {
+    setTxError("");
+    const qty = Number(txQty) || 0;
+    if (!txItemId) {
+      ue.error("Select an item");
+      return;
+    }
+    if (qty <= 0) {
       ue.error("Enter a valid quantity");
       return;
     }
-    const item = items.find((i) => i.id === stockItemId);
-    if (!item) return;
-    if (stockAction === "out" && qty > item.currentStock) {
-      setStockError(
-        `Insufficient stock. Available: ${item.currentStock} ${item.unit}`
-      );
-      return;
+    if (type === "out") {
+      const item = items.find((i) => i.id === txItemId);
+      if (item && qty > item.current_stock) {
+        setTxError(
+          `Insufficient stock. Available: ${item.current_stock} ${item.unit}`
+        );
+        return;
+      }
     }
-    setSavingStock(true);
+    setSavingTx(true);
     try {
-      await phpApiService.post("inventory/transaction", {
-        itemId: stockItemId,
-        type: stockAction === "in" ? "purchase" : "sale",
+      await apiCall("inventory/transaction", "POST", {
+        item_id: txItemId,
+        type,
         quantity: qty,
-        note: stockNote,
-        date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
+        date: txDate,
+        notes: txNotes
       });
       ue.success(
-        `${stockAction === "in" ? "Added" : "Issued"} ${qty} × ${item.name}`
+        `${type === "in" ? "Stock added" : "Stock issued"} successfully`
       );
-      setStockItemId(null);
+      setTxItemId("");
+      setTxQty("");
+      setTxNotes("");
       await loadItems();
-    } catch (err) {
-      ue.error(
-        err instanceof Error ? err.message : "Failed to update stock"
-      );
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to update stock");
     } finally {
-      setSavingStock(false);
+      setSavingTx(false);
     }
-  }, [stockItemId, stockAction, stockQtyStr, stockNote, items, loadItems]);
-  const handleSavePurchase = reactExports.useCallback(async () => {
-    const { itemId, quantityStr, rateStr, vendor, date: date2 } = purchaseForm;
-    if (!itemId || !quantityStr || !rateStr) {
-      ue.error("Fill all required fields");
-      return;
-    }
-    const qty = Number(quantityStr) || 0;
-    const rate = Number(rateStr) || 0;
-    setSavingPurchase(true);
-    try {
-      await phpApiService.post("inventory/transaction", {
-        itemId,
-        type: "purchase",
-        quantity: qty,
-        rate,
-        totalCost: qty * rate,
-        vendor,
-        date: date2
-      });
-      ue.success("Purchase recorded");
-      setShowPurchaseModal(false);
-      setPurchaseForm({
-        itemId: "",
-        quantityStr: "",
-        rateStr: "",
-        vendor: "",
-        date: (/* @__PURE__ */ new Date()).toISOString().split("T")[0]
-      });
-      await loadItems();
-      await loadTransactions();
-    } catch (err) {
-      ue.error(
-        err instanceof Error ? err.message : "Failed to record purchase"
-      );
-    } finally {
-      setSavingPurchase(false);
-    }
-  }, [purchaseForm, loadItems, loadTransactions]);
-  const totalStockValue = reactExports.useMemo(
-    () => items.reduce((a2, i) => a2 + i.currentStock * i.costPrice, 0),
-    [items]
-  );
-  const lowStockItems = reactExports.useMemo(
-    () => items.filter((i) => i.currentStock <= i.reorderLevel),
-    [items]
-  );
-  const stockItem = items.find((i) => i.id === stockItemId);
-  const TABS2 = [
-    { id: "items", label: "Items", icon: Package },
-    { id: "report", label: "Stock Report", icon: TriangleAlert },
-    { id: "purchase", label: "Purchases", icon: Warehouse }
-  ];
+  }
+  function exportCSV2() {
+    const rows = [
+      ["Name", "Category", "Unit", "Stock", "Reorder Level", "Status"],
+      ...items.map((i) => [
+        i.name,
+        i.category,
+        i.unit,
+        String(i.current_stock),
+        String(i.reorder_level),
+        i.current_stock <= i.reorder_level ? "Low Stock" : "OK"
+      ])
+    ];
+    const csv = rows.map((r2) => r2.map((c2) => `"${c2}"`).join(",")).join("\n");
+    const a2 = document.createElement("a");
+    a2.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+    a2.download = "inventory.csv";
+    a2.click();
+  }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 bg-background min-h-screen space-y-4", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Inventory" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm mt-0.5", children: "Manage school store items, purchases, and stock levels" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm mt-0.5", children: "Manage school store items, stock levels and transactions" })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "bg-primary/5 border-primary/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-primary", children: totalItems }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-primary", children: items.length }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Total Items" })
       ] }) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "bg-accent/10 border-accent/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm font-bold text-accent", children: formatCurrency(totalStockValue) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Stock Value" })
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: items.reduce((s2, i) => s2 + i.current_stock, 0) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Total Stock" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: transactions.filter((t2) => t2.type === "purchase").length }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Purchases" })
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-2xl font-bold text-foreground", children: transactions.filter((t2) => t2.type === "in").length }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Stock In (total)" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(
         Card,
         {
-          className: lowStockItems.length > 0 ? "bg-destructive/5 border-destructive/20" : "bg-muted/30",
+          className: lowStock.length > 0 ? "bg-destructive/5 border-destructive/20" : "bg-muted/30",
           children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "py-3 text-center", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(
               "div",
               {
-                className: `text-2xl font-bold ${lowStockItems.length > 0 ? "text-destructive" : "text-foreground"}`,
-                children: lowStockItems.length
+                className: `text-2xl font-bold ${lowStock.length > 0 ? "text-destructive" : "text-foreground"}`,
+                children: lowStock.length
               }
             ),
             /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs text-muted-foreground", children: "Low Stock" })
@@ -82325,80 +81576,19 @@ function Inventory() {
       );
     }) }),
     tab === "items" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap items-center justify-between gap-3", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Input,
-            {
-              value: itemSearch,
-              onChange: (e3) => {
-                setItemSearch(e3.target.value);
-                setPage(1);
-              },
-              placeholder: "Search items…",
-              className: "w-44",
-              "data-ocid": "inventory.search_input"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            "select",
-            {
-              className: "border border-input rounded-md px-3 py-2 text-sm bg-background",
-              value: catFilter,
-              onChange: (e3) => {
-                setCatFilter(e3.target.value);
-                setPage(1);
-              },
-              "data-ocid": "inventory.category_select",
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "All Categories" }),
-                categories.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
-              ]
-            }
-          )
-        ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between items-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "All Items" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            Button,
-            {
-              onClick: openAddItem,
-              "data-ocid": "inventory.add_item_button",
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
-                "Add Item"
-              ]
-            }
-          ),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { onClick: openAdd, "data-ocid": "inventory.add_item_button", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
+            "Add Item"
+          ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs(
             Button,
             {
               variant: "outline",
               size: "sm",
-              onClick: () => exportCSV$1(
-                [
-                  [
-                    "Item",
-                    "Category",
-                    "Unit",
-                    "Cost",
-                    "Sell",
-                    "Stock",
-                    "Reorder",
-                    "Location"
-                  ],
-                  ...items.map((i) => [
-                    i.name,
-                    i.category,
-                    i.unit,
-                    String(i.costPrice),
-                    String(i.sellingPrice),
-                    String(i.currentStock),
-                    String(i.reorderLevel),
-                    i.storeLocation ?? ""
-                  ])
-                ],
-                "inventory.csv"
-              ),
+              onClick: exportCSV2,
               "data-ocid": "inventory.export_button",
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-1" }),
@@ -82408,17 +81598,13 @@ function Inventory() {
           )
         ] })
       ] }),
-      loading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center py-16", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-6 h-6 animate-spin text-primary" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-2 text-muted-foreground", children: "Loading items…" })
-      ] }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
+      loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-center py-16", children: /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-6 h-6 animate-spin text-primary" }) }) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-muted/50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: [
-          "Item Name",
+          "Name",
           "Category",
           "Unit",
-          "Cost Price",
-          "Sell Price",
           "Stock",
+          "Reorder Level",
           "Actions"
         ].map((h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "th",
@@ -82431,21 +81617,21 @@ function Inventory() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "td",
           {
-            colSpan: 7,
+            colSpan: 6,
             className: "px-4 py-12 text-center text-muted-foreground",
             "data-ocid": "inventory.items_empty_state",
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-4xl mb-2", children: "📦" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium", children: "No items found" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Package, { className: "w-10 h-10 mx-auto mb-2 opacity-30" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium", children: "No items yet" }),
               /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-xs mt-1", children: "Add inventory items to get started" })
             ]
           }
         ) }) : items.map((item, idx) => {
-          const isLow = item.currentStock <= item.reorderLevel;
+          const isLow = item.current_stock <= item.reorder_level;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "tr",
             {
-              className: `border-t border-border hover:bg-muted/30 transition-colors ${isLow ? "bg-destructive/5" : ""}`,
+              className: `border-t border-border hover:bg-muted/30 ${isLow ? "bg-destructive/5" : ""}`,
               "data-ocid": `inventory.item.${idx + 1}`,
               children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("td", { className: "px-4 py-3 font-medium text-foreground", children: [
@@ -82461,41 +81647,20 @@ function Inventory() {
                 ] }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", children: item.category || "—" }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: item.unit }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium", children: formatCurrency(item.costPrice) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-accent font-medium", children: formatCurrency(item.sellingPrice) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: isLow ? "destructive" : "outline", children: [
-                  item.currentStock,
+                  item.current_stock,
                   " ",
                   item.unit
                 ] }) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1 flex-wrap", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    Button,
-                    {
-                      variant: "outline",
-                      size: "sm",
-                      onClick: () => openStockModal(item, "in"),
-                      "data-ocid": `inventory.stock_in_button.${idx + 1}`,
-                      children: "+ Stock"
-                    }
-                  ),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    Button,
-                    {
-                      variant: "outline",
-                      size: "sm",
-                      onClick: () => openStockModal(item, "out"),
-                      "data-ocid": `inventory.stock_out_button.${idx + 1}`,
-                      children: "Issue"
-                    }
-                  ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: item.reorder_level }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1", children: [
                   /* @__PURE__ */ jsxRuntimeExports.jsx(
                     Button,
                     {
                       variant: "ghost",
                       size: "icon",
                       className: "h-8 w-8",
-                      onClick: () => openEditItem(item),
+                      onClick: () => openEdit(item),
                       "data-ocid": `inventory.edit_button.${idx + 1}`,
                       children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pen, { className: "w-3.5 h-3.5" })
                     }
@@ -82516,61 +81681,180 @@ function Inventory() {
             },
             item.id
           );
-        }) }),
-        items.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("tfoot", { className: "bg-muted/40", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "td",
-            {
-              colSpan: 5,
-              className: "px-4 py-3 text-right font-semibold text-foreground",
-              children: "Total Stock Value:"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "td",
-            {
-              colSpan: 2,
-              className: "px-4 py-3 font-bold text-primary",
-              children: formatCurrency(
-                items.reduce(
-                  (a2, i) => a2 + i.currentStock * i.costPrice,
-                  0
-                )
-              )
-            }
-          )
-        ] }) })
-      ] }) }),
-      totalItems > PAGE_SIZE2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-center gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
+        }) })
+      ] }) })
+    ] }),
+    tab === "stock_in" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-md space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Add Stock" }),
+      txError && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2", children: [
+        "⚠️ ",
+        txError
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Item *" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "select",
           {
-            variant: "outline",
-            size: "sm",
-            disabled: page === 1,
-            onClick: () => setPage((p2) => p2 - 1),
-            "data-ocid": "inventory.pagination_prev",
-            children: "Previous"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-muted-foreground px-3 py-1.5", children: [
-          "Page ",
-          page,
-          " of ",
-          Math.ceil(totalItems / PAGE_SIZE2)
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
-          {
-            variant: "outline",
-            size: "sm",
-            disabled: page * PAGE_SIZE2 >= totalItems,
-            onClick: () => setPage((p2) => p2 + 1),
-            "data-ocid": "inventory.pagination_next",
-            children: "Next"
+            className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
+            value: txItemId,
+            onChange: (e3) => setTxItemId(e3.target.value),
+            "data-ocid": "inventory.stock_in.item_select",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select Item" }),
+              items.map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("option", { value: i.id, children: [
+                i.name,
+                " (Current: ",
+                i.current_stock,
+                " ",
+                i.unit,
+                ")"
+              ] }, i.id))
+            ]
           }
         )
-      ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Quantity *" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            type: "text",
+            inputMode: "numeric",
+            className: "mt-1",
+            value: txQty,
+            onChange: (e3) => {
+              setTxQty(e3.target.value.replace(/[^0-9]/g, ""));
+              setTxError("");
+            },
+            placeholder: "0",
+            "data-ocid": "inventory.stock_in.qty_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Date" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            type: "date",
+            className: "mt-1",
+            value: txDate,
+            onChange: (e3) => setTxDate(e3.target.value),
+            "data-ocid": "inventory.stock_in.date_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Notes" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            className: "mt-1",
+            value: txNotes,
+            onChange: (e3) => setTxNotes(e3.target.value),
+            placeholder: "Supplier / notes",
+            "data-ocid": "inventory.stock_in.notes_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          onClick: () => void handleTransaction("in"),
+          disabled: savingTx,
+          "data-ocid": "inventory.stock_in.submit_button",
+          children: [
+            savingTx && /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }),
+            "Add Stock"
+          ]
+        }
+      )
+    ] }),
+    tab === "stock_out" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-md space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-base font-semibold text-foreground", children: "Issue Stock" }),
+      txError && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2", children: [
+        "⚠️ ",
+        txError
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Item *" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "select",
+          {
+            className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
+            value: txItemId,
+            onChange: (e3) => setTxItemId(e3.target.value),
+            "data-ocid": "inventory.stock_out.item_select",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select Item" }),
+              items.filter((i) => i.current_stock > 0).map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("option", { value: i.id, children: [
+                i.name,
+                " (",
+                i.current_stock,
+                " ",
+                i.unit,
+                " available)"
+              ] }, i.id))
+            ]
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Quantity *" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            type: "text",
+            inputMode: "numeric",
+            className: "mt-1",
+            value: txQty,
+            onChange: (e3) => {
+              setTxQty(e3.target.value.replace(/[^0-9]/g, ""));
+              setTxError("");
+            },
+            placeholder: "0",
+            "data-ocid": "inventory.stock_out.qty_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Date" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            type: "date",
+            className: "mt-1",
+            value: txDate,
+            onChange: (e3) => setTxDate(e3.target.value),
+            "data-ocid": "inventory.stock_out.date_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Notes" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            className: "mt-1",
+            value: txNotes,
+            onChange: (e3) => setTxNotes(e3.target.value),
+            placeholder: "Issued to (student/staff)",
+            "data-ocid": "inventory.stock_out.notes_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          onClick: () => void handleTransaction("out"),
+          disabled: savingTx,
+          "data-ocid": "inventory.stock_out.submit_button",
+          children: [
+            savingTx && /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }),
+            "Issue Stock"
+          ]
+        }
+      )
     ] }),
     tab === "report" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
@@ -82580,33 +81864,7 @@ function Inventory() {
           {
             variant: "outline",
             size: "sm",
-            onClick: () => exportCSV$1(
-              [
-                [
-                  "Item",
-                  "Category",
-                  "Unit",
-                  "Cost",
-                  "Sell",
-                  "Stock",
-                  "Reorder Level",
-                  "Status",
-                  "Value"
-                ],
-                ...items.map((i) => [
-                  i.name,
-                  i.category,
-                  i.unit,
-                  String(i.costPrice),
-                  String(i.sellingPrice),
-                  String(i.currentStock),
-                  String(i.reorderLevel),
-                  i.currentStock <= i.reorderLevel ? "Low Stock" : "OK",
-                  String(i.currentStock * i.costPrice)
-                ])
-              ],
-              `stock_report_${(/* @__PURE__ */ new Date()).toISOString().split("T")[0]}.csv`
-            ),
+            onClick: exportCSV2,
             "data-ocid": "inventory.export_report_button",
             children: [
               /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-1" }),
@@ -82615,7 +81873,7 @@ function Inventory() {
           }
         )
       ] }),
-      lowStockItems.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      lowStock.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
         {
           className: "bg-destructive/5 border border-destructive/30 rounded-xl p-3",
@@ -82623,13 +81881,13 @@ function Inventory() {
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-semibold text-destructive mb-2", children: [
               "⚠️ ",
-              lowStockItems.length,
+              lowStock.length,
               " item(s) at or below reorder level"
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1", children: lowStockItems.map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", className: "text-xs", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex flex-wrap gap-1", children: lowStock.map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", className: "text-xs", children: [
               i.name,
               ": ",
-              i.currentStock,
+              i.current_stock,
               " ",
               i.unit
             ] }, i.id)) })
@@ -82641,12 +81899,9 @@ function Inventory() {
           "Item Name",
           "Category",
           "Unit",
-          "Cost Price",
-          "Sell Price",
           "Current Stock",
           "Reorder Level",
-          "Status",
-          "Value"
+          "Status"
         ].map((h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
           "th",
           {
@@ -82658,13 +81913,13 @@ function Inventory() {
         /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: items.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(
           "td",
           {
-            colSpan: 9,
+            colSpan: 6,
             className: "px-4 py-12 text-center text-muted-foreground",
             "data-ocid": "inventory.report_empty_state",
             children: "No inventory items yet."
           }
-        ) }) : [...items].sort((a2, b2) => a2.currentStock - b2.currentStock).map((item, idx) => {
-          const isLow = item.currentStock <= item.reorderLevel;
+        ) }) : [...items].sort((a2, b2) => a2.current_stock - b2.current_stock).map((item, idx) => {
+          const isLow = item.current_stock <= item.reorder_level;
           return /* @__PURE__ */ jsxRuntimeExports.jsxs(
             "tr",
             {
@@ -82674,10 +81929,8 @@ function Inventory() {
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium text-foreground", children: item.name }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", children: item.category }) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: item.unit }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: formatCurrency(item.costPrice) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-accent", children: formatCurrency(item.sellingPrice) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-bold", children: item.currentStock }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: item.reorderLevel }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-bold", children: item.current_stock }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: item.reorder_level }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: isLow ? /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "destructive", children: "Low Stock" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
                   Badge,
                   {
@@ -82685,207 +81938,122 @@ function Inventory() {
                     className: "text-foreground",
                     children: "OK"
                   }
-                ) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-semibold text-primary", children: formatCurrency(item.currentStock * item.costPrice) })
+                ) })
               ]
             },
             item.id
           );
-        }) }),
-        items.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("tfoot", { className: "bg-muted/40", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            "td",
+        }) })
+      ] }) }),
+      transactions.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground mb-3", children: "Transaction History" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-muted/50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: ["Date", "Item", "Type", "Quantity", "Notes"].map(
+            (h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "th",
+              {
+                className: "px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap",
+                children: h2
+              },
+              h2
+            )
+          ) }) }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: [...transactions].sort((a2, b2) => b2.date.localeCompare(a2.date)).map((t2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "tr",
             {
-              colSpan: 8,
-              className: "px-4 py-3 text-right font-semibold text-foreground",
-              children: "Total Inventory Value:"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-bold text-primary", children: formatCurrency(totalStockValue) })
+              className: "border-t border-border hover:bg-muted/30",
+              "data-ocid": `inventory.transaction.${idx + 1}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: t2.date }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium text-foreground", children: t2.item_name ?? "—" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Badge,
+                  {
+                    variant: t2.type === "in" ? "default" : "secondary",
+                    children: t2.type === "in" ? "Stock In" : "Stock Out"
+                  }
+                ) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 tabular-nums", children: t2.quantity }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: t2.notes || "—" })
+              ]
+            },
+            t2.id
+          )) })
         ] }) })
-      ] }) })
-    ] }),
-    tab === "purchase" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-lg font-semibold text-foreground", children: "Purchase Register" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            onClick: () => setShowPurchaseModal(true),
-            "data-ocid": "inventory.add_purchase_button",
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
-              "Record Purchase"
-            ]
-          }
-        )
-      ] }),
-      transactions.filter((t2) => t2.type === "purchase").length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "div",
-        {
-          className: "py-12 text-center text-muted-foreground",
-          "data-ocid": "inventory.purchase_empty_state",
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Package, { className: "w-10 h-10 mx-auto mb-2 opacity-30" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "No purchases recorded yet" })
-          ]
-        }
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "overflow-x-auto rounded-xl border border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-muted/50", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: [
-          "Date",
-          "Item",
-          "Qty",
-          "Rate (₹)",
-          "Total Cost",
-          "Vendor"
-        ].map((h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "th",
-          {
-            className: "px-4 py-3 text-left font-semibold text-muted-foreground whitespace-nowrap",
-            children: h2
-          },
-          h2
-        )) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: [...transactions].filter((t2) => t2.type === "purchase").sort((a2, b2) => b2.date.localeCompare(a2.date)).map((p2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "tr",
-          {
-            className: "border-t border-border hover:bg-muted/30",
-            "data-ocid": `inventory.purchase.${idx + 1}`,
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: p2.date }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-medium text-foreground", children: p2.itemName ?? "—" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 tabular-nums", children: p2.quantity }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 tabular-nums", children: p2.rate != null ? formatCurrency(p2.rate) : "—" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 font-semibold text-primary tabular-nums", children: p2.totalCost != null ? formatCurrency(p2.totalCost) : formatCurrency(p2.quantity * (p2.rate ?? 0)) }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground", children: p2.vendor || "—" })
-            ]
-          },
-          p2.id
-        )) })
-      ] }) })
+      ] })
     ] }),
     showItemModal && /* @__PURE__ */ jsxRuntimeExports.jsxs(
       InvModal,
       {
-        title: editItemId ? "Edit Item" : "Add Item",
+        title: editItem ? "Edit Item" : "Add Item",
         onClose: () => {
           setShowItemModal(false);
-          setEditItemId(null);
+          setEditItem(null);
         },
         children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "md:col-span-2", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Item Name *" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  value: itemForm.name,
-                  onChange: handleItemNameChange,
-                  placeholder: "e.g. School Dress",
-                  className: "mt-1",
-                  "data-ocid": "inventory.item_name_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Category" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "select",
-                {
-                  className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
-                  value: itemForm.category,
-                  onChange: handleItemCategoryChange,
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select Category" }),
-                    categories.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
-                  ]
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Unit" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  value: itemForm.unit,
-                  onChange: handleItemUnitChange,
-                  placeholder: "Pcs / Pair / Set",
-                  className: "mt-1"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Cost Price (₹)" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "decimal",
-                  value: itemForm.costPriceStr,
-                  onChange: handleItemCostChange,
-                  placeholder: "0",
-                  className: "mt-1",
-                  "data-ocid": "inventory.item_cost_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Selling Price (₹)" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "decimal",
-                  value: itemForm.sellingPriceStr,
-                  onChange: handleItemSellChange,
-                  placeholder: "0",
-                  className: "mt-1",
-                  "data-ocid": "inventory.item_sell_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Opening Stock" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "numeric",
-                  value: itemForm.currentStockStr,
-                  onChange: handleItemStockChange,
-                  placeholder: "0",
-                  className: "mt-1",
-                  "data-ocid": "inventory.item_stock_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Reorder Level" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "numeric",
-                  value: itemForm.reorderLevelStr,
-                  onChange: handleItemReorderChange,
-                  placeholder: "5",
-                  className: "mt-1",
-                  "data-ocid": "inventory.item_reorder_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "md:col-span-2", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Store Location" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  value: itemForm.storeLocation,
-                  onChange: handleItemLocationChange,
-                  placeholder: "e.g. Room 2 Shelf A",
-                  className: "mt-1"
-                }
-              )
-            ] })
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Item Name *" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                value: itemName,
+                onChange: (e3) => setItemName(e3.target.value),
+                placeholder: "e.g. School Dress",
+                className: "mt-1",
+                "data-ocid": "inventory.item_name_input"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Category" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              "select",
+              {
+                className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
+                value: itemCategory,
+                onChange: (e3) => setItemCategory(e3.target.value),
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select Category" }),
+                  [
+                    "Uniform",
+                    "Tie",
+                    "Belt",
+                    "Shoes",
+                    "Books",
+                    "Stationery",
+                    "Sports",
+                    "Other"
+                  ].map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
+                ]
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Unit" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                value: itemUnit,
+                onChange: (e3) => setItemUnit(e3.target.value),
+                placeholder: "Pcs / Pair / Set",
+                className: "mt-1"
+              }
+            )
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Reorder Level" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                type: "text",
+                inputMode: "numeric",
+                value: itemReorder,
+                onChange: (e3) => setItemReorder(e3.target.value.replace(/[^0-9]/g, "")),
+                placeholder: "5",
+                className: "mt-1",
+                "data-ocid": "inventory.item_reorder_input"
+              }
+            )
           ] }),
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
             /* @__PURE__ */ jsxRuntimeExports.jsxs(
@@ -82906,215 +82074,9 @@ function Inventory() {
                 variant: "outline",
                 onClick: () => {
                   setShowItemModal(false);
-                  setEditItemId(null);
+                  setEditItem(null);
                 },
                 "data-ocid": "inventory.item_cancel_button",
-                children: "Cancel"
-              }
-            )
-          ] })
-        ]
-      }
-    ),
-    stockItemId && /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      InvModal,
-      {
-        title: stockAction === "in" ? "📥 Add Stock" : "📤 Issue Stock",
-        onClose: () => {
-          setStockItemId(null);
-          setStockError("");
-        },
-        children: [
-          stockError && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg px-3 py-2", children: [
-            "⚠️ ",
-            stockError
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-muted-foreground", children: [
-            "Item: ",
-            /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { className: "text-foreground", children: stockItem == null ? void 0 : stockItem.name }),
-            " ",
-            "· Current:",
-            " ",
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("strong", { children: [
-              stockItem == null ? void 0 : stockItem.currentStock,
-              " ",
-              stockItem == null ? void 0 : stockItem.unit
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Quantity *" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Input,
-              {
-                type: "text",
-                inputMode: "numeric",
-                value: stockQtyStr,
-                onChange: handleStockQtyChange,
-                className: "mt-1",
-                "data-ocid": "inventory.stock_qty_input"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Note (optional)" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Input,
-              {
-                value: stockNote,
-                onChange: handleStockNoteChange,
-                placeholder: stockAction === "in" ? "Supplier / purchase order" : "Issued to (student/staff)",
-                className: "mt-1"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              Button,
-              {
-                onClick: () => void handleStockUpdate(),
-                disabled: savingStock,
-                "data-ocid": "inventory.stock_save_button",
-                children: [
-                  savingStock && /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }),
-                  stockAction === "in" ? "Add Stock" : "Issue Stock"
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Button,
-              {
-                variant: "outline",
-                onClick: () => {
-                  setStockItemId(null);
-                  setStockError("");
-                },
-                "data-ocid": "inventory.stock_cancel_button",
-                children: "Cancel"
-              }
-            )
-          ] })
-        ]
-      }
-    ),
-    showPurchaseModal && /* @__PURE__ */ jsxRuntimeExports.jsxs(
-      InvModal,
-      {
-        title: "Record Purchase",
-        onClose: () => setShowPurchaseModal(false),
-        children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Item *" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              "select",
-              {
-                className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
-                value: purchaseForm.itemId,
-                onChange: (e3) => setPurchaseForm((p2) => ({ ...p2, itemId: e3.target.value })),
-                "data-ocid": "inventory.purchase_item_select",
-                children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: "", children: "Select Item" }),
-                  items.map((i) => /* @__PURE__ */ jsxRuntimeExports.jsxs("option", { value: i.id, children: [
-                    i.name,
-                    " (Current: ",
-                    i.currentStock,
-                    " ",
-                    i.unit,
-                    ")"
-                  ] }, i.id))
-                ]
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Quantity *" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "numeric",
-                  value: purchaseForm.quantityStr,
-                  onChange: (e3) => setPurchaseForm((p2) => ({
-                    ...p2,
-                    quantityStr: e3.target.value.replace(/[^0-9]/g, "")
-                  })),
-                  placeholder: "10",
-                  className: "mt-1",
-                  "data-ocid": "inventory.purchase_qty_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Rate (₹) *" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "text",
-                  inputMode: "decimal",
-                  value: purchaseForm.rateStr,
-                  onChange: (e3) => setPurchaseForm((p2) => ({
-                    ...p2,
-                    rateStr: e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-                  })),
-                  placeholder: "200",
-                  className: "mt-1",
-                  "data-ocid": "inventory.purchase_rate_input"
-                }
-              )
-            ] })
-          ] }),
-          purchaseForm.quantityStr && purchaseForm.rateStr && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-muted/40 rounded-lg px-3 py-2 text-sm flex justify-between", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: "Total Cost" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "font-bold text-foreground", children: [
-              "₹",
-              (Number(purchaseForm.quantityStr) * Number(purchaseForm.rateStr)).toLocaleString("en-IN")
-            ] })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Vendor" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Input,
-              {
-                value: purchaseForm.vendor,
-                onChange: (e3) => setPurchaseForm((p2) => ({ ...p2, vendor: e3.target.value })),
-                placeholder: "Vendor / supplier name",
-                className: "mt-1",
-                "data-ocid": "inventory.purchase_vendor_input"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Date" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Input,
-              {
-                type: "date",
-                value: purchaseForm.date,
-                onChange: (e3) => setPurchaseForm((p2) => ({ ...p2, date: e3.target.value })),
-                className: "mt-1",
-                "data-ocid": "inventory.purchase_date_input"
-              }
-            )
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              Button,
-              {
-                onClick: () => void handleSavePurchase(),
-                disabled: savingPurchase,
-                "data-ocid": "inventory.purchase_save_button",
-                children: [
-                  savingPurchase && /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }),
-                  "Record Purchase"
-                ]
-              }
-            ),
-            /* @__PURE__ */ jsxRuntimeExports.jsx(
-              Button,
-              {
-                variant: "outline",
-                onClick: () => setShowPurchaseModal(false),
-                "data-ocid": "inventory.purchase_cancel_button",
                 children: "Cancel"
               }
             )
@@ -83124,157 +82086,72 @@ function Inventory() {
     )
   ] });
 }
-const BOOK_CATEGORIES = [
-  "Textbook",
-  "Fiction",
-  "Non-Fiction",
-  "Science",
-  "Mathematics",
-  "History",
-  "Geography",
-  "Literature",
-  "Reference",
-  "Magazine",
-  "Other"
+const TABS$2 = [
+  { id: "catalog", label: "Books" },
+  { id: "issue", label: "Issue Book" },
+  { id: "returns", label: "Returns" },
+  { id: "report", label: "Stock Report" }
 ];
-const DEFAULT_SETTINGS$1 = {
-  finePerDay: 5,
-  defaultLoanDays: 14
-};
 function todayStr() {
   return (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
 }
-function defaultDueDate(days) {
+function defaultDueDate() {
   const d2 = /* @__PURE__ */ new Date();
-  d2.setDate(d2.getDate() + days);
+  d2.setDate(d2.getDate() + 14);
   return d2.toISOString().split("T")[0];
 }
-function daysOverdue(dueDate) {
-  const due = new Date(dueDate);
-  const now2 = /* @__PURE__ */ new Date();
-  now2.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  const diff = Math.floor((now2.getTime() - due.getTime()) / 864e5);
+function daysOverdue(due) {
+  const diff = Math.floor((Date.now() - new Date(due).getTime()) / 864e5);
   return diff > 0 ? diff : 0;
 }
-function exportCSV(rows, filename) {
-  const csv = rows.map((r2) => r2.map((c2) => `"${String(c2).replace(/"/g, '""')}"`).join(",")).join("\n");
-  const a2 = document.createElement("a");
-  a2.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-  a2.download = filename;
-  a2.click();
-}
-function SettingsDialog({
-  settings,
-  onSave,
-  onClose
-}) {
-  const [fine, setFine] = reactExports.useState(String(settings.finePerDay));
-  const [days, setDays] = reactExports.useState(String(settings.defaultLoanDays));
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(Dialog, { open: true, onOpenChange: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(DialogContent, { className: "max-w-sm", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DialogTitle, { children: "Library Settings" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4 py-2", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Fine per overdue day (₹)" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            type: "text",
-            inputMode: "decimal",
-            className: "mt-1",
-            value: fine,
-            onChange: (e3) => setFine(
-              e3.target.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1")
-            ),
-            "data-ocid": "library.settings.fine_input"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Default loan period (days)" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            type: "text",
-            inputMode: "numeric",
-            className: "mt-1",
-            value: days,
-            onChange: (e3) => setDays(e3.target.value.replace(/[^0-9]/g, "")),
-            "data-ocid": "library.settings.loan_days_input"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
-          {
-            className: "flex-1",
-            onClick: () => onSave({
-              finePerDay: Math.max(0, Number(fine) || 5),
-              defaultLoanDays: Math.max(1, Number(days) || 14)
-            }),
-            "data-ocid": "library.settings.save_button",
-            children: "Save Settings"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
-          {
-            variant: "outline",
-            onClick: onClose,
-            "data-ocid": "library.settings.cancel_button",
-            children: "Cancel"
-          }
-        )
-      ] })
-    ] })
-  ] }) });
-}
-function BookFormDialog({
-  book,
-  onSave,
-  onClose
-}) {
+function BookForm({ book, onSave, onClose }) {
   const [isbn, setIsbn] = reactExports.useState((book == null ? void 0 : book.isbn) ?? "");
   const [title, setTitle] = reactExports.useState((book == null ? void 0 : book.title) ?? "");
   const [author, setAuthor] = reactExports.useState((book == null ? void 0 : book.author) ?? "");
-  const [publisher, setPublisher] = reactExports.useState((book == null ? void 0 : book.publisher) ?? "");
   const [category, setCategory] = reactExports.useState((book == null ? void 0 : book.category) ?? "Textbook");
-  const [totalQty, setTotalQty] = reactExports.useState(String((book == null ? void 0 : book.totalQty) ?? 1));
-  const [availableQty, setAvailableQty] = reactExports.useState(
-    String((book == null ? void 0 : book.availableQty) ?? 1)
+  const [totalCopies, setTotalCopies] = reactExports.useState(
+    String((book == null ? void 0 : book.total_copies) ?? 1)
   );
-  const [location, setLocation] = reactExports.useState((book == null ? void 0 : book.location) ?? "");
   const [saving, setSaving] = reactExports.useState(false);
   async function handleSubmit() {
-    if (!title.trim()) {
-      ue.error("Title is required");
-      return;
-    }
-    if (!author.trim()) {
-      ue.error("Author is required");
+    if (!title.trim() || !author.trim()) {
+      ue.error("Title and author required");
       return;
     }
     setSaving(true);
     try {
-      await onSave({
+      await apiCall("library/book-add", "POST", {
         id: book == null ? void 0 : book.id,
         isbn: isbn.trim(),
         title: title.trim(),
         author: author.trim(),
-        publisher: publisher.trim() || void 0,
         category,
-        totalQty: Math.max(0, Number(totalQty) || 0),
-        availableQty: Math.max(0, Number(availableQty) || 0),
-        location: location.trim() || void 0
+        total_copies: Number(totalCopies) || 1
       });
+      ue.success(book ? "Book updated" : "Book added");
+      onSave();
+      onClose();
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to save");
     } finally {
       setSaving(false);
     }
   }
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(Dialog, { open: true, onOpenChange: onClose, children: /* @__PURE__ */ jsxRuntimeExports.jsxs(DialogContent, { className: "max-w-md max-h-[90vh] overflow-y-auto", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx(DialogHeader, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(DialogTitle, { children: book ? "Edit Book" : "Add New Book" }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3 py-2", children: [
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl w-full max-w-md shadow-elevated animate-slide-up", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between px-5 pt-4 pb-3 border-b border-border", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-base font-semibold text-foreground", children: book ? "Edit Book" : "Add Book" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "button",
+        {
+          type: "button",
+          onClick: onClose,
+          className: "text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center",
+          "aria-label": "Close",
+          children: "×"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-5 space-y-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "ISBN" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -83283,16 +82160,13 @@ function BookFormDialog({
             className: "mt-1",
             value: isbn,
             onChange: (e3) => setIsbn(e3.target.value),
-            placeholder: "978-0-000-00000-0",
+            placeholder: "ISBN",
             "data-ocid": "library.book.isbn_input"
           }
         )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Label$1, { children: [
-          "Title ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-destructive", children: "*" })
-        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Title *" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Input,
           {
@@ -83305,84 +82179,55 @@ function BookFormDialog({
         )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Label$1, { children: [
-          "Author ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-destructive", children: "*" })
-        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Author *" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
           Input,
           {
             className: "mt-1",
             value: author,
             onChange: (e3) => setAuthor(e3.target.value),
-            placeholder: "Author name",
+            placeholder: "Author",
             "data-ocid": "library.book.author_input"
           }
         )
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Publisher" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
-          {
-            className: "mt-1",
-            value: publisher,
-            onChange: (e3) => setPublisher(e3.target.value),
-            placeholder: "Publisher"
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Category" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: category, onValueChange: setCategory, children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(SelectTrigger, { className: "mt-1", children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, {}) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(SelectContent, { children: BOOK_CATEGORIES.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2)) })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Total Qty" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Input,
-            {
-              type: "text",
-              inputMode: "numeric",
-              className: "mt-1",
-              value: totalQty,
-              onChange: (e3) => setTotalQty(e3.target.value.replace(/[^0-9]/g, "")),
-              "data-ocid": "library.book.total_qty_input"
-            }
-          )
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Available Qty" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Input,
-            {
-              type: "text",
-              inputMode: "numeric",
-              className: "mt-1",
-              value: availableQty,
-              onChange: (e3) => setAvailableQty(e3.target.value.replace(/[^0-9]/g, "")),
-              "data-ocid": "library.book.available_qty_input"
-            }
-          )
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Location / Shelf" }),
         /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Input,
+          "select",
           {
-            className: "mt-1",
-            value: location,
-            onChange: (e3) => setLocation(e3.target.value),
-            placeholder: "e.g. Shelf A-3",
-            "data-ocid": "library.book.location_input"
+            className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background mt-1",
+            value: category,
+            onChange: (e3) => setCategory(e3.target.value),
+            children: [
+              "Textbook",
+              "Fiction",
+              "Non-Fiction",
+              "Science",
+              "Mathematics",
+              "History",
+              "Reference",
+              "Other"
+            ].map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
           }
         )
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-2", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Total Copies" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            type: "text",
+            inputMode: "numeric",
+            className: "mt-1",
+            value: totalCopies,
+            onChange: (e3) => setTotalCopies(e3.target.value.replace(/[^0-9]/g, "")),
+            placeholder: "1",
+            "data-ocid": "library.book.total_copies_input"
+          }
+        )
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
           Button,
           {
@@ -83412,64 +82257,35 @@ function BookFormDialog({
 function Library() {
   const [books, setBooks] = reactExports.useState([]);
   const [issues, setIssues] = reactExports.useState([]);
-  const [overdueList, setOverdueList] = reactExports.useState([]);
-  const [totalBooks, setTotalBooks] = reactExports.useState(0);
   const [loading, setLoading] = reactExports.useState(true);
   const [activeTab, setActiveTab] = reactExports.useState("catalog");
-  const [showBookForm, setShowBookForm] = reactExports.useState(false);
-  const [editBook, setEditBook] = reactExports.useState(void 0);
-  const [showSettings, setShowSettings] = reactExports.useState(false);
-  const [libSettings, setLibSettings] = reactExports.useState(DEFAULT_SETTINGS$1);
-  const [catalogSearch, setCatalogSearch] = reactExports.useState("");
-  const [catalogCat, setCatalogCat] = reactExports.useState("all");
-  const [page, setPage] = reactExports.useState(1);
-  const PAGE_SIZE2 = 50;
-  const [issueStudentQ, setIssueStudentQ] = reactExports.useState("");
-  const [issueStudentId, setIssueStudentId] = reactExports.useState("");
-  const [, setIssueStudentName] = reactExports.useState("");
-  const [issueBookQ, setIssueBookQ] = reactExports.useState("");
-  const [issueBookId, setIssueBookId] = reactExports.useState("");
-  const [issueDue, setIssueDue] = reactExports.useState(
-    () => defaultDueDate(DEFAULT_SETTINGS$1.defaultLoanDays)
-  );
-  const [issueLoading, setIssueLoading] = reactExports.useState(false);
-  const [studentResults, setStudentResults] = reactExports.useState([]);
-  const [showStudentDD, setShowStudentDD] = reactExports.useState(false);
-  const [bookResults, setBookResults] = reactExports.useState([]);
-  const [showBookDD, setShowBookDD] = reactExports.useState(false);
-  const [returnQ, setReturnQ] = reactExports.useState("");
+  const [search, setSearch] = reactExports.useState("");
+  const [showForm, setShowForm] = reactExports.useState(false);
+  const [editBook, setEditBook] = reactExports.useState();
+  const [studentSearch, setStudentSearch] = reactExports.useState("");
+  const [studentId, setStudentId] = reactExports.useState("");
+  const [bookSearch, setBookSearch] = reactExports.useState("");
+  const [bookId, setBookId] = reactExports.useState("");
+  const [dueDate, setDueDate] = reactExports.useState(defaultDueDate);
+  const [issuing, setIssuing] = reactExports.useState(false);
+  const [returnSearch, setReturnSearch] = reactExports.useState("");
   const [returnIssue, setReturnIssue] = reactExports.useState(null);
-  const [returnLoading, setReturnLoading] = reactExports.useState(false);
-  const [returnResults, setReturnResults] = reactExports.useState([]);
-  const [showReturnDD, setShowReturnDD] = reactExports.useState(false);
+  const [returning, setReturning] = reactExports.useState(false);
   const loadBooks = reactExports.useCallback(async () => {
-    var _a2;
     setLoading(true);
     try {
-      const res = await phpApiService.get(
-        `library/books&page=${page}&limit=${PAGE_SIZE2}${catalogSearch ? `&search=${encodeURIComponent(catalogSearch)}` : ""}${catalogCat !== "all" ? `&category=${encodeURIComponent(catalogCat)}` : ""}`
-      );
+      const res = await apiCall("library/books");
       setBooks(res.data ?? []);
-      setTotalBooks(res.total ?? ((_a2 = res.data) == null ? void 0 : _a2.length) ?? 0);
     } catch {
       ue.error("Failed to load books");
     } finally {
       setLoading(false);
     }
-  }, [page, catalogSearch, catalogCat]);
+  }, []);
   const loadIssues = reactExports.useCallback(async () => {
     try {
-      const data = await phpApiService.get(
-        "library/issues&limit=50"
-      );
-      setIssues(data ?? []);
-    } catch {
-    }
-  }, []);
-  const loadOverdue = reactExports.useCallback(async () => {
-    try {
-      const data = await phpApiService.get("library/overdue");
-      setOverdueList(data ?? []);
+      const res = await apiCall("library/issues");
+      setIssues(res.data ?? []);
     } catch {
     }
   }, []);
@@ -83477,281 +82293,142 @@ function Library() {
     void loadBooks();
   }, [loadBooks]);
   reactExports.useEffect(() => {
-    if (activeTab === "issue-return") void loadIssues();
-    if (activeTab === "reports") {
-      void loadIssues();
-      void loadOverdue();
-    }
-  }, [activeTab, loadIssues, loadOverdue]);
-  const handleSaveBook = reactExports.useCallback(
-    async (data) => {
-      if (data.id) {
-        await phpApiService.post("library/books/update", data);
-        ue.success(`Book updated: ${data.title}`);
-      } else {
-        await phpApiService.addBook(data);
-        ue.success(`Book added: ${data.title}`);
-      }
-      setShowBookForm(false);
-      setEditBook(void 0);
-      await loadBooks();
-    },
-    [loadBooks]
+    if (activeTab === "returns" || activeTab === "report") void loadIssues();
+  }, [activeTab, loadIssues]);
+  const filtered = reactExports.useMemo(
+    () => books.filter(
+      (b2) => !search || b2.title.toLowerCase().includes(search.toLowerCase()) || b2.author.toLowerCase().includes(search.toLowerCase())
+    ),
+    [books, search]
   );
-  const handleDeleteBook = reactExports.useCallback(
-    async (id) => {
-      if (!confirm("Delete this book from the catalog?")) return;
-      try {
-        await phpApiService.del("library/books/delete", { id });
-        ue.success("Book removed from catalog");
-        await loadBooks();
-      } catch {
-        ue.error("Failed to delete book");
-      }
-    },
-    [loadBooks]
-  );
-  const searchStudents = reactExports.useCallback(async (q2) => {
-    if (!q2.trim()) {
-      setStudentResults([]);
+  async function handleIssue() {
+    if (!studentId) {
+      ue.error("Enter a student ID");
       return;
     }
-    try {
-      const res = await phpApiService.getStudents({
-        search: q2,
-        limit: "8",
-        status: "active"
-      });
-      setStudentResults(
-        res.data.map((s2) => ({
-          id: s2.id,
-          fullName: s2.fullName,
-          admNo: s2.admNo,
-          class: s2.class,
-          section: s2.section
-        }))
-      );
-    } catch {
-      setStudentResults([]);
-    }
-  }, []);
-  const searchBooksForIssue = reactExports.useCallback(async (q2) => {
-    if (!q2.trim()) {
-      setBookResults([]);
-      return;
-    }
-    try {
-      const res = await phpApiService.get(
-        `library/books&search=${encodeURIComponent(q2)}&limit=8`
-      );
-      setBookResults((res.data ?? []).filter((b2) => b2.availableQty > 0));
-    } catch {
-      setBookResults([]);
-    }
-  }, []);
-  const searchBooksForReturn = reactExports.useCallback(async (q2) => {
-    if (!q2.trim()) {
-      setReturnResults([]);
-      return;
-    }
-    try {
-      const data = await phpApiService.get(
-        `library/issues/search&q=${encodeURIComponent(q2)}&status=issued`
-      );
-      setReturnResults(data ?? []);
-    } catch {
-      setReturnResults([]);
-    }
-  }, []);
-  const handleIssue = reactExports.useCallback(async () => {
-    if (!issueStudentId) {
-      ue.error("Select a student");
-      return;
-    }
-    if (!issueBookId) {
+    if (!bookId) {
       ue.error("Select a book");
       return;
     }
-    setIssueLoading(true);
+    setIssuing(true);
     try {
-      await phpApiService.issueBook({
-        bookId: issueBookId,
-        studentId: issueStudentId,
-        dueDate: issueDue,
-        issueDate: todayStr()
+      await apiCall("library/issue", "POST", {
+        book_id: bookId,
+        student_id: studentId,
+        due_date: dueDate,
+        issue_date: todayStr()
       });
       ue.success("Book issued successfully");
-      setIssueStudentQ("");
-      setIssueStudentId("");
-      setIssueStudentName("");
-      setIssueBookQ("");
-      setIssueBookId("");
-      setIssueDue(defaultDueDate(libSettings.defaultLoanDays));
+      setStudentSearch("");
+      setStudentId("");
+      setBookSearch("");
+      setBookId("");
+      setDueDate(defaultDueDate());
       await loadBooks();
-      await loadIssues();
-    } catch (err) {
-      ue.error(err instanceof Error ? err.message : "Failed to issue book");
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to issue");
     } finally {
-      setIssueLoading(false);
+      setIssuing(false);
     }
-  }, [
-    issueStudentId,
-    issueBookId,
-    issueDue,
-    libSettings,
-    loadBooks,
-    loadIssues
-  ]);
-  const handleReturn = reactExports.useCallback(async () => {
-    if (!returnIssue) {
-      ue.error("No open issue found");
-      return;
-    }
-    const od = daysOverdue(returnIssue.dueDate);
-    const fine = od * libSettings.finePerDay;
-    setReturnLoading(true);
+  }
+  async function handleReturn(issue) {
+    setReturning(true);
     try {
-      const res = await phpApiService.returnBook({
-        issueId: returnIssue.id,
-        returnDate: todayStr(),
-        fine
+      await apiCall("library/return", "POST", {
+        issue_id: issue.id,
+        return_date: todayStr()
       });
-      const actualFine = res.fine ?? fine;
-      ue.success(
-        actualFine > 0 ? `Book returned. Fine: ₹${actualFine}` : "Book returned successfully"
-      );
-      setReturnQ("");
+      ue.success("Book returned successfully");
       setReturnIssue(null);
-      setReturnResults([]);
+      setReturnSearch("");
       await loadBooks();
       await loadIssues();
-    } catch (err) {
-      ue.error(
-        err instanceof Error ? err.message : "Failed to process return"
-      );
+    } catch (e3) {
+      ue.error(e3 instanceof Error ? e3.message : "Failed to return");
     } finally {
-      setReturnLoading(false);
+      setReturning(false);
     }
-  }, [returnIssue, libSettings, loadBooks, loadIssues]);
-  const totalIssued = reactExports.useMemo(
-    () => issues.filter((i) => i.status === "issued").length,
-    [issues]
+  }
+  async function handleDelete(id) {
+    if (!confirm("Delete this book?")) return;
+    try {
+      await apiCall("library/book-delete", "POST", { id });
+      ue.success("Book deleted");
+      await loadBooks();
+    } catch {
+      ue.error("Failed to delete");
+    }
+  }
+  const totalBooks = books.reduce((s2, b2) => s2 + b2.total_copies, 0);
+  const totalIssued = issues.filter((i) => i.status === "issued").length;
+  const overdue = issues.filter(
+    (i) => i.status === "issued" && daysOverdue(i.due_date) > 0
   );
-  const totalAvailable = reactExports.useMemo(
-    () => books.reduce((s2, b2) => s2 + b2.availableQty, 0),
-    [books]
+  const matchedReturns = issues.filter(
+    (i) => {
+      var _a2, _b2;
+      return i.status === "issued" && returnSearch && (((_a2 = i.book_title) == null ? void 0 : _a2.toLowerCase().includes(returnSearch.toLowerCase())) || ((_b2 = i.student_name) == null ? void 0 : _b2.toLowerCase().includes(returnSearch.toLowerCase())));
+    }
   );
-  const currentIssueDaysOD = returnIssue ? daysOverdue(returnIssue.dueDate) : 0;
-  const calcFine = currentIssueDaysOD * libSettings.finePerDay;
-  const TABS2 = [
-    { id: "catalog", label: "Books Catalog", icon: BookOpen },
-    { id: "issue-return", label: "Issue / Return", icon: History },
-    { id: "reports", label: "Reports", icon: Download }
-  ];
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 md:p-6 bg-background min-h-screen space-y-4", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start justify-between", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Library" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground text-sm mt-0.5", children: [
-          totalBooks,
-          " books in catalog · ",
-          totalIssued,
-          " currently issued"
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        Button,
-        {
-          variant: "ghost",
-          size: "icon",
-          onClick: () => setShowSettings(true),
-          "data-ocid": "library.settings_button",
-          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Settings$1, { className: "w-5 h-5" })
-        }
-      )
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Library" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground text-sm mt-0.5", children: [
+        totalBooks,
+        " books · ",
+        totalIssued,
+        " issued"
+      ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-3", children: [
-      { label: "Total Books", value: totalBooks, color: "text-primary" },
+      { label: "Total Books", value: books.length, color: "text-primary" },
       { label: "Issued", value: totalIssued, color: "text-warning" },
       {
         label: "Available",
-        value: totalAvailable,
+        value: books.reduce((s2, b2) => s2 + b2.available_copies, 0),
         color: "text-foreground"
       },
       {
         label: "Overdue",
-        value: overdueList.length,
+        value: overdue.length,
         color: "text-destructive"
       }
     ].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-4 pb-3 text-center", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `text-2xl font-bold font-display ${s2.color}`, children: s2.value }),
       /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: s2.label })
     ] }) }, s2.label)) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS2.map((t2) => {
-      const Icon2 = t2.icon;
-      return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-        "button",
-        {
-          type: "button",
-          onClick: () => setActiveTab(t2.id),
-          className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
-          "data-ocid": `library.${t2.id}_tab`,
-          children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(Icon2, { className: "w-4 h-4" }),
-            t2.label
-          ]
-        },
-        t2.id
-      );
-    }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-card border border-border rounded-xl p-1 flex gap-1 overflow-x-auto", children: TABS$2.map((t2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+      "button",
+      {
+        type: "button",
+        onClick: () => setActiveTab(t2.id),
+        className: `px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${activeTab === t2.id ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted/50"}`,
+        "data-ocid": `library.${t2.id}_tab`,
+        children: t2.label
+      },
+      t2.id
+    )) }),
     activeTab === "catalog" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2 items-center", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative flex-1 min-w-[180px]", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
             Input,
             {
               className: "pl-9",
-              placeholder: "Search title, author, ISBN…",
-              value: catalogSearch,
-              onChange: (e3) => {
-                setCatalogSearch(e3.target.value);
-                setPage(1);
-              },
+              placeholder: "Search title, author…",
+              value: search,
+              onChange: (e3) => setSearch(e3.target.value),
               "data-ocid": "library.catalog.search_input"
             }
           )
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Select,
-          {
-            value: catalogCat,
-            onValueChange: (v2) => {
-              setCatalogCat(v2);
-              setPage(1);
-            },
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                SelectTrigger,
-                {
-                  className: "w-36",
-                  "data-ocid": "library.catalog.category_filter",
-                  children: /* @__PURE__ */ jsxRuntimeExports.jsx(SelectValue, { placeholder: "Category" })
-                }
-              ),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Categories" }),
-                BOOK_CATEGORIES.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 }, c2))
-              ] })
-            ]
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
           Button,
           {
             onClick: () => {
               setEditBook(void 0);
-              setShowBookForm(true);
+              setShowForm(true);
             },
             "data-ocid": "library.catalog.add_book_button",
             children: [
@@ -83759,538 +82436,368 @@ function Library() {
               "Add Book"
             ]
           }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          Button,
-          {
-            variant: "outline",
-            onClick: () => exportCSV(
-              [
-                [
-                  "ISBN",
-                  "Title",
-                  "Author",
-                  "Publisher",
-                  "Category",
-                  "Total Qty",
-                  "Available",
-                  "Location"
-                ],
-                ...books.map((b2) => [
-                  b2.isbn ?? "",
-                  b2.title,
-                  b2.author,
-                  b2.publisher ?? "",
-                  b2.category,
-                  String(b2.totalQty),
-                  String(b2.availableQty),
-                  b2.location ?? ""
-                ])
-              ],
-              "library_catalog.csv"
-            ),
-            "data-ocid": "library.catalog.export_button",
-            children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-2" }),
-              "Export"
-            ]
-          }
         )
       ] }),
       loading ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center py-16", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-6 h-6 animate-spin text-primary" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-2 text-muted-foreground", children: "Loading books…" })
-      ] }) : books.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "ml-2 text-muted-foreground", children: "Loading…" })
+      ] }) : filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
         "div",
         {
           className: "flex flex-col items-center justify-center py-16 text-center",
           "data-ocid": "library.catalog.empty_state",
           children: [
             /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-12 h-12 text-muted-foreground/30 mb-3" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground font-medium", children: catalogSearch ? "No books match your search." : "No books yet. Add your first book." }),
-            !catalogSearch && /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { className: "mt-4", onClick: () => setShowBookForm(true), children: "Add First Book" })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground font-medium", children: search ? "No books match your search." : "No books yet." }),
+            !search && /* @__PURE__ */ jsxRuntimeExports.jsx(Button, { className: "mt-4", onClick: () => setShowForm(true), children: "Add First Book" })
           ]
         }
-      ) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-border overflow-x-auto", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "bg-muted/40 border-b border-border", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium", children: "Title" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell", children: "Author" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium hidden lg:table-cell", children: "ISBN" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium", children: "Category" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-right px-3 py-2.5 text-muted-foreground font-medium", children: "Total" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-right px-3 py-2.5 text-muted-foreground font-medium", children: "Avail." }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-center px-3 py-2.5 text-muted-foreground font-medium", children: "Actions" })
-          ] }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: books.map((b2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            "tr",
-            {
-              className: `border-b border-border last:border-0 hover:bg-muted/20 ${b2.availableQty === 0 ? "bg-destructive/5" : ""}`,
-              "data-ocid": `library.catalog.item.${idx + 1}`,
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 font-medium text-foreground", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "span",
-                  {
-                    className: "truncate max-w-[160px] block",
-                    title: b2.title,
-                    children: b2.title
-                  }
-                ) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 text-muted-foreground hidden md:table-cell", children: b2.author }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 text-muted-foreground font-mono text-xs hidden lg:table-cell", children: b2.isbn || "—" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-xs", children: b2.category }) }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 text-right tabular-nums", children: b2.totalQty }),
+      ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "rounded-xl border border-border overflow-x-auto", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { children: /* @__PURE__ */ jsxRuntimeExports.jsxs("tr", { className: "bg-muted/40 border-b border-border", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium", children: "Title" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium hidden md:table-cell", children: "Author" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-left px-3 py-2.5 text-muted-foreground font-medium", children: "Category" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-right px-3 py-2.5 text-muted-foreground font-medium", children: "Total" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-right px-3 py-2.5 text-muted-foreground font-medium", children: "Avail." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("th", { className: "text-center px-3 py-2.5 text-muted-foreground font-medium", children: "Actions" })
+        ] }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { children: filtered.map((b2, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "tr",
+          {
+            className: `border-b border-border last:border-0 hover:bg-muted/20 ${b2.available_copies === 0 ? "bg-destructive/5" : ""}`,
+            "data-ocid": `library.catalog.item.${idx + 1}`,
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 font-medium text-foreground", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "span",
+                {
+                  className: "truncate max-w-[160px] block",
+                  title: b2.title,
+                  children: b2.title
+                }
+              ) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 text-muted-foreground hidden md:table-cell", children: b2.author }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-xs", children: b2.category }) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5 text-right tabular-nums", children: b2.total_copies }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "td",
+                {
+                  className: `px-3 py-2.5 text-right tabular-nums font-medium ${b2.available_copies === 0 ? "text-destructive" : "text-foreground"}`,
+                  children: b2.available_copies
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1", children: [
                 /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  "td",
+                  Button,
                   {
-                    className: `px-3 py-2.5 text-right tabular-nums font-medium ${b2.availableQty === 0 ? "text-destructive" : "text-foreground"}`,
-                    children: b2.availableQty
+                    variant: "ghost",
+                    size: "icon",
+                    className: "h-7 w-7",
+                    onClick: () => {
+                      setEditBook(b2);
+                      setShowForm(true);
+                    },
+                    "data-ocid": `library.catalog.edit_button.${idx + 1}`,
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pen, { className: "w-3.5 h-3.5" })
                   }
                 ),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2.5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-1", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    Button,
-                    {
-                      variant: "ghost",
-                      size: "icon",
-                      className: "h-7 w-7",
-                      onClick: () => {
-                        setEditBook(b2);
-                        setShowBookForm(true);
-                      },
-                      "data-ocid": `library.catalog.edit_button.${idx + 1}`,
-                      children: /* @__PURE__ */ jsxRuntimeExports.jsx(Pen, { className: "w-3.5 h-3.5" })
-                    }
-                  ),
-                  /* @__PURE__ */ jsxRuntimeExports.jsx(
-                    Button,
-                    {
-                      variant: "ghost",
-                      size: "icon",
-                      className: "h-7 w-7 text-destructive",
-                      onClick: () => void handleDeleteBook(b2.id),
-                      "data-ocid": `library.catalog.delete_button.${idx + 1}`,
-                      children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
-                    }
-                  )
-                ] }) })
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Button,
+                  {
+                    variant: "ghost",
+                    size: "icon",
+                    className: "h-7 w-7 text-destructive",
+                    onClick: () => void handleDelete(b2.id),
+                    "data-ocid": `library.catalog.delete_button.${idx + 1}`,
+                    children: /* @__PURE__ */ jsxRuntimeExports.jsx(Trash2, { className: "w-3.5 h-3.5" })
+                  }
+                )
+              ] }) })
+            ]
+          },
+          b2.id
+        )) })
+      ] }) })
+    ] }),
+    activeTab === "issue" && /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-base flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-4 h-4 text-primary" }),
+        "Issue Book"
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Student ID / Adm. No." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            Input,
+            {
+              className: "mt-1",
+              placeholder: "Enter student ID",
+              value: studentSearch,
+              onChange: (e3) => {
+                setStudentSearch(e3.target.value);
+                setStudentId(e3.target.value);
+              },
+              "data-ocid": "library.issue.student_search_input"
+            }
+          )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Book" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Input,
+              {
+                className: "pl-9 mt-1",
+                placeholder: "Search book title…",
+                value: bookSearch,
+                onChange: (e3) => {
+                  setBookSearch(e3.target.value);
+                  const found = books.find(
+                    (b2) => b2.title.toLowerCase().includes(e3.target.value.toLowerCase())
+                  );
+                  if (found) setBookId(found.id);
+                  else setBookId("");
+                },
+                "data-ocid": "library.issue.book_search_input"
+              }
+            )
+          ] }),
+          bookSearch && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border border-border rounded-lg mt-1 max-h-40 overflow-y-auto", children: books.filter(
+            (b2) => b2.title.toLowerCase().includes(bookSearch.toLowerCase()) && b2.available_copies > 0
+          ).map((b2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "button",
+            {
+              type: "button",
+              className: "w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex justify-between",
+              onClick: () => {
+                setBookSearch(b2.title);
+                setBookId(b2.id);
+              },
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: b2.title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground text-xs", children: [
+                  b2.available_copies,
+                  " avail."
+                ] })
               ]
             },
             b2.id
           )) })
-        ] }) }),
-        totalBooks > PAGE_SIZE2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-center gap-2", children: [
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { children: "Due Date" }),
           /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Button,
+            Input,
             {
-              variant: "outline",
-              size: "sm",
-              disabled: page === 1,
-              onClick: () => setPage((p2) => p2 - 1),
-              "data-ocid": "library.catalog.pagination_prev",
-              children: "Previous"
-            }
-          ),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-muted-foreground px-3 py-1.5", children: [
-            "Page ",
-            page,
-            " of ",
-            Math.ceil(totalBooks / PAGE_SIZE2)
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx(
-            Button,
-            {
-              variant: "outline",
-              size: "sm",
-              disabled: page * PAGE_SIZE2 >= totalBooks,
-              onClick: () => setPage((p2) => p2 + 1),
-              "data-ocid": "library.catalog.pagination_next",
-              children: "Next"
+              type: "date",
+              className: "mt-1",
+              value: dueDate,
+              min: todayStr(),
+              onChange: (e3) => setDueDate(e3.target.value),
+              "data-ocid": "library.issue.due_date_input"
             }
           )
-        ] })
-      ] })
-    ] }),
-    activeTab === "issue-return" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-5", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid md:grid-cols-2 gap-4", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-base flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-4 h-4 text-primary" }),
-            "Issue Book"
-          ] }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Student" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  Input,
-                  {
-                    className: "pl-9",
-                    placeholder: "Student name or adm. no…",
-                    value: issueStudentQ,
-                    onChange: (e3) => {
-                      setIssueStudentQ(e3.target.value);
-                      setIssueStudentId("");
-                      setIssueStudentName("");
-                      setShowStudentDD(true);
-                      void searchStudents(e3.target.value);
-                    },
-                    "data-ocid": "library.issue.student_search_input"
-                  }
-                ),
-                issueStudentId && /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" })
-              ] }),
-              showStudentDD && studentResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
-                "div",
-                {
-                  className: "absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto",
-                  "data-ocid": "library.issue.student_dropdown",
-                  children: studentResults.map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                    "button",
-                    {
-                      type: "button",
-                      className: "w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex items-center gap-2",
-                      onClick: () => {
-                        setIssueStudentQ(`${s2.fullName} (${s2.admNo})`);
-                        setIssueStudentId(s2.id);
-                        setIssueStudentName(s2.fullName);
-                        setShowStudentDD(false);
-                        setStudentResults([]);
-                      },
-                      children: [
-                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium", children: s2.fullName }),
-                        /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground text-xs", children: [
-                          s2.class,
-                          "-",
-                          s2.section,
-                          " · ",
-                          s2.admNo
-                        ] })
-                      ]
-                    },
-                    s2.id
-                  ))
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Book" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  Input,
-                  {
-                    className: "pl-9",
-                    placeholder: "Book title or ISBN…",
-                    value: issueBookQ,
-                    onChange: (e3) => {
-                      setIssueBookQ(e3.target.value);
-                      setIssueBookId("");
-                      setShowBookDD(true);
-                      void searchBooksForIssue(e3.target.value);
-                    },
-                    "data-ocid": "library.issue.book_search_input"
-                  }
-                ),
-                issueBookId && /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-primary" })
-              ] }),
-              showBookDD && bookResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto", children: bookResults.map((b2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  type: "button",
-                  className: "w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex justify-between items-center",
-                  onClick: () => {
-                    setIssueBookQ(b2.title);
-                    setIssueBookId(b2.id);
-                    setShowBookDD(false);
-                    setBookResults([]);
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium", children: b2.title }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-muted-foreground", children: [
-                      b2.availableQty,
-                      " avail."
-                    ] })
-                  ]
-                },
-                b2.id
-              )) })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Due Date" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx(
-                Input,
-                {
-                  type: "date",
-                  value: issueDue,
-                  onChange: (e3) => setIssueDue(e3.target.value),
-                  min: todayStr(),
-                  "data-ocid": "library.issue.due_date_input"
-                }
-              )
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              Button,
-              {
-                className: "w-full",
-                onClick: () => void handleIssue(),
-                disabled: issueLoading || !issueStudentId || !issueBookId,
-                "data-ocid": "library.issue.submit_button",
-                children: [
-                  issueLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-4 h-4 mr-2" }),
-                  "Issue Book"
-                ]
-              }
-            )
-          ] })
         ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-base flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4 text-accent" }),
-            "Return Book"
-          ] }) }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "space-y-3", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Search issued book to return" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  Input,
-                  {
-                    className: "pl-9",
-                    placeholder: "Student name or book title…",
-                    value: returnQ,
-                    onChange: (e3) => {
-                      setReturnQ(e3.target.value);
-                      setReturnIssue(null);
-                      setShowReturnDD(true);
-                      void searchBooksForReturn(e3.target.value);
-                    },
-                    "data-ocid": "library.return.book_search_input"
-                  }
-                )
-              ] }),
-              showReturnDD && returnResults.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "absolute z-30 top-full mt-1 w-full bg-card border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto", children: returnResults.map((issue) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                "button",
-                {
-                  type: "button",
-                  className: "w-full text-left px-3 py-2 hover:bg-muted/50 text-sm flex flex-col gap-0.5",
-                  onClick: () => {
-                    setReturnQ(
-                      `${issue.bookTitle} — ${issue.studentName}`
-                    );
-                    setReturnIssue(issue);
-                    setShowReturnDD(false);
-                    setReturnResults([]);
-                  },
-                  children: [
-                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium", children: issue.bookTitle }),
-                    /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs text-muted-foreground", children: [
-                      issue.studentName,
-                      " · Due: ",
-                      issue.dueDate
-                    ] })
-                  ]
-                },
-                issue.id
-              )) })
-            ] }),
-            returnIssue && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-muted/40 rounded-lg p-3 space-y-1.5 text-sm border border-border", children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: "Student" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium", children: returnIssue.studentName })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: "Issue Date" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: returnIssue.issueDate })
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground", children: "Due Date" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                  "span",
-                  {
-                    className: currentIssueDaysOD > 0 ? "text-destructive font-medium" : "",
-                    children: [
-                      returnIssue.dueDate,
-                      currentIssueDaysOD > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-xs ml-1", children: [
-                        "(",
-                        currentIssueDaysOD,
-                        " days overdue)"
-                      ] })
-                    ]
-                  }
-                )
-              ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex justify-between border-t border-border pt-1.5 font-bold", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "Fine" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs(
-                  "span",
-                  {
-                    className: calcFine > 0 ? "text-destructive" : "text-foreground",
-                    children: [
-                      "₹",
-                      calcFine
-                    ]
-                  }
-                )
-              ] })
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs(
-              Button,
-              {
-                className: "w-full",
-                variant: calcFine > 0 ? "destructive" : "default",
-                onClick: () => void handleReturn(),
-                disabled: returnLoading || !returnIssue,
-                "data-ocid": "library.return.submit_button",
-                children: [
-                  returnLoading ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4 mr-2" }),
-                  calcFine > 0 ? `Return & Collect ₹${calcFine}` : "Return Book"
-                ]
-              }
-            )
-          ] })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-sm flex items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(History, { className: "w-4 h-4 text-muted-foreground" }),
-          "Recent Transactions"
-        ] }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { className: "p-0", children: issues.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          Button,
           {
-            className: "py-8 text-center text-muted-foreground text-sm",
-            "data-ocid": "library.recent.empty_state",
-            children: "No transactions yet."
-          }
-        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-border", children: issues.slice(0, 15).map((issue, idx) => {
-          const od = issue.status === "issued" ? daysOverdue(issue.dueDate) : 0;
-          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
-            "div",
-            {
-              className: "flex items-center gap-3 px-4 py-2.5 text-sm",
-              "data-ocid": `library.recent.item.${idx + 1}`,
-              children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx(
-                  Badge,
-                  {
-                    variant: issue.status === "returned" ? "secondary" : od > 0 ? "destructive" : "default",
-                    className: "text-xs flex-shrink-0",
-                    children: issue.status === "returned" ? "Returned" : od > 0 ? "Overdue" : "Issued"
-                  }
-                ),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium truncate flex-1", children: issue.bookTitle ?? "Unknown Book" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground truncate hidden sm:block", children: issue.studentName ?? "—" }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground text-xs flex-shrink-0", children: issue.issueDate })
-              ]
-            },
-            issue.id
-          );
-        }) }) })
-      ] })
-    ] }),
-    activeTab === "reports" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-3", children: [
-        {
-          label: "Total Issued",
-          value: issues.filter((i) => i.status === "issued").length,
-          color: "text-primary"
-        },
-        {
-          label: "Returned",
-          value: issues.filter((i) => i.status === "returned").length,
-          color: "text-foreground"
-        },
-        {
-          label: "Overdue",
-          value: overdueList.length,
-          color: "text-destructive"
-        },
-        {
-          label: "Total Fines (₹)",
-          value: overdueList.reduce((s2, o) => s2 + o.fine, 0),
-          color: "text-warning"
-        }
-      ].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-4 pb-3 text-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: `text-2xl font-bold font-display ${s2.color}`, children: s2.value }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: s2.label })
-      ] }) }, s2.label)) }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex items-center justify-between mb-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { className: "font-semibold text-foreground flex items-center gap-2", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-4 h-4 text-destructive" }),
-          "Overdue Books (",
-          overdueList.length,
-          ")"
-        ] }) }),
-        overdueList.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
-          "div",
-          {
-            className: "flex flex-col items-center justify-center py-10 text-center bg-muted/30 rounded-xl",
-            "data-ocid": "library.reports.overdue_empty_state",
+            className: "w-full",
+            onClick: handleIssue,
+            disabled: issuing || !studentId || !bookId,
+            "data-ocid": "library.issue.submit_button",
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-10 h-10 text-muted-foreground/30 mb-2" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm font-medium", children: "No overdue books! All issues are on time." })
+              issuing ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-2" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(BookOpen, { className: "w-4 h-4 mr-2" }),
+              "Issue Book"
             ]
           }
-        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: overdueList.map((entry, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        )
+      ] })
+    ] }),
+    activeTab === "returns" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Input,
+          {
+            className: "pl-9",
+            placeholder: "Search issued book or student…",
+            value: returnSearch,
+            onChange: (e3) => setReturnSearch(e3.target.value),
+            "data-ocid": "library.return.book_search_input"
+          }
+        )
+      ] }),
+      returnSearch && matchedReturns.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "border border-border rounded-lg overflow-hidden", children: matchedReturns.map((issue, idx) => {
+        const od = daysOverdue(issue.due_date);
+        return /* @__PURE__ */ jsxRuntimeExports.jsxs(
           "div",
           {
-            className: `rounded-lg bg-card border border-border p-3 flex flex-wrap items-center gap-3 ${entry.daysOverdue > 7 ? "border-l-4 border-l-destructive bg-destructive/5" : "border-l-4 border-l-warning"}`,
-            "data-ocid": `library.reports.overdue.item.${idx + 1}`,
+            className: "flex items-center justify-between px-4 py-3 border-b border-border last:border-0 hover:bg-muted/20",
+            "data-ocid": `library.return.item.${idx + 1}`,
             children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0 space-y-0.5", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-sm truncate", children: entry.bookTitle }),
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex flex-wrap gap-x-3 text-xs text-muted-foreground", children: [
-                  /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: entry.studentName }),
-                  entry.studentClass && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                    "Class ",
-                    entry.studentClass
-                  ] }),
-                  /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                    "Due: ",
-                    entry.dueDate
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-sm", children: issue.book_title }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
+                  issue.student_name,
+                  " · Due: ",
+                  issue.due_date,
+                  od > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-destructive ml-1", children: [
+                    "(",
+                    od,
+                    " days overdue)"
                   ] })
                 ] })
               ] }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-right flex-shrink-0", children: [
-                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-bold text-destructive", children: [
-                  entry.daysOverdue,
-                  " days overdue"
-                ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                Button,
+                {
+                  size: "sm",
+                  variant: od > 0 ? "destructive" : "default",
+                  onClick: () => {
+                    setReturnIssue(issue);
+                    void handleReturn(issue);
+                  },
+                  disabled: returning,
+                  "data-ocid": `library.return.submit_button.${idx + 1}`,
+                  children: [
+                    returning && (returnIssue == null ? void 0 : returnIssue.id) === issue.id ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 animate-spin mr-1" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(RotateCcw, { className: "w-4 h-4 mr-1" }),
+                    "Return"
+                  ]
+                }
+              )
+            ]
+          },
+          issue.id
+        );
+      }) }),
+      returnSearch && matchedReturns.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "div",
+        {
+          className: "text-center py-10 text-muted-foreground",
+          "data-ocid": "library.return.empty_state",
+          children: "No matching issued books found."
+        }
+      ),
+      !returnSearch && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center py-10 text-muted-foreground", children: "Search for a student name or book title above." })
+    ] }),
+    activeTab === "report" && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-3", children: [
+        { label: "Total Books", value: books.length },
+        { label: "Issued", value: totalIssued },
+        {
+          label: "Available",
+          value: books.reduce((s2, b2) => s2 + b2.available_copies, 0)
+        },
+        { label: "Overdue", value: overdue.length }
+      ].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-4 pb-3 text-center", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-2xl font-bold font-display", children: s2.value }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: s2.label })
+      ] }) }, s2.label)) }),
+      overdue.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("h3", { className: "font-semibold text-foreground flex items-center gap-2 mb-3", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-4 h-4 text-destructive" }),
+          "Overdue Books"
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", children: overdue.map((i, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-destructive/5 border border-destructive/30 rounded-lg p-3 flex items-center justify-between",
+            "data-ocid": `library.report.overdue.item.${idx + 1}`,
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium text-sm", children: i.book_title }),
                 /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
-                  "Fine: ₹",
-                  entry.fine
+                  i.student_name,
+                  " · Due: ",
+                  i.due_date
                 ] })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(Badge, { variant: "destructive", children: [
+                daysOverdue(i.due_date),
+                " days"
               ] })
             ]
           },
-          entry.id ?? idx
+          i.id
         )) })
-      ] })
+      ] }),
+      overdue.length === 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "flex flex-col items-center justify-center py-10 bg-muted/30 rounded-xl",
+          "data-ocid": "library.report.empty_state",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-10 h-10 text-muted-foreground/30 mb-2" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-muted-foreground text-sm font-medium", children: "No overdue books — all on time!" })
+          ]
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        Button,
+        {
+          variant: "outline",
+          size: "sm",
+          onClick: () => {
+            const rows = [
+              ["Title", "Author", "Category", "Total", "Available"],
+              ...books.map((b2) => [
+                b2.title,
+                b2.author,
+                b2.category,
+                String(b2.total_copies),
+                String(b2.available_copies)
+              ])
+            ];
+            const csv = rows.map((r2) => r2.map((c2) => `"${c2}"`).join(",")).join("\n");
+            const a2 = document.createElement("a");
+            a2.href = `data:text/csv;charset=utf-8,${encodeURIComponent(csv)}`;
+            a2.download = "library_report.csv";
+            a2.click();
+          },
+          "data-ocid": "library.report.export_button",
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-4 h-4 mr-1" }),
+            "Export CSV"
+          ]
+        }
+      )
     ] }),
-    showBookForm && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      BookFormDialog,
+    (activeTab === "issue" || activeTab === "returns") && issues.length > 0 && /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CardHeader, { className: "pb-2", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardTitle, { className: "text-sm flex items-center gap-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(History, { className: "w-4 h-4 text-muted-foreground" }),
+        "Recent Transactions"
+      ] }) }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(CardContent, { className: "p-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "divide-y divide-border", children: issues.slice(0, 10).map((i, idx) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+        "div",
+        {
+          className: "flex items-center gap-3 px-4 py-2.5 text-sm",
+          "data-ocid": `library.recent.item.${idx + 1}`,
+          children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Badge,
+              {
+                variant: i.status === "returned" ? "secondary" : daysOverdue(i.due_date) > 0 ? "destructive" : "default",
+                className: "text-xs flex-shrink-0",
+                children: i.status === "returned" ? "Returned" : daysOverdue(i.due_date) > 0 ? "Overdue" : "Issued"
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium truncate flex-1", children: i.book_title ?? "Unknown" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground truncate hidden sm:block", children: i.student_name ?? "—" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground text-xs flex-shrink-0", children: i.issue_date })
+          ]
+        },
+        i.id
+      )) }) })
+    ] }),
+    showForm && /* @__PURE__ */ jsxRuntimeExports.jsx(
+      BookForm,
       {
         book: editBook,
-        onSave: handleSaveBook,
+        onSave: () => void loadBooks(),
         onClose: () => {
-          setShowBookForm(false);
+          setShowForm(false);
           setEditBook(void 0);
         }
-      }
-    ),
-    showSettings && /* @__PURE__ */ jsxRuntimeExports.jsx(
-      SettingsDialog,
-      {
-        settings: libSettings,
-        onSave: (s2) => {
-          setLibSettings(s2);
-          setShowSettings(false);
-          ue.success("Library settings saved");
-        },
-        onClose: () => setShowSettings(false)
       }
     )
   ] });
@@ -84349,13 +82856,13 @@ function Login() {
         } catch {
         }
       } else {
-        setLoginTime(null);
+        setLoginTime(0);
         setError(
           "Invalid username or password. Please check your credentials and try again."
         );
       }
     } catch {
-      setLoginTime(null);
+      setLoginTime(0);
       setError("Login failed. Please try again.");
     } finally {
       setLoading(false);
@@ -85181,7 +83688,7 @@ function FilterBar({
       ),
       /* @__PURE__ */ jsxRuntimeExports.jsxs(SelectContent, { children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: "all", children: "All Classes" }),
-        CLASSES$1.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 === "Nursery" || c2 === "LKG" || c2 === "UKG" ? c2 : `Class ${c2}` }, c2))
+        CLASSES$2.map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx(SelectItem, { value: c2, children: c2 === "Nursery" || c2 === "LKG" || c2 === "UKG" ? c2 : `Class ${c2}` }, c2))
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(Select, { value: sectionFilter, onValueChange: setSectionFilter, children: [
@@ -85230,7 +83737,7 @@ function StudentsReportView({ data }) {
   });
   const male = filtered.filter((s2) => s2.gender === "Male").length;
   const female = filtered.filter((s2) => s2.gender === "Female").length;
-  const classCounts = CLASSES$1.map((c2) => ({
+  const classCounts = CLASSES$2.map((c2) => ({
     label: c2,
     value: filtered.filter((s2) => s2.class === c2).length
   })).filter((d2) => d2.value > 0);
@@ -85388,12 +83895,12 @@ function FinanceReportView({ data }) {
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "grid grid-cols-2 gap-3", children: [
       {
         label: `${now2.toLocaleString("en-IN", { month: "long" })} Collection`,
-        value: formatCurrency$2(thisMonthTotal),
+        value: formatCurrency$1(thisMonthTotal),
         color: "text-emerald-700"
       },
       {
         label: "Session Total",
-        value: formatCurrency$2(sessionTotal),
+        value: formatCurrency$1(sessionTotal),
         color: "text-emerald-700"
       }
     ].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-3 pb-2 text-center", children: [
@@ -85403,7 +83910,7 @@ function FinanceReportView({ data }) {
     monthFilter !== "all" && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-3 rounded-lg bg-muted/40 border", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-semibold text-foreground", children: [
       monthFilter,
       ": ",
-      formatCurrency$2(filteredTotal),
+      formatCurrency$1(filteredTotal),
       " ",
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-muted-foreground font-normal text-xs", children: [
         "(",
@@ -85438,7 +83945,7 @@ function FinanceReportView({ data }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono", children: r2.receiptNo }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5", children: r2.studentName }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 text-muted-foreground", children: r2.date }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-emerald-700 text-right", children: formatCurrency$2(r2.paidAmount ?? r2.totalAmount ?? 0) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-emerald-700 text-right", children: formatCurrency$1(r2.paidAmount ?? r2.totalAmount ?? 0) })
           ]
         },
         r2.id
@@ -85494,7 +84001,7 @@ function AttendanceReportView({ data }) {
   const absent = filtered.filter((a2) => a2.status === "Absent").length;
   const total = filtered.length;
   const pct2 = total > 0 ? Math.round(present / total * 100) : 0;
-  const classCounts = CLASSES$1.map((c2) => {
+  const classCounts = CLASSES$2.map((c2) => {
     const cAtt = data.filter((a2) => a2.class === c2);
     const p2 = cAtt.filter((a2) => a2.status === "Present").length;
     return {
@@ -85594,7 +84101,7 @@ function HRReportView({ data }) {
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: "Total Staff" })
       ] }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-3 pb-2 text-center", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-lg font-bold font-mono text-pink-600", children: formatCurrency$2(totalSalary) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-lg font-bold font-mono text-pink-600", children: formatCurrency$1(totalSalary) }),
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: "Salary Budget" })
       ] }) })
     ] }),
@@ -85625,7 +84132,7 @@ function HRReportView({ data }) {
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-muted-foreground", children: s2.empId }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-medium", children: s2.fullName }),
             /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5", children: s2.designation }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-right", children: formatCurrency$2(s2.salary ?? 0) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-right", children: formatCurrency$1(s2.salary ?? 0) })
           ]
         },
         s2.id
@@ -85710,7 +84217,7 @@ function FeesDueReportView({ data }) {
       ] }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { className: "text-sm text-muted-foreground", children: [
         "Total Outstanding: ",
-        formatCurrency$2(totalDues)
+        formatCurrency$1(totalDues)
       ] })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-h-72 overflow-y-auto border rounded-lg", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-xs", children: [
@@ -85742,7 +84249,7 @@ function FeesDueReportView({ data }) {
               s2.class,
               s2.section ? `-${s2.section}` : ""
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 font-mono text-destructive font-bold text-right", children: formatCurrency$2(s2.balance ?? 0) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-2 font-mono text-destructive font-bold text-right", children: formatCurrency$1(s2.balance ?? 0) })
           ]
         },
         s2.id
@@ -86058,7 +84565,7 @@ function InventoryReportView({ data }) {
       },
       {
         label: "Total Value",
-        value: formatCurrency$2(totalValue),
+        value: formatCurrency$1(totalValue),
         color: "text-teal-600"
       }
     ].map((s2) => /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { children: /* @__PURE__ */ jsxRuntimeExports.jsxs(CardContent, { className: "pt-3 pb-2 text-center", children: [
@@ -86096,7 +84603,7 @@ function InventoryReportView({ data }) {
               "₹",
               i.sellPrice ?? 0
             ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-right", children: formatCurrency$2((i.quantity ?? 0) * (i.sellPrice ?? 0)) })
+            /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-3 py-1.5 font-mono text-right", children: formatCurrency$1((i.quantity ?? 0) * (i.sellPrice ?? 0)) })
           ]
         },
         i.id
@@ -86146,6 +84653,618 @@ function InventoryReportView({ data }) {
       )
     ] })
   ] });
+}
+const CLASSES = [
+  "Nursery",
+  "LKG",
+  "UKG",
+  "Class 1",
+  "Class 2",
+  "Class 3",
+  "Class 4",
+  "Class 5",
+  "Class 6",
+  "Class 7",
+  "Class 8",
+  "Class 9",
+  "Class 10",
+  "Class 11",
+  "Class 12"
+];
+const CLASS_NEXT = {
+  Nursery: "LKG",
+  LKG: "UKG",
+  UKG: "Class 1",
+  "Class 1": "Class 2",
+  "Class 2": "Class 3",
+  "Class 3": "Class 4",
+  "Class 4": "Class 5",
+  "Class 5": "Class 6",
+  "Class 6": "Class 7",
+  "Class 7": "Class 8",
+  "Class 8": "Class 9",
+  "Class 9": "Class 10",
+  "Class 10": "Class 11",
+  "Class 11": "Class 12",
+  "Class 12": "Alumni"
+};
+function nextLabel(current) {
+  const m2 = current.match(/^(\d{4})-(\d{2})$/);
+  if (!m2) return "";
+  const yr = Number(m2[1]);
+  return `${yr + 1}-${String(yr + 2).slice(2)}`;
+}
+function dateRange$1(s2) {
+  return `Apr ${s2.startYear} – Mar ${s2.endYear}`;
+}
+function Sessions() {
+  const { currentUser, currentSession, switchSession, createSession } = useApp();
+  const isSuperAdmin = (currentUser == null ? void 0 : currentUser.role) === "superadmin";
+  const [sessions, setSessions] = reactExports.useState([]);
+  const [loading, setLoading] = reactExports.useState(true);
+  const [settingCurrent, setSettingCurrent] = reactExports.useState(null);
+  const [showAdd, setShowAdd] = reactExports.useState(false);
+  const [newLabel, setNewLabel] = reactExports.useState("");
+  const [adding, setAdding] = reactExports.useState(false);
+  const [showPromote, setShowPromote] = reactExports.useState(false);
+  const [promoteStep, setPromoteStep] = reactExports.useState(1);
+  const [mapping, setMapping] = reactExports.useState(CLASS_NEXT);
+  const [carryDues, setCarryDues] = reactExports.useState(false);
+  const [promoting, setPromoting] = reactExports.useState(false);
+  const [promoteResult, setPromoteResult] = reactExports.useState(null);
+  const load = reactExports.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiCall("sessions/list");
+      setSessions(Array.isArray(res) ? res : []);
+    } catch {
+      try {
+        const res2 = await apiCall(
+          "academic-sessions/list"
+        );
+        const rows = Array.isArray(res2.data) ? res2.data : Array.isArray(res2) ? res2 : [];
+        setSessions(rows);
+      } catch {
+        setSessions([]);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  reactExports.useEffect(() => {
+    if (sessions.length > 0) {
+      const sorted2 = [...sessions].sort((a2, b2) => b2.startYear - a2.startYear);
+      setNewLabel(nextLabel(sorted2[0].label));
+    }
+  }, [sessions]);
+  const handleSetCurrent = async (s2) => {
+    setSettingCurrent(s2.id);
+    try {
+      await apiCall("sessions/set-current", "POST", { id: s2.id });
+      switchSession(s2.id);
+      setSessions(
+        (prev) => prev.map((r2) => ({ ...r2, isActive: r2.id === s2.id }))
+      );
+      ue.success(`Session ${s2.label} set as current`);
+    } catch {
+      try {
+        await apiCall("academic-sessions/set-current", "POST", { id: s2.id });
+        switchSession(s2.id);
+        setSessions(
+          (prev) => prev.map((r2) => ({ ...r2, isActive: r2.id === s2.id }))
+        );
+        ue.success(`Session ${s2.label} set as current`);
+      } catch {
+        ue.error("Failed to switch session");
+      }
+    } finally {
+      setSettingCurrent(null);
+    }
+  };
+  const handleAdd = async () => {
+    const trimmed = newLabel.trim();
+    if (!trimmed) return;
+    if (!/^\d{4}-\d{2}$/.test(trimmed)) {
+      ue.error("Format must be YYYY-YY (e.g. 2026-27)");
+      return;
+    }
+    if (sessions.some((s2) => s2.label === trimmed)) {
+      ue.error(`Session ${trimmed} already exists`);
+      return;
+    }
+    setAdding(true);
+    const [startStr] = trimmed.split("-");
+    const startYear = Number.parseInt(startStr, 10);
+    const endYear = startYear + 1;
+    try {
+      const res = await apiCall("sessions/add", "POST", {
+        label: trimmed,
+        startYear,
+        endYear
+      });
+      const newSession = res ?? {
+        id: `sess_${trimmed}`,
+        label: trimmed,
+        startYear,
+        endYear,
+        isActive: false,
+        isArchived: false
+      };
+      setSessions((prev) => [...prev, newSession]);
+      createSession(trimmed);
+      setShowAdd(false);
+      ue.success(`Session ${trimmed} created`);
+    } catch {
+      const local = {
+        id: `sess_${Date.now()}`,
+        label: trimmed,
+        startYear,
+        endYear,
+        isActive: false,
+        isArchived: false
+      };
+      setSessions((prev) => [...prev, local]);
+      createSession(trimmed);
+      setShowAdd(false);
+      ue.success(`Session ${trimmed} created (locally)`);
+    } finally {
+      setAdding(false);
+    }
+  };
+  const handlePromote = async () => {
+    var _a2;
+    setPromoting(true);
+    setPromoteResult(null);
+    const active = sessions.find((s2) => s2.isActive);
+    if (!active) {
+      ue.error("No active session found");
+      setPromoting(false);
+      return;
+    }
+    const nextSess = nextLabel(active.label);
+    let targetId = (_a2 = sessions.find((s2) => s2.label === nextSess)) == null ? void 0 : _a2.id;
+    if (!targetId) {
+      try {
+        const [sy] = nextSess.split("-");
+        const sYear = Number.parseInt(sy, 10);
+        const created = await apiCall("sessions/add", "POST", {
+          label: nextSess,
+          startYear: sYear,
+          endYear: sYear + 1
+        });
+        targetId = (created == null ? void 0 : created.id) ?? `sess_${Date.now()}`;
+        const newS = created ?? {
+          id: targetId,
+          label: nextSess,
+          startYear: sYear,
+          endYear: sYear + 1,
+          isActive: false,
+          isArchived: false
+        };
+        setSessions((prev) => [...prev, newS]);
+      } catch {
+      }
+    }
+    try {
+      const res = await apiCall(
+        "sessions/promote",
+        "POST",
+        {
+          fromSessionId: active.id,
+          toSessionLabel: nextSess,
+          mapping,
+          carryDues
+        }
+      );
+      setPromoteResult({
+        promoted: (res == null ? void 0 : res.promoted) ?? 0,
+        skipped: (res == null ? void 0 : res.skipped) ?? 0
+      });
+      ue.success("Students promoted successfully!");
+    } catch {
+      ue.error("Promotion failed — please try again");
+    } finally {
+      setPromoting(false);
+    }
+  };
+  const sorted = [...sessions].sort((a2, b2) => {
+    if (a2.isActive && !a2.isArchived) return -1;
+    if (b2.isActive && !b2.isArchived) return 1;
+    return b2.startYear - a2.startYear;
+  });
+  const activeSess = sessions.find((s2) => s2.isActive && !s2.isArchived);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "p-4 md:p-6 space-y-6 bg-background min-h-screen",
+      "data-ocid": "sessions.page",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-4 flex-wrap", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "Session Management" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground text-sm mt-0.5", children: [
+              "Academic sessions 2019-20 through present — ",
+              sessions.length,
+              " ",
+              "sessions loaded"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                onClick: load,
+                "data-ocid": "sessions.refresh_button",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 mr-1" }),
+                  " Refresh"
+                ]
+              }
+            ),
+            isSuperAdmin && /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                Button,
+                {
+                  variant: "outline",
+                  size: "sm",
+                  onClick: () => {
+                    setShowPromote(true);
+                    setPromoteStep(1);
+                    setPromoteResult(null);
+                  },
+                  "data-ocid": "sessions.promote_button",
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(GraduationCap, { className: "w-4 h-4 mr-1" }),
+                    " Promote Students"
+                  ]
+                }
+              ),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                Button,
+                {
+                  size: "sm",
+                  onClick: () => setShowAdd(true),
+                  "data-ocid": "sessions.add_button",
+                  children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
+                    " New Session"
+                  ]
+                }
+              )
+            ] })
+          ] })
+        ] }),
+        activeSess && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 px-4 py-3 rounded-xl bg-primary/8 border border-primary/20", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "w-5 h-5 text-primary flex-shrink-0" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm font-semibold text-foreground", children: [
+              "Current Session:",
+              " ",
+              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-primary", children: activeSess.label })
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: dateRange$1(activeSess) })
+          ] })
+        ] }),
+        showAdd && /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-card border border-border rounded-xl p-5 space-y-4 max-w-sm animate-slide-up",
+            "data-ocid": "sessions.add_form",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground font-display", children: "Create New Session" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Session Year *" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Input,
+                  {
+                    "data-ocid": "sessions.new_label_input",
+                    placeholder: "e.g. 2026-27",
+                    value: newLabel,
+                    onChange: (e3) => setNewLabel(e3.target.value),
+                    onKeyDown: (e3) => {
+                      if (e3.key === "Enter") void handleAdd();
+                    },
+                    autoFocus: true
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-1", children: "Format: YYYY-YY (April to March)" })
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  Button,
+                  {
+                    className: "flex-1",
+                    onClick: () => void handleAdd(),
+                    disabled: adding || !newLabel.trim(),
+                    "data-ocid": "sessions.add_submit_button",
+                    children: [
+                      adding ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                      "Create"
+                    ]
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  Button,
+                  {
+                    variant: "outline",
+                    onClick: () => setShowAdd(false),
+                    "data-ocid": "sessions.add_cancel_button",
+                    children: "Cancel"
+                  }
+                )
+              ] })
+            ]
+          }
+        ),
+        loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", "data-ocid": "sessions.loading_state", children: [1, 2, 3].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-20 rounded-xl" }, i)) }) : sorted.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "text-center py-16 text-muted-foreground",
+            "data-ocid": "sessions.empty_state",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Calendar, { className: "w-12 h-12 mx-auto mb-3 opacity-20" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium", children: "No sessions found" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs mt-1", children: "Sessions 2019-20 through 2025-26 will be created automatically." })
+            ]
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2", "data-ocid": "sessions.list", children: sorted.map((s2, i) => {
+          var _a2;
+          return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+            "div",
+            {
+              "data-ocid": `sessions.item.${i + 1}`,
+              className: `bg-card border rounded-xl p-4 flex items-center gap-4 ${s2.isActive && !s2.isArchived ? "border-primary/30 bg-primary/5" : "border-border"}`,
+              children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-10 h-10 rounded-lg bg-muted flex items-center justify-center flex-shrink-0", children: s2.isArchived ? /* @__PURE__ */ jsxRuntimeExports.jsx(Archive, { className: "w-5 h-5 text-muted-foreground" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(Calendar, { className: "w-5 h-5 text-primary" }) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 flex-wrap", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-semibold text-foreground", children: s2.label }),
+                    s2.isActive && !s2.isArchived && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "text-[10px] bg-emerald-100 text-emerald-700 border-emerald-200", children: "● Current" }),
+                    s2.isArchived && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Badge,
+                      {
+                        variant: "outline",
+                        className: "text-[10px] text-muted-foreground",
+                        children: "Archived"
+                      }
+                    ),
+                    s2.id === (currentSession == null ? void 0 : currentSession.id) && s2.id !== ((_a2 = sessions.find((x2) => x2.isActive)) == null ? void 0 : _a2.id) && /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { variant: "secondary", className: "text-[10px]", children: "Viewing" })
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground mt-0.5", children: dateRange$1(s2) })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 flex-shrink-0", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      size: "sm",
+                      variant: "outline",
+                      className: "h-8 text-xs",
+                      onClick: () => {
+                        switchSession(s2.id);
+                        ue.success(`Viewing session ${s2.label}`);
+                      },
+                      "data-ocid": `sessions.view_button.${i + 1}`,
+                      children: "View"
+                    }
+                  ),
+                  isSuperAdmin && !s2.isActive && !s2.isArchived && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      size: "sm",
+                      className: "h-8 text-xs",
+                      disabled: settingCurrent === s2.id,
+                      onClick: () => void handleSetCurrent(s2),
+                      "data-ocid": `sessions.set_current_button.${i + 1}`,
+                      children: settingCurrent === s2.id ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-3 h-3 animate-spin" }) : "Set Current"
+                    }
+                  )
+                ] })
+              ]
+            },
+            s2.id
+          );
+        }) }),
+        showPromote && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-card border border-border rounded-2xl shadow-elevated w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-slide-up",
+            "data-ocid": "sessions.promote_dialog",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between p-5 border-b border-border", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "font-display font-semibold text-foreground", children: "Promote Students" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-xs text-muted-foreground", children: [
+                    "Step ",
+                    promoteStep,
+                    " of 3"
+                  ] })
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setShowPromote(false),
+                    className: "text-muted-foreground hover:text-foreground transition-colors text-xl w-8 h-8 flex items-center justify-center",
+                    "aria-label": "Close",
+                    "data-ocid": "sessions.promote_close_button",
+                    children: "×"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-5 space-y-5", children: [
+                promoteStep === 1 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-4 rounded-xl bg-primary/5 border border-primary/20", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-foreground", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Current Session:" }),
+                    " ",
+                    (activeSess == null ? void 0 : activeSess.label) ?? "None",
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("br", {}),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Next Session:" }),
+                    " ",
+                    activeSess ? nextLabel(activeSess.label) : "—"
+                  ] }) }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground", children: "This will promote all active students to the next class in the next session. Class 12 graduates will be moved to Alumni. Staff and fee headings will be copied automatically." }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 p-3 bg-muted/30 rounded-lg", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "input",
+                      {
+                        type: "checkbox",
+                        id: "carry-dues",
+                        checked: carryDues,
+                        onChange: (e3) => setCarryDues(e3.target.checked),
+                        className: "w-4 h-4",
+                        "data-ocid": "sessions.carry_dues_checkbox"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "label",
+                      {
+                        htmlFor: "carry-dues",
+                        className: "text-sm text-foreground cursor-pointer",
+                        children: "Carry forward outstanding fee dues to next session"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      onClick: () => setPromoteStep(2),
+                      className: "w-full",
+                      "data-ocid": "sessions.promote_next_button",
+                      children: "Next: Review Class Mapping →"
+                    }
+                  )
+                ] }),
+                promoteStep === 2 && /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground font-medium", children: "Review and adjust class mapping. Each class will map to the next class in the new session." }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-2 max-h-80 overflow-y-auto", children: CLASSES.map((cls) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "div",
+                    {
+                      className: "flex items-center gap-3 py-2 border-b border-border/50 last:border-0",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "w-28 text-sm font-medium text-foreground flex-shrink-0", children: cls }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-muted-foreground text-xs", children: "→" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          "select",
+                          {
+                            className: "flex-1 border border-input rounded-md px-2 py-1.5 text-sm bg-background",
+                            value: mapping[cls] ?? CLASS_NEXT[cls] ?? "Alumni",
+                            onChange: (e3) => setMapping((prev) => ({
+                              ...prev,
+                              [cls]: e3.target.value
+                            })),
+                            "data-ocid": `sessions.mapping_select.${cls.replace(/\s/g, "_")}`,
+                            children: [...CLASSES, "Alumni", "Discontinue"].map((c2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: c2, children: c2 }, c2))
+                          }
+                        )
+                      ]
+                    },
+                    cls
+                  )) }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Button,
+                      {
+                        variant: "outline",
+                        onClick: () => setPromoteStep(1),
+                        className: "flex-1",
+                        "data-ocid": "sessions.promote_back_button",
+                        children: "← Back"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Button,
+                      {
+                        onClick: () => setPromoteStep(3),
+                        className: "flex-1",
+                        "data-ocid": "sessions.promote_confirm_button",
+                        children: "Next: Confirm →"
+                      }
+                    )
+                  ] })
+                ] }),
+                promoteStep === 3 && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-4", children: promoteResult ? /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    "div",
+                    {
+                      className: "flex items-center gap-3 p-4 rounded-xl bg-emerald-50 border border-emerald-200",
+                      "data-ocid": "sessions.promote_success_state",
+                      children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheckBig, { className: "w-6 h-6 text-emerald-600 flex-shrink-0" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-emerald-800", children: "Promotion Complete!" }),
+                          /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-emerald-700", children: [
+                            promoteResult.promoted,
+                            " students promoted ·",
+                            " ",
+                            promoteResult.skipped,
+                            " skipped"
+                          ] })
+                        ] })
+                      ]
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      onClick: () => setShowPromote(false),
+                      className: "w-full",
+                      "data-ocid": "sessions.promote_done_button",
+                      children: "Done"
+                    }
+                  )
+                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "p-4 rounded-xl bg-amber-50 border border-amber-200", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(TriangleAlert, { className: "w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "text-sm text-amber-800", children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold", children: "Are you sure?" }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-1", children: "This will promote ALL active students. This action cannot be undone." }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-1", children: [
+                        "Session: ",
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: activeSess == null ? void 0 : activeSess.label }),
+                        " →",
+                        " ",
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: activeSess ? nextLabel(activeSess.label) : "—" })
+                      ] })
+                    ] })
+                  ] }) }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Button,
+                      {
+                        variant: "outline",
+                        onClick: () => setPromoteStep(2),
+                        className: "flex-1",
+                        "data-ocid": "sessions.promote_back2_button",
+                        children: "← Back"
+                      }
+                    ),
+                    /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                      Button,
+                      {
+                        className: "flex-1 bg-amber-600 hover:bg-amber-700",
+                        disabled: promoting,
+                        onClick: () => void handlePromote(),
+                        "data-ocid": "sessions.promote_execute_button",
+                        children: [
+                          promoting ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                          promoting ? "Promoting…" : "Confirm & Promote"
+                        ]
+                      }
+                    )
+                  ] })
+                ] }) })
+              ] })
+            ]
+          }
+        ) })
+      ]
+    }
+  );
 }
 const PREFIX = "shubh_erp_";
 function getAllErpData() {
@@ -86197,7 +85316,7 @@ function daysSinceLastBackup(history) {
   return Math.floor((Date.now() - last2) / (1e3 * 60 * 60 * 24));
 }
 function DataManagement() {
-  const { currentUser, logout, syncStatus } = useApp();
+  const { currentUser, logout } = useApp();
   const [history, setHistory] = reactExports.useState(getBackupHistory);
   const [restoreFile, setRestoreFile] = reactExports.useState(null);
   const [restoreError, setRestoreError] = reactExports.useState("");
@@ -86210,7 +85329,6 @@ function DataManagement() {
   const [resetText, setResetText] = reactExports.useState("");
   const [resetPassword, setResetPassword] = reactExports.useState("");
   const [resetError, setResetError] = reactExports.useState("");
-  const [isSyncing, setIsSyncing] = reactExports.useState(false);
   const [storageInfo, setStorageInfo] = reactExports.useState({ used: 0, quota: 0, supported: false });
   reactExports.useEffect(() => {
     var _a2;
@@ -86240,7 +85358,6 @@ function DataManagement() {
   );
   const daysSince = daysSinceLastBackup(history);
   const showWarning = daysSince >= 7;
-  const pendingCount = syncStatus.pendingCount;
   function handleCreateBackup() {
     const data = getAllErpData();
     const now2 = /* @__PURE__ */ new Date();
@@ -86364,31 +85481,20 @@ function DataManagement() {
     ue.success("Factory reset complete.");
     logout();
   }
-  async function handleSyncNow() {
-    setIsSyncing(true);
-    try {
-      await phpApiService.checkHealth();
-      ue.success("Connection to MySQL server verified.");
-    } catch {
-      ue.error("Server unreachable. Please check your connection.");
-    } finally {
-      setIsSyncing(false);
-    }
-  }
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-4 lg:p-6 space-y-6 max-w-4xl", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs("h2", { className: "text-xl font-display font-semibold text-foreground flex items-center gap-2", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx(Database, { className: "w-5 h-5 text-primary" }),
         "Data Management"
       ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mt-1", children: "Backup, restore, and manage your school ERP data stored on the Internet Computer." })
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-muted-foreground mt-1", children: "Backup, restore, and manage your school ERP data stored in MySQL on cPanel." })
     ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsx(Card, { className: "p-5 border-primary/20 bg-primary/5", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-3", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0", children: /* @__PURE__ */ jsxRuntimeExports.jsx(Cloud, { className: "w-5 h-5 text-primary" }) }),
       /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 min-w-0", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground", children: "MySQL / cPanel Storage" }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-muted-foreground mt-1", children: [
-          "All data is stored in your MySQL database on cPanel. Data is saved locally first (IndexedDB) and synced to MySQL in the background. Upload the latest",
+          "All data is stored in your MySQL database on cPanel. Every save goes directly to MySQL — no offline queue, no local cache. Upload the latest",
           " ",
           /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "font-mono text-xs", children: "api/index.php" }),
           " to your cPanel ",
@@ -86422,54 +85528,6 @@ function DataManagement() {
         ] })
       ] })
     ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "p-5 space-y-4", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCcw, { className: "w-4 h-4 text-primary" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground", children: "MySQL Sync Status" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-3 flex-wrap", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "div",
-          {
-            className: `flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${pendingCount === 0 ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-700" : "bg-amber-500/10 border-amber-500/40 text-amber-700"}`,
-            "data-ocid": "data-mgmt.sync.status",
-            children: pendingCount === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-4 h-4 shrink-0" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "All data synced to MySQL" })
-            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 shrink-0 animate-spin" }),
-              /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
-                pendingCount,
-                " change",
-                pendingCount !== 1 ? "s" : "",
-                " pending sync"
-              ] })
-            ] })
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          Button,
-          {
-            variant: "outline",
-            size: "sm",
-            onClick: () => void handleSyncNow(),
-            disabled: isSyncing,
-            "data-ocid": "data-mgmt.sync.button",
-            children: isSyncing ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-3.5 h-3.5 mr-1.5 animate-spin" }),
-              "Syncing…"
-            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCcw, { className: "w-3.5 h-3.5 mr-1.5" }),
-              "Sync Now"
-            ] })
-          }
-        )
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-start gap-2 rounded-md border border-blue-500/20 bg-blue-500/5 px-3 py-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(Info, { className: "w-4 h-4 text-blue-600 mt-0.5 shrink-0" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-blue-700 dark:text-blue-400", children: 'Data syncs automatically in the background. Use "Sync Now" to force an immediate refresh from the canister on all devices.' })
-      ] })
-    ] }),
     /* @__PURE__ */ jsxRuntimeExports.jsxs(Tabs, { defaultValue: "backup", className: "w-full", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsxs(TabsList, { className: "grid grid-cols-2 mb-6", "data-ocid": "data-mgmt.tab", children: [
         /* @__PURE__ */ jsxRuntimeExports.jsxs(TabsTrigger, { value: "backup", "data-ocid": "data-mgmt.tab.backup", children: [
@@ -87257,6 +86315,287 @@ function OnlinePaymentSettings() {
     )
   ] });
 }
+var CHECKBOX_NAME = "Checkbox";
+var [createCheckboxContext] = createContextScope$1(CHECKBOX_NAME);
+var [CheckboxProviderImpl, useCheckboxContext] = createCheckboxContext(CHECKBOX_NAME);
+function CheckboxProvider(props) {
+  const {
+    __scopeCheckbox,
+    checked: checkedProp,
+    children,
+    defaultChecked,
+    disabled,
+    form,
+    name,
+    onCheckedChange,
+    required,
+    value = "on",
+    // @ts-expect-error
+    internal_do_not_use_render
+  } = props;
+  const [checked, setChecked] = useControllableState({
+    prop: checkedProp,
+    defaultProp: defaultChecked ?? false,
+    onChange: onCheckedChange,
+    caller: CHECKBOX_NAME
+  });
+  const [control, setControl] = reactExports.useState(null);
+  const [bubbleInput, setBubbleInput] = reactExports.useState(null);
+  const hasConsumerStoppedPropagationRef = reactExports.useRef(false);
+  const isFormControl = control ? !!form || !!control.closest("form") : (
+    // We set this to true by default so that events bubble to forms without JS (SSR)
+    true
+  );
+  const context = {
+    checked,
+    disabled,
+    setChecked,
+    control,
+    setControl,
+    name,
+    form,
+    value,
+    hasConsumerStoppedPropagationRef,
+    required,
+    defaultChecked: isIndeterminate(defaultChecked) ? false : defaultChecked,
+    isFormControl,
+    bubbleInput,
+    setBubbleInput
+  };
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    CheckboxProviderImpl,
+    {
+      scope: __scopeCheckbox,
+      ...context,
+      children: isFunction(internal_do_not_use_render) ? internal_do_not_use_render(context) : children
+    }
+  );
+}
+var TRIGGER_NAME$2 = "CheckboxTrigger";
+var CheckboxTrigger = reactExports.forwardRef(
+  ({ __scopeCheckbox, onKeyDown, onClick, ...checkboxProps }, forwardedRef) => {
+    const {
+      control,
+      value,
+      disabled,
+      checked,
+      required,
+      setControl,
+      setChecked,
+      hasConsumerStoppedPropagationRef,
+      isFormControl,
+      bubbleInput
+    } = useCheckboxContext(TRIGGER_NAME$2, __scopeCheckbox);
+    const composedRefs = useComposedRefs(forwardedRef, setControl);
+    const initialCheckedStateRef = reactExports.useRef(checked);
+    reactExports.useEffect(() => {
+      const form = control == null ? void 0 : control.form;
+      if (form) {
+        const reset = () => setChecked(initialCheckedStateRef.current);
+        form.addEventListener("reset", reset);
+        return () => form.removeEventListener("reset", reset);
+      }
+    }, [control, setChecked]);
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Primitive.button,
+      {
+        type: "button",
+        role: "checkbox",
+        "aria-checked": isIndeterminate(checked) ? "mixed" : checked,
+        "aria-required": required,
+        "data-state": getState$1(checked),
+        "data-disabled": disabled ? "" : void 0,
+        disabled,
+        value,
+        ...checkboxProps,
+        ref: composedRefs,
+        onKeyDown: composeEventHandlers(onKeyDown, (event) => {
+          if (event.key === "Enter") event.preventDefault();
+        }),
+        onClick: composeEventHandlers(onClick, (event) => {
+          setChecked((prevChecked) => isIndeterminate(prevChecked) ? true : !prevChecked);
+          if (bubbleInput && isFormControl) {
+            hasConsumerStoppedPropagationRef.current = event.isPropagationStopped();
+            if (!hasConsumerStoppedPropagationRef.current) event.stopPropagation();
+          }
+        })
+      }
+    );
+  }
+);
+CheckboxTrigger.displayName = TRIGGER_NAME$2;
+var Checkbox$1 = reactExports.forwardRef(
+  (props, forwardedRef) => {
+    const {
+      __scopeCheckbox,
+      name,
+      checked,
+      defaultChecked,
+      required,
+      disabled,
+      value,
+      onCheckedChange,
+      form,
+      ...checkboxProps
+    } = props;
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      CheckboxProvider,
+      {
+        __scopeCheckbox,
+        checked,
+        defaultChecked,
+        disabled,
+        required,
+        onCheckedChange,
+        name,
+        form,
+        value,
+        internal_do_not_use_render: ({ isFormControl }) => /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            CheckboxTrigger,
+            {
+              ...checkboxProps,
+              ref: forwardedRef,
+              __scopeCheckbox
+            }
+          ),
+          isFormControl && /* @__PURE__ */ jsxRuntimeExports.jsx(
+            CheckboxBubbleInput,
+            {
+              __scopeCheckbox
+            }
+          )
+        ] })
+      }
+    );
+  }
+);
+Checkbox$1.displayName = CHECKBOX_NAME;
+var INDICATOR_NAME = "CheckboxIndicator";
+var CheckboxIndicator = reactExports.forwardRef(
+  (props, forwardedRef) => {
+    const { __scopeCheckbox, forceMount, ...indicatorProps } = props;
+    const context = useCheckboxContext(INDICATOR_NAME, __scopeCheckbox);
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Presence,
+      {
+        present: forceMount || isIndeterminate(context.checked) || context.checked === true,
+        children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+          Primitive.span,
+          {
+            "data-state": getState$1(context.checked),
+            "data-disabled": context.disabled ? "" : void 0,
+            ...indicatorProps,
+            ref: forwardedRef,
+            style: { pointerEvents: "none", ...props.style }
+          }
+        )
+      }
+    );
+  }
+);
+CheckboxIndicator.displayName = INDICATOR_NAME;
+var BUBBLE_INPUT_NAME = "CheckboxBubbleInput";
+var CheckboxBubbleInput = reactExports.forwardRef(
+  ({ __scopeCheckbox, ...props }, forwardedRef) => {
+    const {
+      control,
+      hasConsumerStoppedPropagationRef,
+      checked,
+      defaultChecked,
+      required,
+      disabled,
+      name,
+      value,
+      form,
+      bubbleInput,
+      setBubbleInput
+    } = useCheckboxContext(BUBBLE_INPUT_NAME, __scopeCheckbox);
+    const composedRefs = useComposedRefs(forwardedRef, setBubbleInput);
+    const prevChecked = usePrevious(checked);
+    const controlSize = useSize(control);
+    reactExports.useEffect(() => {
+      const input = bubbleInput;
+      if (!input) return;
+      const inputProto = window.HTMLInputElement.prototype;
+      const descriptor = Object.getOwnPropertyDescriptor(
+        inputProto,
+        "checked"
+      );
+      const setChecked = descriptor.set;
+      const bubbles = !hasConsumerStoppedPropagationRef.current;
+      if (prevChecked !== checked && setChecked) {
+        const event = new Event("click", { bubbles });
+        input.indeterminate = isIndeterminate(checked);
+        setChecked.call(input, isIndeterminate(checked) ? false : checked);
+        input.dispatchEvent(event);
+      }
+    }, [bubbleInput, prevChecked, checked, hasConsumerStoppedPropagationRef]);
+    const defaultCheckedRef = reactExports.useRef(isIndeterminate(checked) ? false : checked);
+    return /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Primitive.input,
+      {
+        type: "checkbox",
+        "aria-hidden": true,
+        defaultChecked: defaultChecked ?? defaultCheckedRef.current,
+        required,
+        disabled,
+        name,
+        value,
+        form,
+        ...props,
+        tabIndex: -1,
+        ref: composedRefs,
+        style: {
+          ...props.style,
+          ...controlSize,
+          position: "absolute",
+          pointerEvents: "none",
+          opacity: 0,
+          margin: 0,
+          // We transform because the input is absolutely positioned but we have
+          // rendered it **after** the button. This pulls it back to sit on top
+          // of the button.
+          transform: "translateX(-100%)"
+        }
+      }
+    );
+  }
+);
+CheckboxBubbleInput.displayName = BUBBLE_INPUT_NAME;
+function isFunction(value) {
+  return typeof value === "function";
+}
+function isIndeterminate(checked) {
+  return checked === "indeterminate";
+}
+function getState$1(checked) {
+  return isIndeterminate(checked) ? "indeterminate" : checked ? "checked" : "unchecked";
+}
+function Checkbox({
+  className,
+  ...props
+}) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsx(
+    Checkbox$1,
+    {
+      "data-slot": "checkbox",
+      className: cn(
+        "peer border-input dark:bg-input/30 data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground dark:data-[state=checked]:bg-primary data-[state=checked]:border-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive size-4 shrink-0 rounded-[4px] border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50",
+        className
+      ),
+      ...props,
+      children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        CheckboxIndicator,
+        {
+          "data-slot": "checkbox-indicator",
+          className: "flex items-center justify-center text-current transition-none",
+          children: /* @__PURE__ */ jsxRuntimeExports.jsx(Check, { className: "size-3.5" })
+        }
+      )
+    }
+  );
+}
 const MODULES = [
   { id: "dashboard", label: "Dashboard" },
   { id: "students", label: "Students" },
@@ -87379,7 +86718,14 @@ function PermissionManagement() {
       const pm = toPermissionMatrix(selectedRole, matrix);
       ls.set(`permissions_${selectedRole}`, pm);
       const jwt = getJwt();
-      if (jwt) ;
+      if (jwt) {
+        await apiUpdatePermissions(
+          selectedRole,
+          pm,
+          jwt
+        ).catch(() => {
+        });
+      }
       ue.success(`Permissions for ${selectedRole} saved.`);
     } catch (err) {
       ue.error(
@@ -89535,7 +88881,7 @@ const ROLE_COLORS = {
   receptionist: "bg-pink-500/10 text-pink-600",
   librarian: "bg-indigo-500/10 text-indigo-600"
 };
-const EMPTY_FORM = {
+const EMPTY_FORM$1 = {
   username: "",
   password: "",
   name: "",
@@ -89543,13 +88889,13 @@ const EMPTY_FORM = {
   phone: "",
   role: "teacher"
 };
-function UserManagement() {
+function UserManagement$1() {
   const [users, setUsers] = reactExports.useState([]);
   const [loading, setLoading] = reactExports.useState(true);
   const [search, setSearch] = reactExports.useState("");
   const [modal, setModal] = reactExports.useState(null);
   const [selected, setSelected] = reactExports.useState(null);
-  const [form, setForm] = reactExports.useState(EMPTY_FORM);
+  const [form, setForm] = reactExports.useState(EMPTY_FORM$1);
   const [newPw, setNewPw] = reactExports.useState("");
   const [saving, setSaving] = reactExports.useState(false);
   const [error, setError] = reactExports.useState("");
@@ -89572,7 +88918,7 @@ function UserManagement() {
     }
   );
   const openAdd = () => {
-    setForm(EMPTY_FORM);
+    setForm(EMPTY_FORM$1);
     setError("");
     setModal("add");
   };
@@ -89850,7 +89196,7 @@ function UserManagement() {
                   onChange: (e3) => setF("role", e3.target.value),
                   className: "w-full border border-input bg-background text-foreground rounded-md px-3 py-2 text-sm focus:ring-2 focus:ring-ring",
                   "data-ocid": "user-modal.role_select",
-                  children: ROLES.filter((r2) => r2 !== "superadmin").map((r2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: r2, children: r2 }, r2))
+                  children: ROLES$1.filter((r2) => r2 !== "superadmin").map((r2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: r2, children: r2 }, r2))
                 }
               )
             ] })
@@ -90017,9 +89363,9 @@ function buildAutoReplyMessage(admNo, overrideTemplate) {
   );
   const lastReceipt = sorted[0];
   const lastPaymentDate = lastReceipt ? lastReceipt.date : "No payment yet";
-  const lastPaymentAmount = lastReceipt ? formatCurrency$2(lastReceipt.paidAmount ?? lastReceipt.totalAmount) : "—";
+  const lastPaymentAmount = lastReceipt ? formatCurrency$1(lastReceipt.paidAmount ?? lastReceipt.totalAmount) : "—";
   const tpl = overrideTemplate ?? settings.responseTemplate;
-  const message = tpl.replace(/{botName}/g, settings.botName || "SHUBH SCHOOL BOT").replace(/{admNo}/g, student.admNo).replace(/{studentName}/g, student.fullName).replace(/{className}/g, `${student.class}-${student.section}`).replace(/{presentDays}/g, String(presentDays)).replace(/{totalDays}/g, String(totalDays)).replace(/{attendancePercent}/g, String(attendancePercent)).replace(/{dueAmount}/g, formatCurrency$2(dueAmount)).replace(
+  const message = tpl.replace(/{botName}/g, settings.botName || "SHUBH SCHOOL BOT").replace(/{admNo}/g, student.admNo).replace(/{studentName}/g, student.fullName).replace(/{className}/g, `${student.class}-${student.section}`).replace(/{presentDays}/g, String(presentDays)).replace(/{totalDays}/g, String(totalDays)).replace(/{attendancePercent}/g, String(attendancePercent)).replace(/{dueAmount}/g, formatCurrency$1(dueAmount)).replace(
     /{pendingMonths}/g,
     monthsDue.length > 0 ? monthsDue.join(", ") : "None"
   ).replace(/{lastPaymentDate}/g, lastPaymentDate).replace(/{lastPaymentAmount}/g, lastPaymentAmount).replace(/{schoolPhone}/g, schoolProfile.phone || "N/A");
@@ -90894,7 +90240,7 @@ function Settings({
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex-1 overflow-auto bg-background", children: [
       activeTab === "profile" && /* @__PURE__ */ jsxRuntimeExports.jsx(SchoolProfile, {}),
       activeTab === "themes" && /* @__PURE__ */ jsxRuntimeExports.jsx(ThemeSettings, {}),
-      activeTab === "users" && isSuperAdmin && /* @__PURE__ */ jsxRuntimeExports.jsx(UserManagement, {}),
+      activeTab === "users" && isSuperAdmin && /* @__PURE__ */ jsxRuntimeExports.jsx(UserManagement$1, {}),
       activeTab === "sessions" && /* @__PURE__ */ jsxRuntimeExports.jsx(SessionManagement, {}),
       activeTab === "permissions" && isSuperAdmin && /* @__PURE__ */ jsxRuntimeExports.jsx(PermissionManagement, {}),
       activeTab === "whatsapp" && isSuperAdmin && /* @__PURE__ */ jsxRuntimeExports.jsx(WhatsAppSettings, {}),
@@ -92384,7 +91730,7 @@ function StudentDetailModal({
                           f2.paymentMode
                         ] })
                       ] }),
-                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-foreground text-sm", children: formatCurrency$1(f2.totalAmount) })
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-bold text-foreground text-sm", children: formatCurrency(f2.totalAmount) })
                     ]
                   },
                   f2.id ?? `fee-${idx}`
@@ -93054,14 +92400,7 @@ function upcomingBirthdays(students) {
   });
 }
 function Students({ onNavigate: _onNavigate }) {
-  const {
-    currentSession,
-    currentUser,
-    saveData,
-    updateData,
-    deleteData,
-    addNotification
-  } = useApp();
+  const { currentSession, currentUser, addNotification } = useApp();
   const [students, setStudents] = reactExports.useState([]);
   const [totalCount, setTotalCount] = reactExports.useState(0);
   const [classes, setClasses] = reactExports.useState([]);
@@ -93262,7 +92601,7 @@ function Students({ onNavigate: _onNavigate }) {
   }
   async function handleDelete(student) {
     try {
-      await deleteData("students", student.id);
+      await phpApiService.deleteStudent(student.id);
       addNotification(`Student ${student.fullName} deleted.`, "success");
       setDeleteConfirm(null);
       await fetchStudents(true);
@@ -93273,7 +92612,7 @@ function Students({ onNavigate: _onNavigate }) {
   async function handleBulkDelete() {
     try {
       for (const id of selectedIds) {
-        await deleteData("students", id);
+        await phpApiService.deleteStudent(id);
       }
       addNotification(`${selectedIds.size} students deleted.`, "success");
       setSelectedIds(/* @__PURE__ */ new Set());
@@ -93903,8 +93242,6 @@ function Students({ onNavigate: _onNavigate }) {
           );
           setSelectedStudent(updated);
         },
-        updateData,
-        deleteData,
         allStudents: students
       }
     ),
@@ -93923,9 +93260,7 @@ function Students({ onNavigate: _onNavigate }) {
         onClose: () => {
           setShowForm(false);
           setEditStudent(null);
-        },
-        saveData,
-        updateData
+        }
       }
     ),
     showImportExport && /* @__PURE__ */ jsxRuntimeExports.jsx(
@@ -95870,6 +95205,582 @@ function Transport() {
     ] })
   ] });
 }
+const EMPTY_FORM = {
+  username: "",
+  password: "",
+  full_name: "",
+  email: "",
+  mobile: "",
+  role: "teacher"
+};
+const ROLES = [
+  { value: "admin", label: "Admin" },
+  { value: "teacher", label: "Teacher" },
+  { value: "accountant", label: "Accountant" },
+  { value: "receptionist", label: "Receptionist" },
+  { value: "librarian", label: "Librarian" },
+  { value: "driver", label: "Driver" },
+  { value: "parent", label: "Parent" },
+  { value: "student", label: "Student" }
+];
+const ROLE_STYLE = {
+  superadmin: "bg-primary/10 text-primary",
+  super_admin: "bg-primary/10 text-primary",
+  admin: "bg-blue-500/10 text-blue-600",
+  teacher: "bg-green-500/10 text-green-600",
+  accountant: "bg-amber-500/10 text-amber-600",
+  parent: "bg-purple-500/10 text-purple-600",
+  student: "bg-cyan-500/10 text-cyan-600",
+  driver: "bg-orange-500/10 text-orange-600",
+  receptionist: "bg-pink-500/10 text-pink-600",
+  librarian: "bg-indigo-500/10 text-indigo-600"
+};
+function isActive(u2) {
+  if (u2.isActive !== void 0) return Boolean(u2.isActive);
+  if (u2.is_active !== void 0)
+    return u2.is_active !== 0 && u2.is_active !== false;
+  return true;
+}
+function displayName(u2) {
+  return u2.full_name ?? u2.name ?? u2.username;
+}
+function UserManagement() {
+  const { currentUser } = useApp();
+  const isSuperAdmin = (currentUser == null ? void 0 : currentUser.role) === "superadmin";
+  const [users, setUsers] = reactExports.useState([]);
+  const [loading, setLoading] = reactExports.useState(true);
+  const [search, setSearch] = reactExports.useState("");
+  const [modal, setModal] = reactExports.useState(null);
+  const [selected, setSelected] = reactExports.useState(null);
+  const [form, setForm] = reactExports.useState(EMPTY_FORM);
+  const [newPw, setNewPw] = reactExports.useState("");
+  const [saving, setSaving] = reactExports.useState(false);
+  const [error, setError] = reactExports.useState("");
+  const load = reactExports.useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiCall(
+        "users/list"
+      );
+      const rows = Array.isArray(res) ? res : Array.isArray(res.data) ? res.data : [];
+      setUsers(
+        rows.filter((u2) => u2.role !== "superadmin" && u2.role !== "super_admin")
+      );
+    } catch {
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  reactExports.useEffect(() => {
+    void load();
+  }, [load]);
+  const filtered = users.filter(
+    (u2) => {
+      var _a2, _b2;
+      return displayName(u2).toLowerCase().includes(search.toLowerCase()) || ((_a2 = u2.username) == null ? void 0 : _a2.toLowerCase().includes(search.toLowerCase())) || ((_b2 = u2.role) == null ? void 0 : _b2.toLowerCase().includes(search.toLowerCase()));
+    }
+  );
+  const openAdd = () => {
+    setSelected(null);
+    setForm(EMPTY_FORM);
+    setError("");
+    setModal("add");
+  };
+  const openEdit = (u2) => {
+    setSelected(u2);
+    setForm({
+      username: u2.username,
+      password: "",
+      full_name: displayName(u2),
+      email: u2.email ?? "",
+      mobile: u2.mobile ?? u2.phone ?? "",
+      role: u2.role
+    });
+    setError("");
+    setModal("edit");
+  };
+  const openReset = (u2) => {
+    setSelected(u2);
+    setNewPw("");
+    setError("");
+    setModal("reset");
+  };
+  const handleSave = async () => {
+    if (!form.username || !form.full_name || !form.role) {
+      setError("Username, full name, and role are required");
+      return;
+    }
+    if (modal === "add" && !form.password) {
+      setError("Password is required for new users");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    try {
+      if (modal === "add") {
+        await apiCall("users/add", "POST", {
+          username: form.username,
+          password: form.password,
+          full_name: form.full_name,
+          email: form.email,
+          mobile: form.mobile,
+          role: form.role
+        });
+        ue.success(`User "${form.full_name}" created`);
+      } else if (modal === "edit" && selected) {
+        await apiCall("users/update", "POST", {
+          id: selected.id,
+          username: form.username,
+          full_name: form.full_name,
+          email: form.email,
+          mobile: form.mobile,
+          role: form.role,
+          ...form.password ? { password: form.password } : {}
+        });
+        ue.success(`User "${form.full_name}" updated`);
+      }
+      setModal(null);
+      await load();
+    } catch (e3) {
+      setError(e3 instanceof Error ? e3.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleReset = async () => {
+    if (!newPw || newPw.length < 4) {
+      setError("Password must be at least 4 characters");
+      return;
+    }
+    if (!selected) return;
+    setSaving(true);
+    setError("");
+    try {
+      await apiCall("users/reset-password", "POST", {
+        id: selected.id,
+        username: selected.username,
+        new_password: newPw
+      });
+      ue.success(`Password reset for "${displayName(selected)}"`);
+      setModal(null);
+    } catch (e3) {
+      setError(e3 instanceof Error ? e3.message : "Reset failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleToggleActive = async (u2) => {
+    const nowActive = isActive(u2);
+    try {
+      await apiCall("users/update", "POST", {
+        id: u2.id,
+        is_active: nowActive ? 0 : 1
+      });
+      setUsers(
+        (prev) => prev.map(
+          (x2) => x2.id === u2.id ? { ...x2, isActive: !nowActive, is_active: nowActive ? 0 : 1 } : x2
+        )
+      );
+      ue.success(
+        `${displayName(u2)} ${nowActive ? "deactivated" : "activated"}`
+      );
+    } catch {
+      ue.error("Failed to update user status");
+    }
+  };
+  if (!isSuperAdmin) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "div",
+      {
+        className: "p-6 text-center text-muted-foreground",
+        "data-ocid": "usermgmt.access_denied",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(ShieldOff, { className: "w-10 h-10 mx-auto mb-3 opacity-30" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { children: "Super Admin access required" })
+        ]
+      }
+    );
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      className: "p-4 md:p-6 space-y-5 bg-background min-h-screen",
+      "data-ocid": "usermgmt.page",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between gap-4 flex-wrap", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-2xl font-bold text-foreground font-display", children: "User Management" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-muted-foreground text-sm mt-0.5", children: [
+              users.length,
+              " users — manage roles, passwords, and access"
+            ] })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                onClick: load,
+                "data-ocid": "usermgmt.refresh_button",
+                children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-4 h-4 mr-1" }),
+                  " Refresh"
+                ]
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs(Button, { size: "sm", onClick: openAdd, "data-ocid": "usermgmt.add_button", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Plus, { className: "w-4 h-4 mr-1" }),
+              " Add User"
+            ] })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "relative max-w-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(Search, { className: "absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx(
+            Input,
+            {
+              placeholder: "Search by name, username, or role…",
+              value: search,
+              onChange: (e3) => setSearch(e3.target.value),
+              className: "pl-9",
+              "data-ocid": "usermgmt.search_input"
+            }
+          )
+        ] }),
+        loading ? /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "space-y-3", "data-ocid": "usermgmt.loading_state", children: [1, 2, 3, 4].map((i) => /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-16 rounded-xl" }, i)) }) : filtered.length === 0 ? /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "text-center py-16 text-muted-foreground",
+            "data-ocid": "usermgmt.empty_state",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx(Users, { className: "w-12 h-12 mx-auto mb-3 opacity-20" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-medium", children: "No users found" }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx(
+                Button,
+                {
+                  className: "mt-4",
+                  onClick: openAdd,
+                  "data-ocid": "usermgmt.empty_add_button",
+                  children: "Add First User"
+                }
+              )
+            ]
+          }
+        ) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "div",
+          {
+            className: "bg-card border border-border rounded-xl overflow-hidden",
+            "data-ocid": "usermgmt.list",
+            children: /* @__PURE__ */ jsxRuntimeExports.jsxs("table", { className: "w-full text-sm", children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("thead", { className: "bg-muted/50 border-b border-border", children: /* @__PURE__ */ jsxRuntimeExports.jsx("tr", { children: ["Name", "Username", "Role", "Status", "Actions"].map((h2) => /* @__PURE__ */ jsxRuntimeExports.jsx(
+                "th",
+                {
+                  className: "text-left px-4 py-3 font-semibold text-muted-foreground text-xs",
+                  children: h2
+                },
+                h2
+              )) }) }),
+              /* @__PURE__ */ jsxRuntimeExports.jsx("tbody", { className: "divide-y divide-border", children: filtered.map((u2, i) => {
+                var _a2;
+                return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                  "tr",
+                  {
+                    className: "hover:bg-muted/20 transition-colors",
+                    "data-ocid": `usermgmt.item.${i + 1}`,
+                    children: [
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center text-primary text-xs font-bold flex-shrink-0", children: ((_a2 = displayName(u2)[0]) == null ? void 0 : _a2.toUpperCase()) ?? "?" }),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "font-medium text-foreground truncate", children: displayName(u2) })
+                      ] }) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3 text-muted-foreground font-mono text-xs", children: u2.username }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        "span",
+                        {
+                          className: `inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${ROLE_STYLE[u2.role] ?? "bg-muted text-muted-foreground"}`,
+                          children: u2.role
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: isActive(u2) ? /* @__PURE__ */ jsxRuntimeExports.jsx(Badge, { className: "bg-emerald-100 text-emerald-700 border-emerald-200 text-xs", children: "Active" }) : /* @__PURE__ */ jsxRuntimeExports.jsx(
+                        Badge,
+                        {
+                          variant: "outline",
+                          className: "text-muted-foreground text-xs",
+                          children: "Inactive"
+                        }
+                      ) }),
+                      /* @__PURE__ */ jsxRuntimeExports.jsx("td", { className: "px-4 py-3", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-1 flex-wrap", children: [
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          Button,
+                          {
+                            size: "sm",
+                            variant: "outline",
+                            className: "h-7 text-xs",
+                            onClick: () => openEdit(u2),
+                            "data-ocid": `usermgmt.edit_button.${i + 1}`,
+                            children: "Edit"
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                          Button,
+                          {
+                            size: "sm",
+                            variant: "outline",
+                            className: "h-7 text-xs",
+                            onClick: () => openReset(u2),
+                            "data-ocid": `usermgmt.reset_pw_button.${i + 1}`,
+                            children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsx(KeyRound, { className: "w-3 h-3 mr-1" }),
+                              " Reset PW"
+                            ]
+                          }
+                        ),
+                        /* @__PURE__ */ jsxRuntimeExports.jsx(
+                          Button,
+                          {
+                            size: "sm",
+                            variant: "ghost",
+                            className: `h-7 text-xs ${isActive(u2) ? "text-destructive" : "text-emerald-600"}`,
+                            onClick: () => void handleToggleActive(u2),
+                            "data-ocid": `usermgmt.toggle_active_button.${i + 1}`,
+                            children: isActive(u2) ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsx(ShieldOff, { className: "w-3 h-3 mr-1" }),
+                              " Deactivate"
+                            ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                              /* @__PURE__ */ jsxRuntimeExports.jsx(UserCheck, { className: "w-3 h-3 mr-1" }),
+                              " Activate"
+                            ] })
+                          }
+                        )
+                      ] }) })
+                    ]
+                  },
+                  u2.id
+                );
+              }) })
+            ] })
+          }
+        ),
+        (modal === "add" || modal === "edit") && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-card border border-border rounded-2xl shadow-elevated w-full max-w-md animate-slide-up",
+            "data-ocid": "usermgmt.dialog",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between p-5 border-b border-border", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "font-display font-semibold text-foreground", children: modal === "add" ? "Add New User" : "Edit User" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setModal(null),
+                    className: "text-muted-foreground hover:text-foreground transition-colors text-xl w-8 h-8 flex items-center justify-center",
+                    "aria-label": "Close",
+                    "data-ocid": "usermgmt.close_button",
+                    children: "×"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-5 space-y-4", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 gap-3", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Full Name *" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Input,
+                      {
+                        value: form.full_name,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, full_name: e3.target.value })),
+                        placeholder: "User's full name",
+                        "data-ocid": "usermgmt.full_name_input"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Username *" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Input,
+                      {
+                        value: form.username,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, username: e3.target.value })),
+                        placeholder: "login username",
+                        "data-ocid": "usermgmt.username_input"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: modal === "add" ? "Password *" : "New Password (leave blank to keep)" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Input,
+                      {
+                        type: "password",
+                        value: form.password,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, password: e3.target.value })),
+                        placeholder: modal === "add" ? "Set password" : "Leave blank to keep",
+                        "data-ocid": "usermgmt.password_input"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Role *" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      "select",
+                      {
+                        className: "w-full border border-input rounded-md px-3 py-2 text-sm bg-background",
+                        value: form.role,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, role: e3.target.value })),
+                        "data-ocid": "usermgmt.role_select",
+                        children: ROLES.map((r2) => /* @__PURE__ */ jsxRuntimeExports.jsx("option", { value: r2.value, children: r2.label }, r2.value))
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Mobile" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Input,
+                      {
+                        value: form.mobile,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, mobile: e3.target.value })),
+                        placeholder: "10-digit mobile",
+                        inputMode: "tel",
+                        "data-ocid": "usermgmt.mobile_input"
+                      }
+                    )
+                  ] }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "Email" }),
+                    /* @__PURE__ */ jsxRuntimeExports.jsx(
+                      Input,
+                      {
+                        type: "email",
+                        value: form.email,
+                        onChange: (e3) => setForm((f2) => ({ ...f2, email: e3.target.value })),
+                        placeholder: "email@school.com",
+                        "data-ocid": "usermgmt.email_input"
+                      }
+                    )
+                  ] })
+                ] }),
+                error && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "p",
+                  {
+                    className: "text-destructive text-sm bg-destructive/10 px-3 py-2 rounded-lg",
+                    "data-ocid": "usermgmt.field_error",
+                    children: error
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 pt-1", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      variant: "outline",
+                      className: "flex-1",
+                      onClick: () => setModal(null),
+                      "data-ocid": "usermgmt.cancel_button",
+                      children: "Cancel"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    Button,
+                    {
+                      className: "flex-1",
+                      disabled: saving,
+                      onClick: () => void handleSave(),
+                      "data-ocid": "usermgmt.submit_button",
+                      children: [
+                        saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                        modal === "add" ? "Create User" : "Save Changes"
+                      ]
+                    }
+                  )
+                ] })
+              ] })
+            ]
+          }
+        ) }),
+        modal === "reset" && selected && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs(
+          "div",
+          {
+            className: "bg-card border border-border rounded-2xl shadow-elevated w-full max-w-sm animate-slide-up",
+            "data-ocid": "usermgmt.reset_dialog",
+            children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between p-5 border-b border-border", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "font-display font-semibold text-foreground", children: "Reset Password" }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "button",
+                  {
+                    type: "button",
+                    onClick: () => setModal(null),
+                    className: "text-muted-foreground hover:text-foreground text-xl w-8 h-8 flex items-center justify-center",
+                    "aria-label": "Close",
+                    "data-ocid": "usermgmt.reset_close_button",
+                    children: "×"
+                  }
+                )
+              ] }),
+              /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "p-5 space-y-4", children: [
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-muted-foreground", children: [
+                  "Reset password for ",
+                  /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: displayName(selected) }),
+                  " (",
+                  selected.username,
+                  ")"
+                ] }),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(Label$1, { className: "text-xs text-muted-foreground mb-1 block", children: "New Password *" }),
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Input,
+                    {
+                      type: "password",
+                      value: newPw,
+                      onChange: (e3) => setNewPw(e3.target.value),
+                      placeholder: "Minimum 4 characters",
+                      autoFocus: true,
+                      "data-ocid": "usermgmt.new_password_input"
+                    }
+                  )
+                ] }),
+                error && /* @__PURE__ */ jsxRuntimeExports.jsx(
+                  "p",
+                  {
+                    className: "text-destructive text-sm bg-destructive/10 px-3 py-2 rounded-lg",
+                    "data-ocid": "usermgmt.reset_error",
+                    children: error
+                  }
+                ),
+                /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2", children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(
+                    Button,
+                    {
+                      variant: "outline",
+                      className: "flex-1",
+                      onClick: () => setModal(null),
+                      "data-ocid": "usermgmt.reset_cancel_button",
+                      children: "Cancel"
+                    }
+                  ),
+                  /* @__PURE__ */ jsxRuntimeExports.jsxs(
+                    Button,
+                    {
+                      className: "flex-1",
+                      disabled: saving || newPw.length < 4,
+                      onClick: () => void handleReset(),
+                      "data-ocid": "usermgmt.reset_confirm_button",
+                      children: [
+                        saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+                        "Reset Password"
+                      ]
+                    }
+                  )
+                ] })
+              ] })
+            ]
+          }
+        ) })
+      ]
+    }
+  );
+}
 const TODAY = (/* @__PURE__ */ new Date()).toISOString().split("T")[0];
 const TOMORROW = new Date(Date.now() + 864e5).toISOString().split("T")[0];
 const SEED_MEETINGS = [
@@ -95911,19 +95822,6 @@ const SEED_MEETINGS = [
     status: "live",
     hostName: "Mrs. Priya Singh",
     participants: 32
-  },
-  {
-    id: "m4",
-    title: "Parent-Teacher Meeting",
-    classSection: "All Classes",
-    platform: "zoom",
-    date: "2026-04-20",
-    time: "15:00",
-    duration: 90,
-    link: "https://zoom.us/j/87654321",
-    status: "ended",
-    hostName: "Super Admin",
-    participants: 120
   }
 ];
 function generateMeetLink(platform2) {
@@ -95993,9 +95891,9 @@ function MeetingCard({
               {
                 size: "sm",
                 variant: "outline",
+                className: "h-8 text-xs",
                 "data-ocid": `virtualclasses.notify_button.${idx}`,
                 onClick: () => onNotify(meeting),
-                className: "h-8 text-xs",
                 children: "Notify"
               }
             ),
@@ -96003,9 +95901,9 @@ function MeetingCard({
               Button,
               {
                 size: "sm",
+                className: "h-8",
                 "data-ocid": `virtualclasses.join_button.${idx}`,
                 asChild: true,
-                className: "h-8",
                 children: /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: meeting.link, target: "_blank", rel: "noreferrer", children: "Join" })
               }
             )
@@ -96029,22 +95927,33 @@ function ScheduleForm({
     time: "09:00",
     duration: "45"
   });
+  const [saving, setSaving] = reactExports.useState(false);
   const update = (k2, v2) => setForm((f2) => ({ ...f2, [k2]: v2 }));
-  const save = () => {
+  const save = async () => {
     if (!form.title || !form.date) return;
-    onSave({
-      id: generateId(),
+    setSaving(true);
+    const link = generateMeetLink(form.platform);
+    const m2 = {
+      id: `m_${Date.now()}`,
       title: form.title,
       classSection: form.classSection || "All Classes",
       platform: form.platform,
       date: form.date,
       time: form.time,
       duration: Number.parseInt(form.duration, 10) || 45,
-      link: generateMeetLink(form.platform),
+      link,
       status: "upcoming",
       hostName: (currentUser == null ? void 0 : currentUser.fullName) ?? "Teacher",
       participants: 0
-    });
+    };
+    try {
+      await apiCall("settings/save", "POST", {
+        key: `virtual_class_${m2.id}`,
+        value: JSON.stringify(m2)
+      });
+    } catch {
+    }
+    onSave(m2);
     setForm({
       title: "",
       classSection: "",
@@ -96053,6 +95962,7 @@ function ScheduleForm({
       time: "09:00",
       duration: "45"
     });
+    setSaving(false);
   };
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-4 max-w-lg", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground font-display", children: "Schedule Meeting" }),
@@ -96139,32 +96049,54 @@ function ScheduleForm({
         )
       ] })
     ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
+    /* @__PURE__ */ jsxRuntimeExports.jsxs(
       Button,
       {
         "data-ocid": "virtualclasses.schedule_submit_button",
-        onClick: save,
+        onClick: () => void save(),
         className: "w-full",
-        disabled: !form.title,
-        children: "Schedule Meeting"
+        disabled: !form.title || saving,
+        children: [
+          saving ? /* @__PURE__ */ jsxRuntimeExports.jsx(LoaderCircle, { className: "w-4 h-4 mr-1 animate-spin" }) : null,
+          "Schedule Meeting"
+        ]
       }
     )
   ] });
 }
 function SettingsTab() {
-  const [creds, setCreds] = reactExports.useState(
-    () => ls.get("vc_creds", {
-      zoomApiKey: "",
-      zoomApiSecret: "",
-      googleClientId: ""
-    })
-  );
+  const [creds, setCreds] = reactExports.useState({
+    zoomApiKey: "",
+    zoomApiSecret: "",
+    googleClientId: ""
+  });
   const [saved, setSaved] = reactExports.useState(false);
-  const save = () => {
-    ls.set("vc_creds", creds);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2e3);
+  const [loading, setLoading] = reactExports.useState(true);
+  reactExports.useEffect(() => {
+    void apiCall("settings/get?key=vc_creds").then((res) => {
+      if (res == null ? void 0 : res.value) {
+        try {
+          setCreds(JSON.parse(res.value));
+        } catch {
+        }
+      }
+    }).catch(() => {
+    }).finally(() => setLoading(false));
+  }, []);
+  const save = async () => {
+    try {
+      await apiCall("settings/save", "POST", {
+        key: "vc_creds",
+        value: JSON.stringify(creds)
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2e3);
+      ue.success("Settings saved");
+    } catch {
+      ue.error("Failed to save");
+    }
   };
+  if (loading) return /* @__PURE__ */ jsxRuntimeExports.jsx(Skeleton, { className: "h-40 rounded-xl" });
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4 max-w-lg", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-xl p-5 space-y-4", children: [
       /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground font-display", children: "Zoom Credentials" }),
@@ -96214,7 +96146,7 @@ function SettingsTab() {
       Button,
       {
         "data-ocid": "virtualclasses.settings_save_button",
-        onClick: save,
+        onClick: () => void save(),
         className: "w-full",
         children: saved ? "✓ Saved" : "Save Settings"
       }
@@ -96222,22 +96154,31 @@ function SettingsTab() {
   ] });
 }
 function VirtualClasses() {
-  const { getData: getData2, addNotification } = useApp();
-  const [meetings, setMeetings] = reactExports.useState(
-    () => ls.get("vc_meetings", SEED_MEETINGS)
-  );
+  const { currentUser, addNotification } = useApp();
+  const [meetings, setMeetings] = reactExports.useState(SEED_MEETINGS);
+  const [classes, setClasses] = reactExports.useState([]);
   const [quickLink, setQuickLink] = reactExports.useState(null);
   const [notifyTarget, setNotifyTarget] = reactExports.useState(null);
-  const classes = getData2("classes").flatMap((c2) => (c2.sections ?? []).map((s2) => `${c2.className}-${s2}`));
-  const addMeeting = (m2) => {
-    const next = [m2, ...meetings];
-    setMeetings(next);
-    ls.set("vc_meetings", next);
-    addNotification(
-      `Meeting "${m2.title}" scheduled for ${m2.date} at ${m2.time}`,
-      "success"
-    );
-  };
+  reactExports.useEffect(() => {
+    void apiCall("academics/classes").then((res) => {
+      const rows = Array.isArray(res) ? res : [];
+      const combos = rows.flatMap((c2) => {
+        const cn2 = c2.name ?? c2.className ?? "";
+        return (c2.sections ?? []).map((s2) => `${cn2}-${s2}`);
+      });
+      setClasses(combos);
+    }).catch(() => setClasses([]));
+  }, []);
+  const addMeeting = reactExports.useCallback(
+    (m2) => {
+      setMeetings((prev) => [m2, ...prev]);
+      addNotification(
+        `Meeting "${m2.title}" scheduled for ${m2.date} at ${m2.time}`,
+        "success"
+      );
+    },
+    [addNotification]
+  );
   const createQuickMeet = () => {
     const link = generateMeetLink("meet");
     setQuickLink(link);
@@ -96246,6 +96187,7 @@ function VirtualClasses() {
   };
   const sendNotification = (m2) => {
     addNotification(`Meeting link sent to participants: "${m2.title}"`, "info");
+    ue.success("Notification sent");
     setNotifyTarget(null);
   };
   const upcoming = meetings.filter((m2) => m2.status !== "ended");
@@ -97267,7 +97209,7 @@ function AccountantDashboard({ onNavigate }) {
           StatCard$2,
           {
             label: "Today's Collection",
-            value: loading ? "—" : formatCurrency$1((stats == null ? void 0 : stats.collectedToday) ?? 0),
+            value: loading ? "—" : formatCurrency((stats == null ? void 0 : stats.collectedToday) ?? 0),
             sub: "Collected today",
             icon: IndianRupee,
             color: "bg-emerald-600",
@@ -97279,7 +97221,7 @@ function AccountantDashboard({ onNavigate }) {
           StatCard$2,
           {
             label: "This Month Total",
-            value: loading ? "—" : formatCurrency$1((stats == null ? void 0 : stats.collectedThisMonth) ?? 0),
+            value: loading ? "—" : formatCurrency((stats == null ? void 0 : stats.collectedThisMonth) ?? 0),
             sub: "Month to date",
             icon: TrendingUp,
             color: "bg-primary",
@@ -97291,7 +97233,7 @@ function AccountantDashboard({ onNavigate }) {
           StatCard$2,
           {
             label: "Pending Dues",
-            value: loading ? "—" : formatCurrency$1((stats == null ? void 0 : stats.pendingDues) ?? 0),
+            value: loading ? "—" : formatCurrency((stats == null ? void 0 : stats.pendingDues) ?? 0),
             sub: "Outstanding balance",
             icon: ClipboardList,
             color: "bg-orange-500",
@@ -97371,7 +97313,7 @@ function AccountantDashboard({ onNavigate }) {
                           const d2 = (_a2 = payload[0]) == null ? void 0 : _a2.payload;
                           return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-card border border-border rounded-lg px-3 py-2 shadow-elevated text-xs", children: [
                             /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold text-foreground mb-0.5", children: d2.month }),
-                            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-emerald-700 font-bold", children: formatCurrency$1(d2.amount) })
+                            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-emerald-700 font-bold", children: formatCurrency(d2.amount) })
                           ] });
                         }
                       }
@@ -98139,7 +98081,7 @@ function ParentDashboard({ onNavigate }) {
                   /* @__PURE__ */ jsxRuntimeExports.jsx(IndianRupee, { className: "w-4 h-4 text-orange-600" }),
                   /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs font-medium text-muted-foreground uppercase tracking-wide", children: "Pending Fees" })
                 ] }),
-                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-foreground font-display", children: formatCurrency$1(totalDue) }),
+                /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-foreground font-display", children: formatCurrency(totalDue) }),
                 /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "mt-2 space-y-1", children: feesDue.map((f2) => /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "div",
                   {
@@ -98779,7 +98721,7 @@ function SuperAdminDashboard({ onNavigate }) {
         StatCard,
         {
           label: "Fees This Month",
-          value: formatCurrency$1((stats == null ? void 0 : stats.feesCollectedThisMonth) ?? 0),
+          value: formatCurrency((stats == null ? void 0 : stats.feesCollectedThisMonth) ?? 0),
           sub: "Collected",
           icon: IndianRupee,
           color: "bg-amber-500",
@@ -99331,6 +99273,8 @@ function AppRoutes() {
     if (effectivePage === "virtualclasses") return /* @__PURE__ */ jsxRuntimeExports.jsx(VirtualClasses, {});
     if (effectivePage === "chat") return /* @__PURE__ */ jsxRuntimeExports.jsx(Chat, {});
     if (effectivePage === "promote") return /* @__PURE__ */ jsxRuntimeExports.jsx(PromoteStudents, {});
+    if (effectivePage === "sessions") return /* @__PURE__ */ jsxRuntimeExports.jsx(Sessions, {});
+    if (effectivePage === "usermanagement") return /* @__PURE__ */ jsxRuntimeExports.jsx(UserManagement, {});
     if (effectivePage === "transport") return /* @__PURE__ */ jsxRuntimeExports.jsx(Transport, {});
     if (effectivePage === "inventory") return /* @__PURE__ */ jsxRuntimeExports.jsx(Inventory, {});
     if (effectivePage === "library") return /* @__PURE__ */ jsxRuntimeExports.jsx(Library, {});
@@ -99363,7 +99307,8 @@ function AppRoutes() {
     }
     if (effectivePage.startsWith("settings") || effectivePage === "settings") {
       const colonTab = effectivePage.includes(":") ? effectivePage.split(":")[1] : null;
-      const tab = colonTab ? colonTab : effectivePage.includes("/") ? effectivePage.split("/")[1] : "profile";
+      const slashTab = effectivePage.includes("/") ? effectivePage.split("/")[1] : null;
+      const tab = colonTab ?? slashTab ?? "profile";
       return /* @__PURE__ */ jsxRuntimeExports.jsx(Settings, { initialTab: tab });
     }
     return /* @__PURE__ */ jsxRuntimeExports.jsx(Dashboard, { onNavigate: navigate });

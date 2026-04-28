@@ -1,86 +1,316 @@
 /**
- * SHUBH SCHOOL ERP — PHP API Stub
+ * SHUBH SCHOOL ERP — Centralized API Client
  *
- * The MySQL/cPanel PHP API has been replaced by the Internet Computer canister.
- * This file is kept to avoid import errors in legacy code paths, but all PHP
- * API functions now throw immediately.
+ * All API calls go through this module.
+ * Token sent as ?token= URL query param (LiteSpeed strips Authorization headers).
+ * Super Admin uses ?sa_key= instead of ?token=.
  *
- * Use canisterService for all data operations.
- * Use syncEngine / dataService for local-first write patterns.
+ * API base: https://shubh.psmkgs.com/api/index.php
  */
 
-// ── Re-exports for backward compat ────────────────────────────────────────────
-export { canisterService, generateId } from "./canisterService";
+const API_BASE = "https://shubh.psmkgs.com/api/index.php";
+const SA_KEY = "shubh_superadmin_2024_secure_key";
 
-// ── Stubs that throw ──────────────────────────────────────────────────────────
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
-const PHP_REMOVED = "PHP API removed — use canisterService instead";
-
-/** @deprecated PHP API removed */
-export function getBaseUrl(): string {
-  throw new Error(PHP_REMOVED);
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem("erp_token");
+  } catch {
+    return null;
+  }
 }
-/** @deprecated PHP API removed */
-export function getApiUrl(): string {
-  throw new Error(PHP_REMOVED);
+
+export function getRole(): string | null {
+  try {
+    return localStorage.getItem("erp_role");
+  } catch {
+    return null;
+  }
 }
-/** @deprecated PHP API removed */
+
+export function setToken(token: string): void {
+  try {
+    localStorage.setItem("erp_token", token);
+  } catch {
+    /* noop */
+  }
+}
+
+export function setRole(role: string): void {
+  try {
+    localStorage.setItem("erp_role", role);
+  } catch {
+    /* noop */
+  }
+}
+
+export function clearAuth(): void {
+  try {
+    localStorage.removeItem("erp_token");
+    localStorage.removeItem("erp_role");
+  } catch {
+    /* noop */
+  }
+}
+
+// ── Core API call ─────────────────────────────────────────────────────────────
+
+export async function apiCall<T = unknown>(
+  route: string,
+  method: "GET" | "POST" = "GET",
+  body?: Record<string, unknown>,
+): Promise<T> {
+  const token = getToken();
+  const role = getRole();
+
+  // Build URL with auth params — LiteSpeed cannot strip query params
+  let url = `${API_BASE}?route=${route}`;
+  if (role === "super_admin" || role === "superadmin") {
+    url += `&sa_key=${SA_KEY}`;
+  } else if (token) {
+    url += `&token=${encodeURIComponent(token)}`;
+  }
+
+  const options: RequestInit = { method };
+  if (body && method !== "GET") {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, options);
+  const text = await response.text();
+
+  let json: { success: boolean; data?: T; error?: string; message?: string };
+  try {
+    json = JSON.parse(text) as typeof json;
+  } catch {
+    throw new Error(
+      `Server error (HTTP ${response.status}): non-JSON response`,
+    );
+  }
+
+  if (!json.success && json.error) {
+    // Fire token-expired event for 401s so AppContext can handle it
+    if (
+      response.status === 401 ||
+      json.error.toLowerCase().includes("unauthorized") ||
+      json.error.toLowerCase().includes("token") ||
+      json.error.toLowerCase().includes("expired")
+    ) {
+      window.dispatchEvent(new CustomEvent("auth:token-expired"));
+    }
+    throw new Error(json.error);
+  }
+
+  return json.data ?? (json as unknown as T);
+}
+
+// ── Auth calls ────────────────────────────────────────────────────────────────
+
+export interface LoginResult {
+  token?: string;
+  refresh_token?: string;
+  user?: {
+    id: string | number;
+    username: string;
+    role: string;
+    fullName?: string;
+    name?: string;
+    permissions?: Record<
+      string,
+      {
+        canView: boolean;
+        canAdd: boolean;
+        canEdit: boolean;
+        canDelete: boolean;
+      }
+    >;
+  };
+}
+
+export async function apiLogin(
+  username: string,
+  password: string,
+): Promise<LoginResult> {
+  const url = `${API_BASE}?route=auth/login`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  const text = await response.text();
+  let json: {
+    success: boolean;
+    data?: LoginResult;
+    error?: string;
+    token?: string;
+    user?: LoginResult["user"];
+  };
+  try {
+    json = JSON.parse(text) as typeof json;
+  } catch {
+    throw new Error("Server error: non-JSON response");
+  }
+  if (!json.success && json.error) throw new Error(json.error);
+  // Handle both {data: {token, user}} and {token, user} response shapes
+  if (json.data?.token) return json.data;
+  return json as unknown as LoginResult;
+}
+
+// ── Broadcast (WhatsApp) ─────────────────────────────────────────────────────
+
+export async function apiSendBroadcast(
+  message: string,
+  phoneNumbers: string[],
+): Promise<{ sent: number; failed: number }> {
+  const settings = (() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem("shubh_erp_whatsapp_settings") ?? "{}",
+      ) as { appKey?: string; authKey?: string };
+    } catch {
+      return {};
+    }
+  })();
+  const { appKey, authKey } = settings;
+  if (!appKey || !authKey) return { sent: 0, failed: phoneNumbers.length };
+
+  let sent = 0;
+  let failed = 0;
+  for (const phone of phoneNumbers) {
+    try {
+      const res = await fetch(
+        `https://wacoder.in/api/send?route=api&appkey=${appKey}&authkey=${authKey}&to=${encodeURIComponent(phone)}&message=${encodeURIComponent(message)}`,
+        { signal: AbortSignal.timeout(8_000) },
+      );
+      if (res.ok) sent++;
+      else failed++;
+    } catch {
+      failed++;
+    }
+  }
+  return { sent, failed };
+}
+
+// ── Legacy broadcast re-export (used by Communication module) ─────────────────
+export { apiSendBroadcast as apiSendBroadcastFromApi };
+
+import type { BroadcastCampaign } from "../types/index";
+
+/** @deprecated Use apiSendBroadcast directly */
+export async function apiSendBroadcastLegacy(
+  campaign: BroadcastCampaign,
+  phoneNumbers: string[],
+): Promise<{ sent: number; failed: number }> {
+  return apiSendBroadcast(campaign.message, phoneNumbers);
+}
+
+// ── Backward compat stubs ─────────────────────────────────────────────────────
+
+export function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export const canisterService = {
+  getCounts: async (): Promise<Record<string, number>> => ({}),
+  isReady: () => false,
+};
+
+export { apiSendBroadcastLegacy as apiSendBroadcast_ };
+
+// ── Legacy function stubs (used by older pages) ───────────────────────────────
+
+/** Returns JWT token — same as getToken() */
+export function getJwt(): string | null {
+  return getToken();
+}
+
+/** @deprecated Use apiCall() directly */
 export function getApiIndexUrl(): string {
-  throw new Error(PHP_REMOVED);
+  return API_BASE;
 }
-/** @deprecated PHP API removed */
-export function getDefaultApiUrl(): string {
-  throw new Error(PHP_REMOVED);
-}
-/** @deprecated PHP API removed */
-export function setApiUrl(_url: string): void {
-  /* no-op */
-}
-/** @deprecated Always false — canister needs no API URL config */
+
+/** @deprecated Always true in cPanel mode */
 export function isApiConfigured(): boolean {
   return true;
 }
-/** @deprecated PHP API removed */
-export function getJwt(): string | null {
-  return null;
+
+/** @deprecated Use getApiIndexUrl() */
+export function getBaseUrl(): string {
+  return "https://shubh.psmkgs.com/api";
 }
-/** @deprecated PHP API removed */
-export function setJwt(_token: string): void {
+
+/** @deprecated Use getApiIndexUrl() */
+export function getApiUrl(): string {
+  return API_BASE;
+}
+
+/** @deprecated Use getApiIndexUrl() */
+export function getDefaultApiUrl(): string {
+  return API_BASE;
+}
+
+/** @deprecated No-op */
+export function setApiUrl(_url: string): void {
   /* no-op */
 }
-/** @deprecated PHP API removed */
+
 export function getRefreshToken(): string | null {
-  return null;
+  try {
+    return localStorage.getItem("erp_refresh_token");
+  } catch {
+    return null;
+  }
 }
-/** @deprecated PHP API removed */
-export function setRefreshToken(_token: string): void {
-  /* no-op */
+
+export function setRefreshToken(token: string): void {
+  try {
+    localStorage.setItem("erp_refresh_token", token);
+  } catch {
+    /* noop */
+  }
 }
-/** @deprecated PHP API removed */
+
 export function clearTokens(): void {
-  /* no-op */
+  clearAuth();
+  try {
+    localStorage.removeItem("erp_refresh_token");
+  } catch {
+    /* noop */
+  }
 }
-/** @deprecated PHP API removed */
+
 export function isJwtExpired(): boolean {
-  return true;
+  const token = getToken();
+  if (!token) return true;
+  try {
+    const parts = token.split(".");
+    if (parts.length < 2) return true;
+    const payload = JSON.parse(atob(parts[1])) as { exp?: number };
+    if (!payload.exp) return false;
+    return Date.now() / 1000 > payload.exp;
+  } catch {
+    return true;
+  }
 }
-/** @deprecated PHP API removed */
+
 export function getJwtRole(): string | null {
-  return null;
+  return getRole();
 }
-/** @deprecated PHP API removed */
+
 export function getSchoolId(): string {
   return "1";
 }
-/** @deprecated PHP API removed */
+
 export function storeServerCredentials(_u: string, _p: string): void {
   /* no-op */
 }
-/** @deprecated PHP API removed */
+
 export function getStoredServerPassword(): string {
   return "";
 }
-/** @deprecated PHP API removed */
+
 export function getStoredServerUsername(): string {
   return "";
 }
@@ -91,7 +321,7 @@ export interface ApiError {
   isNetworkError: boolean;
 }
 
-/** @deprecated PHP API removed */
+/** @deprecated Use phpApiService.login() */
 export async function backendLogin(
   _username: string,
   _password: string,
@@ -102,128 +332,21 @@ export async function backendLogin(
   token?: string;
   refreshToken?: string;
 }> {
-  return { success: false, error: PHP_REMOVED };
+  return { success: false, error: "Use phpApiService.login() instead" };
 }
 
-/** @deprecated PHP API removed */
-export async function apiCall<T = unknown>(): Promise<T> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function fetchCollection<T>(_collection: string): Promise<T[]> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function saveCollectionItem<T extends Record<string, unknown>>(
-  _collection: string,
-  _item: T,
-): Promise<{ id: number }> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function updateCollectionItem<T extends Record<string, unknown>>(
-  _collection: string,
-  _id: string | number,
-  _item: T,
-): Promise<void> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function deleteCollectionItem(
-  _collection: string,
-  _id: string | number,
-): Promise<void> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function syncAllCollections(
-  _collectionNames: string[],
-): Promise<Record<string, unknown[]>> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function fetchSyncStatus(): Promise<{
-  status: string;
-  counts?: Record<string, number>;
-  version: string;
-  timestamp: string;
-}> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiFetchAll(
-  _token: string,
-): Promise<Record<string, unknown[]>> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiCreateRecord<T extends Record<string, unknown>>(
-  _collection: string,
-  _data: T,
-  _token: string | null,
-): Promise<{ id: number | string }> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiUpdateRecord<T extends Record<string, unknown>>(
-  _collection: string,
-  _id: string | number,
-  _data: T,
-  _token: string | null,
-): Promise<void> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiDeleteRecord(
-  _collection: string,
-  _id: string | number,
-  _token: string | null,
-): Promise<void> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiListRecords<T extends Record<string, unknown>>(
-  _collection: string,
-  _filters: Record<string, unknown>,
-  _token: string | null,
-): Promise<T[]> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
+/** Updates user permissions via PHP API */
 export async function apiUpdatePermissions(
-  _userId: string,
-  _permissions: Record<string, unknown>,
+  userId: string,
+  permissions: Record<string, unknown>,
   _token: string | null,
 ): Promise<void> {
-  throw new Error(PHP_REMOVED);
+  await apiCall("users/permissions", "POST", { userId, permissions });
 }
 
-/** @deprecated PHP API removed */
-export async function apiFetchStudentAnalytics(
-  _studentId: string,
-): Promise<Record<string, unknown>> {
-  throw new Error(PHP_REMOVED);
-}
-
-/** @deprecated PHP API removed */
-export async function apiBatchRecords<T extends Record<string, unknown>>(
-  _collection: string,
-  _records: T[],
-  _token: string | null,
-): Promise<{ pushed: number; errors: string[] }> {
-  throw new Error(PHP_REMOVED);
+/** @deprecated Use phpApiService directly */
+export async function fetchCollection<T>(_collection: string): Promise<T[]> {
+  return [];
 }
 
 export interface SyncStatusResponse {
@@ -247,22 +370,19 @@ export interface ConnectionTestResult {
   error?: string;
 }
 
-/** @deprecated PHP API removed */
 export async function testConnection(): Promise<ConnectionTestResult> {
-  return { connected: false, latencyMs: 0, error: PHP_REMOVED };
-}
-
-/** @deprecated PHP API removed */
-export async function migrateLocalData(): Promise<{
-  success: boolean;
-  message: string;
-}> {
-  return { success: false, message: PHP_REMOVED };
-}
-
-/** @deprecated PHP API removed */
-export async function batchPushCollection(): Promise<BatchPushResult> {
-  throw new Error(PHP_REMOVED);
+  const start = Date.now();
+  try {
+    const url = `${API_BASE}?route=ping`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+    return { connected: res.ok, latencyMs: Date.now() - start };
+  } catch (e) {
+    return {
+      connected: false,
+      latencyMs: Date.now() - start,
+      error: String(e),
+    };
+  }
 }
 
 export interface CollectionListResult<T> {
@@ -272,38 +392,16 @@ export interface CollectionListResult<T> {
   offset: number;
 }
 
-// Broadcast stubs (WhatsApp via external API still works — not PHP)
-import type { BroadcastCampaign } from "../types/index";
+export async function migrateLocalData(): Promise<{
+  success: boolean;
+  message: string;
+}> {
+  return { success: true, message: "No migration needed — cPanel/MySQL mode" };
+}
 
-export async function apiSendBroadcast(
-  campaign: BroadcastCampaign,
-  phoneNumbers: string[],
-): Promise<{ sent: number; failed: number }> {
-  const whatsAppSettings = (() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem("shubh_erp_whatsapp_settings") ?? "{}",
-      ) as { appKey?: string; authKey?: string };
-    } catch {
-      return {};
-    }
-  })();
-  const { appKey, authKey } = whatsAppSettings;
-  if (!appKey || !authKey) return { sent: 0, failed: phoneNumbers.length };
-
-  let sent = 0;
-  let failed = 0;
-  for (const phone of phoneNumbers) {
-    try {
-      const res = await fetch(
-        `https://wacoder.in/api/send?route=api&appkey=${appKey}&authkey=${authKey}&to=${encodeURIComponent(phone)}&message=${encodeURIComponent(campaign.message)}`,
-        { signal: AbortSignal.timeout(8_000) },
-      );
-      if (res.ok) sent++;
-      else failed++;
-    } catch {
-      failed++;
-    }
-  }
-  return { sent, failed };
+/** @deprecated */
+export async function apiFetchStudentAnalytics(
+  _studentId: string,
+): Promise<Record<string, unknown>> {
+  return {};
 }

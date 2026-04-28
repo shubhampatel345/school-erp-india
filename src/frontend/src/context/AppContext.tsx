@@ -1,19 +1,19 @@
 /**
- * SHUBH SCHOOL ERP — AppContext (Online-Only, PHP/MySQL)
+ * SHUBH SCHOOL ERP — AppContext (Online-Only, cPanel/MySQL)
  *
  * Auth: JWT via phpApiService.login() — token stored in localStorage.
- * Data: fetched directly from MySQL via PHP API on demand.
+ * Super Admin: uses SA_KEY (?sa_key=) — no JWT needed.
+ * Role from DB: 'super_admin' (underscore) — normalized to 'superadmin' internally.
  *
  * NO: pendingWrites, syncStatus, offlineQueue, IndexedDB, syncEngine.
  *
  * ── Session Expired modal rules ────────────────────────────────────────────
  *  - NEVER shown on login screen (currentUser is null)
- *  - NEVER shown within 10 minutes of a fresh login (_loginTime guard)
+ *  - NEVER shown within 120 seconds of a fresh login (_loginTime guard)
  *  - Only shown after token genuinely expires mid-session AND silent refresh fails
  *
  * ── loginTime: module-level variable ────────────────────────────────────────
  *  Module-level (outside React) so ALL closures see it immediately.
- *  No stale-closure issues that affect useRef inside callbacks.
  */
 
 import {
@@ -34,38 +34,34 @@ import type {
   Session,
   UserRole,
 } from "../types";
-import type { SessionRecord } from "../utils/phpApiService";
 import phpApiService from "../utils/phpApiService";
+import type { SessionRecord } from "../utils/phpApiService";
 
-// ── Module-level login timestamp (outside React component) ────────────────────
-// Using a module-level variable ensures ALL closures see the latest value
-// immediately — no stale-closure issues.
-let _loginTime: number | null = null;
+// ── Module-level login timestamp ──────────────────────────────────────────────
+// Using module-level (not React state/ref) ensures ALL closures see the latest
+// value immediately — no stale-closure issues.
+let _loginTime = 0;
 
-export function setLoginTime(t: number | null): void {
+export function setLoginTime(t: number): void {
   _loginTime = t;
   try {
-    if (t !== null) {
-      localStorage.setItem("erp_login_time", String(t));
-    } else {
-      localStorage.removeItem("erp_login_time");
-    }
+    localStorage.setItem("erp_login_time", String(t));
   } catch {
     /* storage unavailable */
   }
 }
 
-export function getLoginTime(): number | null {
+export function getLoginTime(): number {
   return _loginTime;
 }
 
-/** Returns true if a fresh login happened within the last N minutes */
-function isWithinGracePeriod(minutesThreshold = 10): boolean {
-  if (_loginTime === null) return false;
-  return Date.now() - _loginTime < minutesThreshold * 60 * 1000;
+/** Returns true if a fresh login happened within the last N seconds */
+function isWithinGracePeriod(seconds = 120): boolean {
+  if (_loginTime === 0) return false;
+  return Date.now() - _loginTime < seconds * 1000;
 }
 
-// ── Simple localStorage helper ────────────────────────────────────────────────
+// ── localStorage helpers ──────────────────────────────────────────────────────
 
 function lsGet<T>(key: string, fallback: T): T {
   try {
@@ -85,13 +81,19 @@ function lsSet(key: string, value: unknown): void {
   }
 }
 
-// ── ID generator ──────────────────────────────────────────────────────────────
-
 function generateId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-// ── Pre-loaded session years (2019-20 through 2025-26) ───────────────────────
+// ── Role normalization ────────────────────────────────────────────────────────
+// DB stores 'super_admin' (underscore) — normalize to 'superadmin' for internal use
+
+function normalizeRole(role: string): UserRole {
+  if (role === "super_admin") return "superadmin";
+  return (role as UserRole) || "teacher";
+}
+
+// ── Pre-loaded session years ──────────────────────────────────────────────────
 
 const PRELOADED_SESSIONS = [
   { label: "2019-20", startYear: 2019, endYear: 2020 },
@@ -315,7 +317,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
   }
 }
 
-// ── Context value interface ───────────────────────────────────────────────────
+// ── Context value ─────────────────────────────────────────────────────────────
 
 interface AppContextValue {
   currentUser: AppUser | null;
@@ -326,14 +328,11 @@ interface AppContextValue {
   isReadOnly: boolean;
   canWrite: boolean;
   serverConnected: boolean;
-  // Auth
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
   changePassword: (userId: string, newPassword: string) => boolean;
-  // Session
   switchSession: (sessionId: string) => void;
   createSession: (label: string, description?: string) => Session;
-  // Notifications
   addNotification: (
     message: string,
     type?: Notification["type"],
@@ -341,12 +340,10 @@ interface AppContextValue {
   ) => void;
   markAllRead: () => void;
   clearNotifications: () => void;
-  // Permissions
   hasPermission: (
     module: string,
     action?: keyof Omit<Permission, "module">,
   ) => boolean;
-  // Legacy data access (delegates to phpApiService)
   getData: (collection: string) => unknown[];
   saveData: (
     collection: string,
@@ -359,7 +356,7 @@ interface AppContextValue {
   ) => Promise<void>;
   deleteData: (collection: string, id: string) => Promise<void>;
   refreshCollection: (collection: string) => Promise<void>;
-  // Backward compat stubs
+  // Backward compat stubs (no sync)
   isSyncLoading: boolean;
   syncStatus: {
     state: "idle" | "synced";
@@ -374,9 +371,9 @@ interface AppContextValue {
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-// ── Hardcoded local admin accounts (always work even if PHP server is down) ───
+// ── Local Admin Users (always work even if PHP server is down) ────────────────
 
-const SUPER_ADMIN: AppUser = {
+const SUPER_ADMIN_USER: AppUser = {
   id: "su1",
   username: "superadmin",
   role: "superadmin",
@@ -384,11 +381,10 @@ const SUPER_ADMIN: AppUser = {
   name: "Super Admin",
 };
 
-// admin account — local fallback with superadmin privileges when PHP is down
-const LOCAL_ADMIN: AppUser = {
+const LOCAL_ADMIN_USER: AppUser = {
   id: "su2",
   username: "admin",
-  role: "superadmin", // treated as superadmin locally so SA_KEY is used for API calls
+  role: "superadmin",
   fullName: "Administrator",
   name: "Administrator",
 };
@@ -415,7 +411,7 @@ function AppLoading({
             strokeWidth="2"
             role="img"
           >
-            <title>SHUBH School ERP Loading</title>
+            <title>SHUBH School ERP</title>
             <path d="M22 10v6M2 10l10-5 10 5-10 5z" />
             <path d="M6 12v5c3 3 9 3 12 0v-5" />
           </svg>
@@ -440,9 +436,7 @@ function AppLoading({
             </>
           ) : (
             <>
-              <p className="text-sm text-muted-foreground mt-2">
-                Connecting to server…
-              </p>
+              <p className="text-sm text-muted-foreground mt-2">Loading…</p>
               <div className="flex items-center gap-1.5 justify-center mt-3">
                 {[0, 1, 2].map((i) => (
                   <div
@@ -460,13 +454,9 @@ function AppLoading({
   );
 }
 
-// ── Re-login modal ────────────────────────────────────────────────────────────
+// ── Session Expired Modal ─────────────────────────────────────────────────────
 
-function ReLoginModal({ onDismiss }: { onDismiss: () => void }) {
-  const currentYear = new Date().getFullYear();
-  const baseYear = new Date().getMonth() >= 3 ? currentYear : currentYear - 1;
-  const sessionYear = `${baseYear}-${String(baseYear + 1).slice(-2)}`;
-
+function SessionExpiredModal({ onLogout }: { onLogout: () => void }) {
   return (
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm p-4"
@@ -491,17 +481,16 @@ function ReLoginModal({ onDismiss }: { onDismiss: () => void }) {
               Session Expired
             </p>
             <p className="text-xs text-muted-foreground">
-              Academic session {sessionYear}
+              Please log in again to continue
             </p>
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          Your login session has expired and could not be automatically renewed.
-          Please log out and sign in again to continue.
+          Your login session has expired. Please log out and sign in again.
         </p>
         <button
           type="button"
-          onClick={onDismiss}
+          onClick={onLogout}
           data-ocid="relogin.logout_button"
           className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity"
         >
@@ -516,7 +505,7 @@ function ReLoginModal({ onDismiss }: { onDismiss: () => void }) {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
-  const [showReLoginModal, setShowReLoginModal] = useState(false);
+  const [showExpiredModal, setShowExpiredModal] = useState(false);
   const initStartedRef = useRef(false);
   const stateRef = useRef(state);
 
@@ -524,56 +513,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
     stateRef.current = state;
   });
 
-  // ── Listen for auth:token-expired ─────────────────────────────────────────
+  // ── Listen for token-expired events ──────────────────────────────────────
   useEffect(() => {
-    const handleTokenExpired = async () => {
-      // Guard 1: never handle when nobody is logged in
+    const handleExpired = async () => {
+      // Guard 1: nobody logged in
       if (!stateRef.current.currentUser) return;
-      // Guard 2: superadmin uses local auth — never has a PHP token to expire
+      // Guard 2: super admin uses SA_KEY, no token to expire
       if (stateRef.current.currentUser.role === "superadmin") return;
-      // Guard 3: never show modal within 10 min of fresh login
-      if (isWithinGracePeriod(10)) return;
-      // Guard 4: attempt silent refresh first
+      // Guard 3: within 120s grace period after fresh login
+      if (isWithinGracePeriod(120)) return;
+      // Try silent refresh
       const refreshed = await phpApiService.silentRefresh();
       if (refreshed) return;
-      // All refresh attempts failed — show modal only for mid-session expiry
-      if (!isWithinGracePeriod(10) && stateRef.current.currentUser) {
-        setShowReLoginModal(true);
+      // Show modal only after all guards pass
+      if (!isWithinGracePeriod(120) && stateRef.current.currentUser) {
+        setShowExpiredModal(true);
       }
     };
-
     const listener = () => {
-      void handleTokenExpired();
+      void handleExpired();
     };
     window.addEventListener("auth:token-expired", listener);
     return () => window.removeEventListener("auth:token-expired", listener);
   }, []);
 
-  // ── Restore user from sessionStorage on page reload ───────────────────────
+  // ── Restore session on page reload ────────────────────────────────────────
   useEffect(() => {
-    const storedUserRaw = sessionStorage.getItem("shubh_current_user");
-    if (storedUserRaw) {
-      try {
-        const user = JSON.parse(storedUserRaw) as AppUser;
-        const token = phpApiService.getToken();
-        if (token) {
-          // Treat page reload as fresh login to prevent false expiry on startup
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user });
-        } else if (user.role === "superadmin") {
-          // Superadmin doesn't need a token
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user });
-        } else {
-          sessionStorage.removeItem("shubh_current_user");
-        }
-      } catch {
-        /* corrupt storage */
+    const storedRaw = sessionStorage.getItem("shubh_current_user");
+    if (!storedRaw) return;
+    try {
+      const user = JSON.parse(storedRaw) as AppUser;
+      const token = phpApiService.getToken();
+      if (token || user.role === "superadmin") {
+        // Page reload = fresh start: reset grace period
+        setLoginTime(Date.now());
+        dispatch({ type: "SET_USER", user });
+      } else {
+        sessionStorage.removeItem("shubh_current_user");
       }
+    } catch {
+      /* corrupt storage */
     }
   }, []);
 
-  // ── Initialize: fetch sessions from MySQL after login ─────────────────────
+  // ── Initialize after login ────────────────────────────────────────────────
   useEffect(() => {
     if (!state.currentUser || !state.isInitializing) return;
     if (initStartedRef.current) return;
@@ -605,7 +588,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             }
           }
         } catch {
-          // Server unreachable — use default
+          // Server unreachable — use default session
         }
 
         dispatch({ type: "SET_INIT_DONE", sessions });
@@ -625,81 +608,89 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ── Login ─────────────────────────────────────────────────────────────────
   const login = useCallback(
     async (username: string, password: string): Promise<boolean> => {
-      // 1. Super Admin — always local password check (no PHP token needed)
+      // 1. Super Admin local check — always works regardless of server
       if (username === "superadmin") {
         const passwords = lsGet<Record<string, string>>("user_passwords", {});
         const validPw = passwords[username] ?? "admin123";
         if (password !== validPw) return false;
+        setLoginTime(Date.now()); // FIRST: before any state update
         sessionStorage.setItem(
           "shubh_current_user",
-          JSON.stringify(SUPER_ADMIN),
+          JSON.stringify(SUPER_ADMIN_USER),
         );
+        localStorage.setItem("erp_role", "superadmin");
         initStartedRef.current = false;
-        setLoginTime(Date.now()); // FIRST: before any state updates
-        dispatch({ type: "SET_USER", user: SUPER_ADMIN });
+        dispatch({ type: "SET_USER", user: SUPER_ADMIN_USER });
         return true;
       }
 
-      // 2. PHP API login — try first for non-superadmin users
+      // 2. PHP API login
       try {
         const result = await phpApiService.login(username, password);
         if (result?.token && result.user) {
           const su = result.user;
+          // Normalize role: 'super_admin' from DB → 'superadmin' internally
+          const normalizedRole = normalizeRole(
+            (su.role as string) ?? "teacher",
+          );
           const user: AppUser = {
-            id: su.id,
+            id: String(su.id),
             username: su.username,
-            role: (su.role as UserRole) ?? "teacher",
+            role: normalizedRole,
             fullName: su.fullName ?? su.name ?? username,
             name: su.name ?? su.fullName ?? username,
           };
+          // Store role (normalized) for API calls
+          localStorage.setItem("erp_role", normalizedRole);
           sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
           if (result.refresh_token)
             phpApiService.storeRefreshToken(result.refresh_token);
           if (su.permissions) {
             const matrix: PermissionMatrix = {};
             for (const [mod, perms] of Object.entries(su.permissions)) {
+              const p = perms as {
+                canView?: boolean;
+                canAdd?: boolean;
+                canEdit?: boolean;
+                canDelete?: boolean;
+              };
               matrix[mod] = {
                 module: mod,
-                canView: perms.canView ?? true,
-                canAdd: perms.canAdd ?? false,
-                canEdit: perms.canEdit ?? false,
-                canDelete: perms.canDelete ?? false,
+                canView: p.canView ?? true,
+                canAdd: p.canAdd ?? false,
+                canEdit: p.canEdit ?? false,
+                canDelete: p.canDelete ?? false,
               };
             }
             dispatch({ type: "SET_PERMISSIONS", permissions: matrix });
           }
+          setLoginTime(Date.now()); // FIRST: before any state update
           initStartedRef.current = false;
-          setLoginTime(Date.now()); // FIRST: before any state updates
           dispatch({ type: "SET_USER", user });
           return true;
         }
       } catch {
-        /* server down or network error — try local fallbacks below */
+        /* server down — try local fallbacks */
       }
 
-      // 2b. Local admin fallback — 'admin' ALWAYS gets a local auth attempt.
-      // This covers: PHP server down, admin not yet seeded in MySQL, or any PHP error.
-      // The admin user must always be able to log in even if PHP server is broken.
+      // 3. Local 'admin' fallback (server down or not seeded yet)
       if (username === "admin") {
         const passwords = lsGet<Record<string, string>>("user_passwords", {});
         const validPw = passwords.admin ?? "admin123";
         if (password === validPw) {
-          // Mark this user as using local auth (role=superadmin so isSuperAdmin() returns true
-          // and SA_KEY is used for all API calls — no JWT required)
+          setLoginTime(Date.now());
+          localStorage.setItem("erp_role", "superadmin");
           sessionStorage.setItem(
             "shubh_current_user",
-            JSON.stringify(LOCAL_ADMIN),
+            JSON.stringify(LOCAL_ADMIN_USER),
           );
           initStartedRef.current = false;
-          setLoginTime(Date.now());
-          dispatch({ type: "SET_USER", user: LOCAL_ADMIN });
+          dispatch({ type: "SET_USER", user: LOCAL_ADMIN_USER });
           return true;
         }
-        // Password doesn't match local admin password either — fall through to return false
-        // But don't show "Invalid" error if PHP also failed — it just means wrong password
       }
 
-      // 3. Local staff fallback (when server is unreachable)
+      // 4. Local staff fallback
       const staffList = lsGet<
         Array<{
           id: string;
@@ -735,38 +726,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
           staffId: staffMember.id,
           mobile: staffMember.mobile,
         };
+        setLoginTime(Date.now());
+        localStorage.setItem("erp_role", role);
         sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
         initStartedRef.current = false;
-        setLoginTime(Date.now());
-        dispatch({ type: "SET_USER", user });
-        return true;
-      }
-
-      // 4. Student local fallback
-      const students = lsGet<
-        Array<{
-          id: string;
-          fullName: string;
-          credentials: { username: string; password: string };
-        }>
-      >("students", []);
-      const student = students.find(
-        (s) =>
-          s.credentials?.username === username &&
-          s.credentials?.password === password,
-      );
-      if (student) {
-        const user: AppUser = {
-          id: student.id,
-          username,
-          role: "student",
-          fullName: student.fullName ?? "Student",
-          name: student.fullName ?? "Student",
-          studentId: student.id,
-        };
-        sessionStorage.setItem("shubh_current_user", JSON.stringify(user));
-        initStartedRef.current = false;
-        setLoginTime(Date.now());
         dispatch({ type: "SET_USER", user });
         return true;
       }
@@ -778,10 +741,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     sessionStorage.removeItem("shubh_current_user");
+    localStorage.removeItem("erp_role");
     phpApiService.clearToken();
     initStartedRef.current = false;
-    setLoginTime(null);
-    setShowReLoginModal(false);
+    setLoginTime(0);
+    setShowExpiredModal(false);
     dispatch({ type: "LOGOUT" });
   }, []);
 
@@ -816,7 +780,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const changePassword = useCallback(
     (userId: string, newPassword: string): boolean => {
       let username: string | undefined;
-      if (userId === SUPER_ADMIN.id) username = "superadmin";
+      if (userId === SUPER_ADMIN_USER.id) username = "superadmin";
       else {
         const custom = lsGet<AppUser[]>("custom_users", []).find(
           (u) => u.id === userId,
@@ -886,7 +850,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [state.currentUser, state.permissions],
   );
 
-  // ── Legacy data access delegates ─────────────────────────────────────────
+  // ── Legacy data delegates ─────────────────────────────────────────────────
 
   const getData = useCallback((_collection: string): unknown[] => [], []);
   const refreshCollection = useCallback(
@@ -948,7 +912,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   // ── Computed ──────────────────────────────────────────────────────────────
-
   const isReadOnly = state.currentSession?.isArchived ?? false;
   const canWrite = !isReadOnly || state.currentUser?.role === "superadmin";
   const unreadCount = state.notifications.filter((n) => !n.isRead).length;
@@ -1011,14 +974,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       )}
       {/*
         Session Expired modal rules:
-        - Only when currentUser is set (never on login screen)
-        - Never within 10 minutes of login (isWithinGracePeriod guard)
-        - Only after all silent refresh attempts have failed
+        1. Only when currentUser is set (never on login screen)
+        2. Never within 120 seconds of login (isWithinGracePeriod(120))
+        3. Never for superadmin (uses SA_KEY, no token)
+        4. Only after all silent refresh attempts failed
       */}
-      {showReLoginModal &&
+      {showExpiredModal &&
         state.currentUser !== null &&
         state.currentUser.role !== "superadmin" &&
-        !isWithinGracePeriod(10) && <ReLoginModal onDismiss={logout} />}
+        !isWithinGracePeriod(120) && <SessionExpiredModal onLogout={logout} />}
     </AppContext.Provider>
   );
 }

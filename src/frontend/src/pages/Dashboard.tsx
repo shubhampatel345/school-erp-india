@@ -8,20 +8,13 @@ import {
   BarChart2,
   Bus,
   CalendarCheck,
-  CheckCircle2,
   ClipboardList,
   GraduationCap,
   IndianRupee,
-  Info,
   LineChart,
-  Loader2,
   Plus,
-  RefreshCw,
-  Server,
-  ShieldAlert,
   TrendingUp,
   Users,
-  WifiOff,
   X,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -36,7 +29,6 @@ import {
   YAxis,
 } from "recharts";
 import { useApp } from "../context/AppContext";
-import { useSync } from "../hooks/useSync";
 import type { AttendanceRecord, FeeReceipt, Staff, Student } from "../types";
 import { isApiConfigured } from "../utils/api";
 import { dataService } from "../utils/dataService";
@@ -97,279 +89,6 @@ function StatCard({
   );
 }
 
-// ── Sync status bar ────────────────────────────────────────
-
-function SyncBar() {
-  const {
-    mode,
-    lastSyncTime,
-    lastSyncError,
-    triggerSync,
-    isPolling,
-    serverInfo,
-    needsAuth,
-    serverCounts,
-    syncedCounts,
-    pendingSyncCount,
-    failedSyncCount,
-  } = useSync();
-  const [showTooltip, setShowTooltip] = useState(false);
-
-  const displayCounts =
-    Object.keys(serverCounts).length > 0 ? serverCounts : syncedCounts;
-
-  const countSummary = (() => {
-    const parts: string[] = [];
-    if (displayCounts.students)
-      parts.push(`${displayCounts.students} students`);
-    if (displayCounts.fee_receipts)
-      parts.push(`${displayCounts.fee_receipts} receipts`);
-    if (displayCounts.staff) parts.push(`${displayCounts.staff} staff`);
-    return parts.join(", ");
-  })();
-
-  const barConfig = {
-    local: {
-      bg: "bg-card border-b border-border",
-      icon: <Info className="w-4 h-4 text-muted-foreground flex-shrink-0" />,
-      label: "Local Mode — syncing to MySQL server",
-      labelClass: "text-xs font-medium text-muted-foreground",
-      badgeCls: "bg-muted text-muted-foreground border-border",
-      badgeText: "Local",
-    },
-    connected: {
-      bg: "bg-emerald-50 dark:bg-emerald-950/20 border-b border-emerald-200/60",
-      icon: <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />,
-      label: countSummary
-        ? `Synced to MySQL server — ${countSummary} — all devices share this data`
-        : "Synced to MySQL server — all devices see the same data",
-      labelClass: "text-xs font-medium text-emerald-700",
-      badgeCls: "bg-emerald-500/10 text-emerald-700 border-emerald-500/30",
-      badgeText: "Synced",
-    },
-    syncing: {
-      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200/60",
-      icon: (
-        <Loader2 className="w-4 h-4 text-amber-600 animate-spin flex-shrink-0" />
-      ),
-      label: "Loading data from server…",
-      labelClass: "text-xs font-medium text-amber-700",
-      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
-      badgeText: "Syncing",
-    },
-    offline: {
-      bg: "bg-destructive/5 border-b border-destructive/20",
-      icon: <WifiOff className="w-4 h-4 text-destructive flex-shrink-0" />,
-      label: "Offline Mode — server unreachable, data saved locally only",
-      labelClass: "text-xs font-medium text-destructive",
-      badgeCls: "bg-destructive/10 text-destructive border-destructive/30",
-      badgeText: "Offline",
-    },
-    auth_error: {
-      bg: "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-300/60",
-      icon: <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0" />,
-      label: "Server auth required — data not syncing. Open Settings to fix",
-      labelClass: "text-xs font-medium text-amber-700",
-      badgeCls: "bg-amber-500/10 text-amber-700 border-amber-500/30",
-      badgeText: "Auth Required",
-    },
-  };
-
-  const cfg = barConfig[mode] ?? barConfig.offline;
-
-  function handleAuthClick() {
-    const event = new CustomEvent("erp:navigate", { detail: "settings" });
-    window.dispatchEvent(event);
-  }
-
-  return (
-    <div
-      className={`${cfg.bg} px-6 py-2 flex items-center gap-2`}
-      data-ocid="dashboard.sync_status"
-      style={{ cursor: needsAuth ? "pointer" : "default" }}
-      onClick={needsAuth ? handleAuthClick : undefined}
-      onKeyDown={
-        needsAuth
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") handleAuthClick();
-            }
-          : undefined
-      }
-      role={needsAuth ? "button" : undefined}
-      tabIndex={needsAuth ? 0 : undefined}
-      title={needsAuth ? "Click to open Settings and authenticate" : undefined}
-    >
-      {cfg.icon}
-      <span className={cfg.labelClass}>{cfg.label}</span>
-
-      {lastSyncTime && mode === "connected" && (
-        <span className="text-xs text-emerald-600 ml-1">
-          ·{" "}
-          {lastSyncTime.toLocaleTimeString("en-IN", {
-            hour: "2-digit",
-            minute: "2-digit",
-          })}
-        </span>
-      )}
-
-      <Badge
-        variant="outline"
-        className={`text-[10px] px-1.5 py-0.5 ml-1 border ${cfg.badgeCls}`}
-        data-ocid={`dashboard.sync_badge.${mode}`}
-      >
-        {cfg.badgeText}
-      </Badge>
-
-      {/* Pending sync queue indicator — shown when changes are waiting to push to server */}
-      {pendingSyncCount > 0 && (
-        <span
-          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-amber-500/10 text-amber-700 border border-amber-500/30 flex items-center gap-1"
-          title={`${pendingSyncCount} change${pendingSyncCount !== 1 ? "s" : ""} saved locally, syncing to server in background`}
-          data-ocid="dashboard.sync_pending_badge"
-        >
-          <Loader2 className="w-2.5 h-2.5 animate-spin" />
-          {pendingSyncCount} pending
-        </span>
-      )}
-
-      {/* Failed sync indicator */}
-      {failedSyncCount > 0 && (
-        <span
-          className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive border border-destructive/30"
-          title={`${failedSyncCount} change${failedSyncCount !== 1 ? "s" : ""} failed to sync. Data is safe locally. Check Settings to fix.`}
-          data-ocid="dashboard.sync_failed_badge"
-        >
-          {failedSyncCount} sync failed
-        </span>
-      )}
-
-      {mode === "offline" && lastSyncError && (
-        <span className="text-xs text-destructive/70 ml-1 truncate max-w-[200px]">
-          {lastSyncError}
-        </span>
-      )}
-
-      {needsAuth && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="ml-2 h-6 text-[10px] px-2 border-amber-500/50 text-amber-700 hover:bg-amber-500/10"
-          onClick={(e) => {
-            e.stopPropagation();
-            handleAuthClick();
-          }}
-          data-ocid="dashboard.sync_auth.button"
-        >
-          Fix in Settings
-        </Button>
-      )}
-
-      {mode !== "local" && !needsAuth && (
-        <button
-          type="button"
-          onClick={() => void triggerSync()}
-          disabled={isPolling}
-          className="ml-1 p-0.5 rounded hover:bg-black/5 transition-colors"
-          title="Refresh sync"
-          aria-label="Refresh sync"
-          data-ocid="dashboard.sync_refresh.button"
-        >
-          <RefreshCw
-            className={`w-3.5 h-3.5 text-muted-foreground ${isPolling ? "animate-spin" : ""}`}
-          />
-        </button>
-      )}
-
-      {/* Info tooltip */}
-      <div
-        className="ml-1 relative"
-        onMouseEnter={() => setShowTooltip(true)}
-        onMouseLeave={() => setShowTooltip(false)}
-      >
-        <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
-        {showTooltip && (
-          <div className="absolute left-0 top-6 z-50 w-80 bg-card border border-border rounded-lg shadow-elevated p-3 text-xs text-foreground">
-            <p className="font-semibold mb-1 flex items-center gap-1.5">
-              {mode === "connected" ? (
-                <>
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />{" "}
-                  MySQL Server
-                </>
-              ) : mode === "local" ? (
-                <>
-                  <Info className="w-3.5 h-3.5 text-muted-foreground" />{" "}
-                  Device-Local Storage
-                </>
-              ) : mode === "auth_error" ? (
-                <>
-                  <ShieldAlert className="w-3.5 h-3.5 text-amber-600" /> Server
-                  Auth Required
-                </>
-              ) : mode === "offline" ? (
-                <>
-                  <WifiOff className="w-3.5 h-3.5 text-destructive" /> Server
-                  Unreachable
-                </>
-              ) : (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading data…
-                </>
-              )}
-            </p>
-            {mode === "connected" && (
-              <div className="space-y-0.5 text-muted-foreground">
-                {serverInfo?.version && <p>API v{serverInfo.version}</p>}
-                <div className="mt-1 pt-1 border-t border-border/50">
-                  <p className="font-medium text-foreground mb-0.5">
-                    Records on MySQL server:
-                  </p>
-                  {Object.entries(displayCounts)
-                    .filter(([, count]) => count > 0)
-                    .map(([col, count]) => (
-                      <p key={col} className="flex justify-between">
-                        <span className="capitalize">
-                          {col.replace(/_/g, " ")}
-                        </span>
-                        <span className="font-medium text-foreground">
-                          {count}
-                        </span>
-                      </p>
-                    ))}
-                </div>
-              </div>
-            )}
-            {mode === "local" && (
-              <p className="text-muted-foreground leading-relaxed">
-                Data is stored locally and syncing to the MySQL server in the
-                background.
-              </p>
-            )}
-            {mode === "auth_error" && (
-              <p className="text-muted-foreground leading-relaxed">
-                Go to <strong>Settings → Data Management</strong> and click{" "}
-                <strong>Authenticate Now</strong>.
-              </p>
-            )}
-            {mode === "offline" && (
-              <p className="text-muted-foreground leading-relaxed">
-                MySQL server is configured but unreachable. Check your internet
-                connection or server status.
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-
-      {mode === "local" && (
-        <div className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-primary cursor-pointer transition-colors">
-          <Server className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">MySQL Server</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── Main Dashboard ─────────────────────────────────────────
 
 interface DashboardProps {
@@ -381,13 +100,8 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
   const sessionId = currentSession?.id ?? "";
   const [showAttendanceModal, setShowAttendanceModal] = useState(false);
 
-  const { serverCounts, mode: syncMode } = useSync();
-
-  const serverCountsLoaded =
-    Object.keys(serverCounts).length > 0 ||
-    syncMode === "offline" ||
-    syncMode === "local" ||
-    syncMode === "auth_error";
+  const serverCounts: Record<string, number> = {};
+  const serverCountsLoaded = false;
 
   const schoolSettings = useMemo(
     () =>
@@ -402,17 +116,13 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
     const cachedStudents = dataService.get<Student>("students");
     const cachedStaff = dataService.get<Staff>("staff");
 
-    // Total students — always prefer server count (real MySQL)
+    // Total students — from local cache (real MySQL data is fetched per page)
     const totalStudentsCount: number | "—" =
       serverCounts.students != null
         ? serverCounts.students
-        : syncMode === "offline" ||
-            syncMode === "local" ||
-            syncMode === "auth_error"
-          ? cachedStudents.filter(
-              (s) => s.sessionId === sessionId && s.status === "active",
-            ).length
-          : "—";
+        : cachedStudents.filter(
+            (s) => s.sessionId === sessionId && s.status === "active",
+          ).length;
 
     const totalTeachersCount =
       serverCounts.teachers != null
@@ -633,7 +343,7 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
       today,
       currentMonthName,
     };
-  }, [sessionId, serverCounts, syncMode]);
+  }, [sessionId]);
 
   const recentReceipts = useMemo(() => {
     const allReceipts =
@@ -801,9 +511,6 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
           })}
         </Badge>
       </div>
-
-      {/* Sync status bar */}
-      <SyncBar />
 
       <div className="p-4 lg:p-6 space-y-6">
         {/* KPI stat cards */}

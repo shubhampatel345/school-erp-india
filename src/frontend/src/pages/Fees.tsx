@@ -1,3 +1,8 @@
+/**
+ * Fees — Main module shell for SHUBH SCHOOL ERP
+ * Tabs: Collect Fees | Fee Headings | Fees Plan | Due Fees | Fee Register | Accounts | Online
+ * All data: direct PHP/MySQL via phpApiService. No offline cache, no IndexedDB.
+ */
 import { useState } from "react";
 import CollectFees from "./fees/CollectFees";
 import DueFees from "./fees/DueFees";

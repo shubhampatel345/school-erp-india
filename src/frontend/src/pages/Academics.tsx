@@ -1,6 +1,7 @@
 /**
  * Academics — Main module shell for SHUBH SCHOOL ERP
  * Tabs: Classes & Sections | Subjects | Class Timetable | Teacher Timetable | Class Teachers | Syllabus
+ * All data: direct PHP/MySQL via phpApiService. No offline cache, no IndexedDB.
  */
 import {
   BookOpen,
