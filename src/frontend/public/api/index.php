@@ -560,10 +560,41 @@ if ($section === 'migrate' && $action === 'run') {
         $db->exec($sql);
     }
 
-    // Add is_enabled column to classes for existing deployments
-    try {
-        $db->exec("ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_enabled TINYINT(1) NOT NULL DEFAULT 1");
-    } catch (Exception $e) { /* column may already exist */ }
+    // Add missing columns for existing deployments (idempotent — IF NOT EXISTS prevents errors)
+    $alterColumns = [
+        "ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_enabled TINYINT(1) NOT NULL DEFAULT 1",
+        "ALTER TABLE classes ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE sessions_academic ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE sections ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE subjects ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE students ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE staff ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE fee_headings ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE fees_plan ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE fee_receipts ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE attendance ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE payroll ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE exams ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE exam_results ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE transport_routes ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE transport_buses ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE transport_pickup_points ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE library_books ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE library_issues ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE inventory_items ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE inventory_transactions ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE expenses ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE homework ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE notifications ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE chat_rooms ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE certificates ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+        "ALTER TABLE settings ADD COLUMN IF NOT EXISTS school_id INT NOT NULL DEFAULT 1",
+    ];
+    foreach ($alterColumns as $sql) {
+        try { $db->exec($sql); } catch (Exception $e) { /* column may already exist or IF NOT EXISTS unsupported */ }
+    }
 
     // Seed default super admin using INSERT IGNORE for idempotency
     $hash = password_hash('admin123', PASSWORD_BCRYPT);
