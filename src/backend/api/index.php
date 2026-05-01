@@ -1186,41 +1186,89 @@ if ($section === 'classes') {
     $schoolId = (int)($user['school_id'] ?? 1);
 
     if ($action === 'list' && $method === 'GET') {
-        $sessionId = $_GET['session_id'] ?? null;
-        $where  = "school_id = $schoolId"; $params = [];
-        if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
-        $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
-        $stmt->execute($params);
-        json_out(['success' => true, 'classes' => $stmt->fetchAll()]);
+        // No session_id filter — classes are school-wide, not session-specific.
+        // Always return ALL classes for this school so newly-added classes always appear.
+        $stmt = $db->prepare("SELECT c.*, GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ',') as sections_csv FROM classes c LEFT JOIN sections s ON s.class_id = c.id AND s.school_id = c.school_id WHERE c.school_id = ? GROUP BY c.id ORDER BY c.display_order ASC, c.name ASC");
+        $stmt->execute([$schoolId]);
+        $rows = $stmt->fetchAll();
+        // Expand sections_csv into an array and normalise field names for the frontend
+        foreach ($rows as &$row) {
+            $csv = $row['sections_csv'] ?? '';
+            $row['sections'] = $csv ? explode(',', $csv) : [];
+            unset($row['sections_csv']);
+        }
+        unset($row);
+        // Return as 'data' key so frontend apiGet() → res.data works correctly
+        json_out(['success' => true, 'data' => $rows]);
     }
 
     if ($action === 'add' && $method === 'POST') {
         $b = body();
+        $name = trim($b['name'] ?? '');
+        if ($name === '') {
+            json_error('Class name is required');
+        }
         $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
-        $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
-            ->execute([$schoolId, $b['session_id'] ?? null, $b['name'] ?? '', (int)($b['display_order'] ?? 0), $isEnabled]);
-        $id = (int)$db->lastInsertId();
-        // Also insert sections if provided
+        // Do NOT insert session_id — classes are school-wide
+        try {
+            $stmt = $db->prepare("INSERT INTO classes (school_id, name, display_order, is_enabled) VALUES (?,?,?,?)");
+            $stmt->execute([$schoolId, $name, (int)($b['display_order'] ?? 0), $isEnabled]);
+            $id = (int)$db->lastInsertId();
+        } catch (Exception $e) {
+            json_error('Failed to save class: ' . $e->getMessage());
+        }
+        // Insert sections if provided
+        $sections = [];
         if (!empty($b['sections']) && is_array($b['sections'])) {
             $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
             foreach ($b['sections'] as $secName) {
-                if ($secName) $secStmt->execute([$schoolId, $id, $secName]);
+                $secName = trim((string)$secName);
+                if ($secName) {
+                    try {
+                        $secStmt->execute([$schoolId, $id, $secName]);
+                        $sections[] = $secName;
+                    } catch (Exception $e) { /* section may already exist */ }
+                }
             }
         }
-        json_out(['success' => true, 'id' => $id]);
+        // Return the full class record so frontend can normalise it
+        json_out([
+            'success'  => true,
+            'data'     => [
+                'id'           => $id,
+                'name'         => $name,
+                'display_order'=> (int)($b['display_order'] ?? 0),
+                'is_enabled'   => $isEnabled,
+                'sections'     => $sections,
+            ],
+        ]);
     }
 
     if ($action === 'update' && $method === 'POST') {
-        $id = (int)($_GET['id'] ?? 0); $b = body();
+        $id = (int)($_GET['id'] ?? (int)(body()['id'] ?? 0));
+        $b  = body();
         $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
-        $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=?, is_enabled=? WHERE id=? AND school_id=?")
-            ->execute([$b['name'] ?? '', (int)($b['display_order'] ?? 0), $b['session_id'] ?? null, $isEnabled, $id, $schoolId]);
-        json_out(['success' => true]);
+        // Do NOT update session_id — classes are school-wide
+        $db->prepare("UPDATE classes SET name=?, display_order=?, is_enabled=? WHERE id=? AND school_id=?")
+            ->execute([$b['name'] ?? '', (int)($b['display_order'] ?? 0), $isEnabled, $id, $schoolId]);
+        // Update sections if provided: delete old, insert new
+        if (isset($b['sections']) && is_array($b['sections'])) {
+            $db->prepare("DELETE FROM sections WHERE class_id=? AND school_id=?")->execute([$id, $schoolId]);
+            $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+            foreach ($b['sections'] as $secName) {
+                $secName = trim((string)$secName);
+                if ($secName) {
+                    try { $secStmt->execute([$schoolId, $id, $secName]); } catch (Exception $e) { /* skip */ }
+                }
+            }
+        }
+        json_out(['success' => true, 'data' => ['id' => $id]]);
     }
 
     if ($action === 'delete' && $method === 'POST') {
-        $id = (int)($_GET['id'] ?? 0);
-        $db->prepare("UPDATE classes SET is_enabled=0 WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
+        $id = (int)($_GET['id'] ?? (int)(body()['id'] ?? 0));
+        $db->prepare("DELETE FROM sections WHERE class_id=? AND school_id=?")->execute([$id, $schoolId]);
+        $db->prepare("DELETE FROM classes WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
         json_out(['success' => true]);
     }
 
@@ -1275,13 +1323,17 @@ if ($section === 'academics') {
     $schoolId = (int)($user['school_id'] ?? 1);
 
     if ($action === 'classes' && $method === 'GET') {
-        $sessionId = $_GET['session_id'] ?? null;
-        $where  = "school_id = $schoolId";
-        $params = [];
-        if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
-        $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
-        $stmt->execute($params);
-        json_out(['success' => true, 'classes' => $stmt->fetchAll()]);
+        // No session_id filter — classes are school-wide
+        $stmt = $db->prepare("SELECT c.*, GROUP_CONCAT(s.name ORDER BY s.name SEPARATOR ',') as sections_csv FROM classes c LEFT JOIN sections s ON s.class_id = c.id AND s.school_id = c.school_id WHERE c.school_id = ? GROUP BY c.id ORDER BY c.display_order ASC, c.name ASC");
+        $stmt->execute([$schoolId]);
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$row) {
+            $csv = $row['sections_csv'] ?? '';
+            $row['sections'] = $csv ? explode(',', $csv) : [];
+            unset($row['sections_csv']);
+        }
+        unset($row);
+        json_out(['success' => true, 'data' => $rows]);
     }
 
     if ($action === 'classes/save' && $method === 'POST') {

@@ -800,15 +800,11 @@ class PhpApiService {
 
   // ── Classes ────────────────────────────────────────────────────────────────
 
-  async getClasses(sessionId?: string): Promise<ClassRecord[]> {
-    const params: Record<string, string> = {};
-    if (sessionId) params.session_id = sessionId;
-    const paramStr = Object.keys(params).length ? params : undefined;
-
-    // Normalise raw rows from either route format
+  async getClasses(): Promise<ClassRecord[]> {
+    // normalise raw rows from PHP — sections is now always a string[]
     const normalise = (
       raw: Array<{
-        id: string;
+        id: string | number;
         name: string;
         display_order?: number;
         is_enabled?: number;
@@ -823,24 +819,24 @@ class PhpApiService {
         sections: Array.isArray(c.sections) ? c.sections : [],
       }));
 
-    // Try clean route first, then legacy academic route
+    // Try clean route first (classes/list), fall back to academics/classes
     try {
       console.log("[getClasses] trying route: classes/list");
-      const raw = await this.apiGet<
-        Array<{
-          id: string;
-          name: string;
-          display_order?: number;
-          is_enabled?: number;
-          sections?: string[];
-        }>
-      >("classes/list", paramStr);
+      const raw =
+        await this.apiGet<
+          Array<{
+            id: string | number;
+            name: string;
+            display_order?: number;
+            is_enabled?: number;
+            sections?: string[];
+          }>
+        >("classes/list");
       const result = normalise(raw);
       console.log(
         "[getClasses] classes/list returned",
         result.length,
         "classes",
-        result,
       );
       return result;
     } catch (primaryErr) {
@@ -851,15 +847,16 @@ class PhpApiService {
       );
     }
     try {
-      const raw = await this.apiGet<
-        Array<{
-          id: string;
-          name: string;
-          display_order?: number;
-          is_enabled?: number;
-          sections?: string[];
-        }>
-      >("academics/classes", paramStr);
+      const raw =
+        await this.apiGet<
+          Array<{
+            id: string | number;
+            name: string;
+            display_order?: number;
+            is_enabled?: number;
+            sections?: string[];
+          }>
+        >("academics/classes");
       const result = normalise(raw);
       console.log(
         "[getClasses] academics/classes returned",
@@ -869,7 +866,7 @@ class PhpApiService {
       return result;
     } catch (fallbackErr) {
       console.error("[getClasses] both routes failed:", fallbackErr);
-      return [];
+      throw fallbackErr; // propagate so caller can show error
     }
   }
 
@@ -880,34 +877,24 @@ class PhpApiService {
     sections?: string[];
     is_enabled?: number;
     isEnabled?: boolean;
-    sessionId?: string;
   }): Promise<ClassRecord> {
-    const currentSessionId = (() => {
-      try {
-        return localStorage.getItem("erp_current_session_id") ?? undefined;
-      } catch {
-        return undefined;
-      }
-    })();
+    // Do NOT send session_id — classes are school-wide, not session-specific.
+    // Sending session_id causes INSERT/SELECT mismatch and empty list after add.
     const payload: Record<string, unknown> = {
       name: cls.name ?? cls.className ?? "",
       display_order: cls.display_order ?? 0,
+      is_enabled:
+        cls.is_enabled !== undefined
+          ? cls.is_enabled
+          : cls.isEnabled !== undefined
+            ? cls.isEnabled
+              ? 1
+              : 0
+            : 1,
     };
-    const sid = cls.sessionId ?? currentSessionId;
-    if (sid) payload.session_id = sid;
-    payload.is_enabled =
-      cls.is_enabled !== undefined
-        ? cls.is_enabled
-        : cls.isEnabled !== undefined
-          ? cls.isEnabled
-            ? 1
-            : 0
-          : 1;
     if (cls.sections) payload.sections = cls.sections;
 
-    // Try primary route first; fall back to legacy route if it returns a 404-style error.
-    // Primary:  POST ?route=classes/add        (clean single-file router)
-    // Fallback: POST ?route=academics/classes/save  (older multi-file structure)
+    // Try primary route; fall back to legacy on route-not-found error.
     try {
       console.debug("[addClass] trying route: classes/add", payload);
       const result = await this.apiPost<ClassRecord>("classes/add", payload);
@@ -930,8 +917,7 @@ class PhpApiService {
           primary: primaryErr,
           fallback: fallbackErr,
         });
-        // Re-throw the primary error (more likely to be descriptive)
-        throw primaryErr;
+        throw primaryErr; // surface the primary error to the UI
       }
     }
   }
@@ -951,6 +937,7 @@ class PhpApiService {
     if (data.display_order !== undefined)
       payload.display_order = data.display_order;
     if (data.sections !== undefined) payload.sections = data.sections;
+    // Do NOT send session_id — classes are school-wide
     payload.is_enabled =
       data.is_enabled !== undefined
         ? data.is_enabled
@@ -960,7 +947,6 @@ class PhpApiService {
             : 0
           : 1;
 
-    // Try primary route first; fall back to legacy route on failure.
     try {
       return await this.apiPost<ClassRecord>("classes/update", payload);
     } catch {

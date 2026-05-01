@@ -118,11 +118,13 @@ export default function Classes() {
       setClasses(sortClasses(data));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load classes";
+      // Never say "Session expired" — always show the real error
       toast.error(
         msg.includes("expired")
-          ? "Failed to load classes — please refresh"
+          ? "Failed to load classes — please refresh the page"
           : msg,
       );
+      // Keep existing classes visible rather than clearing them
     } finally {
       setLoading(false);
     }
@@ -228,7 +230,7 @@ export default function Classes() {
         await loadClasses(); // ← AWAIT so list refreshes before success toast
         toast.success(`${displayName(finalName)} updated`);
       } else {
-        // Add: POST with name (no id)
+        // Add: POST with name (no id, no session_id)
         console.log("[Classes] adding class:", {
           name: finalName,
           sections: modal.sections,
@@ -240,16 +242,35 @@ export default function Classes() {
           is_enabled: modal.isEnabled ? 1 : 0,
         });
         console.log("[Classes] addClass result:", result);
+
+        // Validate the server actually saved and returned an id
+        if (!result?.id) {
+          setModal((p) => ({
+            ...p,
+            error:
+              "Class could not be saved — check server connection and try again",
+          }));
+          toast.error("Class could not be saved — no id returned from server");
+          return;
+        }
+
         // Close modal first, then reload
         setModal(BLANK_MODAL);
-        await loadClasses(); // ← AWAIT so the new class appears immediately
-        toast.success(`${displayName(finalName)} added successfully`);
-        // Warn if list is still empty after reload (data not persisted on server)
-        if (classes.length === 0) {
+        const refreshed = await phpApiService.getClasses();
+
+        // Check the class actually appears in the refreshed list
+        const saved = refreshed.find(
+          (c) =>
+            String(c.id) === String(result.id) || c.className === finalName,
+        );
+        if (!saved) {
           toast.warning(
-            "Class saved but list is empty — check server API route",
+            `Class saved (id ${result.id}) but not visible yet — try refreshing the page`,
           );
+        } else {
+          toast.success(`${displayName(finalName)} added successfully`);
         }
+        setClasses(sortClasses(refreshed));
       }
     } catch (err) {
       const msg =

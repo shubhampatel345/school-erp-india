@@ -14633,10 +14633,7 @@ class PhpApiService {
     }
   }
   // ── Classes ────────────────────────────────────────────────────────────────
-  async getClasses(sessionId) {
-    const params = {};
-    if (sessionId) params.session_id = sessionId;
-    const paramStr = Object.keys(params).length ? params : void 0;
+  async getClasses() {
     const normalise = (raw) => (raw ?? []).map((c2) => ({
       id: String(c2.id),
       className: c2.name ?? "",
@@ -14646,13 +14643,12 @@ class PhpApiService {
     }));
     try {
       console.log("[getClasses] trying route: classes/list");
-      const raw = await this.apiGet("classes/list", paramStr);
+      const raw = await this.apiGet("classes/list");
       const result = normalise(raw);
       console.log(
         "[getClasses] classes/list returned",
         result.length,
-        "classes",
-        result
+        "classes"
       );
       return result;
     } catch (primaryErr) {
@@ -14663,7 +14659,7 @@ class PhpApiService {
       );
     }
     try {
-      const raw = await this.apiGet("academics/classes", paramStr);
+      const raw = await this.apiGet("academics/classes");
       const result = normalise(raw);
       console.log(
         "[getClasses] academics/classes returned",
@@ -14673,24 +14669,15 @@ class PhpApiService {
       return result;
     } catch (fallbackErr) {
       console.error("[getClasses] both routes failed:", fallbackErr);
-      return [];
+      throw fallbackErr;
     }
   }
   async addClass(cls) {
-    const currentSessionId = (() => {
-      try {
-        return localStorage.getItem("erp_current_session_id") ?? void 0;
-      } catch {
-        return void 0;
-      }
-    })();
     const payload = {
       name: cls.name ?? cls.className ?? "",
-      display_order: cls.display_order ?? 0
+      display_order: cls.display_order ?? 0,
+      is_enabled: cls.is_enabled !== void 0 ? cls.is_enabled : cls.isEnabled !== void 0 ? cls.isEnabled ? 1 : 0 : 1
     };
-    const sid = cls.sessionId ?? currentSessionId;
-    if (sid) payload.session_id = sid;
-    payload.is_enabled = cls.is_enabled !== void 0 ? cls.is_enabled : cls.isEnabled !== void 0 ? cls.isEnabled ? 1 : 0 : 1;
     if (cls.sections) payload.sections = cls.sections;
     try {
       console.debug("[addClass] trying route: classes/add", payload);
@@ -28615,7 +28602,7 @@ function Classes() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load classes";
       ue.error(
-        msg.includes("expired") ? "Failed to load classes — please refresh" : msg
+        msg.includes("expired") ? "Failed to load classes — please refresh the page" : msg
       );
     } finally {
       setLoading(false);
@@ -28717,14 +28704,27 @@ function Classes() {
           is_enabled: modal.isEnabled ? 1 : 0
         });
         console.log("[Classes] addClass result:", result);
-        setModal(BLANK_MODAL);
-        await loadClasses();
-        ue.success(`${displayName$1(finalName)} added successfully`);
-        if (classes.length === 0) {
-          ue.warning(
-            "Class saved but list is empty — check server API route"
-          );
+        if (!(result == null ? void 0 : result.id)) {
+          setModal((p2) => ({
+            ...p2,
+            error: "Class could not be saved — check server connection and try again"
+          }));
+          ue.error("Class could not be saved — no id returned from server");
+          return;
         }
+        setModal(BLANK_MODAL);
+        const refreshed = await phpApiService.getClasses();
+        const saved = refreshed.find(
+          (c2) => String(c2.id) === String(result.id) || c2.className === finalName
+        );
+        if (!saved) {
+          ue.warning(
+            `Class saved (id ${result.id}) but not visible yet — try refreshing the page`
+          );
+        } else {
+          ue.success(`${displayName$1(finalName)} added successfully`);
+        }
+        setClasses(sortClasses$2(refreshed));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save. Please retry.";
