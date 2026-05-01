@@ -1110,15 +1110,17 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
         <StudentForm
           student={editStudent ?? undefined}
           onSave={async (saved) => {
-            // Wait for server confirmation, then reload
+            // Close form first
+            setShowForm(false);
+            setEditStudent(null);
+            // Await the refresh so the new student appears in the list
+            await fetchStudents(true);
+            // Show success AFTER the list has refreshed with real server data
             toast.success(
               editStudent
                 ? `${saved.fullName} updated`
                 : `${saved.fullName} added`,
             );
-            setShowForm(false);
-            setEditStudent(null);
-            await fetchStudents(true);
           }}
           onClose={() => {
             setShowForm(false);

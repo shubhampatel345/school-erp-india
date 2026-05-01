@@ -679,10 +679,13 @@ class PhpApiService {
     search?: string;
     status?: string;
   }): Promise<StudentListResult> {
+    // NOTE: school_id is NOT sent as a param — PHP reads it from the JWT token
     const qs = params
       ? `&${new URLSearchParams(params as Record<string, string>).toString()}`
       : "";
+    console.log("[getStudents] route →", `students/list${qs}`);
     const res = await this.request<StudentRecord[]>(`students/list${qs}`);
+    console.log("[getStudents] received", res.data?.length ?? 0, "students");
     return { data: res.data ?? [], total: res.total ?? res.data?.length ?? 0 };
   }
 
@@ -721,7 +724,15 @@ class PhpApiService {
       class_id: s.classId ?? s.class_id ?? "",
       section_id: s.sectionId ?? s.section_id ?? "",
     };
-    return this.apiPost<StudentRecord>("students/add", payload);
+    console.log("[addStudent] payload →", JSON.stringify(payload, null, 2));
+    try {
+      const result = await this.apiPost<StudentRecord>("students/add", payload);
+      console.log("[addStudent] success ←", result);
+      return result;
+    } catch (err) {
+      console.error("[addStudent] FAILED ←", err);
+      throw err; // Re-throw so StudentForm shows the error to user
+    }
   }
 
   async updateStudent(
@@ -814,6 +825,7 @@ class PhpApiService {
 
     // Try clean route first, then legacy academic route
     try {
+      console.log("[getClasses] trying route: classes/list");
       const raw = await this.apiGet<
         Array<{
           id: string;
@@ -823,9 +835,20 @@ class PhpApiService {
           sections?: string[];
         }>
       >("classes/list", paramStr);
-      return normalise(raw);
-    } catch {
-      /* fall through */
+      const result = normalise(raw);
+      console.log(
+        "[getClasses] classes/list returned",
+        result.length,
+        "classes",
+        result,
+      );
+      return result;
+    } catch (primaryErr) {
+      console.warn(
+        "[getClasses] classes/list failed:",
+        primaryErr,
+        "— trying academics/classes",
+      );
     }
     try {
       const raw = await this.apiGet<
@@ -837,8 +860,15 @@ class PhpApiService {
           sections?: string[];
         }>
       >("academics/classes", paramStr);
-      return normalise(raw);
-    } catch {
+      const result = normalise(raw);
+      console.log(
+        "[getClasses] academics/classes returned",
+        result.length,
+        "classes",
+      );
+      return result;
+    } catch (fallbackErr) {
+      console.error("[getClasses] both routes failed:", fallbackErr);
       return [];
     }
   }

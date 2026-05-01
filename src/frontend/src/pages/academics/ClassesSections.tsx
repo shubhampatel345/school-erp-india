@@ -108,13 +108,18 @@ export default function ClassesSections() {
   const canWrite =
     currentUser?.role === "superadmin" || currentUser?.role === "admin";
 
-  const loadClasses = useCallback(() => {
+  const loadClasses = useCallback(async () => {
     setLoading(true);
-    phpApiService
-      .getClasses()
-      .then((data) => setClasses(sortClasses(data)))
-      .catch(() => toast.error("Failed to load classes"))
-      .finally(() => setLoading(false));
+    try {
+      const data = await phpApiService.getClasses();
+      console.log("[ClassesSections] loaded", data.length, "classes");
+      setClasses(sortClasses(data));
+    } catch (err) {
+      console.error("[ClassesSections] loadClasses failed:", err);
+      toast.error("Failed to load classes");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -204,23 +209,40 @@ export default function ClassesSections() {
     try {
       if (classModal.editing) {
         // POST academics/classes/save with id → update
-        await phpApiService.updateClass(classModal.editing.id, {
-          name: finalName,
-          sections: classModal.sections,
-          is_enabled: classModal.isEnabled ? 1 : 0,
-        });
+        console.log(
+          "[ClassesSections] updating class:",
+          classModal.editing.id,
+          finalName,
+        );
+        const updateResult = await phpApiService.updateClass(
+          classModal.editing.id,
+          {
+            name: finalName,
+            sections: classModal.sections,
+            is_enabled: classModal.isEnabled ? 1 : 0,
+          },
+        );
+        console.log("[ClassesSections] updateClass result:", updateResult);
+        setClassModal((prev) => ({ ...prev, open: false }));
+        await loadClasses(); // ← AWAIT so updated class appears immediately
         toast.success(`${displayClassName(finalName)} updated`);
       } else {
         // POST academics/classes/save without id → insert
-        await phpApiService.addClass({
+        console.log(
+          "[ClassesSections] adding class:",
+          finalName,
+          classModal.sections,
+        );
+        const addResult = await phpApiService.addClass({
           name: finalName,
           sections: classModal.sections,
           is_enabled: classModal.isEnabled ? 1 : 0,
         });
+        console.log("[ClassesSections] addClass result:", addResult);
+        setClassModal((prev) => ({ ...prev, open: false }));
+        await loadClasses(); // ← AWAIT so new class appears immediately
         toast.success(`${displayClassName(finalName)} added`);
       }
-      setClassModal((prev) => ({ ...prev, open: false }));
-      loadClasses();
     } catch (err) {
       // Show error inside modal — do NOT close and do NOT show "Session expired"
       let msg = "Failed to save class. Please retry.";
@@ -233,6 +255,7 @@ export default function ClassesSections() {
           ? "Authentication error — please refresh the page and try again."
           : err.message;
       }
+      console.error("[ClassesSections] save failed:", err, msg);
       setClassModal((p) => ({ ...p, saveError: msg }));
     } finally {
       setSaving(false);
@@ -248,11 +271,12 @@ export default function ClassesSections() {
       return;
     setDeletingId(cls.id);
     try {
-      // PHP: DELETE /api/?route=academics/classes/delete&id=X
-      await phpApiService.del(`academics/classes/delete&id=${cls.id}`);
+      console.log("[ClassesSections] deleting class:", cls.id);
+      await phpApiService.deleteClass(cls.id);
       toast.success(`${displayClassName(cls.className)} deleted`);
-      loadClasses();
-    } catch {
+      await loadClasses(); // ← AWAIT so deleted class disappears immediately
+    } catch (err) {
+      console.error("[ClassesSections] delete failed:", err);
       toast.error("Failed to delete class. Please retry.");
     } finally {
       setDeletingId(null);
@@ -262,15 +286,21 @@ export default function ClassesSections() {
   async function handleToggleEnabled(cls: ClassRecord) {
     const nowEnabled = (cls as Record<string, unknown>).isEnabled !== false;
     try {
-      // POST academics/classes/save with id + is_enabled to toggle
+      console.log(
+        "[ClassesSections] toggling class:",
+        cls.id,
+        "→",
+        !nowEnabled,
+      );
       await phpApiService.updateClass(cls.id, {
         is_enabled: nowEnabled ? 0 : 1,
       });
       toast.success(
         `${displayClassName(cls.className)} ${!nowEnabled ? "enabled" : "disabled"}`,
       );
-      loadClasses();
-    } catch {
+      await loadClasses(); // ← AWAIT so toggle reflects immediately
+    } catch (err) {
+      console.error("[ClassesSections] toggle failed:", err);
       toast.error("Failed to update class status.");
     }
   }
@@ -292,6 +322,12 @@ export default function ClassesSections() {
     }
     setSaving(true);
     try {
+      console.log(
+        "[ClassesSections] adding section:",
+        sectionModal.name,
+        "to class:",
+        sectionModal.classId,
+      );
       await phpApiService.addSection({
         classId: sectionModal.classId,
         name: sectionModal.name.trim().toUpperCase(),
@@ -300,8 +336,9 @@ export default function ClassesSections() {
         `Section ${sectionModal.name.toUpperCase()} added to ${displayClassName(sectionModal.className)}`,
       );
       setSectionModal((prev) => ({ ...prev, open: false }));
-      loadClasses();
-    } catch {
+      await loadClasses(); // ← AWAIT so new section appears immediately
+    } catch (err) {
+      console.error("[ClassesSections] addSection failed:", err);
       toast.error("Failed to add section. Please retry.");
     } finally {
       setSaving(false);

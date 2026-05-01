@@ -211,15 +211,25 @@ export default function Classes() {
     try {
       if (modal.editing) {
         // Update: POST with id + name
-        await phpApiService.updateClass(modal.editing.id, {
+        console.log("[Classes] updating class:", {
+          id: modal.editing.id,
+          name: finalName,
+          sections: modal.sections,
+          is_enabled: modal.isEnabled ? 1 : 0,
+        });
+        const updateResult = await phpApiService.updateClass(modal.editing.id, {
           name: finalName, // ← 'name', NOT 'className'
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0,
         });
+        console.log("[Classes] updateClass result:", updateResult);
+        // Close modal first, then reload
+        setModal(BLANK_MODAL);
+        await loadClasses(); // ← AWAIT so list refreshes before success toast
         toast.success(`${displayName(finalName)} updated`);
       } else {
         // Add: POST with name (no id)
-        console.debug("[Classes] adding class:", {
+        console.log("[Classes] adding class:", {
           name: finalName,
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0,
@@ -229,15 +239,23 @@ export default function Classes() {
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0,
         });
-        console.debug("[Classes] addClass result:", result);
+        console.log("[Classes] addClass result:", result);
+        // Close modal first, then reload
+        setModal(BLANK_MODAL);
+        await loadClasses(); // ← AWAIT so the new class appears immediately
         toast.success(`${displayName(finalName)} added successfully`);
+        // Warn if list is still empty after reload (data not persisted on server)
+        if (classes.length === 0) {
+          toast.warning(
+            "Class saved but list is empty — check server API route",
+          );
+        }
       }
-      setModal(BLANK_MODAL);
-      void loadClasses();
     } catch (err) {
       const msg =
         err instanceof Error ? err.message : "Failed to save. Please retry.";
       console.error("[Classes] save failed:", err);
+      // Keep modal open with inline error so user sees what went wrong
       setModal((p) => ({ ...p, error: msg }));
       toast.error(msg);
     } finally {
@@ -248,14 +266,21 @@ export default function Classes() {
   async function handleToggle(cls: ClassRecord) {
     const wasEnabled = (cls as Record<string, unknown>).isEnabled !== false;
     try {
+      console.log(
+        "[Classes] toggling class:",
+        cls.id,
+        "enabled →",
+        !wasEnabled,
+      );
       await phpApiService.updateClass(cls.id, {
         is_enabled: wasEnabled ? 0 : 1,
       });
       toast.success(
         `${displayName(cls.className)} ${wasEnabled ? "disabled" : "enabled"}`,
       );
-      void loadClasses();
-    } catch {
+      await loadClasses(); // ← AWAIT to immediately reflect the toggle
+    } catch (err) {
+      console.error("[Classes] toggle failed:", err);
       toast.error("Failed to update class status");
     }
   }
@@ -265,10 +290,12 @@ export default function Classes() {
       return;
     setDeletingId(cls.id);
     try {
+      console.log("[Classes] deleting class:", cls.id);
       await phpApiService.deleteClass(cls.id);
       toast.success(`${displayName(cls.className)} deleted`);
-      void loadClasses();
-    } catch {
+      await loadClasses(); // ← AWAIT so deleted class disappears immediately
+    } catch (err) {
+      console.error("[Classes] delete failed:", err);
       toast.error("Failed to delete class");
     } finally {
       setDeletingId(null);

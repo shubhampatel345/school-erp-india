@@ -14529,10 +14529,12 @@ class PhpApiService {
   }
   // ── Students ───────────────────────────────────────────────────────────────
   async getStudents(params) {
-    var _a2;
+    var _a2, _b2;
     const qs = params ? `&${new URLSearchParams(params).toString()}` : "";
+    console.log("[getStudents] route →", `students/list${qs}`);
     const res = await this.request(`students/list${qs}`);
-    return { data: res.data ?? [], total: res.total ?? ((_a2 = res.data) == null ? void 0 : _a2.length) ?? 0 };
+    console.log("[getStudents] received", ((_a2 = res.data) == null ? void 0 : _a2.length) ?? 0, "students");
+    return { data: res.data ?? [], total: res.total ?? ((_b2 = res.data) == null ? void 0 : _b2.length) ?? 0 };
   }
   async addStudent(student) {
     const s2 = student;
@@ -14567,7 +14569,15 @@ class PhpApiService {
       class_id: s2.classId ?? s2.class_id ?? "",
       section_id: s2.sectionId ?? s2.section_id ?? ""
     };
-    return this.apiPost("students/add", payload);
+    console.log("[addStudent] payload →", JSON.stringify(payload, null, 2));
+    try {
+      const result = await this.apiPost("students/add", payload);
+      console.log("[addStudent] success ←", result);
+      return result;
+    } catch (err) {
+      console.error("[addStudent] FAILED ←", err);
+      throw err;
+    }
   }
   async updateStudent(student) {
     const { id } = student;
@@ -14635,14 +14645,34 @@ class PhpApiService {
       sections: Array.isArray(c2.sections) ? c2.sections : []
     }));
     try {
+      console.log("[getClasses] trying route: classes/list");
       const raw = await this.apiGet("classes/list", paramStr);
-      return normalise(raw);
-    } catch {
+      const result = normalise(raw);
+      console.log(
+        "[getClasses] classes/list returned",
+        result.length,
+        "classes",
+        result
+      );
+      return result;
+    } catch (primaryErr) {
+      console.warn(
+        "[getClasses] classes/list failed:",
+        primaryErr,
+        "— trying academics/classes"
+      );
     }
     try {
       const raw = await this.apiGet("academics/classes", paramStr);
-      return normalise(raw);
-    } catch {
+      const result = normalise(raw);
+      console.log(
+        "[getClasses] academics/classes returned",
+        result.length,
+        "classes"
+      );
+      return result;
+    } catch (fallbackErr) {
+      console.error("[getClasses] both routes failed:", fallbackErr);
       return [];
     }
   }
@@ -28658,15 +28688,24 @@ function Classes() {
     setSaving(true);
     try {
       if (modal.editing) {
-        await phpApiService.updateClass(modal.editing.id, {
+        console.log("[Classes] updating class:", {
+          id: modal.editing.id,
+          name: finalName,
+          sections: modal.sections,
+          is_enabled: modal.isEnabled ? 1 : 0
+        });
+        const updateResult = await phpApiService.updateClass(modal.editing.id, {
           name: finalName,
           // ← 'name', NOT 'className'
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0
         });
+        console.log("[Classes] updateClass result:", updateResult);
+        setModal(BLANK_MODAL);
+        await loadClasses();
         ue.success(`${displayName$1(finalName)} updated`);
       } else {
-        console.debug("[Classes] adding class:", {
+        console.log("[Classes] adding class:", {
           name: finalName,
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0
@@ -28677,11 +28716,16 @@ function Classes() {
           sections: modal.sections,
           is_enabled: modal.isEnabled ? 1 : 0
         });
-        console.debug("[Classes] addClass result:", result);
+        console.log("[Classes] addClass result:", result);
+        setModal(BLANK_MODAL);
+        await loadClasses();
         ue.success(`${displayName$1(finalName)} added successfully`);
+        if (classes.length === 0) {
+          ue.warning(
+            "Class saved but list is empty — check server API route"
+          );
+        }
       }
-      setModal(BLANK_MODAL);
-      void loadClasses();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save. Please retry.";
       console.error("[Classes] save failed:", err);
@@ -28694,14 +28738,21 @@ function Classes() {
   async function handleToggle(cls) {
     const wasEnabled = cls.isEnabled !== false;
     try {
+      console.log(
+        "[Classes] toggling class:",
+        cls.id,
+        "enabled →",
+        !wasEnabled
+      );
       await phpApiService.updateClass(cls.id, {
         is_enabled: wasEnabled ? 0 : 1
       });
       ue.success(
         `${displayName$1(cls.className)} ${wasEnabled ? "disabled" : "enabled"}`
       );
-      void loadClasses();
-    } catch {
+      await loadClasses();
+    } catch (err) {
+      console.error("[Classes] toggle failed:", err);
       ue.error("Failed to update class status");
     }
   }
@@ -28710,10 +28761,12 @@ function Classes() {
       return;
     setDeletingId(cls.id);
     try {
+      console.log("[Classes] deleting class:", cls.id);
       await phpApiService.deleteClass(cls.id);
       ue.success(`${displayName$1(cls.className)} deleted`);
-      void loadClasses();
-    } catch {
+      await loadClasses();
+    } catch (err) {
+      console.error("[Classes] delete failed:", err);
       ue.error("Failed to delete class");
     } finally {
       setDeletingId(null);
@@ -90892,11 +90945,20 @@ function StudentForm({
     try {
       let saved;
       if (student == null ? void 0 : student.id) {
+        console.log("[StudentForm] updating student:", student.id, payload);
         await phpApiService.updateStudent({ id: student.id, ...payload });
         saved = { ...payload, id: student.id };
+        console.log("[StudentForm] update success");
       } else {
+        console.log("[StudentForm] adding student:", payload);
         const result = await phpApiService.addStudent(payload);
         saved = result;
+        console.log("[StudentForm] add success, server returned:", saved);
+        if (!saved.id && !saved.id) {
+          console.warn(
+            "[StudentForm] WARNING: server did not return an ID — data may not have been saved"
+          );
+        }
       }
       const savedStudent = {
         id: saved.id ?? (student == null ? void 0 : student.id) ?? "",
@@ -93250,12 +93312,12 @@ function Students({ onNavigate: _onNavigate }) {
       {
         student: editStudent ?? void 0,
         onSave: async (saved) => {
-          ue.success(
-            editStudent ? `${saved.fullName} updated` : `${saved.fullName} added`
-          );
           setShowForm(false);
           setEditStudent(null);
           await fetchStudents(true);
+          ue.success(
+            editStudent ? `${saved.fullName} updated` : `${saved.fullName} added`
+          );
         },
         onClose: () => {
           setShowForm(false);

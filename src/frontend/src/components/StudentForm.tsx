@@ -267,11 +267,21 @@ export default function StudentForm({
     try {
       let saved: Record<string, unknown>;
       if (student?.id) {
+        console.log("[StudentForm] updating student:", student.id, payload);
         await phpApiService.updateStudent({ id: student.id, ...payload });
         saved = { ...payload, id: student.id };
+        console.log("[StudentForm] update success");
       } else {
+        console.log("[StudentForm] adding student:", payload);
         const result = await phpApiService.addStudent(payload);
         saved = result as Record<string, unknown>;
+        console.log("[StudentForm] add success, server returned:", saved);
+        // Verify server returned an ID — if not, the save may have failed silently
+        if (!saved.id && !(saved as Record<string, unknown>).id) {
+          console.warn(
+            "[StudentForm] WARNING: server did not return an ID — data may not have been saved",
+          );
+        }
       }
 
       const savedStudent: Student = {
