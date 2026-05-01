@@ -758,7 +758,7 @@ if ($section === 'students') {
         $stmt  = $db->prepare("SELECT s.*, c.name as class_name, sec.name as section_name FROM students s LEFT JOIN classes c ON c.id = s.class_id LEFT JOIN sections sec ON sec.id = s.section_id WHERE $whereStr ORDER BY s.full_name ASC LIMIT $limit OFFSET $offset");
         $stmt->execute($params);
         $students = $stmt->fetchAll();
-        json_out(['success' => true, 'students' => $students, 'total' => $total, 'page' => $page, 'limit' => $limit]);
+        json_out(['success' => true, 'data' => $students, 'students' => $students, 'total' => $total, 'page' => $page, 'limit' => $limit]);
     }
 
     if ($action === 'get' && $method === 'GET') {
@@ -1217,7 +1217,8 @@ if ($section === 'academics') {
         if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
         $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
         $stmt->execute($params);
-        json_out(['success' => true, 'classes' => $stmt->fetchAll()]);
+        $rows = $stmt->fetchAll();
+        json_out(['success' => true, 'data' => $rows, 'classes' => $rows]);
     }
 
     if ($action === 'classes/save' && $method === 'POST') {
@@ -2056,13 +2057,19 @@ if ($section === 'classes') {
     $db = getDB();
     $schoolId = (int)($user['school_id'] ?? 1);
 
+    // Helper: Indian class display order lookup
+    $indianClassOrder = ['Nursery'=>1,'LKG'=>2,'UKG'=>3,'Class 1'=>4,'Class 2'=>5,'Class 3'=>6,'Class 4'=>7,'Class 5'=>8,'Class 6'=>9,'Class 7'=>10,'Class 8'=>11,'Class 9'=>12,'Class 10'=>13,'Class 11'=>14,'Class 12'=>15];
+    $getDisplayOrder = function(string $name) use ($indianClassOrder): int {
+        if (isset($indianClassOrder[$name])) return $indianClassOrder[$name];
+        // Handle numeric short names like "1","2"..."12"
+        if (isset($indianClassOrder["Class $name"])) return $indianClassOrder["Class $name"];
+        return 99;
+    };
+
     if ($action === 'list' && $method === 'GET') {
-        $sessionId = $_GET['session_id'] ?? null;
-        $where  = "school_id = $schoolId";
-        $params = [];
-        if ($sessionId) { $where .= " AND (session_id = ? OR session_id IS NULL)"; $params[] = $sessionId; }
-        $stmt = $db->prepare("SELECT * FROM classes WHERE $where ORDER BY display_order ASC, name ASC");
-        $stmt->execute($params);
+        // IMPORTANT: Classes are school-wide — do NOT filter by session_id
+        $stmt = $db->prepare("SELECT * FROM classes WHERE school_id = ? ORDER BY display_order ASC, name ASC");
+        $stmt->execute([$schoolId]);
         $classes = $stmt->fetchAll();
         // Attach sections for each class
         foreach ($classes as &$cls) {
@@ -2070,7 +2077,8 @@ if ($section === 'classes') {
             $secStmt->execute([$cls['id'], $schoolId]);
             $cls['sections'] = array_column($secStmt->fetchAll(), 'name');
         }
-        json_out(['success' => true, 'classes' => $classes]);
+        // Return data under BOTH 'data' (what apiGet() uses) and 'classes' (legacy)
+        json_out(['success' => true, 'data' => $classes, 'classes' => $classes]);
     }
 
     if ($action === 'add' && $method === 'POST') {
@@ -2078,53 +2086,147 @@ if ($section === 'classes') {
         $name      = trim($b['name'] ?? '');
         $sections  = $b['sections'] ?? [];
         $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
-        $sessionId = $b['session_id'] ?? null;
         if (!$name) json_error('Class name is required');
-        // Determine display order (max + 1)
-        $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
-        $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
-           ->execute([$schoolId, $sessionId, $name, $maxOrder + 1, $isEnabled]);
+
+        // Check for duplicate class name in this school
+        $dupCheck = $db->prepare("SELECT id FROM classes WHERE school_id=? AND name=? LIMIT 1");
+        $dupCheck->execute([$schoolId, $name]);
+        if ($dupCheck->fetch()) json_error("Class '$name' already exists");
+
+        // Use Indian class order for display_order; fall back to max+1 for customs
+        $displayOrder = $getDisplayOrder($name);
+        if ($displayOrder === 99) {
+            $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
+            $displayOrder = $maxOrder + 1;
+        }
+
+        // Classes are school-wide — do NOT store session_id
+        $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,NULL,?,?,?)")
+           ->execute([$schoolId, $name, $displayOrder, $isEnabled]);
         $classId = (int)$db->lastInsertId();
+
         // Insert sections if provided
         $sectionNames = [];
         if (!empty($sections) && is_array($sections)) {
             $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
             foreach ($sections as $sec) {
-                $sec = trim($sec);
-                if ($sec) {
+                $sec = trim((string)$sec);
+                if ($sec !== '') {
                     $secStmt->execute([$schoolId, $classId, $sec]);
                     $sectionNames[] = $sec;
                 }
             }
         }
+
         json_out(['success' => true, 'data' => [
-            'id'         => (string)$classId,
-            'name'       => $name,
-            'sections'   => $sectionNames,
-            'is_enabled' => (bool)$isEnabled,
+            'id'          => (string)$classId,
+            'name'        => $name,
+            'sections'    => $sectionNames,
+            'is_enabled'  => $isEnabled,
+            'display_order' => $displayOrder,
         ]]);
     }
 
+    // classes/update — primary update route (called by updateClass())
+    if ($action === 'update' && $method === 'POST') {
+        $b         = body();
+        $id        = (int)($b['id'] ?? $_GET['id'] ?? 0);
+        $name      = isset($b['name']) ? trim($b['name']) : null;
+        $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : null;
+        $sections  = $b['sections'] ?? null; // null means "don't touch sections"
+        if (!$id) json_error('id is required for update');
+
+        // Build dynamic UPDATE
+        $setClauses = []; $params = [];
+        if ($name !== null && $name !== '') {
+            $setClauses[] = 'name=?'; $params[] = $name;
+            $displayOrder = $getDisplayOrder($name);
+            $setClauses[] = 'display_order=?'; $params[] = $displayOrder;
+        }
+        if ($isEnabled !== null) { $setClauses[] = 'is_enabled=?'; $params[] = $isEnabled; }
+        if (!empty($setClauses)) {
+            $params[] = $id; $params[] = $schoolId;
+            $db->prepare("UPDATE classes SET " . implode(',', $setClauses) . " WHERE id=? AND school_id=?")->execute($params);
+        }
+
+        // Sync sections: replace all existing with the new array
+        if ($sections !== null && is_array($sections)) {
+            $db->prepare("DELETE FROM sections WHERE class_id=? AND school_id=?")->execute([$id, $schoolId]);
+            $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+            foreach ($sections as $sec) {
+                $sec = trim((string)$sec);
+                if ($sec !== '') $secStmt->execute([$schoolId, $id, $sec]);
+            }
+        }
+
+        // Return updated class with sections
+        $clsStmt = $db->prepare("SELECT * FROM classes WHERE id=? AND school_id=? LIMIT 1");
+        $clsStmt->execute([$id, $schoolId]);
+        $cls = $clsStmt->fetch();
+        if ($cls) {
+            $secStmt = $db->prepare("SELECT name FROM sections WHERE class_id=? AND school_id=? ORDER BY name");
+            $secStmt->execute([$id, $schoolId]);
+            $cls['sections'] = array_column($secStmt->fetchAll(), 'name');
+        }
+        json_out(['success' => true, 'data' => $cls]);
+    }
+
+    // classes/save — legacy route (also handles update + section sync)
     if ($action === 'save' && $method === 'POST') {
         $b         = body();
         $id        = (int)($b['id'] ?? 0);
-        $name      = trim($b['name'] ?? '');
+        $name      = isset($b['name']) ? trim($b['name']) : '';
         $isEnabled = isset($b['is_enabled']) ? (int)$b['is_enabled'] : 1;
-        $sessionId = $b['session_id'] ?? null;
+        $sections  = $b['sections'] ?? null;
+
         if ($id) {
-            $db->prepare("UPDATE classes SET name=?, display_order=?, session_id=?, is_enabled=? WHERE id=? AND school_id=?")
-               ->execute([$name, (int)($b['display_order'] ?? 0), $sessionId, $isEnabled, $id, $schoolId]);
+            $setClauses = []; $params = [];
+            if ($name !== '') {
+                $setClauses[] = 'name=?'; $params[] = $name;
+                $displayOrder = $getDisplayOrder($name);
+                $setClauses[] = 'display_order=?'; $params[] = $displayOrder;
+            }
+            $setClauses[] = 'is_enabled=?'; $params[] = $isEnabled;
+            $params[] = $id; $params[] = $schoolId;
+            $db->prepare("UPDATE classes SET " . implode(',', $setClauses) . " WHERE id=? AND school_id=?")->execute($params);
+
+            // Sync sections
+            if ($sections !== null && is_array($sections)) {
+                $db->prepare("DELETE FROM sections WHERE class_id=? AND school_id=?")->execute([$id, $schoolId]);
+                $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+                foreach ($sections as $sec) {
+                    $sec = trim((string)$sec);
+                    if ($sec !== '') $secStmt->execute([$schoolId, $id, $sec]);
+                }
+            }
         } else {
-            $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
-            $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,?,?,?,?)")
-               ->execute([$schoolId, $sessionId, $name, $maxOrder + 1, $isEnabled]);
+            if (!$name) json_error('Class name is required');
+            $displayOrder = $getDisplayOrder($name);
+            if ($displayOrder === 99) {
+                $maxOrder = (int)($db->query("SELECT COALESCE(MAX(display_order),0) as mo FROM classes WHERE school_id=$schoolId")->fetch()['mo'] ?? 0);
+                $displayOrder = $maxOrder + 1;
+            }
+            $db->prepare("INSERT INTO classes (school_id, session_id, name, display_order, is_enabled) VALUES (?,NULL,?,?,?)")
+               ->execute([$schoolId, $name, $displayOrder, $isEnabled]);
             $id = (int)$db->lastInsertId();
+
+            if ($sections !== null && is_array($sections)) {
+                $secStmt = $db->prepare("INSERT INTO sections (school_id, class_id, name) VALUES (?,?,?)");
+                foreach ($sections as $sec) {
+                    $sec = trim((string)$sec);
+                    if ($sec !== '') $secStmt->execute([$schoolId, $id, $sec]);
+                }
+            }
         }
         json_out(['success' => true, 'id' => $id]);
     }
 
     if ($action === 'delete' && $method === 'POST') {
-        $id = (int)($_GET['id'] ?? 0);
+        // Accept id from body OR query param
+        $b  = body();
+        $id = (int)($b['id'] ?? $_GET['id'] ?? 0);
+        if (!$id) json_error('id is required');
+        $db->prepare("DELETE FROM sections WHERE class_id=? AND school_id=?")->execute([$id, $schoolId]);
         $db->prepare("DELETE FROM classes WHERE id=? AND school_id=?")->execute([$id, $schoolId]);
         json_out(['success' => true]);
     }
