@@ -8,6 +8,7 @@ import {
   ChevronRight,
   ChevronUp,
   Clipboard,
+  CloudOff,
   Code,
   Copy,
   Database,
@@ -1820,6 +1821,109 @@ EXPENSES & HOMEWORK
 BACKUP
   GET  backup/export          — Export all data as JSON
   POST backup/import          — Import data from JSON`,
+      },
+    ],
+  },
+  {
+    id: "offline-sync",
+    category: "Setup",
+    title: "Offline Mode & Data Sync",
+    icon: CloudOff,
+    badge: "Important",
+    items: [
+      {
+        heading: "How offline-first works",
+        body: `SHUBH School ERP saves all changes to the browser's local database
+(IndexedDB) the moment you tap Save — before any network request is sent.
+This means:
+
+  • Every add / edit / delete feels instant — no waiting for the server
+  • The app works even when your internet is slow or disconnected
+  • Changes are queued and sent to the MySQL server automatically
+    once your connection is restored
+  • You will never lose unsaved data due to a network interruption
+
+Sync happens automatically every 30 seconds and immediately after
+each action. You don't need to press any button to sync.`,
+      },
+      {
+        heading: "Reading the sync status bar",
+        body: `A small status bar appears at the very top of the app (above the
+navbar) whenever changes are being synced or have failed:
+
+  🟡 Yellow spinner + "Syncing X changes…"
+     Data is being uploaded to the server. Wait a few seconds.
+
+  🔴 Red dot + "X changes failed to sync — Retry"
+     Something went wrong (server down, bad credentials, etc.).
+     Tap Retry to try again.
+
+  ✅ Bar hidden
+     All data is saved and synced — everything is up to date.
+
+The sync bar is visible on ALL pages for ALL roles so you can
+always tell whether your data has reached the server.`,
+      },
+      {
+        heading: "Yellow 'You are offline' banner",
+        body: `When your device has no internet connection, a yellow banner
+appears at the very top of every page (including the login screen):
+
+  "You are offline — changes are saved locally and will sync
+   when your connection returns."
+
+This banner disappears automatically the moment your connection
+comes back. Your data is safe — nothing is lost.`,
+      },
+      {
+        heading: "Downloading a local backup",
+        body: `Super Admin can export all data at any time from Settings:
+
+  1. Go to Settings → Backup & Restore
+  2. Tap Export All Data
+  3. A JSON file is downloaded to your device
+  4. Store this file safely (Google Drive, USB, email it to yourself)
+
+The backup includes students, fees, attendance, staff, classes,
+sessions, and all other module data.
+
+Restore: Settings → Backup & Restore → Import Data → choose file.`,
+      },
+      {
+        heading: "What to do if sync gets stuck",
+        body: `If the sync bar shows "X changes failed to sync" for a long time:
+
+  1. Check your internet connection
+  2. Tap the Retry button in the sync bar
+  3. If it still fails, go to Settings → Server Settings and tap
+     Test Connection to see if the server is reachable
+  4. Verify your cPanel server URL is correct in Server Settings
+  5. Visit https://yourserver.com/api/index.php?route=ping in
+     a browser — it should return {"success":true}
+  6. If the server is down, wait and the app will retry automatically
+     once the server comes back online
+
+To manually clear the sync queue (last resort — only do this if
+you are sure the data reached the server):
+  Settings → Server Settings → Clear Pending Queue`,
+      },
+      {
+        heading: "Important: browser data vs server data",
+        body: `Your local copy lives in the browser's IndexedDB storage.
+
+  ⚠️  Clearing browser data (Clear site data / Clear cookies in
+      Chrome settings) will delete the local copy of all ERP data.
+
+  ✅  The server always holds the last successfully synced version.
+      To recover, open the app and wait for it to re-fetch from
+      the server (happens automatically on login).
+
+For this reason:
+  • Always ensure data is synced (bar hidden) before clearing
+    browser data or switching devices
+  • Take regular backups via Settings → Backup & Restore
+  • On a new device or fresh browser, your data reloads from the
+    MySQL server automatically after you log in`,
       },
     ],
   },

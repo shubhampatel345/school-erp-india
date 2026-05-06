@@ -7,6 +7,7 @@ import {
   FileJson,
   HardDrive,
   HardDriveDownload,
+  RefreshCw,
   Trash2,
   Upload,
   XCircle,
@@ -23,6 +24,7 @@ import {
   TabsTrigger,
 } from "../../components/ui/tabs";
 import { useApp } from "../../context/AppContext";
+import { exportAllStores, importAllStores } from "../../lib/db";
 import { generateId } from "../../utils/localStorage";
 import phpApiService from "../../utils/phpApiService";
 
@@ -280,6 +282,81 @@ export default function DataManagement() {
 
   // ── Factory reset ──────────────────────────────────────
 
+  const [idbExporting, setIdbExporting] = useState(false);
+  const [idbImporting, setIdbImporting] = useState(false);
+  const idbFileInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleIdbBackup() {
+    setIdbExporting(true);
+    try {
+      const data = await exportAllStores();
+      const nowDate = new Date();
+      const ts = nowDate
+        .toISOString()
+        .replace(/[-:T]/g, (m) => (m === "T" ? "-" : m === ":" ? "" : m))
+        .slice(0, 15);
+      const filename = `shubh-erp-localdb-${ts}.json`;
+      const meta = {
+        version: "2.0",
+        appName: "SHUBH SCHOOL ERP",
+        storage: "IndexedDB",
+        createdAt: nowDate.toISOString(),
+        createdBy: currentUser?.name ?? "Unknown",
+        data,
+      };
+      triggerDownload(JSON.stringify(meta, null, 2), filename);
+      toast.success("Local database backup downloaded.");
+    } catch (err) {
+      toast.error(
+        `Backup failed: ${err instanceof Error ? err.message : "Unknown"}`,
+      );
+    } finally {
+      setIdbExporting(false);
+    }
+  }
+
+  function handleIdbFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      try {
+        const parsed = JSON.parse(text) as {
+          version: string;
+          appName: string;
+          data: Record<string, unknown[]>;
+        };
+        if (!parsed.data || parsed.appName !== "SHUBH SCHOOL ERP") {
+          toast.error("Invalid file — must be a SHUBH SCHOOL ERP backup.");
+          return;
+        }
+        const storeCount = Object.keys(parsed.data).length;
+        if (
+          !confirm(
+            `Restore ${storeCount} stores from local backup? Will merge (Last Write Wins).`,
+          )
+        )
+          return;
+        setIdbImporting(true);
+        importAllStores(parsed.data)
+          .then(() =>
+            toast.success("Restore complete! Refresh to see your data."),
+          )
+          .catch((err: unknown) =>
+            toast.error(
+              `Restore failed: ${err instanceof Error ? err.message : "Unknown"}`,
+            ),
+          )
+          .finally(() => setIdbImporting(false));
+      } catch {
+        toast.error("Could not parse file — must be valid JSON.");
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
   function verifyPasswordForReset(pw: string): boolean {
     if (!currentUser) return false;
     try {
@@ -409,6 +486,67 @@ export default function DataManagement() {
             >
               <Download className="w-4 h-4 mr-2" /> Create &amp; Download Backup
             </Button>
+          </Card>
+
+          {/* IndexedDB local backup */}
+          <Card className="p-5 space-y-4" data-ocid="backup.idb.card">
+            <div className="flex items-center gap-2">
+              <Database className="w-4 h-4 text-primary" />
+              <h3 className="font-semibold text-foreground">
+                Local Offline Database
+              </h3>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Download or restore the local offline database (IndexedDB) —
+              contains data saved while offline or pending sync to MySQL.
+            </p>
+            <div className="flex gap-2 flex-wrap">
+              <input
+                ref={idbFileInputRef}
+                type="file"
+                accept=".json"
+                className="hidden"
+                onChange={handleIdbFileChange}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={idbExporting}
+                onClick={() => void handleIdbBackup()}
+                data-ocid="backup.idb_export.button"
+              >
+                {idbExporting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-2 animate-spin" />
+                    Exporting…
+                  </>
+                ) : (
+                  <>
+                    <Download className="w-3.5 h-3.5 mr-2" />
+                    Download Local DB
+                  </>
+                )}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={idbImporting}
+                onClick={() => idbFileInputRef.current?.click()}
+                data-ocid="backup.idb_restore.upload_button"
+              >
+                {idbImporting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 mr-2 animate-spin" />
+                    Restoring…
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-3.5 h-3.5 mr-2" />
+                    Restore from Local DB
+                  </>
+                )}
+              </Button>
+            </div>
           </Card>
 
           {/* Restore */}

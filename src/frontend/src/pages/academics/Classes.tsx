@@ -22,6 +22,8 @@ import {
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useApp } from "../../context/AppContext";
+import { getClasses } from "../../utils/dataService";
+import { mergeServerRecords } from "../../utils/localFirstSync";
 import type { ClassRecord } from "../../utils/phpApiService";
 import phpApiService from "../../utils/phpApiService";
 
@@ -114,17 +116,33 @@ export default function Classes() {
   const loadClasses = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await phpApiService.getClasses();
-      setClasses(sortClasses(data));
+      // IndexedDB first (instant, works offline)
+      const local = await getClasses();
+      if (local.length > 0) {
+        setClasses(sortClasses(local as unknown as ClassRecord[]));
+        setLoading(false);
+      }
+      // Sync from server in background
+      if (navigator.onLine) {
+        try {
+          const serverData = await phpApiService.getClasses();
+          await mergeServerRecords(
+            "classes",
+            serverData as unknown as Record<string, unknown>[],
+          );
+          const merged = await getClasses();
+          setClasses(sortClasses(merged as unknown as ClassRecord[]));
+        } catch {
+          /* server unreachable */
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load classes";
-      // Never say "Session expired" — always show the real error
       toast.error(
         msg.includes("expired")
-          ? "Failed to load classes — please refresh the page"
+          ? "Failed to load classes - please refresh"
           : msg,
       );
-      // Keep existing classes visible rather than clearing them
     } finally {
       setLoading(false);
     }

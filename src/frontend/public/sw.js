@@ -1,4 +1,4 @@
-const CACHE_NAME = 'shubh-erp-v3';
+const CACHE_NAME = 'shubh-erp-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -29,12 +29,27 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
+// Cache-first strategy for app shell (HTML/JS/CSS)
+// Network-first is used as default, fallback to cache for offline
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests for same-origin resources
   if (event.request.method !== 'GET') return;
   if (!event.request.url.startsWith(self.location.origin)) return;
-  // Skip API calls (WhatsApp, etc.)
-  if (event.request.url.includes('/api/')) return;
+  // Skip API calls — never cache dynamic data
+  if (event.request.url.includes('/api/') || event.request.url.includes('?route=')) return;
+
+  const url = new URL(event.request.url);
+  const isHtmlOrAppShell =
+    url.pathname.endsWith('.html') ||
+    url.pathname === '/' ||
+    url.pathname.endsWith('.js') ||
+    url.pathname.endsWith('.css') ||
+    url.pathname.endsWith('.json') ||
+    url.pathname.endsWith('.png') ||
+    url.pathname.endsWith('.ico') ||
+    url.pathname.endsWith('.svg');
+
+  if (!isHtmlOrAppShell) return;
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
@@ -45,8 +60,12 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       });
-      // Network-first, cache fallback
-      return networkFetch.catch(() => cached ?? caches.match('/'));
+      // Cache-first for JS/CSS (fast), network-first for HTML (fresh)
+      if (url.pathname.endsWith('.js') || url.pathname.endsWith('.css')) {
+        return cached ?? networkFetch.catch(() => caches.match('/'));
+      }
+      // Network-first, cache fallback for HTML
+      return networkFetch.catch(() => cached ?? caches.match('/index.html'));
     })
   );
 });

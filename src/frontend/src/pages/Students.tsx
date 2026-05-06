@@ -49,6 +49,13 @@ import StudentImportExport from "../components/StudentImportExport";
 import { useApp } from "../context/AppContext";
 import type { Student } from "../types";
 import { CLASSES_ORDER } from "../types";
+import {
+  deleteStudent,
+  getStudents,
+  refreshFromServer,
+  saveStudent,
+} from "../utils/dataService";
+import { mergeServerRecords } from "../utils/localFirstSync";
 import { ls } from "../utils/localStorage";
 import phpApiService, { type StudentRecord } from "../utils/phpApiService";
 
@@ -251,7 +258,7 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
     currentUser?.role === "admin" ||
     currentUser?.role === "receptionist";
 
-  // ── Fetch ──────────────────────────────────────────────────────────────────
+  // ── Fetch (offline-first) ─────────────────────────────────────────────────
   const currentSessionId = currentSession?.id;
   const fetchStudents = useCallback(
     async (silent = false) => {
@@ -259,13 +266,41 @@ export default function Students({ onNavigate: _onNavigate }: StudentsProps) {
       else setIsRefreshing(true);
       setError(null);
       try {
-        const params: Record<string, string> = { page: "1", limit: "1000" };
-        if (currentSessionId) params.session = currentSessionId;
-        const result = await phpApiService.getStudents(params);
-        const mapped = (result.data ?? []).map(toStudent);
-        setStudents(mapped);
-        setTotalCount(result.total ?? mapped.length);
-        setCurrentPage(1);
+        // 1. Load from IndexedDB immediately (fast, works offline)
+        const localStudents = await getStudents();
+        if (localStudents.length > 0) {
+          const mapped = localStudents.map((r) =>
+            toStudent(r as unknown as StudentRecord),
+          );
+          setStudents(mapped);
+          setTotalCount(mapped.length);
+          if (!silent) setIsLoading(false);
+        }
+
+        // 2. Fetch fresh from server in background and merge (Last Write Wins)
+        if (navigator.onLine) {
+          try {
+            const params: Record<string, string> = { page: "1", limit: "1000" };
+            if (currentSessionId) params.session = currentSessionId;
+            const result = await phpApiService.getStudents(params);
+            const serverData = result.data ?? [];
+            // Merge server data into IndexedDB
+            await mergeServerRecords(
+              "students",
+              serverData as unknown as Record<string, unknown>[],
+            );
+            // Re-read from IndexedDB after merge
+            const merged = await getStudents();
+            const mapped = merged.map((r) =>
+              toStudent(r as unknown as StudentRecord),
+            );
+            setStudents(mapped);
+            setTotalCount(result.total ?? mapped.length);
+            setCurrentPage(1);
+          } catch {
+            // Server unreachable — IndexedDB data is still displayed
+          }
+        }
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Failed to load students";

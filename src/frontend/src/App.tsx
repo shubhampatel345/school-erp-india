@@ -1,6 +1,8 @@
 import { useState } from "react";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
+import OfflineBanner from "./components/OfflineBanner";
+import SyncStatusBar from "./components/SyncStatusBar";
 import { AppProvider, useApp } from "./context/AppContext";
 import Academics from "./pages/Academics";
 import AlumniPage from "./pages/Alumni";
@@ -74,7 +76,13 @@ function AppRoutes() {
   });
 
   // Not logged in — show login screen (no Layout, no sidebar)
-  if (!currentUser) return <Login />;
+  if (!currentUser)
+    return (
+      <>
+        <OfflineBanner />
+        <Login />
+      </>
+    );
 
   const effectivePage =
     activePage === "dashboard"
@@ -176,9 +184,13 @@ function AppRoutes() {
   };
 
   return (
-    <Layout activePage={effectivePage} onNavigate={navigate}>
-      <ErrorBoundary key={effectivePage}>{renderPage()}</ErrorBoundary>
-    </Layout>
+    <>
+      <OfflineBanner />
+      <SyncStatusBar />
+      <Layout activePage={effectivePage} onNavigate={navigate}>
+        <ErrorBoundary key={effectivePage}>{renderPage()}</ErrorBoundary>
+      </Layout>
+    </>
   );
 }
 

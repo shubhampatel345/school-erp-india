@@ -1,12 +1,26 @@
 /**
- * SHUBH SCHOOL ERP — DataService (Online-Only, PHP/MySQL)
+ * SHUBH SCHOOL ERP — DataService
  *
- * Thin wrapper over phpApiService.
- * NO IndexedDB, NO offline sync, NO pending queues.
- * All reads/writes go directly to MySQL via the PHP API.
+ * Main data access layer for all modules.
+ * Architecture: IndexedDB (source of truth) → phpApiService (sync target)
+ *
+ * On read:  load from IndexedDB; if empty, fetch from PHP API → seed IndexedDB
+ * On write: write to IndexedDB first, add to sync_queue, background push to PHP API
+ *
+ * Modules that already use phpApiService directly continue to work — this is
+ * an additive layer, not a replacement.
  */
 
+import { type DbRecord, type StoreName, dbGetAll } from "../lib/db";
+import {
+  getAll,
+  mergeServerRecords,
+  remove,
+  save,
+  setCollection,
+} from "./localFirstSync";
 import phpApiService from "./phpApiService";
+import { processSyncQueue } from "./syncEngine";
 
 export { phpApiService };
 
@@ -35,18 +49,12 @@ export const COLLECTIONS = [
 
 export type CollectionName = (typeof COLLECTIONS)[number];
 
-/**
- * useData — lightweight hook for data fetching with loading state.
- * Usage: const { data, loading, error, refetch } = useData(() => phpApiService.getStudents())
- * Import from this file and use in components that need simple fetch patterns.
- */
 export interface DataState<T> {
   data: T | null;
   loading: boolean;
   error: string | null;
 }
 
-/** Simple fetch wrapper: calls fetcher, returns {data, loading, error} */
 export async function fetchData<T>(
   fetcher: () => Promise<T>,
 ): Promise<DataState<T>> {
@@ -62,34 +70,124 @@ export async function fetchData<T>(
   }
 }
 
+// ── Offline-first helpers ─────────────────────────────────────────────────────
+
 /**
- * Minimal DataService class kept for backward compatibility with pages
- * that call dataService.get() or dataService.save().
- * All methods now delegate directly to phpApiService.
+ * Get all records from IndexedDB.
+ * If IndexedDB is empty, fetch from PHP API and seed IndexedDB first.
+ * Returns IndexedDB records (fast, always available).
  */
+export async function getLocalOrFetch<T extends DbRecord>(
+  store: StoreName,
+  fetcher: () => Promise<T[]>,
+): Promise<T[]> {
+  try {
+    const local = await getAll<T>(store);
+    if (local.length > 0) return local;
+
+    // IndexedDB empty — fetch from server and seed
+    try {
+      const serverRecords = await fetcher();
+      await setCollection(
+        store,
+        serverRecords as unknown as Record<string, unknown>[],
+      );
+      return getAll<T>(store);
+    } catch {
+      return [];
+    }
+  } catch {
+    // IndexedDB unavailable — fallback to direct API
+    try {
+      return fetcher();
+    } catch {
+      return [];
+    }
+  }
+}
+
+/**
+ * Refresh a store from the server (merge new server data into IndexedDB).
+ */
+export async function refreshFromServer(
+  store: StoreName,
+  fetcher: () => Promise<Record<string, unknown>[]>,
+): Promise<void> {
+  try {
+    const serverRecords = await fetcher();
+    await mergeServerRecords(store, serverRecords);
+  } catch (err) {
+    console.warn(`[dataService] refreshFromServer failed for ${store}:`, err);
+  }
+}
+
+// ── Students ──────────────────────────────────────────────────────────────────
+
+export async function getStudents(): Promise<DbRecord[]> {
+  return getLocalOrFetch<DbRecord>("students", async () => {
+    const result = await phpApiService.getStudents();
+    return result.data as unknown as DbRecord[];
+  });
+}
+
+export async function saveStudent(
+  student: Record<string, unknown>,
+): Promise<DbRecord> {
+  const isNew = !student.id;
+  const action = isNew ? "create" : "update";
+  const saved = await save("students", student, action);
+  return saved as DbRecord;
+}
+
+export async function deleteStudent(id: string): Promise<void> {
+  await remove("students", id);
+}
+
+// ── Classes ───────────────────────────────────────────────────────────────────
+
+export async function getClasses(): Promise<DbRecord[]> {
+  return getLocalOrFetch<DbRecord>("classes", async () => {
+    const classes = await phpApiService.getClasses();
+    return classes as unknown as DbRecord[];
+  });
+}
+
+export async function saveClass(
+  cls: Record<string, unknown>,
+): Promise<DbRecord> {
+  const isNew = !cls.id;
+  const action = isNew ? "create" : "update";
+  return save("classes", cls, action) as Promise<DbRecord>;
+}
+
+export async function deleteClass(id: string): Promise<void> {
+  await remove("classes", id);
+}
+
+// ── Generic DataService class (backward compat) ──────────────────────────────
+
 class DataService {
   private _ready = true;
 
   isReady(): boolean {
     return this._ready;
   }
-
   getMode(): "ready" {
     return "ready";
   }
-
   getCounts(): Record<string, number> {
     return {};
   }
 
-  /** @deprecated — use phpApiService directly */
+  /** @deprecated — use getLocalOrFetch or phpApiService directly */
   get<T>(_collection: string): T[] {
     return [];
   }
 
-  /** Fetch from server — delegates to phpApiService.loadAll() */
   async getAsync<T>(collection: string): Promise<T[]> {
     try {
+      const local = await dbGetAll(collection as StoreName);
+      if (local.length > 0) return local as unknown as T[];
       const all = await phpApiService.loadAll();
       return ((all[collection] as T[]) ?? []) as T[];
     } catch {
@@ -97,35 +195,46 @@ class DataService {
     }
   }
 
-  /** Save a record — delegates to the appropriate phpApiService method */
   async save<T extends Record<string, unknown>>(
     collection: string,
     item: T,
   ): Promise<T> {
-    switch (collection) {
-      case "students":
-        if (item.id) {
-          return (await phpApiService.updateStudent(
-            item as unknown as Parameters<
-              typeof phpApiService.updateStudent
-            >[0],
-          )) as unknown as T;
-        }
-        return (await phpApiService.addStudent(item)) as unknown as T;
-      case "staff":
-        if (item.id) {
-          return (await phpApiService.updateStaff(
-            item as unknown as Parameters<typeof phpApiService.updateStaff>[0],
-          )) as unknown as T;
-        }
-        return (await phpApiService.addStaff(item)) as unknown as T;
-      default:
-        // Generic fallback — not used for critical collections
-        return item;
+    // Write to IndexedDB + sync queue first, then let background sync handle PHP
+    const action = item.id ? "update" : "create";
+    try {
+      const saved = await save(
+        collection as StoreName,
+        item as Record<string, unknown>,
+        action,
+      );
+      return saved as unknown as T;
+    } catch {
+      // Fallback: direct API call
+      switch (collection) {
+        case "students":
+          if (item.id) {
+            return (await phpApiService.updateStudent(
+              item as unknown as Parameters<
+                typeof phpApiService.updateStudent
+              >[0],
+            )) as unknown as T;
+          }
+          return (await phpApiService.addStudent(item)) as unknown as T;
+        case "staff":
+          if (item.id) {
+            return (await phpApiService.updateStaff(
+              item as unknown as Parameters<
+                typeof phpApiService.updateStaff
+              >[0],
+            )) as unknown as T;
+          }
+          return (await phpApiService.addStaff(item)) as unknown as T;
+        default:
+          return item;
+      }
     }
   }
 
-  /** Refresh a collection from server */
   async refreshFromServer<T>(collection: string): Promise<T[]> {
     return this.getAsync<T>(collection);
   }
@@ -137,10 +246,8 @@ class DataService {
   async initializeFromServer(): Promise<Record<string, unknown[]>> {
     return {};
   }
-
   async init(): Promise<void> {}
   async initializeFromCanister(): Promise<void> {}
-
   reset(): void {}
   waitForInit(): Promise<void> {
     return Promise.resolve();
@@ -149,3 +256,13 @@ class DataService {
 
 export const dataService = new DataService();
 export default dataService;
+
+// Re-export for convenience
+export {
+  getAll,
+  save,
+  remove,
+  mergeServerRecords,
+  setCollection,
+  processSyncQueue,
+};

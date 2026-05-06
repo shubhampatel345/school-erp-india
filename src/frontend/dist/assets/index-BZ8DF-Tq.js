@@ -2513,9 +2513,9 @@ react_production.useRef = function(initialValue) {
 react_production.useState = function(initialState) {
   return ReactSharedInternals$2.H.useState(initialState);
 };
-react_production.useSyncExternalStore = function(subscribe, getSnapshot, getServerSnapshot) {
+react_production.useSyncExternalStore = function(subscribe2, getSnapshot, getServerSnapshot) {
   return ReactSharedInternals$2.H.useSyncExternalStore(
-    subscribe,
+    subscribe2,
     getSnapshot,
     getServerSnapshot
   );
@@ -3219,7 +3219,7 @@ function popHostContext(fiber) {
   contextFiberStackCursor.current === fiber && (pop(contextStackCursor), pop(contextFiberStackCursor));
   hostTransitionProviderCursor.current === fiber && (pop(hostTransitionProviderCursor), HostTransitionContext._currentValue = sharedNotPendingObject);
 }
-var hasOwnProperty$b = Object.prototype.hasOwnProperty, scheduleCallback$3 = Scheduler.unstable_scheduleCallback, cancelCallback$1 = Scheduler.unstable_cancelCallback, shouldYield = Scheduler.unstable_shouldYield, requestPaint = Scheduler.unstable_requestPaint, now$3 = Scheduler.unstable_now, getCurrentPriorityLevel = Scheduler.unstable_getCurrentPriorityLevel, ImmediatePriority = Scheduler.unstable_ImmediatePriority, UserBlockingPriority = Scheduler.unstable_UserBlockingPriority, NormalPriority$1 = Scheduler.unstable_NormalPriority, LowPriority = Scheduler.unstable_LowPriority, IdlePriority = Scheduler.unstable_IdlePriority, log$1 = Scheduler.log, unstable_setDisableYieldValue = Scheduler.unstable_setDisableYieldValue, rendererID = null, injectedHook = null;
+var hasOwnProperty$b = Object.prototype.hasOwnProperty, scheduleCallback$3 = Scheduler.unstable_scheduleCallback, cancelCallback$1 = Scheduler.unstable_cancelCallback, shouldYield = Scheduler.unstable_shouldYield, requestPaint = Scheduler.unstable_requestPaint, now$4 = Scheduler.unstable_now, getCurrentPriorityLevel = Scheduler.unstable_getCurrentPriorityLevel, ImmediatePriority = Scheduler.unstable_ImmediatePriority, UserBlockingPriority = Scheduler.unstable_UserBlockingPriority, NormalPriority$1 = Scheduler.unstable_NormalPriority, LowPriority = Scheduler.unstable_LowPriority, IdlePriority = Scheduler.unstable_IdlePriority, log$1 = Scheduler.log, unstable_setDisableYieldValue = Scheduler.unstable_setDisableYieldValue, rendererID = null, injectedHook = null;
 function setIsStrictModeForDevtools(newIsStrictMode) {
   "function" === typeof log$1 && unstable_setDisableYieldValue(newIsStrictMode);
   if (injectedHook && "function" === typeof injectedHook.setStrictMode)
@@ -5740,7 +5740,7 @@ function rerenderReducer(reducer) {
   }
   return [newState, dispatch];
 }
-function updateSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) {
+function updateSyncExternalStore(subscribe2, getSnapshot, getServerSnapshot) {
   var fiber = currentlyRenderingFiber, hook = updateWorkInProgressHook(), isHydrating$jscomp$0 = isHydrating;
   if (isHydrating$jscomp$0) {
     if (void 0 === getServerSnapshot) throw Error(formatProdErrorMessage(407));
@@ -5752,8 +5752,8 @@ function updateSyncExternalStore(subscribe, getSnapshot, getServerSnapshot) {
   );
   snapshotChanged && (hook.memoizedState = getServerSnapshot, didReceiveUpdate = true);
   hook = hook.queue;
-  var create = subscribeToStore.bind(null, fiber, hook, subscribe);
-  updateEffectImpl(2048, 8, create, [subscribe]);
+  var create = subscribeToStore.bind(null, fiber, hook, subscribe2);
+  updateEffectImpl(2048, 8, create, [subscribe2]);
   if (hook.getSnapshot !== getSnapshot || snapshotChanged || null !== workInProgressHook && workInProgressHook.memoizedState.tag & 1) {
     fiber.flags |= 2048;
     pushSimpleEffect(
@@ -5784,8 +5784,8 @@ function updateStoreInstance(fiber, inst, nextSnapshot, getSnapshot) {
   inst.getSnapshot = getSnapshot;
   checkIfSnapshotChanged(inst) && forceStoreRerender(fiber);
 }
-function subscribeToStore(fiber, inst, subscribe) {
-  return subscribe(function() {
+function subscribeToStore(fiber, inst, subscribe2) {
+  return subscribe2(function() {
     checkIfSnapshotChanged(inst) && forceStoreRerender(fiber);
   });
 }
@@ -6479,7 +6479,7 @@ var ContextOnlyDispatcher = {
     mountWorkInProgressHook().memoizedState = stateHook;
     return [false, stateHook];
   },
-  useSyncExternalStore: function(subscribe, getSnapshot, getServerSnapshot) {
+  useSyncExternalStore: function(subscribe2, getSnapshot, getServerSnapshot) {
     var fiber = currentlyRenderingFiber, hook = mountWorkInProgressHook();
     if (isHydrating) {
       if (void 0 === getServerSnapshot)
@@ -6494,8 +6494,8 @@ var ContextOnlyDispatcher = {
     hook.memoizedState = getServerSnapshot;
     var inst = { value: getServerSnapshot, getSnapshot };
     hook.queue = inst;
-    mountEffect(subscribeToStore.bind(null, fiber, inst, subscribe), [
-      subscribe
+    mountEffect(subscribeToStore.bind(null, fiber, inst, subscribe2), [
+      subscribe2
     ]);
     fiber.flags |= 2048;
     pushSimpleEffect(
@@ -8710,7 +8710,7 @@ function completeWork(current, workInProgress2, renderLanes2) {
               }
               current = current.sibling;
             }
-          null !== type.tail && now$3() > workInProgressRootRenderTargetTime && (workInProgress2.flags |= 128, newProps = true, cutOffTailIfNeeded(type, false), workInProgress2.lanes = 4194304);
+          null !== type.tail && now$4() > workInProgressRootRenderTargetTime && (workInProgress2.flags |= 128, newProps = true, cutOffTailIfNeeded(type, false), workInProgress2.lanes = 4194304);
         }
       else {
         if (!newProps)
@@ -8718,11 +8718,11 @@ function completeWork(current, workInProgress2, renderLanes2) {
             if (workInProgress2.flags |= 128, newProps = true, current = current.updateQueue, workInProgress2.updateQueue = current, scheduleRetryEffect(workInProgress2, current), cutOffTailIfNeeded(type, true), null === type.tail && "hidden" === type.tailMode && !cache$127.alternate && !isHydrating)
               return bubbleProperties(workInProgress2), null;
           } else
-            2 * now$3() - type.renderingStartTime > workInProgressRootRenderTargetTime && 536870912 !== renderLanes2 && (workInProgress2.flags |= 128, newProps = true, cutOffTailIfNeeded(type, false), workInProgress2.lanes = 4194304);
+            2 * now$4() - type.renderingStartTime > workInProgressRootRenderTargetTime && 536870912 !== renderLanes2 && (workInProgress2.flags |= 128, newProps = true, cutOffTailIfNeeded(type, false), workInProgress2.lanes = 4194304);
         type.isBackwards ? (cache$127.sibling = workInProgress2.child, workInProgress2.child = cache$127) : (current = type.last, null !== current ? current.sibling = cache$127 : workInProgress2.child = cache$127, type.last = cache$127);
       }
       if (null !== type.tail)
-        return workInProgress2 = type.tail, type.rendering = workInProgress2, type.tail = workInProgress2.sibling, type.renderingStartTime = now$3(), workInProgress2.sibling = null, current = suspenseStackCursor.current, push(suspenseStackCursor, newProps ? current & 1 | 2 : current & 1), workInProgress2;
+        return workInProgress2 = type.tail, type.rendering = workInProgress2, type.tail = workInProgress2.sibling, type.renderingStartTime = now$4(), workInProgress2.sibling = null, current = suspenseStackCursor.current, push(suspenseStackCursor, newProps ? current & 1 | 2 : current & 1), workInProgress2;
       bubbleProperties(workInProgress2);
       return null;
     case 22:
@@ -9635,7 +9635,7 @@ function commitMutationEffectsOnFiber(finishedWork, root2) {
     case 13:
       recursivelyTraverseMutationEffects(root2, finishedWork);
       commitReconciliationEffects(finishedWork);
-      finishedWork.child.flags & 8192 && null !== finishedWork.memoizedState !== (null !== current && null !== current.memoizedState) && (globalMostRecentFallbackTime = now$3());
+      finishedWork.child.flags & 8192 && null !== finishedWork.memoizedState !== (null !== current && null !== current.memoizedState) && (globalMostRecentFallbackTime = now$4());
       flags & 4 && (flags = finishedWork.updateQueue, null !== flags && (finishedWork.updateQueue = null, attachSuspenseRetryListeners(finishedWork, flags)));
       break;
     case 22:
@@ -10385,7 +10385,7 @@ function performWorkOnRoot(root$jscomp$0, lanes, forceSync) {
           default:
             throw Error(formatProdErrorMessage(329));
         }
-        if ((lanes & 62914560) === lanes && (exitStatus = globalMostRecentFallbackTime + 300 - now$3(), 10 < exitStatus)) {
+        if ((lanes & 62914560) === lanes && (exitStatus = globalMostRecentFallbackTime + 300 - now$4(), 10 < exitStatus)) {
           markRootSuspended(
             shouldTimeSlice,
             lanes,
@@ -10648,7 +10648,7 @@ function renderRootConcurrent(root2, lanes) {
   var prevExecutionContext = executionContext;
   executionContext |= 2;
   var prevDispatcher = pushDispatcher(), prevAsyncDispatcher = pushAsyncDispatcher();
-  workInProgressRoot !== root2 || workInProgressRootRenderLanes !== lanes ? (workInProgressTransitions = null, workInProgressRootRenderTargetTime = now$3() + 500, prepareFreshStack(root2, lanes)) : workInProgressRootIsPrerendering = checkIfRootIsPrerendering(
+  workInProgressRoot !== root2 || workInProgressRootRenderLanes !== lanes ? (workInProgressTransitions = null, workInProgressRootRenderTargetTime = now$4() + 500, prepareFreshStack(root2, lanes)) : workInProgressRootIsPrerendering = checkIfRootIsPrerendering(
     root2,
     lanes
   );
@@ -11149,7 +11149,7 @@ function pingSuspendedRoot(root2, wakeable, pingedLanes) {
   null !== pingCache && pingCache.delete(wakeable);
   root2.pingedLanes |= root2.suspendedLanes & pingedLanes;
   root2.warmLanes &= ~pingedLanes;
-  workInProgressRoot === root2 && (workInProgressRootRenderLanes & pingedLanes) === pingedLanes && (4 === workInProgressRootExitStatus || 3 === workInProgressRootExitStatus && (workInProgressRootRenderLanes & 62914560) === workInProgressRootRenderLanes && 300 > now$3() - globalMostRecentFallbackTime ? 0 === (executionContext & 2) && prepareFreshStack(root2, 0) : workInProgressRootPingedLanes |= pingedLanes, workInProgressSuspendedRetryLanes === workInProgressRootRenderLanes && (workInProgressSuspendedRetryLanes = 0));
+  workInProgressRoot === root2 && (workInProgressRootRenderLanes & pingedLanes) === pingedLanes && (4 === workInProgressRootExitStatus || 3 === workInProgressRootExitStatus && (workInProgressRootRenderLanes & 62914560) === workInProgressRootRenderLanes && 300 > now$4() - globalMostRecentFallbackTime ? 0 === (executionContext & 2) && prepareFreshStack(root2, 0) : workInProgressRootPingedLanes |= pingedLanes, workInProgressSuspendedRetryLanes === workInProgressRootRenderLanes && (workInProgressSuspendedRetryLanes = 0));
   ensureRootIsScheduled(root2);
 }
 function retryTimedOutBoundary(boundaryFiber, retryLane) {
@@ -11226,7 +11226,7 @@ function processRootScheduleInMicrotask() {
   mightHavePendingSyncWork = didScheduleMicrotask = false;
   var syncTransitionLanes = 0;
   0 !== currentEventTransitionLane && (shouldAttemptEagerTransition() && (syncTransitionLanes = currentEventTransitionLane), currentEventTransitionLane = 0);
-  for (var currentTime = now$3(), prev = null, root2 = firstScheduledRoot; null !== root2; ) {
+  for (var currentTime = now$4(), prev = null, root2 = firstScheduledRoot; null !== root2; ) {
     var next = root2.next, nextLanes = scheduleTaskForRootDuringMicrotask(root2, currentTime);
     if (0 === nextLanes)
       root2.next = null, null === prev ? firstScheduledRoot = next : prev.next = next, null === next && (lastScheduledRoot = prev);
@@ -11298,7 +11298,7 @@ function performWorkOnRootViaSchedulerTask(root2, didTimeout) {
   );
   if (0 === workInProgressRootRenderLanes$jscomp$0) return null;
   performWorkOnRoot(root2, workInProgressRootRenderLanes$jscomp$0, didTimeout);
-  scheduleTaskForRootDuringMicrotask(root2, now$3());
+  scheduleTaskForRootDuringMicrotask(root2, now$4());
   return null != root2.callbackNode && root2.callbackNode === originalCallbackNode ? performWorkOnRootViaSchedulerTask.bind(null, root2) : null;
 }
 function performSyncWorkOnRoot(root2, lanes) {
@@ -13541,7 +13541,7 @@ function dispatchEvent(domEventName, eventSystemFlags, targetContainer, nativeEv
                     lanes &= ~lane;
                   }
                   ensureRootIsScheduled(fiber);
-                  0 === (executionContext & 6) && (workInProgressRootRenderTargetTime = now$3() + 500, flushSyncWorkAcrossRoots_impl(0));
+                  0 === (executionContext & 6) && (workInProgressRootRenderTargetTime = now$4() + 500, flushSyncWorkAcrossRoots_impl(0));
                 }
               }
               break;
@@ -15063,10 +15063,10 @@ class PhpApiService {
   async deleteInventoryItem(id) {
     await this.apiPost("inventory/items/delete", { id });
   }
-  async addInventoryTransaction(transaction) {
+  async addInventoryTransaction(transaction2) {
     return this.apiPost(
       "inventory/transactions/add",
-      transaction
+      transaction2
     );
   }
   // ── Exams ──────────────────────────────────────────────────────────────────
@@ -15332,6 +15332,450 @@ class PhpApiService {
   }
 }
 const phpApiService = new PhpApiService();
+const DB_NAME = "shubh-erp-db";
+const DB_VERSION = 1;
+const STORES = [
+  "students",
+  "staff",
+  "classes",
+  "sections",
+  "subjects",
+  "sessions",
+  "fee_headings",
+  "fee_plans",
+  "fee_receipts",
+  "attendance",
+  "exams",
+  "results",
+  "homework",
+  "library_books",
+  "inventory_items",
+  "transport_routes",
+  "expenses",
+  "notifications",
+  "chat_messages",
+  "sync_queue",
+  "settings"
+];
+let _db = null;
+let _openPromise = null;
+function openDb() {
+  if (_db) return Promise.resolve(_db);
+  if (_openPromise) return _openPromise;
+  _openPromise = new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      for (const storeName of STORES) {
+        if (!db.objectStoreNames.contains(storeName)) {
+          if (storeName === "sync_queue") {
+            const store = db.createObjectStore(storeName, { keyPath: "id" });
+            store.createIndex("synced", "synced", { unique: false });
+            store.createIndex("store", "store", { unique: false });
+          } else if (storeName === "settings") {
+            db.createObjectStore(storeName, { keyPath: "id" });
+          } else {
+            const store = db.createObjectStore(storeName, { keyPath: "id" });
+            store.createIndex("updatedAt", "updatedAt", { unique: false });
+            store.createIndex("synced", "synced", { unique: false });
+          }
+        }
+      }
+    };
+    req.onsuccess = (event) => {
+      _db = event.target.result;
+      _db.onclose = () => {
+        _db = null;
+        _openPromise = null;
+      };
+      _db.onerror = (e3) => console.error("[db] IDBDatabase error", e3);
+      resolve(_db);
+    };
+    req.onerror = () => {
+      _openPromise = null;
+      reject(req.error ?? new Error("IndexedDB open failed"));
+    };
+    req.onblocked = () => {
+      console.warn("[db] IndexedDB open blocked — close other tabs");
+    };
+  });
+  return _openPromise;
+}
+function idbRequest(req) {
+  return new Promise((resolve, reject) => {
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function transaction(storeName, mode, fn) {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    tx.onerror = () => reject(tx.error);
+    try {
+      const result = fn(store);
+      if (result instanceof IDBRequest) {
+        result.onsuccess = () => resolve(result.result);
+        result.onerror = () => reject(result.error);
+      } else {
+        result.then(resolve).catch(reject);
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+async function dbGetAll(store) {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).getAll();
+      req.onsuccess = () => {
+        const rows = req.result.filter(
+          (r2) => r2.syncAction !== "delete"
+        );
+        resolve(rows);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
+  }
+}
+async function dbGetById(store, id) {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).get(id);
+      req.onsuccess = () => resolve(req.result ?? null);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+async function dbPut(store, record) {
+  try {
+    await transaction(store, "readwrite", (s2) => s2.put(record));
+  } catch (err) {
+    console.error(`[db] put failed on ${store}:`, err);
+    throw err;
+  }
+}
+async function dbPutMany(store, records) {
+  if (records.length === 0) return;
+  try {
+    const db = await openDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readwrite");
+      const s2 = tx.objectStore(store);
+      for (const r2 of records) s2.put(r2);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error(`[db] putMany failed on ${store}:`, err);
+    throw err;
+  }
+}
+async function dbDelete(store, id) {
+  try {
+    await transaction(store, "readwrite", (s2) => s2.delete(id));
+  } catch (err) {
+    console.error(`[db] delete failed on ${store}:`, err);
+  }
+}
+async function dbClear(store) {
+  try {
+    await transaction(store, "readwrite", (s2) => s2.clear());
+  } catch (err) {
+    console.error(`[db] clear failed on ${store}:`, err);
+  }
+}
+async function enqueueSyncOp(store, recordId, action, payload) {
+  const entry = {
+    id: `${store}_${recordId}_${Date.now()}`,
+    store,
+    recordId,
+    action,
+    syncAction: action,
+    // DbRecord compatibility
+    payload,
+    updatedAt: Date.now(),
+    attempts: 0,
+    lastError: null,
+    synced: false
+  };
+  try {
+    await dbPut(
+      "sync_queue",
+      entry
+    );
+  } catch (err) {
+    console.warn("[db] enqueueSyncOp failed:", err);
+  }
+}
+async function getPendingSyncOps() {
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction("sync_queue", "readonly");
+      const idx = tx.objectStore("sync_queue").index("synced");
+      const req = idx.getAll(IDBKeyRange.only(false));
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return [];
+  }
+}
+async function markSyncOpDone(id) {
+  try {
+    await dbDelete("sync_queue", id);
+  } catch {
+  }
+}
+async function updateSyncOpAttempt(id, attempts, lastError) {
+  try {
+    const db = await openDb();
+    const entry = await idbRequest(
+      db.transaction("sync_queue", "readonly").objectStore("sync_queue").get(id)
+    );
+    if (!entry) return;
+    entry.attempts = attempts;
+    entry.lastError = lastError;
+    await dbPut(
+      "sync_queue",
+      entry
+    );
+  } catch {
+  }
+}
+async function exportAllStores() {
+  const result = {};
+  for (const store of STORES) {
+    if (store === "sync_queue") continue;
+    try {
+      result[store] = await dbGetAll(store);
+    } catch {
+      result[store] = [];
+    }
+  }
+  return result;
+}
+async function importAllStores(data) {
+  for (const [store, records] of Object.entries(data)) {
+    if (!STORES.includes(store)) continue;
+    if (store === "sync_queue") continue;
+    try {
+      await dbPutMany(store, records);
+    } catch (err) {
+      console.warn(`[db] importAllStores failed for ${store}:`, err);
+    }
+  }
+}
+let _status = {
+  state: "idle",
+  lastSyncTime: null,
+  lastError: null,
+  pendingCount: 0,
+  serverCounts: {}
+};
+const _listeners = /* @__PURE__ */ new Set();
+let _intervalId = null;
+let _isSyncing = false;
+const SYNC_INTERVAL_MS = 3e4;
+const MAX_ATTEMPTS = 5;
+function notify(update) {
+  _status = { ..._status, ...update };
+  for (const fn of _listeners) {
+    try {
+      fn(_status);
+    } catch {
+    }
+  }
+}
+async function pushOp(entry) {
+  const { store, action, payload } = entry;
+  switch (store) {
+    case "students":
+      if (action === "delete") {
+        await phpApiService.deleteStudent(entry.recordId);
+      } else if (action === "create") {
+        await phpApiService.addStudent(payload);
+      } else {
+        await phpApiService.updateStudent({
+          ...payload,
+          id: entry.recordId
+        });
+      }
+      break;
+    case "staff":
+      if (action === "delete") {
+        await phpApiService.deleteStaff(entry.recordId);
+      } else if (action === "create") {
+        await phpApiService.addStaff(payload);
+      } else {
+        await phpApiService.updateStaff({
+          ...payload,
+          id: entry.recordId
+        });
+      }
+      break;
+    case "classes":
+      if (action === "delete") {
+        await phpApiService.deleteClass(entry.recordId);
+      } else if (action === "create") {
+        await phpApiService.addClass(
+          payload
+        );
+      } else {
+        await phpApiService.updateClass(
+          entry.recordId,
+          payload
+        );
+      }
+      break;
+    case "fee_headings":
+      if (action === "delete") {
+        await phpApiService.deleteFeeHeading(entry.recordId);
+      } else {
+        await phpApiService.addFeeHeading(payload);
+      }
+      break;
+    case "attendance":
+      if (action === "create" || action === "update") {
+        await phpApiService.markAttendance([
+          payload
+        ]);
+      }
+      break;
+    case "expenses":
+      if (action === "delete") {
+        await phpApiService.deleteExpense(entry.recordId);
+      } else {
+        await phpApiService.addExpense(payload);
+      }
+      break;
+    case "homework":
+      if (action === "delete") {
+        await phpApiService.deleteHomework(entry.recordId);
+      } else {
+        await phpApiService.addHomework(payload);
+      }
+      break;
+    case "library_books":
+      if (action === "create") {
+        await phpApiService.addBook(payload);
+      } else if (action === "update") {
+        await phpApiService.updateBook(payload);
+      }
+      break;
+    case "inventory_items":
+      if (action === "delete") {
+        await phpApiService.deleteInventoryItem(entry.recordId);
+      } else if (action === "create") {
+        await phpApiService.addInventoryItem(payload);
+      } else {
+        await phpApiService.updateInventoryItem(payload);
+      }
+      break;
+    default:
+      console.debug(
+        `[syncEngine] no push handler for store=${store}, skipping`
+      );
+      break;
+  }
+}
+async function processSyncQueue() {
+  if (_isSyncing) return;
+  if (!navigator.onLine) {
+    notify({ state: "offline" });
+    return;
+  }
+  _isSyncing = true;
+  const pending = await getPendingSyncOps();
+  if (pending.length === 0) {
+    _isSyncing = false;
+    notify({ state: "synced", lastSyncTime: Date.now(), pendingCount: 0 });
+    return;
+  }
+  notify({ state: "syncing", pendingCount: pending.length });
+  let errorCount = 0;
+  for (const entry of pending) {
+    if (entry.attempts >= MAX_ATTEMPTS) {
+      await markSyncOpDone(entry.id);
+      continue;
+    }
+    try {
+      await phpApiService.ensureValidToken();
+      await pushOp(entry);
+      await markSyncOpDone(entry.id);
+    } catch (err) {
+      errorCount++;
+      const msg = err instanceof Error ? err.message : "Sync failed";
+      await updateSyncOpAttempt(entry.id, entry.attempts + 1, msg);
+      console.warn(
+        `[syncEngine] op failed (attempt ${entry.attempts + 1}):`,
+        msg
+      );
+    }
+  }
+  _isSyncing = false;
+  const remaining = await getPendingSyncOps();
+  if (errorCount > 0 && remaining.length > 0) {
+    notify({
+      state: "error",
+      lastError: `${errorCount} item(s) failed to sync`,
+      pendingCount: remaining.length
+    });
+  } else {
+    notify({
+      state: "synced",
+      lastSyncTime: Date.now(),
+      lastError: null,
+      pendingCount: remaining.length
+    });
+  }
+}
+function startSync() {
+  if (_intervalId !== null) return;
+  window.addEventListener("online", () => {
+    notify({ state: "idle" });
+    void processSyncQueue();
+  });
+  window.addEventListener("offline", () => {
+    notify({ state: "offline" });
+  });
+  if (!navigator.onLine) {
+    notify({ state: "offline" });
+    return;
+  }
+  void processSyncQueue();
+  _intervalId = setInterval(() => {
+    if (navigator.onLine) void processSyncQueue();
+  }, SYNC_INTERVAL_MS);
+}
+function stopSync() {
+  if (_intervalId !== null) {
+    clearInterval(_intervalId);
+    _intervalId = null;
+  }
+}
+async function retryFailed() {
+  await processSyncQueue();
+}
+function subscribe(fn) {
+  _listeners.add(fn);
+  fn(_status);
+  return () => _listeners.delete(fn);
+}
+function getStatus() {
+  return _status;
+}
 let _loginTime = 0;
 function setLoginTime(t2) {
   _loginTime = t2;
@@ -15641,11 +16085,21 @@ function AppProvider({ children }) {
   var _a2, _b2;
   const [state, dispatch] = reactExports.useReducer(appReducer, INITIAL_STATE);
   const [showExpiredModal, setShowExpiredModal] = reactExports.useState(false);
+  const [syncStatus, setSyncStatus] = reactExports.useState(getStatus);
   const initStartedRef = reactExports.useRef(false);
   const stateRef = reactExports.useRef(state);
   reactExports.useEffect(() => {
     stateRef.current = state;
   });
+  reactExports.useEffect(() => {
+    if (!state.currentUser) return;
+    const unsub = subscribe(setSyncStatus);
+    startSync();
+    return () => {
+      stopSync();
+      unsub();
+    };
+  }, [state.currentUser]);
   reactExports.useEffect(() => {
     const handleExpired = async () => {
       if (!stateRef.current.currentUser) return;
@@ -15966,13 +16420,9 @@ function AppProvider({ children }) {
   const unreadCount = state.notifications.filter((n2) => !n2.isRead).length;
   const showLoading = state.currentUser !== null && state.isInitializing && state.sessions.length === 0;
   const showError = state.currentUser !== null && state.initError !== null && !state.isInitializing;
-  const syncStatusStub = {
-    state: "synced",
-    lastSyncTime: null,
-    lastError: null,
-    pendingCount: 0,
-    serverCounts: {}
-  };
+  const retrySync = reactExports.useCallback(() => {
+    void retryFailed();
+  }, []);
   return /* @__PURE__ */ jsxRuntimeExports.jsxs(
     AppContext.Provider,
     {
@@ -15999,8 +16449,10 @@ function AppProvider({ children }) {
         updateData,
         deleteData,
         refreshCollection,
-        isSyncLoading: false,
-        syncStatus: syncStatusStub,
+        isSyncLoading: syncStatus.state === "syncing",
+        syncStatus,
+        pendingCount: syncStatus.pendingCount,
+        retrySync,
         serverCounts: {},
         syncCounts: {}
       },
@@ -16021,6 +16473,14 @@ function useApp() {
   const ctx = reactExports.useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
+}
+function useSyncStatus() {
+  const [status, setStatus] = reactExports.useState(getStatus);
+  reactExports.useEffect(() => {
+    const unsub = subscribe(setStatus);
+    return unsub;
+  }, []);
+  return status;
 }
 const PREFIX$1 = "shubh_erp_";
 const ls = {
@@ -18974,7 +19434,7 @@ const createLucideIcon = (iconName, iconNode) => {
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1$ = [
+const __iconNode$20 = [
   [
     "path",
     {
@@ -18983,7 +19443,19 @@ const __iconNode$1$ = [
     }
   ]
 ];
-const Activity = createLucideIcon("activity", __iconNode$1$);
+const Activity = createLucideIcon("activity", __iconNode$20);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1$ = [
+  ["path", { d: "M17 12H7", key: "16if0g" }],
+  ["path", { d: "M19 18H5", key: "18s9l3" }],
+  ["path", { d: "M21 6H3", key: "1jwq7v" }]
+];
+const AlignCenter = createLucideIcon("align-center", __iconNode$1$);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -18991,11 +19463,11 @@ const Activity = createLucideIcon("activity", __iconNode$1$);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1_ = [
-  ["path", { d: "M17 12H7", key: "16if0g" }],
-  ["path", { d: "M19 18H5", key: "18s9l3" }],
+  ["path", { d: "M15 12H3", key: "6jk70r" }],
+  ["path", { d: "M17 18H3", key: "1amg6g" }],
   ["path", { d: "M21 6H3", key: "1jwq7v" }]
 ];
-const AlignCenter = createLucideIcon("align-center", __iconNode$1_);
+const AlignLeft = createLucideIcon("align-left", __iconNode$1_);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19003,11 +19475,11 @@ const AlignCenter = createLucideIcon("align-center", __iconNode$1_);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1Z = [
-  ["path", { d: "M15 12H3", key: "6jk70r" }],
-  ["path", { d: "M17 18H3", key: "1amg6g" }],
-  ["path", { d: "M21 6H3", key: "1jwq7v" }]
+  ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
+  ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
+  ["path", { d: "M10 12h4", key: "a56b0p" }]
 ];
-const AlignLeft = createLucideIcon("align-left", __iconNode$1Z);
+const Archive = createLucideIcon("archive", __iconNode$1Z);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19015,11 +19487,10 @@ const AlignLeft = createLucideIcon("align-left", __iconNode$1Z);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1Y = [
-  ["rect", { width: "20", height: "5", x: "2", y: "3", rx: "1", key: "1wp1u1" }],
-  ["path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8", key: "1s80jp" }],
-  ["path", { d: "M10 12h4", key: "a56b0p" }]
+  ["path", { d: "M12 5v14", key: "s699le" }],
+  ["path", { d: "m19 12-7 7-7-7", key: "1idqje" }]
 ];
-const Archive = createLucideIcon("archive", __iconNode$1Y);
+const ArrowDown = createLucideIcon("arrow-down", __iconNode$1Y);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19027,10 +19498,10 @@ const Archive = createLucideIcon("archive", __iconNode$1Y);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1X = [
-  ["path", { d: "M12 5v14", key: "s699le" }],
-  ["path", { d: "m19 12-7 7-7-7", key: "1idqje" }]
+  ["path", { d: "M5 12h14", key: "1ays0h" }],
+  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
 ];
-const ArrowDown = createLucideIcon("arrow-down", __iconNode$1X);
+const ArrowRight = createLucideIcon("arrow-right", __iconNode$1X);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19038,10 +19509,12 @@ const ArrowDown = createLucideIcon("arrow-down", __iconNode$1X);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1W = [
-  ["path", { d: "M5 12h14", key: "1ays0h" }],
-  ["path", { d: "m12 5 7 7-7 7", key: "xquz4c" }]
+  ["path", { d: "m21 16-4 4-4-4", key: "f6ql7i" }],
+  ["path", { d: "M17 20V4", key: "1ejh1v" }],
+  ["path", { d: "m3 8 4-4 4 4", key: "11wl7u" }],
+  ["path", { d: "M7 4v16", key: "1glfcx" }]
 ];
-const ArrowRight = createLucideIcon("arrow-right", __iconNode$1W);
+const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1W);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19049,12 +19522,10 @@ const ArrowRight = createLucideIcon("arrow-right", __iconNode$1W);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1V = [
-  ["path", { d: "m21 16-4 4-4-4", key: "f6ql7i" }],
-  ["path", { d: "M17 20V4", key: "1ejh1v" }],
-  ["path", { d: "m3 8 4-4 4 4", key: "11wl7u" }],
-  ["path", { d: "M7 4v16", key: "1glfcx" }]
+  ["path", { d: "M7 7h10v10", key: "1tivn9" }],
+  ["path", { d: "M7 17 17 7", key: "1vkiza" }]
 ];
-const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1V);
+const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1V);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19062,10 +19533,10 @@ const ArrowUpDown = createLucideIcon("arrow-up-down", __iconNode$1V);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1U = [
-  ["path", { d: "M7 7h10v10", key: "1tivn9" }],
-  ["path", { d: "M7 17 17 7", key: "1vkiza" }]
+  ["path", { d: "m5 12 7-7 7 7", key: "hav0vg" }],
+  ["path", { d: "M12 19V5", key: "x0mq9r" }]
 ];
-const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1U);
+const ArrowUp = createLucideIcon("arrow-up", __iconNode$1U);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19073,17 +19544,6 @@ const ArrowUpRight = createLucideIcon("arrow-up-right", __iconNode$1U);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1T = [
-  ["path", { d: "m5 12 7-7 7 7", key: "hav0vg" }],
-  ["path", { d: "M12 19V5", key: "x0mq9r" }]
-];
-const ArrowUp = createLucideIcon("arrow-up", __iconNode$1T);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1S = [
   [
     "path",
     {
@@ -19093,14 +19553,14 @@ const __iconNode$1S = [
   ],
   ["circle", { cx: "12", cy: "8", r: "6", key: "1vp47v" }]
 ];
-const Award = createLucideIcon("award", __iconNode$1S);
+const Award = createLucideIcon("award", __iconNode$1T);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1R = [
+const __iconNode$1S = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -19112,14 +19572,14 @@ const __iconNode$1R = [
   ["path", { d: "m2 2 20 20", key: "1ooewy" }],
   ["path", { d: "M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05", key: "1hqiys" }]
 ];
-const BellOff = createLucideIcon("bell-off", __iconNode$1R);
+const BellOff = createLucideIcon("bell-off", __iconNode$1S);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1Q = [
+const __iconNode$1R = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   ["path", { d: "M22 8c0-2.3-.8-4.3-2-6", key: "5bb3ad" }],
   [
@@ -19131,14 +19591,14 @@ const __iconNode$1Q = [
   ],
   ["path", { d: "M4 2C2.8 3.7 2 5.7 2 8", key: "tap9e0" }]
 ];
-const BellRing = createLucideIcon("bell-ring", __iconNode$1Q);
+const BellRing = createLucideIcon("bell-ring", __iconNode$1R);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1P = [
+const __iconNode$1Q = [
   ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0", key: "vwvbt9" }],
   [
     "path",
@@ -19148,7 +19608,20 @@ const __iconNode$1P = [
     }
   ]
 ];
-const Bell = createLucideIcon("bell", __iconNode$1P);
+const Bell = createLucideIcon("bell", __iconNode$1Q);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1P = [
+  [
+    "path",
+    { d: "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8", key: "mg9rjx" }
+  ]
+];
+const Bold = createLucideIcon("bold", __iconNode$1P);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19156,19 +19629,6 @@ const Bell = createLucideIcon("bell", __iconNode$1P);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1O = [
-  [
-    "path",
-    { d: "M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8", key: "mg9rjx" }
-  ]
-];
-const Bold = createLucideIcon("bold", __iconNode$1O);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1N = [
   ["path", { d: "M12 7v14", key: "1akyts" }],
   [
     "path",
@@ -19178,14 +19638,14 @@ const __iconNode$1N = [
     }
   ]
 ];
-const BookOpen = createLucideIcon("book-open", __iconNode$1N);
+const BookOpen = createLucideIcon("book-open", __iconNode$1O);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1M = [
+const __iconNode$1N = [
   [
     "path",
     {
@@ -19196,14 +19656,14 @@ const __iconNode$1M = [
   ["path", { d: "M8 11h8", key: "vwpz6n" }],
   ["path", { d: "M8 7h6", key: "1f0q6e" }]
 ];
-const BookText = createLucideIcon("book-text", __iconNode$1M);
+const BookText = createLucideIcon("book-text", __iconNode$1N);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1L = [
+const __iconNode$1M = [
   ["path", { d: "M12 8V4H8", key: "hb8ula" }],
   ["rect", { width: "16", height: "12", x: "4", y: "8", rx: "2", key: "enze0r" }],
   ["path", { d: "M2 14h2", key: "vft8re" }],
@@ -19211,14 +19671,14 @@ const __iconNode$1L = [
   ["path", { d: "M15 13v2", key: "1xurst" }],
   ["path", { d: "M9 13v2", key: "rq6x2g" }]
 ];
-const Bot = createLucideIcon("bot", __iconNode$1L);
+const Bot = createLucideIcon("bot", __iconNode$1M);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1K = [
+const __iconNode$1L = [
   [
     "path",
     {
@@ -19241,14 +19701,14 @@ const __iconNode$1K = [
   ["path", { d: "M6 18a4 4 0 0 1-1.967-.516", key: "2e4loj" }],
   ["path", { d: "M19.967 17.484A4 4 0 0 1 18 18", key: "159ez6" }]
 ];
-const Brain = createLucideIcon("brain", __iconNode$1K);
+const Brain = createLucideIcon("brain", __iconNode$1L);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1J = [
+const __iconNode$1K = [
   ["path", { d: "M8 6v6", key: "18i7km" }],
   ["path", { d: "M15 6v6", key: "1sg6z9" }],
   ["path", { d: "M2 12h19.6", key: "de5uta" }],
@@ -19263,14 +19723,14 @@ const __iconNode$1J = [
   ["path", { d: "M9 18h5", key: "lrx6i" }],
   ["circle", { cx: "16", cy: "18", r: "2", key: "1v4tcr" }]
 ];
-const Bus = createLucideIcon("bus", __iconNode$1J);
+const Bus = createLucideIcon("bus", __iconNode$1K);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1I = [
+const __iconNode$1J = [
   ["path", { d: "M20 21v-8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8", key: "1w3rig" }],
   ["path", { d: "M4 16s.5-1 2-1 2.5 2 4 2 2.5-2 4-2 2.5 2 4 2 2-1 2-1", key: "n2jgmb" }],
   ["path", { d: "M2 21h20", key: "1nyx9w" }],
@@ -19281,7 +19741,21 @@ const __iconNode$1I = [
   ["path", { d: "M12 4h.01", key: "1ujb9j" }],
   ["path", { d: "M17 4h.01", key: "1upcoc" }]
 ];
-const Cake = createLucideIcon("cake", __iconNode$1I);
+const Cake = createLucideIcon("cake", __iconNode$1J);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1I = [
+  ["path", { d: "M8 2v4", key: "1cmpym" }],
+  ["path", { d: "M16 2v4", key: "4m81vk" }],
+  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
+  ["path", { d: "M3 10h18", key: "8toen8" }],
+  ["path", { d: "m9 16 2 2 4-4", key: "19s6y9" }]
+];
+const CalendarCheck = createLucideIcon("calendar-check", __iconNode$1I);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19293,20 +19767,6 @@ const __iconNode$1H = [
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
   ["path", { d: "M3 10h18", key: "8toen8" }],
-  ["path", { d: "m9 16 2 2 4-4", key: "19s6y9" }]
-];
-const CalendarCheck = createLucideIcon("calendar-check", __iconNode$1H);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1G = [
-  ["path", { d: "M8 2v4", key: "1cmpym" }],
-  ["path", { d: "M16 2v4", key: "4m81vk" }],
-  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
-  ["path", { d: "M3 10h18", key: "8toen8" }],
   ["path", { d: "M8 14h.01", key: "6423bh" }],
   ["path", { d: "M12 14h.01", key: "1etili" }],
   ["path", { d: "M16 14h.01", key: "1gbofw" }],
@@ -19314,14 +19774,14 @@ const __iconNode$1G = [
   ["path", { d: "M12 18h.01", key: "mhygvu" }],
   ["path", { d: "M16 18h.01", key: "kzsmim" }]
 ];
-const CalendarDays = createLucideIcon("calendar-days", __iconNode$1G);
+const CalendarDays = createLucideIcon("calendar-days", __iconNode$1H);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1F = [
+const __iconNode$1G = [
   ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
   ["path", { d: "M16 2v4", key: "4m81vk" }],
   ["path", { d: "M3 10h18", key: "8toen8" }],
@@ -19331,7 +19791,20 @@ const __iconNode$1F = [
   ["path", { d: "M7 14h.01", key: "1qa3f1" }],
   ["path", { d: "M17 18h.01", key: "1bdyru" }]
 ];
-const CalendarRange = createLucideIcon("calendar-range", __iconNode$1F);
+const CalendarRange = createLucideIcon("calendar-range", __iconNode$1G);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1F = [
+  ["path", { d: "M8 2v4", key: "1cmpym" }],
+  ["path", { d: "M16 2v4", key: "4m81vk" }],
+  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
+  ["path", { d: "M3 10h18", key: "8toen8" }]
+];
+const Calendar = createLucideIcon("calendar", __iconNode$1F);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19339,19 +19812,6 @@ const CalendarRange = createLucideIcon("calendar-range", __iconNode$1F);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1E = [
-  ["path", { d: "M8 2v4", key: "1cmpym" }],
-  ["path", { d: "M16 2v4", key: "4m81vk" }],
-  ["rect", { width: "18", height: "18", x: "3", y: "4", rx: "2", key: "1hopcy" }],
-  ["path", { d: "M3 10h18", key: "8toen8" }]
-];
-const Calendar = createLucideIcon("calendar", __iconNode$1E);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1D = [
   [
     "path",
     {
@@ -19361,7 +19821,20 @@ const __iconNode$1D = [
   ],
   ["circle", { cx: "12", cy: "13", r: "3", key: "1vg3eu" }]
 ];
-const Camera = createLucideIcon("camera", __iconNode$1D);
+const Camera = createLucideIcon("camera", __iconNode$1E);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1D = [
+  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
+  ["path", { d: "M18 17V9", key: "2bz60n" }],
+  ["path", { d: "M13 17V5", key: "1frdt8" }],
+  ["path", { d: "M8 17v-3", key: "17ska0" }]
+];
+const ChartColumn = createLucideIcon("chart-column", __iconNode$1D);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19370,11 +19843,9 @@ const Camera = createLucideIcon("camera", __iconNode$1D);
  */
 const __iconNode$1C = [
   ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
-  ["path", { d: "M18 17V9", key: "2bz60n" }],
-  ["path", { d: "M13 17V5", key: "1frdt8" }],
-  ["path", { d: "M8 17v-3", key: "17ska0" }]
+  ["path", { d: "m19 9-5 5-4-4-3 3", key: "2osh9i" }]
 ];
-const ChartColumn = createLucideIcon("chart-column", __iconNode$1C);
+const ChartLine = createLucideIcon("chart-line", __iconNode$1C);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19382,10 +19853,11 @@ const ChartColumn = createLucideIcon("chart-column", __iconNode$1C);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1B = [
-  ["path", { d: "M3 3v16a2 2 0 0 0 2 2h16", key: "c24i48" }],
-  ["path", { d: "m19 9-5 5-4-4-3 3", key: "2osh9i" }]
+  ["line", { x1: "18", x2: "18", y1: "20", y2: "10", key: "1xfpm4" }],
+  ["line", { x1: "12", x2: "12", y1: "20", y2: "4", key: "be30l9" }],
+  ["line", { x1: "6", x2: "6", y1: "20", y2: "14", key: "1r4le6" }]
 ];
-const ChartLine = createLucideIcon("chart-line", __iconNode$1B);
+const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode$1B);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19393,18 +19865,6 @@ const ChartLine = createLucideIcon("chart-line", __iconNode$1B);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1A = [
-  ["line", { x1: "18", x2: "18", y1: "20", y2: "10", key: "1xfpm4" }],
-  ["line", { x1: "12", x2: "12", y1: "20", y2: "4", key: "be30l9" }],
-  ["line", { x1: "6", x2: "6", y1: "20", y2: "14", key: "1r4le6" }]
-];
-const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode$1A);
-/**
- * @license lucide-react v0.511.0 - ISC
- *
- * This source code is licensed under the ISC license.
- * See the LICENSE file in the root directory of this source tree.
- */
-const __iconNode$1z = [
   [
     "path",
     {
@@ -19414,58 +19874,70 @@ const __iconNode$1z = [
   ],
   ["path", { d: "M21.21 15.89A10 10 0 1 1 8 2.83", key: "k2fpak" }]
 ];
-const ChartPie = createLucideIcon("chart-pie", __iconNode$1z);
+const ChartPie = createLucideIcon("chart-pie", __iconNode$1A);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1y = [
+const __iconNode$1z = [
   ["path", { d: "M18 6 7 17l-5-5", key: "116fxf" }],
   ["path", { d: "m22 10-7.5 7.5L13 16", key: "ke71qq" }]
 ];
-const CheckCheck = createLucideIcon("check-check", __iconNode$1y);
+const CheckCheck = createLucideIcon("check-check", __iconNode$1z);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1x = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
-const Check = createLucideIcon("check", __iconNode$1x);
+const __iconNode$1y = [["path", { d: "M20 6 9 17l-5-5", key: "1gmf2c" }]];
+const Check = createLucideIcon("check", __iconNode$1y);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1w = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
-const ChevronDown = createLucideIcon("chevron-down", __iconNode$1w);
+const __iconNode$1x = [["path", { d: "m6 9 6 6 6-6", key: "qrunsl" }]];
+const ChevronDown = createLucideIcon("chevron-down", __iconNode$1x);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1v = [["path", { d: "m15 18-6-6 6-6", key: "1wnfg3" }]];
-const ChevronLeft = createLucideIcon("chevron-left", __iconNode$1v);
+const __iconNode$1w = [["path", { d: "m15 18-6-6 6-6", key: "1wnfg3" }]];
+const ChevronLeft = createLucideIcon("chevron-left", __iconNode$1w);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1u = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
-const ChevronRight = createLucideIcon("chevron-right", __iconNode$1u);
+const __iconNode$1v = [["path", { d: "m9 18 6-6-6-6", key: "mthhwq" }]];
+const ChevronRight = createLucideIcon("chevron-right", __iconNode$1v);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
  * This source code is licensed under the ISC license.
  * See the LICENSE file in the root directory of this source tree.
  */
-const __iconNode$1t = [["path", { d: "m18 15-6-6-6 6", key: "153udz" }]];
-const ChevronUp = createLucideIcon("chevron-up", __iconNode$1t);
+const __iconNode$1u = [["path", { d: "m18 15-6-6-6 6", key: "153udz" }]];
+const ChevronUp = createLucideIcon("chevron-up", __iconNode$1u);
+/**
+ * @license lucide-react v0.511.0 - ISC
+ *
+ * This source code is licensed under the ISC license.
+ * See the LICENSE file in the root directory of this source tree.
+ */
+const __iconNode$1t = [
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
+  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+];
+const CircleAlert = createLucideIcon("circle-alert", __iconNode$1t);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19473,11 +19945,10 @@ const ChevronUp = createLucideIcon("chevron-up", __iconNode$1t);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1s = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["line", { x1: "12", x2: "12", y1: "8", y2: "12", key: "1pkeuh" }],
-  ["line", { x1: "12", x2: "12.01", y1: "16", y2: "16", key: "4dfq90" }]
+  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
+  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
 ];
-const CircleAlert = createLucideIcon("circle-alert", __iconNode$1s);
+const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1s);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19485,10 +19956,10 @@ const CircleAlert = createLucideIcon("circle-alert", __iconNode$1s);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1r = [
-  ["path", { d: "M21.801 10A10 10 0 1 1 17 3.335", key: "yps3ct" }],
-  ["path", { d: "m9 11 3 3L22 4", key: "1pflzl" }]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["path", { d: "m9 12 2 2 4-4", key: "dzmm74" }]
 ];
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1r);
+const CircleCheck = createLucideIcon("circle-check", __iconNode$1r);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19497,9 +19968,10 @@ const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode$1r);
  */
 const __iconNode$1q = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m9 12 2 2 4-4", key: "dzmm74" }]
+  ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", key: "1u773s" }],
+  ["path", { d: "M12 17h.01", key: "p32p05" }]
 ];
-const CircleCheck = createLucideIcon("circle-check", __iconNode$1q);
+const CircleHelp = createLucideIcon("circle-help", __iconNode$1q);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19508,10 +19980,10 @@ const CircleCheck = createLucideIcon("circle-check", __iconNode$1q);
  */
 const __iconNode$1p = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3", key: "1u773s" }],
-  ["path", { d: "M12 17h.01", key: "p32p05" }]
+  ["path", { d: "M8 12h8", key: "1wcyev" }],
+  ["path", { d: "M12 8v8", key: "napkw2" }]
 ];
-const CircleHelp = createLucideIcon("circle-help", __iconNode$1p);
+const CirclePlus = createLucideIcon("circle-plus", __iconNode$1p);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19520,10 +19992,10 @@ const CircleHelp = createLucideIcon("circle-help", __iconNode$1p);
  */
 const __iconNode$1o = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "M8 12h8", key: "1wcyev" }],
-  ["path", { d: "M12 8v8", key: "napkw2" }]
+  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
+  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
 ];
-const CirclePlus = createLucideIcon("circle-plus", __iconNode$1o);
+const CircleUser = createLucideIcon("circle-user", __iconNode$1o);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19532,10 +20004,10 @@ const CirclePlus = createLucideIcon("circle-plus", __iconNode$1o);
  */
 const __iconNode$1n = [
   ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["circle", { cx: "12", cy: "10", r: "3", key: "ilqhr7" }],
-  ["path", { d: "M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662", key: "154egf" }]
+  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
+  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
 ];
-const CircleUser = createLucideIcon("circle-user", __iconNode$1n);
+const CircleX = createLucideIcon("circle-x", __iconNode$1n);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19543,11 +20015,20 @@ const CircleUser = createLucideIcon("circle-user", __iconNode$1n);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1m = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["path", { d: "m15 9-6 6", key: "1uzhvr" }],
-  ["path", { d: "m9 9 6 6", key: "z0biqf" }]
+  ["rect", { width: "8", height: "4", x: "8", y: "2", rx: "1", ry: "1", key: "tgr4d6" }],
+  [
+    "path",
+    {
+      d: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
+      key: "116196"
+    }
+  ],
+  ["path", { d: "M12 11h4", key: "1jrz19" }],
+  ["path", { d: "M12 16h4", key: "n85exb" }],
+  ["path", { d: "M8 11h.01", key: "1dfujw" }],
+  ["path", { d: "M8 16h.01", key: "18s6g9" }]
 ];
-const CircleX = createLucideIcon("circle-x", __iconNode$1m);
+const ClipboardList = createLucideIcon("clipboard-list", __iconNode$1m);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19562,13 +20043,9 @@ const __iconNode$1l = [
       d: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
       key: "116196"
     }
-  ],
-  ["path", { d: "M12 11h4", key: "1jrz19" }],
-  ["path", { d: "M12 16h4", key: "n85exb" }],
-  ["path", { d: "M8 11h.01", key: "1dfujw" }],
-  ["path", { d: "M8 16h.01", key: "18s6g9" }]
+  ]
 ];
-const ClipboardList = createLucideIcon("clipboard-list", __iconNode$1l);
+const Clipboard = createLucideIcon("clipboard", __iconNode$1l);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19576,16 +20053,10 @@ const ClipboardList = createLucideIcon("clipboard-list", __iconNode$1l);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1k = [
-  ["rect", { width: "8", height: "4", x: "8", y: "2", rx: "1", ry: "1", key: "tgr4d6" }],
-  [
-    "path",
-    {
-      d: "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2",
-      key: "116196"
-    }
-  ]
+  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
+  ["polyline", { points: "12 6 12 12 16 14", key: "68esgv" }]
 ];
-const Clipboard = createLucideIcon("clipboard", __iconNode$1k);
+const Clock$1 = createLucideIcon("clock", __iconNode$1k);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -19593,10 +20064,14 @@ const Clipboard = createLucideIcon("clipboard", __iconNode$1k);
  * See the LICENSE file in the root directory of this source tree.
  */
 const __iconNode$1j = [
-  ["circle", { cx: "12", cy: "12", r: "10", key: "1mglay" }],
-  ["polyline", { points: "12 6 12 12 16 14", key: "68esgv" }]
+  ["path", { d: "m2 2 20 20", key: "1ooewy" }],
+  ["path", { d: "M5.782 5.782A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.307-.193", key: "yfwify" }],
+  [
+    "path",
+    { d: "M21.532 16.5A4.5 4.5 0 0 0 17.5 10h-1.79A7.008 7.008 0 0 0 10 5.07", key: "jlfiyv" }
+  ]
 ];
-const Clock$1 = createLucideIcon("clock", __iconNode$1j);
+const CloudOff = createLucideIcon("cloud-off", __iconNode$1j);
 /**
  * @license lucide-react v0.511.0 - ISC
  *
@@ -22282,6 +22757,108 @@ function Layout({
       }
     )
   ] });
+}
+function OfflineBanner() {
+  const [isOffline, setIsOffline] = reactExports.useState(!navigator.onLine);
+  reactExports.useEffect(() => {
+    const goOffline = () => setIsOffline(true);
+    const goOnline = () => setIsOffline(false);
+    window.addEventListener("offline", goOffline);
+    window.addEventListener("online", goOnline);
+    return () => {
+      window.removeEventListener("offline", goOffline);
+      window.removeEventListener("online", goOnline);
+    };
+  }, []);
+  if (!isOffline) return null;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "div",
+    {
+      role: "alert",
+      "aria-live": "assertive",
+      "data-ocid": "offline.banner",
+      className: "w-full py-2 px-4 flex items-center justify-center gap-2 text-xs font-medium bg-yellow-50 text-yellow-800 border-b border-yellow-200 z-[60] print:hidden",
+      children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(WifiOff, { className: "w-3.5 h-3.5 shrink-0", "aria-hidden": "true" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "You are offline — changes are saved locally and will sync when your connection returns." })
+      ]
+    }
+  );
+}
+function SyncStatusBar() {
+  const { retrySync } = useApp();
+  const syncStatus = useSyncStatus();
+  const { state, pendingCount, lastError } = syncStatus;
+  if (state === "synced" && pendingCount === 0 && !lastError) return null;
+  if (state === "idle" && pendingCount === 0) return null;
+  const hasError = state === "error" || !!lastError;
+  const isSyncing = state === "syncing";
+  const isOffline = state === "offline";
+  if (isOffline) {
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+      "output",
+      {
+        "aria-live": "polite",
+        "data-ocid": "sync.offline_bar",
+        className: "w-full py-1.5 px-4 flex items-center justify-center gap-2 text-xs font-medium z-50 print:hidden bg-muted/60 border-b border-border text-muted-foreground",
+        children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "w-3.5 h-3.5 shrink-0", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: "You are offline — changes will sync when connection is restored" })
+        ]
+      }
+    );
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(
+    "output",
+    {
+      "aria-live": "polite",
+      "data-ocid": "sync.status_bar",
+      className: [
+        "w-full py-1.5 px-4 flex items-center justify-center gap-2 text-xs font-medium z-50",
+        "print:hidden",
+        hasError ? "bg-destructive/10 text-destructive border-b border-destructive/20" : "bg-amber-50 dark:bg-amber-950/20 border-b border-amber-200/40 text-amber-800 dark:text-amber-300"
+      ].join(" "),
+      children: [
+        hasError ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx(CircleAlert, { className: "w-3.5 h-3.5 shrink-0", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("span", { children: [
+            pendingCount > 0 ? `${pendingCount} change${pendingCount !== 1 ? "s" : ""} failed to sync` : "Sync error",
+            " — ",
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "button",
+              {
+                type: "button",
+                "data-ocid": "sync.retry_button",
+                className: "underline underline-offset-2 hover:no-underline font-semibold transition-colors",
+                onClick: retrySync,
+                children: "Retry"
+              }
+            )
+          ] })
+        ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+          isSyncing ? /* @__PURE__ */ jsxRuntimeExports.jsx(
+            LoaderCircle,
+            {
+              className: "w-3.5 h-3.5 shrink-0 animate-spin",
+              "aria-hidden": "true"
+            }
+          ) : /* @__PURE__ */ jsxRuntimeExports.jsx(CircleCheck, { className: "w-3.5 h-3.5 shrink-0", "aria-hidden": "true" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("span", { children: isSyncing ? `Syncing ${pendingCount > 0 ? `${pendingCount} change${pendingCount !== 1 ? "s" : ""}…` : "…"}` : `${pendingCount} pending change${pendingCount !== 1 ? "s" : ""}` })
+        ] }),
+        hasError && /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            type: "button",
+            "data-ocid": "sync.dismiss_button",
+            "aria-label": "Retry sync",
+            className: "ml-auto text-destructive/60 hover:text-destructive transition-colors",
+            onClick: retrySync,
+            children: /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-3 h-3", "aria-hidden": "true" })
+          }
+        )
+      ]
+    }
+  );
 }
 const badgeVariants = cva(
   "inline-flex items-center justify-center rounded-md border px-2 py-0.5 text-xs font-medium w-fit whitespace-nowrap shrink-0 [&>svg]:size-3 gap-1 [&>svg]:pointer-events-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive transition-[color,box-shadow] overflow-hidden",
@@ -28538,6 +29115,253 @@ function ClassTimetable() {
     ] }) })
   ] });
 }
+const scriptRel = "modulepreload";
+const assetsURL = function(dep) {
+  return "/" + dep;
+};
+const seen = {};
+const __vitePreload = function preload2(baseModule, deps, importerUrl) {
+  let promise = Promise.resolve();
+  if (deps && deps.length > 0) {
+    document.getElementsByTagName("link");
+    const cspNonceMeta = document.querySelector(
+      "meta[property=csp-nonce]"
+    );
+    const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
+    promise = Promise.allSettled(
+      deps.map((dep) => {
+        dep = assetsURL(dep);
+        if (dep in seen) return;
+        seen[dep] = true;
+        const isCss = dep.endsWith(".css");
+        const cssSelector = isCss ? '[rel="stylesheet"]' : "";
+        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
+          return;
+        }
+        const link = document.createElement("link");
+        link.rel = isCss ? "stylesheet" : scriptRel;
+        if (!isCss) {
+          link.as = "script";
+        }
+        link.crossOrigin = "";
+        link.href = dep;
+        if (cspNonce) {
+          link.setAttribute("nonce", cspNonce);
+        }
+        document.head.appendChild(link);
+        if (isCss) {
+          return new Promise((res, rej) => {
+            link.addEventListener("load", res);
+            link.addEventListener(
+              "error",
+              () => rej(new Error(`Unable to preload CSS for ${dep}`))
+            );
+          });
+        }
+      })
+    );
+  }
+  function handlePreloadError(err) {
+    const e3 = new Event("vite:preloadError", {
+      cancelable: true
+    });
+    e3.payload = err;
+    window.dispatchEvent(e3);
+    if (!e3.defaultPrevented) {
+      throw err;
+    }
+  }
+  return promise.then((res) => {
+    for (const item of res || []) {
+      if (item.status !== "rejected") continue;
+      handlePreloadError(item.reason);
+    }
+    return baseModule().catch(handlePreloadError);
+  });
+};
+function genId() {
+  return `local_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+function now$3() {
+  return Date.now();
+}
+async function mergeServerRecords(store, serverRecords) {
+  if (serverRecords.length === 0) return;
+  try {
+    await openDb();
+    const toWrite = [];
+    for (const sr of serverRecords) {
+      const serverId = String(sr.id ?? "");
+      if (!serverId) continue;
+      const serverTs = sr.updatedAt ?? 0;
+      const local = await dbGetById(store, serverId);
+      if (!local || local.updatedAt <= serverTs) {
+        toWrite.push({
+          ...sr,
+          id: serverId,
+          updatedAt: serverTs || now$3(),
+          synced: true,
+          syncAction: "update"
+        });
+      }
+    }
+    if (toWrite.length > 0) {
+      await dbPutMany(store, toWrite);
+    }
+  } catch (err) {
+    console.warn(
+      `[localFirstSync] mergeServerRecords failed for ${store}:`,
+      err
+    );
+  }
+}
+async function getAll(store) {
+  try {
+    const local = await dbGetAll(store);
+    return local;
+  } catch {
+    return [];
+  }
+}
+async function save(store, record, action = "create") {
+  const id = record.id ? String(record.id) : genId();
+  const ts = now$3();
+  const dbRecord = {
+    ...record,
+    id,
+    updatedAt: ts,
+    synced: false,
+    syncAction: action
+  };
+  await dbPut(store, dbRecord);
+  await enqueueSyncOp(store, id, action, dbRecord);
+  void processSyncQueue();
+  return dbRecord;
+}
+async function setCollection(store, serverRecords) {
+  await dbClear(store);
+  const records = serverRecords.map((r2) => ({
+    ...r2,
+    id: String(r2.id ?? genId()),
+    updatedAt: r2.updatedAt ?? now$3(),
+    synced: true,
+    syncAction: "update"
+  }));
+  if (records.length > 0) {
+    await dbPutMany(store, records);
+  }
+}
+async function getLocalOrFetch(store, fetcher) {
+  try {
+    const local = await getAll(store);
+    if (local.length > 0) return local;
+    try {
+      const serverRecords = await fetcher();
+      await setCollection(
+        store,
+        serverRecords
+      );
+      return getAll(store);
+    } catch {
+      return [];
+    }
+  } catch {
+    try {
+      return fetcher();
+    } catch {
+      return [];
+    }
+  }
+}
+async function getStudents() {
+  return getLocalOrFetch("students", async () => {
+    const result = await phpApiService.getStudents();
+    return result.data;
+  });
+}
+async function getClasses() {
+  return getLocalOrFetch("classes", async () => {
+    const classes = await phpApiService.getClasses();
+    return classes;
+  });
+}
+class DataService {
+  constructor() {
+    __publicField(this, "_ready", true);
+  }
+  isReady() {
+    return this._ready;
+  }
+  getMode() {
+    return "ready";
+  }
+  getCounts() {
+    return {};
+  }
+  /** @deprecated — use getLocalOrFetch or phpApiService directly */
+  get(_collection) {
+    return [];
+  }
+  async getAsync(collection) {
+    try {
+      const local = await dbGetAll(collection);
+      if (local.length > 0) return local;
+      const all = await phpApiService.loadAll();
+      return all[collection] ?? [];
+    } catch {
+      return [];
+    }
+  }
+  async save(collection, item) {
+    const action = item.id ? "update" : "create";
+    try {
+      const saved = await save(
+        collection,
+        item,
+        action
+      );
+      return saved;
+    } catch {
+      switch (collection) {
+        case "students":
+          if (item.id) {
+            return await phpApiService.updateStudent(
+              item
+            );
+          }
+          return await phpApiService.addStudent(item);
+        case "staff":
+          if (item.id) {
+            return await phpApiService.updateStaff(
+              item
+            );
+          }
+          return await phpApiService.addStaff(item);
+        default:
+          return item;
+      }
+    }
+  }
+  async refreshFromServer(collection) {
+    return this.getAsync(collection);
+  }
+  async refresh(collection) {
+    await this.refreshFromServer(collection);
+  }
+  async initializeFromServer() {
+    return {};
+  }
+  async init() {
+  }
+  async initializeFromCanister() {
+  }
+  reset() {
+  }
+  waitForInit() {
+    return Promise.resolve();
+  }
+}
+const dataService = new DataService();
 const CLASS_ORDER_SHORT$1 = [
   "Nursery",
   "LKG",
@@ -28597,12 +29421,27 @@ function Classes() {
   const loadClasses = reactExports.useCallback(async () => {
     setLoading(true);
     try {
-      const data = await phpApiService.getClasses();
-      setClasses(sortClasses$2(data));
+      const local = await getClasses();
+      if (local.length > 0) {
+        setClasses(sortClasses$2(local));
+        setLoading(false);
+      }
+      if (navigator.onLine) {
+        try {
+          const serverData = await phpApiService.getClasses();
+          await mergeServerRecords(
+            "classes",
+            serverData
+          );
+          const merged = await getClasses();
+          setClasses(sortClasses$2(merged));
+        } catch {
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to load classes";
       ue.error(
-        msg.includes("expired") ? "Failed to load classes — please refresh the page" : msg
+        msg.includes("expired") ? "Failed to load classes - please refresh" : msg
       );
     } finally {
       setLoading(false);
@@ -33365,7 +34204,7 @@ function DrillDownModal({
   const classStudents = students.filter(
     (s2) => s2.class === row.cls && s2.section === row.section
   );
-  function getStatus(studentId) {
+  function getStatus2(studentId) {
     const rec = records.find(
       (r2) => r2.studentId === studentId && r2.date === date2
     );
@@ -33475,7 +34314,7 @@ function DrillDownModal({
                   children: "No students in this class/section"
                 }
               ) }) : classStudents.map((s2, idx) => {
-                const status = getStatus(s2.id);
+                const status = getStatus2(s2.id);
                 return /* @__PURE__ */ jsxRuntimeExports.jsxs(
                   "tr",
                   {
@@ -37320,7 +38159,7 @@ function CallingSettings() {
     () => ls.get("acs_endpoint", "")
   );
   const [saved, setSaved] = reactExports.useState(false);
-  const save = () => {
+  const save2 = () => {
     ls.set("teams_tenant_id", tenantId);
     ls.set("acs_endpoint", acsEndpoint);
     setSaved(true);
@@ -37357,7 +38196,7 @@ function CallingSettings() {
         Button,
         {
           "data-ocid": "calling.settings_save_button",
-          onClick: save,
+          onClick: save2,
           className: "w-full",
           children: saved ? "✓ Saved" : "Save Settings"
         }
@@ -52926,7 +53765,7 @@ function createAnimateManager() {
       shouldStop = false;
       setStyle(style2);
     },
-    subscribe: function subscribe(_handleChange) {
+    subscribe: function subscribe2(_handleChange) {
       handleChange = _handleChange;
       return function() {
         handleChange = function handleChange2() {
@@ -63006,74 +63845,6 @@ var PieChart = generateCategoricalChart({
     outerRadius: "80%"
   }
 });
-class DataService {
-  constructor() {
-    __publicField(this, "_ready", true);
-  }
-  isReady() {
-    return this._ready;
-  }
-  getMode() {
-    return "ready";
-  }
-  getCounts() {
-    return {};
-  }
-  /** @deprecated — use phpApiService directly */
-  get(_collection) {
-    return [];
-  }
-  /** Fetch from server — delegates to phpApiService.loadAll() */
-  async getAsync(collection) {
-    try {
-      const all = await phpApiService.loadAll();
-      return all[collection] ?? [];
-    } catch {
-      return [];
-    }
-  }
-  /** Save a record — delegates to the appropriate phpApiService method */
-  async save(collection, item) {
-    switch (collection) {
-      case "students":
-        if (item.id) {
-          return await phpApiService.updateStudent(
-            item
-          );
-        }
-        return await phpApiService.addStudent(item);
-      case "staff":
-        if (item.id) {
-          return await phpApiService.updateStaff(
-            item
-          );
-        }
-        return await phpApiService.addStaff(item);
-      default:
-        return item;
-    }
-  }
-  /** Refresh a collection from server */
-  async refreshFromServer(collection) {
-    return this.getAsync(collection);
-  }
-  async refresh(collection) {
-    await this.refreshFromServer(collection);
-  }
-  async initializeFromServer() {
-    return {};
-  }
-  async init() {
-  }
-  async initializeFromCanister() {
-  }
-  reset() {
-  }
-  waitForInit() {
-    return Promise.resolve();
-  }
-}
-const dataService = new DataService();
 function StatCard$3({
   label,
   value,
@@ -65717,6 +66488,109 @@ EXPENSES & HOMEWORK
 BACKUP
   GET  backup/export          — Export all data as JSON
   POST backup/import          — Import data from JSON`
+      }
+    ]
+  },
+  {
+    id: "offline-sync",
+    category: "Setup",
+    title: "Offline Mode & Data Sync",
+    icon: CloudOff,
+    badge: "Important",
+    items: [
+      {
+        heading: "How offline-first works",
+        body: `SHUBH School ERP saves all changes to the browser's local database
+(IndexedDB) the moment you tap Save — before any network request is sent.
+This means:
+
+  • Every add / edit / delete feels instant — no waiting for the server
+  • The app works even when your internet is slow or disconnected
+  • Changes are queued and sent to the MySQL server automatically
+    once your connection is restored
+  • You will never lose unsaved data due to a network interruption
+
+Sync happens automatically every 30 seconds and immediately after
+each action. You don't need to press any button to sync.`
+      },
+      {
+        heading: "Reading the sync status bar",
+        body: `A small status bar appears at the very top of the app (above the
+navbar) whenever changes are being synced or have failed:
+
+  🟡 Yellow spinner + "Syncing X changes…"
+     Data is being uploaded to the server. Wait a few seconds.
+
+  🔴 Red dot + "X changes failed to sync — Retry"
+     Something went wrong (server down, bad credentials, etc.).
+     Tap Retry to try again.
+
+  ✅ Bar hidden
+     All data is saved and synced — everything is up to date.
+
+The sync bar is visible on ALL pages for ALL roles so you can
+always tell whether your data has reached the server.`
+      },
+      {
+        heading: "Yellow 'You are offline' banner",
+        body: `When your device has no internet connection, a yellow banner
+appears at the very top of every page (including the login screen):
+
+  "You are offline — changes are saved locally and will sync
+   when your connection returns."
+
+This banner disappears automatically the moment your connection
+comes back. Your data is safe — nothing is lost.`
+      },
+      {
+        heading: "Downloading a local backup",
+        body: `Super Admin can export all data at any time from Settings:
+
+  1. Go to Settings → Backup & Restore
+  2. Tap Export All Data
+  3. A JSON file is downloaded to your device
+  4. Store this file safely (Google Drive, USB, email it to yourself)
+
+The backup includes students, fees, attendance, staff, classes,
+sessions, and all other module data.
+
+Restore: Settings → Backup & Restore → Import Data → choose file.`
+      },
+      {
+        heading: "What to do if sync gets stuck",
+        body: `If the sync bar shows "X changes failed to sync" for a long time:
+
+  1. Check your internet connection
+  2. Tap the Retry button in the sync bar
+  3. If it still fails, go to Settings → Server Settings and tap
+     Test Connection to see if the server is reachable
+  4. Verify your cPanel server URL is correct in Server Settings
+  5. Visit https://yourserver.com/api/index.php?route=ping in
+     a browser — it should return {"success":true}
+  6. If the server is down, wait and the app will retry automatically
+     once the server comes back online
+
+To manually clear the sync queue (last resort — only do this if
+you are sure the data reached the server):
+  Settings → Server Settings → Clear Pending Queue`
+      },
+      {
+        heading: "Important: browser data vs server data",
+        body: `Your local copy lives in the browser's IndexedDB storage.
+
+  ⚠️  Clearing browser data (Clear site data / Clear cookies in
+      Chrome settings) will delete the local copy of all ERP data.
+
+  ✅  The server always holds the last successfully synced version.
+      To recover, open the app and wait for it to re-fetch from
+      the server (happens automatically on login).
+
+For this reason:
+  • Always ensure data is synced (bar hidden) before clearing
+    browser data or switching devices
+  • Take regular backups via Settings → Backup & Restore
+  • On a new device or fresh browser, your data reloads from the
+    MySQL server automatically after you log in`
       }
     ]
   }
@@ -75319,7 +76193,7 @@ function FeeHeadingPage() {
       );
     }).catch(() => setClasses(CLASS_ORDER$5));
   }, [fetchHeadings]);
-  async function save() {
+  async function save2() {
     if (!name.trim()) return;
     setSaving(true);
     try {
@@ -75891,7 +76765,7 @@ function FeeHeadingPage() {
               /* @__PURE__ */ jsxRuntimeExports.jsx(
                 Button,
                 {
-                  onClick: () => void save(),
+                  onClick: () => void save2(),
                   disabled: !name.trim() || saving,
                   "data-ocid": "fee-heading.save-btn",
                   children: saving ? "Saving…" : editId ? "Update Heading" : "Add Heading"
@@ -85508,6 +86382,68 @@ function DataManagement() {
     setRestoreSuccess(true);
     ue.success("Restore complete! Please refresh the page.");
   }
+  const [idbExporting, setIdbExporting] = reactExports.useState(false);
+  const [idbImporting, setIdbImporting] = reactExports.useState(false);
+  const idbFileInputRef = reactExports.useRef(null);
+  async function handleIdbBackup() {
+    setIdbExporting(true);
+    try {
+      const data = await exportAllStores();
+      const nowDate = /* @__PURE__ */ new Date();
+      const ts = nowDate.toISOString().replace(/[-:T]/g, (m2) => m2 === "T" ? "-" : m2 === ":" ? "" : m2).slice(0, 15);
+      const filename = `shubh-erp-localdb-${ts}.json`;
+      const meta = {
+        version: "2.0",
+        appName: "SHUBH SCHOOL ERP",
+        storage: "IndexedDB",
+        createdAt: nowDate.toISOString(),
+        createdBy: (currentUser == null ? void 0 : currentUser.name) ?? "Unknown",
+        data
+      };
+      triggerDownload(JSON.stringify(meta, null, 2), filename);
+      ue.success("Local database backup downloaded.");
+    } catch (err) {
+      ue.error(
+        `Backup failed: ${err instanceof Error ? err.message : "Unknown"}`
+      );
+    } finally {
+      setIdbExporting(false);
+    }
+  }
+  function handleIdbFileChange(e3) {
+    var _a2;
+    const file = (_a2 = e3.target.files) == null ? void 0 : _a2[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      var _a3;
+      const text = (_a3 = ev.target) == null ? void 0 : _a3.result;
+      try {
+        const parsed = JSON.parse(text);
+        if (!parsed.data || parsed.appName !== "SHUBH SCHOOL ERP") {
+          ue.error("Invalid file — must be a SHUBH SCHOOL ERP backup.");
+          return;
+        }
+        const storeCount = Object.keys(parsed.data).length;
+        if (!confirm(
+          `Restore ${storeCount} stores from local backup? Will merge (Last Write Wins).`
+        ))
+          return;
+        setIdbImporting(true);
+        importAllStores(parsed.data).then(
+          () => ue.success("Restore complete! Refresh to see your data.")
+        ).catch(
+          (err) => ue.error(
+            `Restore failed: ${err instanceof Error ? err.message : "Unknown"}`
+          )
+        ).finally(() => setIdbImporting(false));
+      } catch {
+        ue.error("Could not parse file — must be valid JSON.");
+      }
+    };
+    reader.readAsText(file);
+    e3.target.value = "";
+  }
   function verifyPasswordForReset(pw) {
     if (!currentUser) return false;
     try {
@@ -85617,6 +86553,62 @@ function DataManagement() {
               ]
             }
           )
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "p-5 space-y-4", "data-ocid": "backup.idb.card", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(Database, { className: "w-4 h-4 text-primary" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "font-semibold text-foreground", children: "Local Offline Database" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-muted-foreground", children: "Download or restore the local offline database (IndexedDB) — contains data saved while offline or pending sync to MySQL." }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-2 flex-wrap", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              "input",
+              {
+                ref: idbFileInputRef,
+                type: "file",
+                accept: ".json",
+                className: "hidden",
+                onChange: handleIdbFileChange
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                disabled: idbExporting,
+                onClick: () => void handleIdbBackup(),
+                "data-ocid": "backup.idb_export.button",
+                children: idbExporting ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-3.5 h-3.5 mr-2 animate-spin" }),
+                  "Exporting…"
+                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(Download, { className: "w-3.5 h-3.5 mr-2" }),
+                  "Download Local DB"
+                ] })
+              }
+            ),
+            /* @__PURE__ */ jsxRuntimeExports.jsx(
+              Button,
+              {
+                variant: "outline",
+                size: "sm",
+                disabled: idbImporting,
+                onClick: () => {
+                  var _a2;
+                  return (_a2 = idbFileInputRef.current) == null ? void 0 : _a2.click();
+                },
+                "data-ocid": "backup.idb_restore.upload_button",
+                children: idbImporting ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(RefreshCw, { className: "w-3.5 h-3.5 mr-2 animate-spin" }),
+                  "Restoring…"
+                ] }) : /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+                  /* @__PURE__ */ jsxRuntimeExports.jsx(Upload, { className: "w-3.5 h-3.5 mr-2" }),
+                  "Restore from Local DB"
+                ] })
+              }
+            )
+          ] })
         ] }),
         /* @__PURE__ */ jsxRuntimeExports.jsxs(Card, { className: "p-5 space-y-4", children: [
           /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
@@ -89464,7 +90456,7 @@ function WhatsAppAutoReply() {
     );
     setLogs(getLogs());
   }, []);
-  function save() {
+  function save2() {
     ls.set("wa_autoreply_settings", settings);
     void saveAutoReplyToServer(settings);
     setSaved(true);
@@ -89510,7 +90502,7 @@ function WhatsAppAutoReply() {
       /* @__PURE__ */ jsxRuntimeExports.jsxs(
         Button,
         {
-          onClick: save,
+          onClick: save2,
           "data-ocid": "wa-autoreply-save",
           className: "gap-2",
           size: "sm",
@@ -90307,70 +91299,6 @@ function Settings({
     ] })
   ] });
 }
-const scriptRel = "modulepreload";
-const assetsURL = function(dep) {
-  return "/" + dep;
-};
-const seen = {};
-const __vitePreload = function preload2(baseModule, deps, importerUrl) {
-  let promise = Promise.resolve();
-  if (deps && deps.length > 0) {
-    document.getElementsByTagName("link");
-    const cspNonceMeta = document.querySelector(
-      "meta[property=csp-nonce]"
-    );
-    const cspNonce = (cspNonceMeta == null ? void 0 : cspNonceMeta.nonce) || (cspNonceMeta == null ? void 0 : cspNonceMeta.getAttribute("nonce"));
-    promise = Promise.allSettled(
-      deps.map((dep) => {
-        dep = assetsURL(dep);
-        if (dep in seen) return;
-        seen[dep] = true;
-        const isCss = dep.endsWith(".css");
-        const cssSelector = isCss ? '[rel="stylesheet"]' : "";
-        if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
-          return;
-        }
-        const link = document.createElement("link");
-        link.rel = isCss ? "stylesheet" : scriptRel;
-        if (!isCss) {
-          link.as = "script";
-        }
-        link.crossOrigin = "";
-        link.href = dep;
-        if (cspNonce) {
-          link.setAttribute("nonce", cspNonce);
-        }
-        document.head.appendChild(link);
-        if (isCss) {
-          return new Promise((res, rej) => {
-            link.addEventListener("load", res);
-            link.addEventListener(
-              "error",
-              () => rej(new Error(`Unable to preload CSS for ${dep}`))
-            );
-          });
-        }
-      })
-    );
-  }
-  function handlePreloadError(err) {
-    const e3 = new Event("vite:preloadError", {
-      cancelable: true
-    });
-    e3.payload = err;
-    window.dispatchEvent(e3);
-    if (!e3.defaultPrevented) {
-      throw err;
-    }
-  }
-  return promise.then((res) => {
-    for (const item of res || []) {
-      if (item.status !== "rejected") continue;
-      handlePreloadError(item.reason);
-    }
-    return baseModule().catch(handlePreloadError);
-  });
-};
 var POPOVER_NAME = "Popover";
 var [createPopoverContext] = createContextScope$1(POPOVER_NAME, [
   createPopperScope
@@ -92498,13 +93426,35 @@ function Students({ onNavigate: _onNavigate }) {
       else setIsRefreshing(true);
       setError(null);
       try {
-        const params = { page: "1", limit: "1000" };
-        if (currentSessionId) params.session = currentSessionId;
-        const result = await phpApiService.getStudents(params);
-        const mapped = (result.data ?? []).map(toStudent);
-        setStudents(mapped);
-        setTotalCount(result.total ?? mapped.length);
-        setCurrentPage(1);
+        const localStudents = await getStudents();
+        if (localStudents.length > 0) {
+          const mapped = localStudents.map(
+            (r2) => toStudent(r2)
+          );
+          setStudents(mapped);
+          setTotalCount(mapped.length);
+          if (!silent) setIsLoading(false);
+        }
+        if (navigator.onLine) {
+          try {
+            const params = { page: "1", limit: "1000" };
+            if (currentSessionId) params.session = currentSessionId;
+            const result = await phpApiService.getStudents(params);
+            const serverData = result.data ?? [];
+            await mergeServerRecords(
+              "students",
+              serverData
+            );
+            const merged = await getStudents();
+            const mapped = merged.map(
+              (r2) => toStudent(r2)
+            );
+            setStudents(mapped);
+            setTotalCount(result.total ?? mapped.length);
+            setCurrentPage(1);
+          } catch {
+          }
+        }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Failed to load students";
         const isTokenErr = msg.toLowerCase().includes("session expired") || msg.toLowerCase().includes("token");
@@ -95991,7 +96941,7 @@ function ScheduleForm({
   });
   const [saving, setSaving] = reactExports.useState(false);
   const update = (k2, v2) => setForm((f2) => ({ ...f2, [k2]: v2 }));
-  const save = async () => {
+  const save2 = async () => {
     if (!form.title || !form.date) return;
     setSaving(true);
     const link = generateMeetLink(form.platform);
@@ -96115,7 +97065,7 @@ function ScheduleForm({
       Button,
       {
         "data-ocid": "virtualclasses.schedule_submit_button",
-        onClick: () => void save(),
+        onClick: () => void save2(),
         className: "w-full",
         disabled: !form.title || saving,
         children: [
@@ -96145,7 +97095,7 @@ function SettingsTab() {
     }).catch(() => {
     }).finally(() => setLoading(false));
   }, []);
-  const save = async () => {
+  const save2 = async () => {
     try {
       await apiCall("settings/save", "POST", {
         key: "vc_creds",
@@ -96208,7 +97158,7 @@ function SettingsTab() {
       Button,
       {
         "data-ocid": "virtualclasses.settings_save_button",
-        onClick: () => void save(),
+        onClick: () => void save2(),
         className: "w-full",
         children: saved ? "✓ Saved" : "Save Settings"
       }
@@ -99309,7 +100259,11 @@ function AppRoutes() {
     }
     return "dashboard";
   });
-  if (!currentUser) return /* @__PURE__ */ jsxRuntimeExports.jsx(Login, {});
+  if (!currentUser)
+    return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(OfflineBanner, {}),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(Login, {})
+    ] });
   const effectivePage = activePage === "dashboard" ? getRoleDashboard(currentUser.role) : activePage;
   const navigate = (page) => setActivePage(page);
   const renderPage = () => {
@@ -99375,7 +100329,11 @@ function AppRoutes() {
     }
     return /* @__PURE__ */ jsxRuntimeExports.jsx(Dashboard, { onNavigate: navigate });
   };
-  return /* @__PURE__ */ jsxRuntimeExports.jsx(Layout, { activePage: effectivePage, onNavigate: navigate, children: /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: renderPage() }, effectivePage) });
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx(OfflineBanner, {}),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(SyncStatusBar, {}),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(Layout, { activePage: effectivePage, onNavigate: navigate, children: /* @__PURE__ */ jsxRuntimeExports.jsx(ErrorBoundary, { children: renderPage() }, effectivePage) })
+  ] });
 }
 function App() {
   return /* @__PURE__ */ jsxRuntimeExports.jsx(AppProvider, { children: /* @__PURE__ */ jsxRuntimeExports.jsx(AppRoutes, {}) });

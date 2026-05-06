@@ -36,6 +36,14 @@ import type {
 } from "../types";
 import phpApiService from "../utils/phpApiService";
 import type { SessionRecord } from "../utils/phpApiService";
+import {
+  getStatus,
+  retryFailed,
+  startSync,
+  stopSync,
+  subscribe,
+} from "../utils/syncEngine";
+import type { SyncStatus } from "../utils/syncEngine";
 
 // ── Module-level login timestamp ──────────────────────────────────────────────
 // Using module-level (not React state/ref) ensures ALL closures see the latest
@@ -356,15 +364,11 @@ interface AppContextValue {
   ) => Promise<void>;
   deleteData: (collection: string, id: string) => Promise<void>;
   refreshCollection: (collection: string) => Promise<void>;
-  // Backward compat stubs (no sync)
+  // Sync status
   isSyncLoading: boolean;
-  syncStatus: {
-    state: "idle" | "synced";
-    lastSyncTime: null;
-    lastError: null;
-    pendingCount: 0;
-    serverCounts: Record<string, number>;
-  };
+  syncStatus: SyncStatus;
+  pendingCount: number;
+  retrySync: () => void;
   serverCounts: Record<string, number>;
   syncCounts: Record<string, number>;
 }
@@ -506,12 +510,24 @@ function SessionExpiredModal({ onLogout }: { onLogout: () => void }) {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(appReducer, INITIAL_STATE);
   const [showExpiredModal, setShowExpiredModal] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>(getStatus);
   const initStartedRef = useRef(false);
   const stateRef = useRef(state);
 
   useEffect(() => {
     stateRef.current = state;
   });
+
+  // ── Sync engine lifecycle ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!state.currentUser) return;
+    const unsub = subscribe(setSyncStatus);
+    startSync();
+    return () => {
+      stopSync();
+      unsub();
+    };
+  }, [state.currentUser]);
 
   // ── Listen for token-expired events ──────────────────────────────────────
   useEffect(() => {
@@ -925,13 +941,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     state.initError !== null &&
     !state.isInitializing;
 
-  const syncStatusStub = {
-    state: "synced" as const,
-    lastSyncTime: null,
-    lastError: null,
-    pendingCount: 0 as const,
-    serverCounts: {} as Record<string, number>,
-  };
+  const retrySync = useCallback(() => {
+    void retryFailed();
+  }, []);
 
   return (
     <AppContext.Provider
@@ -958,8 +970,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateData,
         deleteData,
         refreshCollection,
-        isSyncLoading: false,
-        syncStatus: syncStatusStub,
+        isSyncLoading: syncStatus.state === "syncing",
+        syncStatus,
+        pendingCount: syncStatus.pendingCount,
+        retrySync,
         serverCounts: {},
         syncCounts: {},
       }}
@@ -991,4 +1005,13 @@ export function useApp() {
   const ctx = useContext(AppContext);
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
+}
+
+export function useSyncStatus() {
+  const [status, setStatus] = useState<SyncStatus>(getStatus);
+  useEffect(() => {
+    const unsub = subscribe(setStatus);
+    return unsub;
+  }, []);
+  return status;
 }
